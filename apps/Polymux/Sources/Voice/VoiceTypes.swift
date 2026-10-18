@@ -35,7 +35,9 @@ protocol VoiceSession: AnyObject {
     func start() async
     func stop() async
     func retry() async
+    var silenced: Bool { get }
     func toggleMute()
+    func toggleSilence()
 }
 
 extension VoiceSession {
@@ -61,6 +63,11 @@ protocol SpeechOutput: AnyObject {
     var firstAudio: (() -> Void)? { get set }
     func speak(_ text: String) async throws
     func stop()
+    func setSilenced(_ silenced: Bool)
+}
+
+extension SpeechOutput {
+    func setSilenced(_ silenced: Bool) {}
 }
 
 @MainActor
@@ -68,46 +75,6 @@ protocol VoiceReply: AnyObject {
     func preview(_ text: String)
     func stream(_ text: String) -> AsyncThrowingStream<VoiceFragment, Error>
     func stop() async
-}
-
-@MainActor
-final class ClosureReply: VoiceReply {
-    private let response: (String) -> AsyncThrowingStream<VoiceFragment, Error>
-    private let interruption: () async -> Void
-    private let partial: (String) -> Void
-
-    init(
-        stream: @escaping (String) -> AsyncThrowingStream<VoiceFragment, Error>,
-        interrupt: @escaping () async -> Void,
-        preview: @escaping (String) -> Void = { _ in }
-    ) {
-        response = stream
-        interruption = interrupt
-        partial = preview
-    }
-
-    convenience init(
-        send: @escaping (String) async throws -> String,
-        interrupt: @escaping () async -> Void
-    ) {
-        self.init(stream: { text in
-            AsyncThrowingStream { continuation in
-                let task = Task { @MainActor in
-                    do {
-                        continuation.yield(VoiceFragment(text: try await send(text)))
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
-                    }
-                }
-                continuation.onTermination = { _ in task.cancel() }
-            }
-        }, interrupt: interrupt)
-    }
-
-    func preview(_ text: String) { partial(text) }
-    func stream(_ text: String) -> AsyncThrowingStream<VoiceFragment, Error> { response(text) }
-    func stop() async { await interruption() }
 }
 
 enum VoiceFailure: LocalizedError {

@@ -32,9 +32,9 @@ Check the failed attachment in the composer. Retry after restoring the connectio
 
 Check your app generation. Earlier Electron releases show a tabbed Hub, Drive, Browser, and Tasks workspace. Current native builds show agent conversations and groups. Read [Installation](/docs/installation/) before treating a missing older settings page as a bug.
 
-## Voice or computer control is unavailable
+## Voice is unavailable
 
-Check the relevant feature in Settings and its own error state. Microphone and speech permissions are separate from Accessibility and Screen Recording. Change only the permission needed for the feature, using the operating system's settings; a server or model problem is not fixed by granting broader computer access.
+Check Voice in Settings and its error state. Change only the microphone or speech permission needed for the feature, using the operating system's settings; a server or model problem is not fixed by granting broader device access.
 
 ## Still stuck
 

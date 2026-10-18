@@ -171,7 +171,6 @@ public let STATES: [StateDef] = [
 ]
 
 public let STATE_BY_ID = Dictionary(uniqueKeysWithValues: STATES.map { ($0.id, $0) })
-public let STATE_BY_NAME = Dictionary(uniqueKeysWithValues: STATES.map { ($0.id.rawValue, $0) })
 public let POSES: [StateID: Double] = [.idle: 1, .thinking: 1.1, .wink: 0.8, .wide: 0.8,
                                      .alert: 0.75, .notify: 0.9, .exclaim: 0.8, .sleep: 0.45,
                                      .egg: 0.8, .hexagon: 0.8, .play: 0.9, .orbit: 1.2,

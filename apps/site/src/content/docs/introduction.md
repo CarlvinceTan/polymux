@@ -21,7 +21,7 @@ These guides describe the **native app in the current source tree**. Older Elect
 - Give each agent a name, role, role description, and avatar.
 - Send attachments, reply to messages, and search within a conversation.
 - Review agent activity and answer approval requests in the chat.
-- Configure appearance, the server connection, voice, notifications, and macOS computer control in Settings.
+- Configure appearance, the server connection, voice, and notifications in Settings.
 
 The app does not currently expose the older tabbed Hub, Drive, Browser, or Tasks workspace. Those older screenshots are not a guide to the native interface.
 

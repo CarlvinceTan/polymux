@@ -9,10 +9,10 @@ public enum ClientPaths {
         token(address, root: root)
     }
 
-    public static var control: URL {
-        root.appending(path: "control", directoryHint: .isDirectory)
+    /// The tunnel ticket a pairing link carried for this server, if any.
+    public static func ticket(_ address: String) -> URL {
+        token(address, root: root).deletingLastPathComponent().appending(path: "ticket")
     }
-
 
     private static var root: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

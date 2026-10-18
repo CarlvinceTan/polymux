@@ -14,7 +14,7 @@ The native app does not currently include the Electron **Browser** workspace, br
 
 ## Research from a conversation
 
-Ask the agent for research in the chat. Available web and computer-control tools depend on the connected server. A working model connection alone does not guarantee browser access.
+Ask the agent for research in the chat. Available web tools depend on the connected server. A working model connection alone does not guarantee browser access.
 
 When a task needs a real browser, confirm which computer, app, and account the agent is using. Do not assume a browser open on your phone or Mac is available to a remote server.
 

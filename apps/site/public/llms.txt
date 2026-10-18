@@ -2,7 +2,7 @@
 
 > Polymux is a native SwiftUI app for conversations with AI agents, backed by a Go agent server.
 
-Current native source targets macOS 27 and iOS 27. It includes individual and group conversations, attachments, message search, agent profiles and avatars, voice settings, and optional macOS computer control. The server runs agents, stores history and conversation-scoped memory, and connects tools.
+Current native source targets macOS 27 and iOS 27. It includes individual and group conversations, attachments, message search, agent profiles and avatars, and voice settings. The server runs agents, stores history and conversation-scoped memory, and connects tools.
 
 The native app is distinct from earlier Electron releases for macOS, Windows, and Linux. Website desktop download buttons select the Electron release line. Native source version 0.4.0 does not establish signed installer availability. The native app does not expose the older Hub, Drive, Browser, Tasks, Providers, Models, or Memory settings/workspace pages.
 

@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"context"
 	"errors"
 	"net/http/httptest"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/testenv"
 )
 
 // git runs a git command and returns its trimmed output, failing the test on error.
@@ -61,28 +61,22 @@ func seedFile(t *testing.T, repo, name string) {
 	runGit(t, repo, "push", "origin", "HEAD:main", "HEAD:dev")
 }
 
-func testRuntime(t *testing.T, dir string) *Runtime {
-	t.Helper()
-	testenv.PiG(t)
-	runtime, err := New(dir, "http://127.0.0.1:1", "local/test", "test-key", Client{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { runtime.Close() })
-	return runtime
+// checkout prepares a conversation's worktree the way the server does before a turn.
+func checkout(ctx context.Context, w *Worktrees, d Definition) (string, error) {
+	return w.Ensure(ctx, d.Workspace, d.Agent.ID, WorkspaceThread(d))
 }
 
 func TestWorkspaceWorktreePerThread(t *testing.T) {
 	repo := gitRepo(t, true)
-	runtime := testRuntime(t, t.TempDir())
+	worktrees := NewWorktrees(t.TempDir())
 	definition := func(scope string) Definition {
 		return Definition{Agent: contract.Agent{ID: "coding", Name: "Coding", Model: "local/test"}, Prompt: "Work.", Scope: scope, Workspace: repo}
 	}
-	first, err := runtime.checkout(t.Context(), definition("chat-one"))
+	first, err := checkout(t.Context(), worktrees, definition("chat-one"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := runtime.checkout(t.Context(), definition("chat-two"))
+	second, err := checkout(t.Context(), worktrees, definition("chat-two"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,23 +100,8 @@ func TestWorkspaceWorktreePerThread(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(second, "draft.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("a file written in one conversation is visible in another")
 	}
-	if again, err := runtime.checkout(t.Context(), definition("chat-one")); err != nil || again != first {
+	if again, err := checkout(t.Context(), worktrees, definition("chat-one")); err != nil || again != first {
 		t.Fatalf("a later turn did not reuse the checkout: %q %v", again, err)
-	}
-}
-
-func TestWorkspaceAbsentKeepsAgentDir(t *testing.T) {
-	dir := t.TempDir()
-	runtime := testRuntime(t, dir)
-	cwd, err := runtime.checkout(t.Context(), Definition{Agent: contract.Agent{ID: "assistant", Model: "local/test"}, Prompt: "Chat."})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(dir, "assistant"); cwd != want {
-		t.Fatalf("agent without a workspace left its directory: %q", cwd)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "worktrees")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("agent without a workspace prepared a worktree")
 	}
 }
 
@@ -275,15 +254,15 @@ func TestWorkspaceTwoAgentsOneGroup(t *testing.T) {
 	first, second := gitRepo(t, true), gitRepo(t, true)
 	seedFile(t, first, "first.txt")
 	seedFile(t, second, "second.txt")
-	runtime := testRuntime(t, t.TempDir())
+	worktrees := NewWorktrees(t.TempDir())
 	definition := func(agent, repo string) Definition {
 		return Definition{Agent: contract.Agent{ID: agent, Name: agent, Model: "local/test"}, Prompt: "Work.", Scope: "group1", Workspace: repo}
 	}
-	firstPath, err := runtime.checkout(t.Context(), definition("coding", first))
+	firstPath, err := checkout(t.Context(), worktrees, definition("coding", first))
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondPath, err := runtime.checkout(t.Context(), definition("writer", second))
+	secondPath, err := checkout(t.Context(), worktrees, definition("writer", second))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,8 +19,9 @@ import (
 )
 
 type invite struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
+	URL    string `json:"url"`
+	Token  string `json:"token"`
+	Ticket string `json:"ticket,omitempty"`
 }
 
 func pair(args []string) error {
@@ -79,7 +80,7 @@ func readToken(path string) (string, error) {
 }
 
 func fetchInvite(base, token string) (invite, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 20 * time.Second}
 	request, err := http.NewRequest(http.MethodGet, base+"/network/invite", nil)
 	if err != nil {
 		return invite{}, err
@@ -108,6 +109,9 @@ func connectLink(value invite) string {
 	query := url.Values{}
 	query.Set("url", value.URL)
 	query.Set("token", value.Token)
+	if value.Ticket != "" {
+		query.Set("ticket", value.Ticket)
+	}
 	parts.RawQuery = query.Encode()
 	return parts.String()
 }

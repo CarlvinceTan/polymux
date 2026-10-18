@@ -2,12 +2,11 @@ package agentruntime
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/testenv"
+	"github.com/MichaelKinsy/PiG/ai"
 )
 
 func TestBlankPromptUsesHelpfulFallback(t *testing.T) {
@@ -21,66 +20,28 @@ func TestBlankPromptUsesHelpfulFallback(t *testing.T) {
 	}
 }
 
-func TestScopeKeepsSessionFilesSeparate(t *testing.T) {
-	testenv.PiG(t)
-	dir := t.TempDir()
-	runtime, err := New(dir, "http://127.0.0.1:1", "local/test", "test-key", Client{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close()
-	definition := Definition{Agent: contract.Agent{ID: "a", Name: "A", Model: "local/test"}, Prompt: "Configured instructions"}
-	for _, scope := range []string{"", "group-a", "group-b"} {
-		definition.Scope = scope
-		session, err := runtime.Open(t.Context(), definition, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := filepath.Join(dir, "a", "sessions")
-		if scope != "" {
-			want = filepath.Join(dir, "groups", scope, "a", "sessions")
-		}
-		relative, err := filepath.Rel(want, session.Path())
-		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			t.Fatalf("session escaped its conversation directory %q", session.Path())
-		}
-		if err := session.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestRequestHeadersScopeSessionToConversation(t *testing.T) {
-	runtime := &Runtime{client: Client{
-		Headers: map[string]string{"User-Agent": "polymux-server/0.1"},
-		Session: "x-opencode-session",
-	}}
-	first := runtime.requestHeaders(Definition{Agent: contract.Agent{ID: "assistant"}})
-	if first["User-Agent"] != "polymux-server/0.1" {
+func TestSessionHeadersScopeToConversation(t *testing.T) {
+	agent := "polymux-server/0.1"
+	shared := ai.ProviderHeaders{"User-Agent": &agent}
+	first := sessionHeaders(shared, "x-opencode-session", "conversation-1")
+	if first["User-Agent"] == nil || *first["User-Agent"] != agent {
 		t.Fatalf("static header lost: %v", first)
 	}
-	session, ok := first["x-opencode-session"]
-	if !ok || session == "" {
+	session := first["x-opencode-session"]
+	if session == nil || *session == "" {
 		t.Fatalf("session header missing: %v", first)
 	}
-	repeat := runtime.requestHeaders(Definition{Agent: contract.Agent{ID: "assistant"}})
-	if repeat["x-opencode-session"] != session {
+	if repeat := sessionHeaders(shared, "x-opencode-session", "conversation-1"); *repeat["x-opencode-session"] != *session {
 		t.Fatal("session changed between turns of one conversation")
 	}
-	for _, other := range []Definition{
-		{Agent: contract.Agent{ID: "coding"}},
-		{Agent: contract.Agent{ID: "assistant"}, Scope: "group-1"},
-	} {
-		if runtime.requestHeaders(other)["x-opencode-session"] == session {
-			t.Fatalf("session shared across conversations: %+v", other)
-		}
+	if other := sessionHeaders(shared, "x-opencode-session", "conversation-2"); *other["x-opencode-session"] == *session {
+		t.Fatal("session shared across conversations")
 	}
-	runtime.client.Headers["User-Agent"] = "mutated"
-	if first["User-Agent"] != "polymux-server/0.1" {
-		t.Fatal("returned headers alias the shared map")
+	if _, aliased := shared["x-opencode-session"]; aliased {
+		t.Fatal("session header mutated the shared map")
 	}
-	if empty := (&Runtime{}).requestHeaders(Definition{}); empty != nil {
-		t.Fatalf("unconfigured runtime sent headers: %v", empty)
+	if unset := sessionHeaders(shared, "", "conversation-1"); len(unset) != 1 {
+		t.Fatalf("unconfigured runtime sent a session header: %v", unset)
 	}
 }
 

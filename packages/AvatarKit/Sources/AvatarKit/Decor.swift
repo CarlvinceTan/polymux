@@ -145,7 +145,6 @@ public let COMET_RIBBONS: [ArcSeed] = {
 }()
 
 public let COMET_DOT = 0.129
-public let NOTIF_BLUE = "#2496e8"
 public let NOTIF_ANGLE = -42.0
 public let NOTIF_DIST = 1.003
 public let NOTIF_R = 0.15

@@ -428,11 +428,7 @@ func TestHTMLRuntime(t *testing.T) {
 	}))
 	defer provider.Close()
 	dir := t.TempDir()
-	runtime, err := agentruntime.New(dir, provider.URL, "local/test", "test-key", agentruntime.Client{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close()
+	runtime := durableRuntime(t, dir, provider.URL)
 	db, err := store.Open(t.Context(), filepath.Join(dir, "db"))
 	if err != nil {
 		t.Fatal(err)

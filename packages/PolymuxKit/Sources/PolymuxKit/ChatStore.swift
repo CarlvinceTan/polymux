@@ -3,13 +3,11 @@ import Observation
 
 @MainActor @Observable
 public final class ChatStore {
-    public private(set) var activityEvents: [Event] = [] { didSet { refreshTranscript() } }
-    public private(set) var transcript: [TranscriptRow] = []
     public let activity: ActivityStore
     public let trace = SignpostTrace()
     public private(set) var runs: [Run] = []
     public private(set) var threadID: String
-    public private(set) var messages: [Message] = [] { didSet { refreshTranscript() } }
+    public private(set) var messages: [Message] = []
     public private(set) var isConnected = false
     public var isVisible = true
     /// Per-file progress for sends still uploading, keyed by the local attachment id.
@@ -26,15 +24,6 @@ public final class ChatStore {
     @ObservationIgnored private var loading: Task<Void, Never>?
     @ObservationIgnored private var flushing = false
     @ObservationIgnored private var queued: [String: Message] = [:]
-    @ObservationIgnored private var voices: [UUID: VoiceReply] = [:]
-
-    private struct VoiceReply {
-        let userID: String
-        var assistantID: String?
-        var agentID: String?
-        var hasEmitted = false
-        let continuation: AsyncThrowingStream<VoiceFragment, any Error>.Continuation
-    }
 
     public init(client: APIClient, actor: LocalCacheActor, threadID: String, sidebar: SidebarStore? = nil,
                 uploadClient: (any UploadClient)? = nil) {
@@ -58,7 +47,6 @@ public final class ChatStore {
         runs = stored
         activity.restore(stored)
         messages = (try? await cacheActor.call { try $0.messages(threadID: threadID, limit: 100) }) ?? []
-        activityEvents = (try? await cacheActor.call { try $0.activityEvents(threadID: threadID) }) ?? []
         for message in queued.values { update(message) }
     }
 
@@ -74,8 +62,6 @@ public final class ChatStore {
         streamTask?.cancel()
         streamTask = nil
         isConnected = false
-        for reply in voices.values { reply.continuation.finish(throwing: CancellationError()) }
-        voices.removeAll()
     }
 
     public func send(text: String, attachments: [Attachment] = [], reply: ReplyContext? = nil, mentions: [String] = []) async {
@@ -191,13 +177,6 @@ public final class ChatStore {
         }
     }
 
-    public func cancelReply(withdrawQueued: Bool = false) async {
-        do { try await client.stop(threadID: threadID, withdrawQueued: withdrawQueued) }
-        catch { self.error = error.localizedDescription }
-        for reply in voices.values { reply.continuation.finish(throwing: CancellationError()) }
-        voices.removeAll()
-    }
-
     public func markRead() async {
         let threadID = self.threadID
         guard isVisible else { return }
@@ -235,23 +214,6 @@ public final class ChatStore {
         } catch { self.error = error.localizedDescription }
     }
 
-    public func voiceReply(text: String) -> AsyncThrowingStream<VoiceFragment, any Error> {
-        let token = UUID()
-        let userID = UUID().uuidString
-        return AsyncThrowingStream { continuation in
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                continuation.finish()
-                return
-            }
-            voices[token] = VoiceReply(userID: userID, continuation: continuation)
-            let task = Task { [weak self] in await self?.send(text: text, attachments: [], id: userID) }
-            continuation.onTermination = { [weak self] _ in
-                task.cancel()
-                Task { @MainActor [weak self] in self?.voices.removeValue(forKey: token) }
-            }
-        }
-    }
-
     private func send(text: String, attachments: [Attachment], id: String, reply: ReplyContext? = nil, mentions: [String] = []) async {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
@@ -271,7 +233,6 @@ public final class ChatStore {
                 update(message)
             }
             self.error = "Couldn’t send this message. Check your connection and try again."
-            failVoices(DeliveryFailure.interrupted, ids: [id])
             return
         }
         threadID = resolved
@@ -291,7 +252,6 @@ public final class ChatStore {
             await flush()
         } catch {
             self.error = error.localizedDescription
-            failVoices(error, ids: [id])
         }
     }
 
@@ -319,7 +279,6 @@ public final class ChatStore {
                     runs.append(run)
                 }
                 activity.restore(runs)
-                activityEvents = try await cacheActor.call { try $0.activityEvents(threadID: threadID) }
                 isConnected = true
                 error = nil
                 delay = 1
@@ -338,7 +297,6 @@ public final class ChatStore {
                 if Task.isCancelled { return }
                 isConnected = false
                 self.error = error.localizedDescription
-                failVoices(DeliveryFailure.interrupted)
             }
             try? await Task.sleep(for: .seconds(delay))
             delay = min(delay * 2, 15)
@@ -376,19 +334,12 @@ public final class ChatStore {
             return try message.flatMap { try cache.isHidden($0.id, threadID: threadID) ? nil : $0 }
         }) { update(message) }
         if event.type == "activity" {
-            activityEvents.append(event)
-            if activityEvents.count > 1000 { activityEvents.removeFirst(activityEvents.count - 1000) }
             let hidden = Set(event.payload?.messageIDs ?? [])
             messages.removeAll { hidden.contains($0.id) }
         }
         activity.receive(event, live: live)
         if event.run != nil { runs = try await cacheActor.call({ try $0.runs(threadID: threadID) }) }
         if live { isConnected = true }
-        forwardVoice(event)
-    }
-
-    private func refreshTranscript() {
-        transcript = TranscriptRow.ordered(messages: messages, events: activityEvents)
     }
 
     private func update(_ message: Message) {
@@ -428,7 +379,6 @@ public final class ChatStore {
                         try await cacheActor.call { try $0.setStatus(id: request.id, status: "error") }
                         if let message = try await cacheActor.call({ try $0.messages(threadID: threadID) }).first(where: { $0.id == request.id }) { update(message) }
                         self.error = error.localizedDescription
-                        failVoices(DeliveryFailure.interrupted, ids: [request.id])
                         continue
                     }
                     let pending = try await cacheActor.call { try $0.pending(threadID: threadID) }
@@ -438,52 +388,11 @@ public final class ChatStore {
                     }
                     isConnected = false
                     self.error = error.localizedDescription
-                    failVoices(DeliveryFailure.interrupted, ids: Set(pending.map(\.id)))
                     break
                 }
             }
         } catch {
             self.error = error.localizedDescription
-            failVoices(error)
-        }
-    }
-
-    private func failVoices(_ error: any Error, ids: Set<String>? = nil) {
-        for token in Array(voices.keys) {
-            guard let reply = voices[token] else { continue }
-            if let ids, !ids.contains(reply.userID) { continue }
-            voices.removeValue(forKey: token)
-            reply.continuation.finish(throwing: error)
-        }
-    }
-
-    private func forwardVoice(_ event: Event) {
-        for token in Array(voices.keys) {
-            guard var reply = voices[token] else { continue }
-            if reply.assistantID == nil, event.type == "message.start", event.message?.role == "assistant", event.message?.replyToID == reply.userID {
-                reply.assistantID = event.messageID ?? event.message?.id
-                reply.agentID = event.message?.agentID ?? event.agentID
-            }
-            if let id = reply.assistantID, event.messageID == id || event.message?.id == id {
-                if event.type == "message.delta", let text = event.text {
-                    reply.continuation.yield(VoiceFragment(text: text, agentID: reply.agentID))
-                    reply.hasEmitted = true
-                }
-                if event.type == "message.done" {
-                    if !reply.hasEmitted, let text = event.message?.text, !text.isEmpty {
-                        reply.continuation.yield(VoiceFragment(text: text, agentID: reply.agentID))
-                    }
-                    reply.continuation.finish()
-                    voices.removeValue(forKey: token)
-                    continue
-                }
-                if event.type == "message.error" {
-                    reply.continuation.finish(throwing: DeliveryFailure.interrupted)
-                    voices.removeValue(forKey: token)
-                    continue
-                }
-            }
-            voices[token] = reply
         }
     }
 }

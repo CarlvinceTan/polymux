@@ -24,20 +24,12 @@ struct LiveTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         #expect(chat.isConnected)
-        let stream = chat.voiceReply(text: "Reply with exactly this short sentence: Polymux client integration verified.")
-        let response = try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                var response = ""
-                for try await delta in stream { response += delta.text }
-                return response
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(120))
-                throw ClientError.response(408, "Timed out waiting for the live reply.")
-            }
-            let response = try await group.next() ?? ""
-            group.cancelAll()
-            return response
+        await chat.send(text: "Reply with exactly this short sentence: Polymux client integration verified.")
+        var response = ""
+        for _ in 0..<1200 {
+            if let reply = chat.messages.last(where: { $0.role == "assistant" && $0.status == "done" }),
+               reply.text.lowercased().contains("integration verified") { response = reply.text; break }
+            try await Task.sleep(for: .milliseconds(100))
         }
         #expect(response.lowercased().contains("integration verified"))
         #expect(chat.messages.contains { $0.role == "assistant" && $0.status == "done" && $0.text == response })

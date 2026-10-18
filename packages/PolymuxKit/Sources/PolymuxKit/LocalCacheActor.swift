@@ -41,13 +41,13 @@ public actor LocalCacheActor {
         try await enter()
     }
 
-    public func save(agents: [Agent], threads: [Thread], pins: [String]? = nil, edits: [Thread]? = nil, pinEdits: [String]? = nil, dirtyPins: [String]? = nil) async throws {
+    public func save(agents: [Agent], threads: [Thread], edits: [Thread]? = nil, pinEdits: [String]? = nil, dirtyPins: [String]? = nil) async throws {
         try await enter()
         saves += 1
         if failing { throw ClientError.cache("forced") }
         if instant { return }
         if let edits { try cache.saveEdits(edits, pins: pinEdits, dirtyPins: dirtyPins) }
-        try cache.save(agents: agents, threads: threads, pins: pins)
+        try cache.save(agents: agents, threads: threads)
     }
 
     public func markRead(threadID: String, seq: Int64) async throws {

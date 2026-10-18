@@ -45,6 +45,10 @@ final class VoiceAudio {
         try engine.start()
     }
 
+    func setSilenced(_ value: Bool) {
+        engine.mainMixerNode.outputVolume = value ? 0 : 1
+    }
+
     func setMuted(_ value: Bool) {
         muted = value
         if engine.isRunning, engine.inputNode.isVoiceProcessingEnabled {
@@ -427,6 +431,8 @@ final class AppleOutput: NSObject, SpeechOutput {
     private var timeout: Task<Void, Never>?
 
     init(audio: VoiceAudio) { self.audio = audio }
+
+    func setSilenced(_ silenced: Bool) { audio.setSilenced(silenced) }
 
     func speak(_ text: String) async throws {
         try Task.checkCancellation()

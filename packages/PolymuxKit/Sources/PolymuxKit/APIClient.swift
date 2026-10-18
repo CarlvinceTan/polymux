@@ -23,21 +23,32 @@ public struct APIClient: Sendable {
         URL(string: path, relativeTo: baseURL)?.absoluteURL
     }
 
-    public func activityObject(threadID: String, seq: Int64) async throws -> [String: String] {
-        try await get("threads/\(threadID)/activity/\(seq)")
-    }
-
-    public func peerHistory(agentID: String, peerID: String, before: Int64? = nil) async throws -> [Message] {
-        try await get("agents/\(agentID)/history/\(peerID)",
-                      query: before.map { [URLQueryItem(name: "before", value: String($0))] } ?? [])
-    }
-
     public func agents() async throws -> [Agent] {
         try await get("agents")
     }
 
     public func network() async throws -> NetworkInfo {
         try await get("network")
+    }
+
+    public func invite() async throws -> Invite {
+        try await get("network/invite")
+    }
+
+    public func renameDevice(_ name: String) async throws {
+        var request = try await request("network/devices/self")
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["name": name])
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
+    public func removeDevice(_ id: String) async throws {
+        var request = try await request("network/devices/\(id)")
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
     }
 
     public func notices(after: Int64? = nil) async throws -> NoticePage {
@@ -56,26 +67,6 @@ public struct APIClient: Sendable {
 
     public func settings() async throws -> Settings {
         try await get("settings")
-    }
-
-    public func host(enabled: Bool? = nil) async throws -> HostState {
-        var parts = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        let port = parts?.port ?? (parts?.scheme == "https" ? 443 : 80)
-        guard port < 65535 else { throw ClientError.invalidURL }
-        parts?.port = port + 1
-        parts?.path = "/host"
-        parts?.query = nil
-        guard let url = parts?.url else { throw ClientError.invalidURL }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-        if let enabled {
-            request.httpMethod = "PATCH"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONEncoder().encode(HostPatch(enabled: enabled))
-        }
-        let (data, response) = try await session.data(for: request)
-        try validate(response, data: data)
-        return try JSONDecoder().decode(HostState.self, from: data)
     }
 
     public func updateSettings(_ patch: SettingsPatch) async throws -> Settings {
@@ -171,37 +162,6 @@ public struct APIClient: Sendable {
 
     public func routines(agentID: String) async throws -> [Routine] {
         try await get("agents/\(agentID)/routines")
-    }
-
-    public func updateRoutine(agentID: String, routineID: String, prompt: String? = nil, enabled: Bool? = nil) async throws -> Routine {
-        struct Edit: Encodable {
-            let prompt: String?
-            let enabled: Bool?
-        }
-        var request = try await request("agents/\(agentID)/routines/\(routineID)")
-        request.httpMethod = "PATCH"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(Edit(prompt: prompt, enabled: enabled))
-        let (data, response) = try await session.data(for: request)
-        try validate(response, data: data)
-        return try JSONDecoder().decode(Routine.self, from: data)
-    }
-
-    public func createRoutine(agentID: String, schedule: RoutineRequest) async throws -> Routine {
-        var request = try await request("agents/\(agentID)/routines")
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(schedule)
-        let (data, response) = try await session.data(for: request)
-        try validate(response, data: data)
-        return try JSONDecoder().decode(Routine.self, from: data)
-    }
-
-    public func cancelRoutine(agentID: String, id: String) async throws {
-        var request = try await request("agents/\(agentID)/routines/\(id)")
-        request.httpMethod = "DELETE"
-        let (data, response) = try await session.data(for: request)
-        try validate(response, data: data)
     }
 
     public func proactivity(agentID: String) async throws -> Proactivity {
@@ -381,10 +341,6 @@ public struct APIClient: Sendable {
         if let token = await credential.value { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         try Task.checkCancellation()
         return request
-    }
-
-    public static func localToken(_ url: URL) async -> String? {
-        await Task.detached { discoverToken(url) }.value
     }
 
     private static func discoverToken(_ url: URL) -> String? {

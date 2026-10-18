@@ -147,7 +147,7 @@ func TestEmbedReportsServerModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "embeddinggemma-300M-qat-Q4_0.gguf" {
+	if model != "embeddinggemma-300M-qat-Q4_0.gguf@2" {
 		t.Fatalf("model %q, want the model the server reported", model)
 	}
 }
@@ -158,8 +158,8 @@ func TestEmbedFallsBackToConfiguredModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != testModel {
-		t.Fatalf("model %q, want %q", model, testModel)
+	if model != testModel+"@2" {
+		t.Fatalf("model %q, want %q", model, testModel+"@2")
 	}
 }
 
@@ -299,5 +299,43 @@ func TestCheckMediaDistinguishesImages(t *testing.T) {
 	e := &HTTPEmbedder{URL: srv.URL + "/v1/embeddings", Model: testModel, Dims: 2, Client: srv.Client(), Media: true}
 	if err := e.CheckMedia(t.Context()); err != nil {
 		t.Fatalf("check rejected distinct image embeddings: %v", err)
+	}
+}
+
+func TestReindexQueuesVectorsOfOtherSizes(t *testing.T) {
+	ctx := t.Context()
+	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Register(ctx, []contract.Agent{{ID: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	for id, model := range map[string]string{"old": "m@512", "new": "m@768"} {
+		body := id
+		m := contract.Message{ID: id, ThreadID: "a", Role: "user", Status: "done", CreatedAt: store.Now(),
+			Parts: []contract.Part{{Kind: "text", Text: &body}}}
+		if _, err := s.Append(ctx, contract.Event{ConversationID: "a", Type: "message.done"}, &m); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.ExecContext(ctx, `UPDATE messages SET indexing_state='ready' WHERE id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.ExecContext(ctx, `INSERT INTO media_vectors(message_id,thread_id,embedding,model) VALUES(?,?,?,?)`, id, "a", []byte{0}, model); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&Index{Store: s}).Reindex(ctx, 768); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"old": "pending", "new": "ready"} {
+		var got string
+		if err := s.DB.QueryRowContext(ctx, `SELECT indexing_state FROM messages WHERE id=?`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("%s is %s, want %s", id, got, want)
+		}
 	}
 }

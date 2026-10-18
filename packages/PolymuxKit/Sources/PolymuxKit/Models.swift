@@ -74,10 +74,6 @@ public enum WireDate {
     }
 }
 
-public enum DeliveryFailure: Error, Sendable {
-    case interrupted
-}
-
 /// A composer file handed to `ChatStore.send` before the server knows about it.
 public struct LocalFile: Identifiable, Hashable, Sendable {
     public let id: String

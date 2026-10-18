@@ -151,7 +151,6 @@ public final class LocalCache: @unchecked Sendable {
     }
 
     public func agents() throws -> [Agent] { try metadata("agents") ?? [] }
-    public func pins() throws -> [String] { try metadata("pins") ?? [] }
     public func threads() throws -> [Thread] {
         lock.lock()
         threadReads += 1
@@ -201,14 +200,13 @@ public final class LocalCache: @unchecked Sendable {
         }
     }
 
-    public func save(agents: [Agent], threads: [Thread], pins: [String]? = nil) throws {
+    public func save(agents: [Agent], threads: [Thread]) throws {
         try transaction {
             let deleted = Set(try self.threads().map(\.id)).subtracting(threads.map(\.id))
             try prune(deleted)
             for thread in threads { for run in thread.runs { try write(run) } }
             try setMetadata("agents", value: agents)
             try setMetadata("threads", value: threads)
-            if let pins { try setMetadata("pins", value: pins) }
         }
     }
 

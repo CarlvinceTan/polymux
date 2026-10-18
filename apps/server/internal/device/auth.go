@@ -38,8 +38,16 @@ func (b *Broker) Require(next http.Handler) http.Handler {
 			delete(b.store.requests, guard)
 			b.store.access.Unlock()
 		}()
-		next.ServeHTTP(guard, r.WithContext(ctx))
+		next.ServeHTTP(guard, r.WithContext(context.WithValue(ctx, selfKey{}, pair.ID)))
 	})
+}
+
+type selfKey struct{}
+
+// Self is the ID of the device that made the request, or empty without authentication.
+func Self(ctx context.Context) string {
+	id, _ := ctx.Value(selfKey{}).(string)
+	return id
 }
 
 type responseGuard struct {

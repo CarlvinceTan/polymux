@@ -18,7 +18,7 @@ Open **Settings** using the gear button. If the app cannot connect, use **Connec
 
 Enter your server URL under **Agent server**, including its scheme and port. Use an address reachable from this device. `localhost` on an iPhone refers to the phone, not your Mac.
 
-For the default local server, use `http://127.0.0.1:7337`. Do not paste a token into the URL. Computer-control pairing does not configure remote chat authentication.
+For the default local server, use `http://127.0.0.1:7337`. Do not paste a token into the URL.
 
 The server address saves after a short pause or when you leave Settings. If connection fails, check the address, network access, and server state before changing model configuration.
 

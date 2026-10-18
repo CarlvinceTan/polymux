@@ -4,7 +4,7 @@ import SwiftUI
 import PolymuxKit
 #if os(macOS)
 import AppKit
-import PolymuxControl
+import ApplicationServices
 #else
 import UIKit
 #endif
@@ -18,16 +18,8 @@ enum PolymuxMain {
                   let nonce = UUID(uuidString: CommandLine.arguments[index + 1]) else { return }
             let result = FileManager.default.temporaryDirectory
                 .appending(path: "polymux-ui-accessibility-\(nonce.uuidString).json")
-            let value = ["accessibility": ControlPermissions.accessibility]
+            let value = ["accessibility": AXIsProcessTrusted()]
             if let data = try? JSONEncoder().encode(value) { try? data.write(to: result, options: .atomic) }
-            return
-        }
-        if CommandLine.arguments.contains("--companion") {
-            let app = NSApplication.shared
-            app.setActivationPolicy(.accessory)
-            let delegate = CompanionDelegate()
-            app.delegate = delegate
-            withExtendedLifetime(delegate) { app.run() }
             return
         }
         #endif
@@ -45,15 +37,6 @@ struct PolymuxApp: App {
     init() {
         _ = Notifications.shared
         FrameLog.install()
-        #if os(macOS)
-        #if DEBUG
-        if !VerifyFixture.enabled && !CommandLine.arguments.contains("--verify-approval") {
-            ControlCoordinator.shared.start()
-        }
-        #else
-        ControlCoordinator.shared.start()
-        #endif
-        #endif
     }
     var body: some Scene {
         WindowGroup {
@@ -81,16 +64,22 @@ final class AppSession {
     let sidebar: SidebarStore
     let settings: SettingsStore
     let avatars: AvatarStore
+    /// Carries the connection when the server is only reachable from another network.
+    let tunnel: Tunnel?
 
     init(address: String) async throws {
         guard let url = ServerAddress.resolve(address, defaults: .standard) else {
             throw URLError(.badURL)
         }
         #if DEBUG
-        client = APIClient(baseURL: url, session: VerifyFixture.local ? VerifyFixture.session() : .shared,
-                           token: VerifyFixture.local ? "" : nil)
+        if VerifyFixture.local {
+            client = APIClient(baseURL: url, session: VerifyFixture.session(), token: "")
+            tunnel = nil
+        } else {
+            (client, tunnel) = try await Self.connect(address, url: url)
+        }
         #else
-        client = APIClient(baseURL: url)
+        (client, tunnel) = try await Self.connect(address, url: url)
         #endif
         cache = try await Task.detached {
             let file = ClientPaths.cache(address)
@@ -103,6 +92,15 @@ final class AppSession {
         await sidebar.load()
         settings = SettingsStore(client: client)
         avatars = AvatarStore(sidebar: sidebar)
+    }
+
+    private static func connect(_ address: String, url: URL) async throws -> (APIClient, Tunnel?) {
+        let ticket = try? String(contentsOf: ClientPaths.ticket(address), encoding: .utf8)
+        let (base, tunnel) = try await Tunnel.route(url, ticket: ticket)
+        guard tunnel != nil else { return (APIClient(baseURL: url), nil) }
+        // The tunnel's local address is not the one the credential was saved under.
+        let token = try? String(contentsOf: ClientPaths.token(address), encoding: .utf8)
+        return (APIClient(baseURL: base, token: token), tunnel)
     }
 }
 
@@ -137,6 +135,7 @@ struct AppRoot: View {
                     let opened = try await AppSession(address: address)
                     session = opened
                     error = nil
+                    Task { await announce(opened.client) }
                     #if DEBUG
                     if !VerifyFixture.local { Notifications.shared.connect(opened.client) }
                     #else
@@ -166,6 +165,9 @@ struct AppRoot: View {
                 .id(address)
         }
         .panelHost()
+        #if os(macOS)
+        .toolbar(removing: .title)
+        #endif
         .environment(session?.avatars)
         .appAppearance(appearance)
         #if os(macOS)
@@ -178,18 +180,31 @@ struct AppRoot: View {
             showSettings = true
             return
         }
-        guard url.scheme == "polymux", url.host == "connect",
-              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let target = parts.queryItems?.first(where: { $0.name == "url" })?.value,
-              let token = parts.queryItems?.first(where: { $0.name == "token" })?.value,
-              let parsed = ServerAddress.parse(target) else { return }
-        let file = ClientPaths.token(parsed.absoluteString)
+        guard let invite = Invite(link: url), let parsed = ServerAddress.parse(invite.url) else { return }
+        let target = parsed.absoluteString
+        let file = ClientPaths.token(target)
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
-        try? token.write(to: file, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        address = parsed.absoluteString
+        for (value, path) in [(invite.token, file), (invite.ticket, ClientPaths.ticket(target))] {
+            guard let value else {
+                try? FileManager.default.removeItem(at: path)
+                continue
+            }
+            try? value.write(to: path, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+        }
+        address = target
+    }
+
+    /// Names this device on the server so the Devices list can tell it apart.
+    private func announce(_ client: APIClient) async {
+        #if os(macOS)
+        let name = await Task.detached { Host.current().localizedName ?? "Mac" }.value
+        #else
+        let name = UIDevice.current.name
+        #endif
+        try? await client.renameDevice(name)
     }
 
     private var appearance: String {
@@ -207,14 +222,16 @@ struct AppRoot: View {
             if let session {
                 ShellView(session: session, showSettings: $showSettings)
                     .id(address)
-            } else {
+            } else if let error {
                 ContentUnavailableView {
                     Label("Connect to Polymux", systemImage: "network")
                 } description: {
-                    Text(error ?? "Opening your conversations…")
+                    Text(error)
                 } actions: {
                     Button("Connection settings") { showSettings = true }
                 }
+            } else {
+                Color.clear
             }
         }
     }
@@ -226,125 +243,85 @@ struct ConnectionView: View {
     let client: APIClient?
     let onClose: () -> Void
     @State private var draft = ""
-    @State private var notificationToggle = OptimisticToggle(isOn: Notifications.shared.enabled)
     @FocusState private var serverFocused: Bool
-    @State private var network: NetworkInfo?
+    @State private var network: NetworkInfo? = nil
     @State private var networkIssue: String?
-    @State private var link = ""
-    @State private var linkIssue: String?
+    @State private var removeIssue: String?
+    @State private var refreshing = false
+    @State private var adding = false
 
     var body: some View {
         PanelView("Settings", onClose: close) {
             Form {
-                if let settings, let value = settings.value {
-                    Section("Appearance") {
-                        Picker("Theme", selection: Binding(get: { settings.value?.appearance ?? value.appearance },
-                                                          set: { settings.edit(SettingsPatch(appearance: $0)) })) {
-                            Text("Light").tag("light")
-                            Text("Dark").tag("dark")
-                            Text("System").tag("system")
-                        }
-                        .disabled(!settings.isConnected)
+                Section("Appearance") {
+                    Picker("Theme", selection: Binding(get: { settings?.value?.appearance ?? "system" },
+                                                      set: { settings?.edit(SettingsPatch(appearance: $0)) })) {
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                        Text("System").tag("system")
                     }
-                    .panelRow()
-                }
-                Section("Devices") {
-                    if let network {
-                        HStack(spacing: 16) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(network.server.name).font(.headline)
-                                Text(network.server.role.capitalized)
-                                Text(network.server.platform)
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("Server").font(.caption).foregroundStyle(.secondary)
-                        }
-                        ForEach(network.devices) { device in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(device.name)
-                                    Text(device.name == "Local Mac app" ? "This server" : "Linked device")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(device.name == "Local Mac app" ? "Server" : (device.connected ? "Online" : "Paired"))
-                                    .font(.caption)
-                                    .foregroundStyle(device.name == "Local Mac app" || device.connected ? Color.green : Color.secondary)
-                            }
-                        }
-                        if network.devices.isEmpty {
-                            Text("No other devices are linked yet.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                    } else if let networkIssue {
-                        Text(networkIssue)
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
-                    } else {
-                        HStack {
-                            Spacer()
-                            ProgressView().controlSize(.small)
-                            Spacer()
-                        }
-                        .frame(height: 96)
-                    }
-                    Button("Refresh") { Task { await loadNetwork() } }
+                    .disabled(settings?.value == nil || settings?.isConnected != true)
                 }
                 .panelRow()
-                Section("Connect") {
-                    TextField("Paste a pairing link", text: $link)
+                Section("Server") {
+                    LabeledContent(network?.server.name ?? "Server", value: network?.server.platform ?? "")
+                    TextField("Server address", text: $draft)
+                        .labelsHidden()
+                        .accessibilityIdentifier("settings.server")
                         .lineLimit(1)
+                        .multilineTextAlignment(.leading)
                         .autocorrectionDisabled()
+                        .focused($serverFocused)
+                        .onSubmit { save() }
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
                         #endif
-                    Button("Connect") { connect() }
-                        .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if let linkIssue {
-                        Text(linkIssue).font(.footnote).foregroundStyle(.red)
+                }
+                .panelRow()
+                Section {
+                    devices
+                } header: {
+                    HStack {
+                        Text("Devices")
+                        Spacer()
+                        Button("Refresh devices", systemImage: "arrow.clockwise") { Task { await loadNetwork() } }
+                            .disabled(refreshing)
+                        Button("Add device", systemImage: "plus") { adding = true }
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                } footer: {
+                    if let removeIssue {
+                        Text(removeIssue).font(.footnote).foregroundStyle(.red)
+                    } else if let networkIssue {
+                        Text(networkIssue).font(.footnote).foregroundStyle(.red)
+                            .accessibilityIdentifier("settings.network-error")
                     }
                 }
                 .panelRow()
                 if let settings {
                     VoiceSettings(store: settings)
+                    if let issue = settings.error {
+                        Section {
+                            Text(issue).font(.footnote).foregroundStyle(.red)
+                            Button("Retry") { Task { await settings.retry() } }
+                        }
+                        .panelRow()
+                    }
                 }
                 Section("Notifications") {
-                    let choice = notificationToggle.binding { enabled in
-                        await Notifications.shared.allow(enabled)
-                        guard Notifications.shared.enabled == enabled else {
-                            throw ToggleFailure(Notifications.shared.issue ?? "Couldn’t update notification permission.")
-                        }
-                    }
-                    Toggle("Allow notifications", isOn: choice.isOn)
-                    if let issue = toggleIssue(notificationToggle.message, Notifications.shared.issue) {
+                    Toggle("Allow notifications", isOn: Binding(get: { Notifications.shared.enabled },
+                        set: { enabled in Task { await Notifications.shared.allow(enabled) } }))
+                    if let issue = Notifications.shared.issue {
                         Text(issue).font(.footnote).foregroundStyle(.secondary)
                     }
-                }
-                .panelRow()
-                .onChange(of: Notifications.shared.enabled, initial: true) { _, enabled in
-                    notificationToggle.adopt(enabled)
-                }
-                DisclosureGroup("Advanced") {
-                    Section("Connection") {
-                        TextField("Server address", text: $draft)
-                            .lineLimit(1)
-                            .multilineTextAlignment(.leading)
-                            .autocorrectionDisabled()
-                            .focused($serverFocused)
-                            .onSubmit { save() }
-                        if let issue = settings?.error {
-                            Text(issue).font(.footnote).foregroundStyle(.red)
-                            Button("Retry") { Task { await settings?.retry() } }
-                        }
-                    }
-                    ControlSettings(server: ServerAddress.parse(address))
                 }
                 .panelRow()
             }
             .formStyle(.grouped)
             .defaultFocus($serverFocused, false)
+            .accessibilityIdentifier("settings.form")
         }
         .panelDismiss(onClose: close)
         #if os(macOS)
@@ -358,30 +335,76 @@ struct ConnectionView: View {
             save()
         }
         .onDisappear { save() }
-        .task { await loadNetwork() }
+        .task(id: client?.baseURL) { await loadNetwork() }
         .onChange(of: address) { _, _ in Task { await loadNetwork() } }
+        .panel(isPresented: $adding) {
+            AddDevice(client: client) { link in
+                URLRouter.shared.handler?(link)
+                adding = false
+                onClose()
+            }
+        }
     }
 
-    private func connect() {
-        guard let url = URL(string: link.trimmingCharacters(in: .whitespacesAndNewlines)),
-              url.scheme == "polymux", url.host == "connect" else {
-            linkIssue = "Paste a valid Polymux pairing link."
-            return
+    private static let rowHeight: CGFloat = 40
+    private static let visibleRows = 4
+
+    /// Client devices in a window that shows four rows and scrolls past them, so the panel keeps its height.
+    private var devices: some View {
+        let rows = (network?.devices ?? []).sorted { $0.id == network?.current && $1.id != network?.current }
+        let height = CGFloat(min(max(rows.count, 1), Self.visibleRows)) * Self.rowHeight
+        return ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(rows) { device in
+                    HStack {
+                        Text(device.name).lineLimit(1)
+                        Spacer(minLength: 8)
+                        if device.id == network?.current { Text("This device").foregroundStyle(.secondary) }
+                    }
+                    .frame(height: Self.rowHeight)
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        if device.id != network?.current {
+                            Button("Remove", systemImage: "trash", role: .destructive) { remove(device) }
+                        }
+                    }
+                }
+            }
         }
-        linkIssue = nil
-        URLRouter.shared.handler?(url)
-        onClose()
+        .scrollIndicators(.hidden)
+        .frame(height: height)
+        .overlay { if network == nil && networkIssue == nil { ProgressView().accessibilityIdentifier("settings.network-loading") } }
     }
 
     private func loadNetwork() async {
+        refreshing = true
+        defer { refreshing = false }
         guard let url = ServerAddress.parse(address) else { return }
+        if network == nil, let cached = Self.networks[address] { network = cached }
         do {
-            let api = client?.baseURL == url ? client! : APIClient(baseURL: url)
-            network = try await api.network()
+            let api = client ?? APIClient(baseURL: url)
+            let fresh = try await api.network()
+            Self.networks[address] = fresh
+            network = fresh
             networkIssue = nil
         } catch {
-            network = nil
+            // Keep what is already shown; only say why it could not refresh.
             networkIssue = error.localizedDescription
+        }
+    }
+
+    private static var networks: [String: NetworkInfo] = [:]
+
+    private func remove(_ device: NetworkInfo.Device) {
+        guard let client, let index = network?.devices.firstIndex(where: { $0.id == device.id }) else { return }
+        network?.devices.remove(at: index)
+        removeIssue = nil
+        Task {
+            do { try await client.removeDevice(device.id) }
+            catch {
+                network?.devices.insert(device, at: min(index, network?.devices.count ?? 0))
+                removeIssue = "Couldn't remove \(device.name): \(error.localizedDescription)"
+            }
         }
     }
 
@@ -423,4 +446,3 @@ private final class SettingsAnchor: NSView {
     }
 }
 #endif
-

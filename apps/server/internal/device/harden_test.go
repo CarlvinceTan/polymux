@@ -2,7 +2,6 @@ package device
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -44,49 +43,32 @@ func TestGlobalHandshakeRateLimit(t *testing.T) {
 
 func TestPrePairRevealsNothing(t *testing.T) {
 	b := New(openStore(t))
-	for _, path := range []string{"/", "/enroll", "/redeem", "/connect", "/pairing", "/version", "/unknown"} {
+	for _, path := range []string{"/", "/enroll", "/connect", "/pairing", "/version", "/unknown"} {
 		r := httptest.NewRequest("POST", path, strings.NewReader("{}"))
 		r.TLS = &tls.ConnectionState{}
 		w := httptest.NewRecorder()
 		b.ServeHTTP(w, r)
-		if w.Code != 403 || w.Body.String() != string(make([]byte, 64)) {
+		if w.Code != 404 || strings.Contains(w.Body.String(), "token") {
 			t.Fatalf("%s leaked: %d %q", path, w.Code, w.Body.String())
 		}
 	}
+	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{"code":"unknown"}`))
+	r.TLS = &tls.ConnectionState{}
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, r)
+	if w.Code != 403 || w.Body.String() != string(make([]byte, 64)) {
+		t.Fatalf("/redeem leaked: %d %q", w.Code, w.Body.String())
+	}
 }
 
-func TestPairedEventEmitted(t *testing.T) {
+func TestRedeemRequiresTLS(t *testing.T) {
 	s := openStore(t)
 	b := New(s)
 	code := codeOf(t, appCode(t, s, []string{"https://mac.example"}))
-	for i := range 2 {
-		r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{"code":"`+code+`"}`))
-		r.TLS = &tls.ConnectionState{}
-		w := httptest.NewRecorder()
-		b.ServeHTTP(w, r)
-		if i == 0 {
-			var p Enrollment
-			if json.Unmarshal(w.Body.Bytes(), &p) != nil || p.ID == "" || len(b.events) != 1 || b.events[0].Type != "device.paired" || b.events[0].ID != p.ID {
-				t.Fatal("missing pairing event")
-			}
-			if _, err := s.Authenticate(t.Context(), p.Token); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.Revoke(t.Context(), p.ID); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.Authenticate(t.Context(), p.Token); err == nil {
-				t.Fatal("revoke failed")
-			}
-		} else if w.Code != 403 || len(b.events) != 1 {
-			t.Fatal("replay emitted pairing")
-		}
+	if w := redeem(b, code, false); w.Code != 403 {
+		t.Fatalf("plaintext status: %d", w.Code)
 	}
-	r := httptest.NewRequest("GET", "/device/events", nil)
-	r.RemoteAddr = "203.0.113.1:4444"
-	w := httptest.NewRecorder()
-	b.Paired(w, r)
-	if w.Code != 403 || w.Body.Len() != 64 {
-		t.Fatal("remote event disclosure")
+	if _, err := s.RedeemApp(t.Context(), "route:device", code); err != nil {
+		t.Fatal("plaintext request consumed the code")
 	}
 }

@@ -13,8 +13,8 @@ Explain features using the user's current setup and exposed tools. Do not claim 
 - Memory stores useful facts and preferences. Users can ask to recall, save, or forget memory; never store credentials.
 - Routines schedule reminders or recurring work. Confirm time and timezone. Tasks checkpoint multi-step work; triggers connect external events to established tasks.
 - Integrations include MCP configured through `~/.polymux/mcp.json` and trusted skill files registered through `manage_integrations`. Inspect existing setup first; changes apply on the next turn.
-- Device control requires pairing and appropriate permissions. Pair with `polymux-server device pair -agent ID`, replacing ID with the agent's stable ID. Pairing does not authorize unrelated actions. Inspect available device schemas before control.
-- Settings cover the server connection, agents/models/providers, voice, integrations, and device access. Guide users from observed controls and configuration; never guess UI labels or expose credentials.
+- Devices link with a single-use code from `polymux-server device pair -agent ID`, replacing ID with the agent's stable ID; `device list` and `device revoke` manage them. Linking is not authorization for unrelated actions.
+- Settings cover the server connection, agents/models/providers, voice, integrations, and linked devices. Guide users from observed controls and configuration; never guess UI labels or expose credentials.
 
 ## Troubleshooting
 

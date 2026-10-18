@@ -29,4 +29,12 @@ struct ClientPathsTests {
         #expect(ClientPaths.root(home: home, support: support, environment: [:], desktop: false).path ==
                 "/var/mobile/Library/Application Support/Polymux")
     }
+
+    @Test func networkDevicesDecode() throws {
+        let payload = Data(#"{"server":{"name":"Home","build":"1","platform":"darwin","role":"server"},"devices":[{"id":"d1","name":"Local Mac app","agent":"local","capabilities":[],"revoked":false}]}"#.utf8)
+        let info = try JSONDecoder().decode(NetworkInfo.self, from: payload)
+        #expect(info.devices.count == 1)
+        #expect(info.devices[0].id == "d1")
+        #expect(info.devices[0].name == "Local Mac app")
+    }
 }

@@ -103,7 +103,8 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             } catch { client?.urlProtocol(self, didFailWithError: error) }
             return
         }
-        if CommandLine.arguments.contains("--verify-tools"), request.url?.lastPathComponent == "stream" {
+        if request.url?.lastPathComponent == "stream",
+           CommandLine.arguments.contains("--verify-tools") || CommandLine.arguments.contains("--verify-settings") {
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
                                            headerFields: ["Content-Type": "text/event-stream"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -127,6 +128,20 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                     let theme = CommandLine.arguments.contains("--verify-tools")
                         ? (CommandLine.arguments.contains("--tools-dark") ? "dark" : "light") : Self.appearance
                     data = try JSONEncoder().encode(Settings(appearance: theme, sidebarWidth: 360))
+                case "network":
+                    if CommandLine.arguments.contains("--verify-network-fail") { fail(); return }
+                    if CommandLine.arguments.contains("--verify-network-slow") { return }
+                    let devices: [[String: Any]] = CommandLine.arguments.contains("--verify-network-empty") ? [] : [
+                        ["id": "d-mac", "name": "Local Mac app"],
+                        ["id": "d-ios", "name": "Carlvince’s iPhone"],
+                    ]
+                    data = try JSONSerialization.data(withJSONObject: [
+                        "server": ["name": "Home server", "build": "0.4.0", "platform": "macOS", "role": "host"],
+                        "devices": devices,
+                    ])
+                case "invite":
+                    data = try JSONEncoder().encode(Invite(url: "http://192.168.1.20:7337", token: "fixture-token",
+                                                           ticket: "endpoint" + String(repeating: "a", count: 140)))
                 case "messages": data = try JSONEncoder().encode([Message]())
                 case "events":
                     let after = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?

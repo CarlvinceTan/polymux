@@ -42,9 +42,6 @@ func TestGroupTargets(t *testing.T) {
 			}
 		})
 	}
-	if hasMention("@Ann-more", "Ann") || hasMention("email@Ann", "Ann") || hasMention("@Anna", "Ann") {
-		t.Fatal("mention accepted a prefix/email collision")
-	}
 	if got := groupTargets("No handoff", members, nil, false); len(got) != 0 {
 		t.Fatal("unmentioned reply caused an autonomous handoff")
 	}

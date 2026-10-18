@@ -385,11 +385,7 @@ func TestR4(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"internal server error","type":"server_error"}}`))
 	}))
 	t.Cleanup(provider.Close)
-	runtime, err := agentruntime.New(t.TempDir(), provider.URL+"/v1", "local/test", "test-key", agentruntime.Client{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = runtime.Close() })
+	runtime := durableRuntime(t, t.TempDir(), provider.URL+"/v1")
 	api, _ := startTest(t, runtime)
 	if err := api.Store.RegisterPush(t.Context(), contract.PushDevice{
 		ID: "fixture-installation", Token: strings.Repeat("ab", 32),

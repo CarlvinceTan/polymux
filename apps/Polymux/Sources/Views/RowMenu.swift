@@ -4,11 +4,10 @@ import SwiftUI
 
 struct RowMenu: NSViewRepresentable {
     let profile: () -> Void
+    var pinned = false
+    var pin: (() -> Void)? = nil
     var avatar: (() -> Void)? = nil
     var delete: (() -> Void)? = nil
-    var pin: (() -> Void)? = nil
-    var pinned = false
-    var canPin = true
     var title = "Edit profile"
 
     func makeNSView(context: Context) -> MenuAnchor {
@@ -19,11 +18,10 @@ struct RowMenu: NSViewRepresentable {
 
     func updateNSView(_ view: MenuAnchor, context: Context) {
         view.profile = profile
+        view.pinned = pinned
+        view.pin = pin
         view.avatar = avatar
         view.delete = delete
-        view.pin = pin
-        view.pinned = pinned
-        view.canPin = canPin
         view.title = title
         view.enabled = context.environment.isEnabled
         view.attach()
@@ -34,11 +32,10 @@ struct RowMenu: NSViewRepresentable {
 
 final class MenuAnchor: NSView {
     var profile: (() -> Void)?
+    var pinned = false
+    var pin: (() -> Void)?
     var avatar: (() -> Void)?
     var delete: (() -> Void)?
-    var pin: (() -> Void)?
-    var pinned = false
-    var canPin = true
     var title = "Edit profile"
     var enabled = true
     private var keyboardMenu: TableMenu?
@@ -95,12 +92,7 @@ final class MenuAnchor: NSView {
     func populate(_ menu: NSMenu) {
         menu.removeAllItems()
         menu.autoenablesItems = false
-        if pin != nil {
-            let item = add(pinned ? "Unpin" : "Pin", symbol: pinned ? "pin.slash" : "pin",
-                           action: #selector(togglePin), to: menu)
-            item.isEnabled = enabled && (pinned || canPin)
-            menu.addItem(.separator())
-        }
+        if pin != nil { add(pinned ? "Unpin" : "Pin", symbol: pinned ? "pin.slash" : "pin", action: #selector(togglePin), to: menu) }
         add(title, symbol: "pencil", action: #selector(editProfile), to: menu)
         if avatar != nil { add("Customise avatar", symbol: "face.smiling", action: #selector(editAvatar), to: menu) }
         if delete != nil {

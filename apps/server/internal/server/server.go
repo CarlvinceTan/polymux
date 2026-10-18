@@ -47,6 +47,8 @@ type Config struct {
 	Log         *slog.Logger
 	Push        PushSender
 	Devices     *device.Broker
+	// Ticket returns this server's tunnel ticket, waiting at most the given time; nil disables it.
+	Ticket func(time.Duration) string
 	// BackgroundTimeout defaults to the normal turn limit when unset.
 	BackgroundTimeout time.Duration
 }
@@ -265,7 +267,7 @@ func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 			write(w, 500, map[string]string{"error": "local credential unavailable"})
 			return
 		}
-		write(w, 200, map[string]string{"url": "http://" + r.Host, "token": strings.TrimSpace(string(token))})
+		write(w, 200, s.invite(r, strings.TrimSpace(string(token))))
 		return
 	}
 	token, err := s.config.Devices.Issue(r.Context(), "Polymux app")
@@ -273,11 +275,22 @@ func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 		write(w, 500, map[string]string{"error": "could not issue a pairing credential"})
 		return
 	}
-	write(w, 200, map[string]string{"url": "http://" + r.Host, "token": token})
+	write(w, 200, s.invite(r, token))
+}
+
+// invite carries the direct address and, when available, a tunnel ticket for other networks.
+func (s *Server) invite(r *http.Request, token string) map[string]string {
+	value := map[string]string{"url": "http://" + r.Host, "token": token}
+	if s.config.Ticket != nil {
+		if ticket := s.config.Ticket(15 * time.Second); ticket != "" {
+			value["ticket"] = ticket
+		}
+	}
+	return value
 }
 
 func (s *Server) network(w http.ResponseWriter, r *http.Request) {
-	devices := []device.Status{}
+	devices := []device.Pairing{}
 	if s.config.Devices != nil {
 		if listed, err := s.config.Devices.All(r.Context()); err == nil {
 			devices = listed
@@ -290,7 +303,45 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 			"platform": runtime.GOOS, "role": "server",
 		},
 		"devices": devices,
+		"current": device.Self(r.Context()),
 	})
+}
+
+// renameDevice lets a device name itself so others can tell it apart.
+func (s *Server) renameDevice(w http.ResponseWriter, r *http.Request) {
+	self := device.Self(r.Context())
+	if s.config.Devices == nil || self == "" {
+		fail(w, 404, "not_found", "Device pairing is unavailable.")
+		return
+	}
+	var input struct{ Name string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+		fail(w, 400, "invalid", "Send a device name.")
+		return
+	}
+	if err := s.config.Devices.Rename(r.Context(), self, strings.TrimSpace(input.Name)); err != nil {
+		fail(w, 400, "invalid", err.Error())
+		return
+	}
+	w.WriteHeader(204)
+}
+
+// removeDevice revokes another device; a device cannot remove itself.
+func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.config.Devices == nil {
+		fail(w, 404, "not_found", "Device pairing is unavailable.")
+		return
+	}
+	if id == device.Self(r.Context()) {
+		fail(w, 409, "self", "This device can't remove itself.")
+		return
+	}
+	if err := s.config.Devices.Revoke(r.Context(), id); err != nil {
+		fail(w, 404, "not_found", err.Error())
+		return
+	}
+	w.WriteHeader(204)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +369,8 @@ func (s *Server) routes() {
 	})
 	s.mux.HandleFunc("GET /network", s.network)
 	s.mux.HandleFunc("GET /network/invite", s.networkInvite)
+	s.mux.HandleFunc("PATCH /network/devices/self", s.renameDevice)
+	s.mux.HandleFunc("DELETE /network/devices/{id}", s.removeDevice)
 	s.mux.HandleFunc("GET /agents", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.Agents(r.Context())
 		s.respond(w, v, err)
@@ -1116,10 +1169,6 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	state.external = map[string]bool{}
 	state.classes = map[string]ToolClass{}
 	state.known = map[string]bool{}
-	if s.config.Devices != nil && a.threadID == "" && !delegated {
-		state.external["control_device"] = true
-		state.known["control_device"] = true
-	}
 	if len(d.Devices) > 0 {
 		state.external["run_device"] = true
 		state.known["run_device"] = true
@@ -1184,9 +1233,6 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 				d.ExtraTools = slices.Clone(d.ExtraTools)
 				if work.Trigger != "review" {
 					d.ExtraTools = append(d.ExtraTools, s.sidebarTools()...)
-				}
-				if s.config.Devices != nil && a.threadID == "" && !delegated {
-					d.ExtraTools = append(d.ExtraTools, &controlTool{broker: s.config.Devices, agent: a.id})
 				}
 				if !d.Automatic {
 					d.ExtraTools = append(d.ExtraTools,

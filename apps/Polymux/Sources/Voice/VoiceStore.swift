@@ -15,6 +15,7 @@ final class VoiceStore: VoiceSession {
     private(set) var firstAudio: Double?
     private(set) var levels = Array(repeating: Float(0), count: 36)
     private(set) var muted = false
+    private(set) var silenced = false
 
     private let input: any SpeechInput
     private let output: any SpeechOutput
@@ -61,7 +62,9 @@ final class VoiceStore: VoiceSession {
         guard inputTask == nil else { return }
         closed = false
         muted = false
+        silenced = false
         input.setMuted(false)
+        output.setSilenced(false)
         issue = nil
         transcript = ""
         segments = [:]
@@ -153,6 +156,12 @@ final class VoiceStore: VoiceSession {
         consumedThrough = -Double.infinity
         transcript = ""
         await start()
+    }
+
+    func toggleSilence() {
+        guard !closed else { return }
+        silenced.toggle()
+        output.setSilenced(silenced)
     }
 
     func toggleMute() {
@@ -255,13 +264,6 @@ final class VoiceStore: VoiceSession {
                 self.speechTask?.cancel()
                 self.output.stop()
                 self.agentID = nil
-                if error is DeliveryFailure {
-                    self.transcript = ""
-                    self.response = ""
-                    self.issue = nil
-                    self.phase = .listening
-                    return
-                }
                 self.fail(error)
                 await self.stop()
             }

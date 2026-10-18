@@ -7,15 +7,15 @@ let package = Package(
     products: [
         .library(name: "PolymuxKit", targets: ["PolymuxKit"]),
         .library(name: "AvatarKit", targets: ["AvatarKit"]),
-        .library(name: "PolymuxControl", targets: ["PolymuxControl"]),
         .executable(name: "media-text", targets: ["MediaText"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/n0-computer/iroh-ffi", exact: "1.1.0")
     ],
     targets: [
         .systemLibrary(name: "CSQLite", path: "packages/CSQLite"),
-        .target(name: "PolymuxKit", dependencies: ["CSQLite"], path: "packages/PolymuxKit/Sources/PolymuxKit"),
+        .target(name: "PolymuxKit", dependencies: ["CSQLite", .product(name: "IrohLib", package: "iroh-ffi")], path: "packages/PolymuxKit/Sources/PolymuxKit"),
         .target(name: "AvatarKit", path: "packages/AvatarKit/Sources/AvatarKit", resources: [.copy("Resources/Bloub-LICENSE.txt")]),
-        .target(name: "PolymuxControl", path: "packages/PolymuxControl/Sources/PolymuxControl"),
-        .testTarget(name: "PolymuxControlTests", dependencies: ["PolymuxControl"], path: "packages/PolymuxControl/Tests/PolymuxControlTests"),
         .target(name: "PolymuxAvatar", dependencies: ["PolymuxKit", "AvatarKit"], path: "apps/Polymux/Sources/Avatar"),
         .target(name: "PolymuxVoice", dependencies: ["PolymuxKit"], path: "apps/Polymux/Sources/Voice"),
         .executableTarget(name: "MediaText", path: "packages/MediaText/Sources/MediaText"),

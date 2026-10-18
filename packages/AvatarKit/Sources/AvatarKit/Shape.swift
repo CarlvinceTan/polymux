@@ -172,15 +172,6 @@ public func regularPolygonProfile(_ sides: Int, _ radius: Double, _ rc: Double, 
     return profileFromPolygon(roundedPolygon(verts, rc), 0, 0)
 }
 
-public func polyPath(_ pts: [Point], _ scale: Double = 1) -> CGPath {
-    let path = CGMutablePath()
-    guard pts.count >= 3 else { return path }
-    path.move(to: CGPoint(x: r2(pts[0].x * scale), y: r2(pts[0].y * scale)))
-    for p in pts.dropFirst() { path.addLine(to: CGPoint(x: r2(p.x * scale), y: r2(p.y * scale))) }
-    path.closeSubpath()
-    return path
-}
-
 private func svgArc(_ path: CGMutablePath, _ from: Point, _ to: Point, _ radius: Double) {
     let dx = to.x - from.x, dy = to.y - from.y
     let chord = hypot(dx, dy)

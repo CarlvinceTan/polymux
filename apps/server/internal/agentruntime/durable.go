@@ -40,9 +40,15 @@ func toolReplay(tool agent.AgentTool) durable.ToolReplay {
 // restores the context values a tool expects, because the caller's own context does not
 // reach a durable tool call.
 func ToolRegistration(d Definition, tool agent.AgentTool, conversation durable.ConversationId) *durable.ToolRegistration {
+	mode := durable.ToolExecutionParallel
+	if tool.ExecutionMode() == agent.ToolModeSequential {
+		// A sequential tool (a checkpoint, a remote command) must see earlier calls settle first.
+		mode = durable.ToolExecutionSequential
+	}
 	return &durable.ToolRegistration{
-		ToolSchema: tool.Schema(),
-		Replay:     toolReplay(tool),
+		ToolSchema:    tool.Schema(),
+		Replay:        toolReplay(tool),
+		ExecutionMode: mode,
 		Execute: func(ctx context.Context, args any, api durable.ToolExecutionApi) (durable.ToolExecutionResult, error) {
 			if d.TurnContext != nil {
 				// Only this session's conversation may use its turn state: a call from

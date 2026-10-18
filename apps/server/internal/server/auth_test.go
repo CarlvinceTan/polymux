@@ -29,7 +29,6 @@ func TestServerAuthentication(t *testing.T) {
 	pair, err := pairs.Authenticate(t.Context(), token)
 	checkErr(err)
 	broker := device.New(pairs)
-	defer broker.Close()
 	s := settingsAPI(t)
 	s.config.Devices = broker
 	_, err = s.settings.SetKey("test-only-secret")

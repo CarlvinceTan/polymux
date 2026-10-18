@@ -20,7 +20,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,15 +28,6 @@ import (
 )
 
 const Version = 1
-
-type Ticket struct {
-	Version      int      `json:"version"`
-	URL          string   `json:"url"`
-	Certificate  string   `json:"certificate"`
-	Code         string   `json:"code"`
-	Agent        string   `json:"agent"`
-	Capabilities []string `json:"capabilities"`
-}
 
 type Pairing struct {
 	ID           string   `json:"id"`
@@ -208,100 +198,6 @@ func (s *Store) identity(ctx context.Context, hostname string) error {
 	return err
 }
 
-func validCaps(caps []string) bool {
-	if len(caps) == 0 || len(caps) > 2 {
-		return false
-	}
-	seen := map[string]bool{}
-	for _, cap := range caps {
-		if (cap != "native" && cap != "commands") || seen[cap] {
-			return false
-		}
-		seen[cap] = true
-	}
-	return true
-}
-
-func (s *Store) Issue(ctx context.Context, address, agent string, caps []string) (string, error) {
-	u, err := url.Parse(address)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return "", errors.New("pairing requires an HTTPS control address")
-	}
-	if err := s.issuer.VerifyHostname(u.Hostname()); err != nil {
-		return "", errors.New("control address changed; explicitly reset device identity and re-pair")
-	}
-	if agent == "" || len(agent) > 128 || strings.ContainsAny(agent, "/\\.\x00") || !validCaps(caps) {
-		return "", errors.New("invalid agent or capabilities")
-	}
-	code := randomID()
-	data, err := json.Marshal(caps)
-	if err != nil {
-		return "", err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `DELETE FROM tickets WHERE expires<=? OR (agent=? AND capabilities LIKE '[%')`, s.moment().Unix(), agent)
-	if err == nil {
-		err = ticketCap(ctx, tx)
-	}
-	if err == nil {
-		_, err = tx.ExecContext(ctx, `INSERT INTO tickets VALUES(?,?,?,?)`, hash(code), agent, string(data), s.moment().Add(3*time.Minute).Unix())
-	}
-	if err == nil {
-		err = tx.Commit()
-	}
-	if err != nil {
-		return "", err
-	}
-	ticket, err := json.Marshal(Ticket{Version, strings.TrimRight(address, "/"), base64.StdEncoding.EncodeToString(s.issuer.Raw), code, agent, slices.Clone(caps)})
-	if err != nil {
-		return "", err
-	}
-	return "polymux-pair:" + base64.RawURLEncoding.EncodeToString(ticket), nil
-}
-
-func (s *Store) Enroll(ctx context.Context, code, name string, caps []string) (Enrollment, error) {
-	if len(code) != 43 || strings.TrimSpace(name) == "" || len(name) > 64 || strings.ContainsAny(name, "\x00\r\n") || !validCaps(caps) {
-		return Enrollment{}, errors.New("invalid enrollment")
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Enrollment{}, err
-	}
-	defer tx.Rollback()
-	var agent, encoded string
-	// Control tickets are JSON arrays. App tickets are objects and must stay put.
-	err = tx.QueryRowContext(ctx, `DELETE FROM tickets WHERE hash=? AND expires>? AND capabilities LIKE '[%' RETURNING agent,capabilities`, hash(code), s.moment().Unix()).Scan(&agent, &encoded)
-	if err != nil {
-		return Enrollment{}, errors.New("pairing code expired or already used")
-	}
-	var approved []string
-	if err := json.Unmarshal([]byte(encoded), &approved); err != nil {
-		return Enrollment{}, err
-	}
-	for _, cap := range caps {
-		if !slices.Contains(approved, cap) {
-			return Enrollment{}, errors.New("capability not approved")
-		}
-	}
-	data, err := json.Marshal(caps)
-	if err != nil {
-		return Enrollment{}, err
-	}
-	out := Enrollment{Pairing: Pairing{ID: randomID(), Name: name, Agent: agent, Capabilities: slices.Clone(caps)}, Token: randomID()}
-	_, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,agent,capabilities,token_hash) VALUES(?,?,?,?,?)`, out.ID, name, agent, string(data), hash(out.Token))
-	if err != nil {
-		return Enrollment{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Enrollment{}, err
-	}
-	return out, nil
-}
-
 func (s *Store) Authenticate(ctx context.Context, token string) (Pairing, error) {
 	if len(token) != 43 {
 		return Pairing{}, errors.New("invalid device credential")
@@ -349,6 +245,20 @@ func (s *Store) IssueAppToken(ctx context.Context, name string) (string, error) 
 		return "", err
 	}
 	return token, nil
+}
+
+func (s *Store) Rename(ctx context.Context, id, name string) error {
+	if name == "" || len(name) > 128 || strings.ContainsAny(name, "\x00\r\n") {
+		return errors.New("invalid device name")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE devices SET name=? WHERE id=? AND revoked=0`, name, id)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err == nil && n != 1 {
+		return errors.New("device not found")
+	}
+	return err
 }
 
 func (s *Store) Revoke(ctx context.Context, id string) error {

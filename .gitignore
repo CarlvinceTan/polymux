@@ -8,7 +8,8 @@ node_modules/
 /apps/site/product/*/
 
 # Local tool settings and experiments
-.claude/settings.local.json
+.claude/
+.cursor/
 /experiments/
 /.proof/
 /.pig/
@@ -33,6 +34,7 @@ __debug_bin*
 
 # Swift and Xcode output
 .build/
+dist/
 .swiftpm/
 DerivedData/
 xcuserdata/
@@ -41,11 +43,5 @@ xcuserdata/
 # Bundled native dependencies staged for local builds
 /.vendor/
 
-# Local folders left by Electron-era checkouts
-/apps/extension/locker/config.local.js
-/apps/extension/safari/Polymux/
-/apps/extension/safari/ios/
-/apps/extension/vault/
-/apps/mobile/
-/docs/reviews/
-/resources/mobile/
+# Machine-specific agent rules
+/AGENTS.local.md

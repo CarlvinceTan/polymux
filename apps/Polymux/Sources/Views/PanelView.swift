@@ -1,5 +1,31 @@
 import SwiftUI
 
+enum PanelSurface {
+    /// macOS window background values, so panels read the same on macOS and iOS.
+    static func color(_ scheme: ColorScheme) -> Color {
+        #if os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        scheme == .dark ? Color(white: 30.0 / 255) : Color(uiColor: .systemBackground)
+        #endif
+    }
+}
+
+extension View {
+    /// Keeps a list or form row on the panel surface instead of a separate row colour.
+    func panelRow() -> some View {
+        modifier(PanelRow())
+    }
+}
+
+private struct PanelRow: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        content.listRowBackground(PanelSurface.color(scheme))
+    }
+}
+
 struct PanelView<Content: View, Actions: View>: View {
     let title: String
     let enabled: Bool

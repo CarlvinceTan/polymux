@@ -11,6 +11,7 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/testenv"
+	"github.com/MichaelKinsy/PiG/durable/storage"
 )
 
 func TestEphemeralSessionNeverResumesOrPersists(t *testing.T) {
@@ -22,7 +23,7 @@ func TestEphemeralSessionNeverResumesOrPersists(t *testing.T) {
 	}))
 	defer provider.Close()
 	dir := t.TempDir()
-	runtime, err := New(dir, provider.URL+"/v1", "local/test", "test-key", Client{})
+	runtime, err := NewDurable(t.Context(), dir, provider.URL+"/v1", "local/test", "test-key", Client{}, storage.NewMemoryStorage())
 	if err != nil {
 		t.Fatal(err)
 	}

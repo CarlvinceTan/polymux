@@ -12,9 +12,14 @@ protocol LiveSound: AnyObject {
     var drained: (() -> Void)? { get set }
     func start(rate: Int) async throws -> AsyncThrowingStream<MicEvent, Error>
     func setMuted(_ muted: Bool)
+    func setSilenced(_ silenced: Bool)
     func play(_ chunk: LivePCM) throws
     func interrupt()
     func stop()
+}
+
+extension LiveSound {
+    func setSilenced(_ silenced: Bool) {}
 }
 
 @MainActor
@@ -39,6 +44,8 @@ final class NativeSound: LiveSound {
         catch { stop(); throw error }
         return stream.stream
     }
+
+    func setSilenced(_ silenced: Bool) { audio.setSilenced(silenced) }
 
     func setMuted(_ muted: Bool) {
         audio.setMuted(muted)

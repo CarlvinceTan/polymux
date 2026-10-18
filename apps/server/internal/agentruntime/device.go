@@ -31,7 +31,7 @@ func (*deviceTool) Name() string                           { return "run_device"
 func (*deviceTool) Label() string                          { return "Run on a paired device" }
 func (*deviceTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (*deviceTool) Description() string {
-	return "Run one executable with arguments over a preconfigured SSH target. Uses existing keys/known hosts without prompts or permission changes. Choose a registered device; filesystem paths refer to that remote host. No automatic retries: a timeout may have left remote effects running. Native GUI work must use the paired Cua MCP, not shell UI scripting."
+	return "Run one executable with arguments over a preconfigured SSH target. Uses existing keys/known hosts without prompts or permission changes. Choose a registered device; filesystem paths refer to that remote host. No automatic retries: a timeout may have left remote effects running."
 }
 func (t *deviceTool) Schema() ai.ToolSchema {
 	names := []string{}

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/testenv"
 )
 
@@ -39,11 +38,7 @@ func TestParkedTaskSurfacesOnAUserTurn(t *testing.T) {
 		fmt.Fprint(w, "data: {\"id\":\"fixture\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Noted\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"fixture\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer provider.Close()
-	runtime, err := agentruntime.New(t.TempDir(), provider.URL+"/v1", "local/test", "test-key", agentruntime.Client{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close()
+	runtime := durableRuntime(t, t.TempDir(), provider.URL+"/v1")
 	api, endpoint := startTest(t, runtime)
 	send := func(id string) {
 		t.Helper()
@@ -55,8 +50,7 @@ func TestParkedTaskSurfacesOnAUserTurn(t *testing.T) {
 		response.Body.Close()
 	}
 	send("first")
-	deadline := time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) {
+	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); {
 		tasks, err := api.Store.Tasks(t.Context(), "assistant", "assistant")
 		if err != nil {
 			t.Fatal(err)
@@ -70,24 +64,29 @@ func TestParkedTaskSurfacesOnAUserTurn(t *testing.T) {
 	if err != nil || len(tasks) == 0 || tasks[0].Status != "parked" {
 		t.Fatalf("task did not park: %+v %v", tasks, err)
 	}
-	send("second")
-	deadline = time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) {
-		if turns.Load() > 1 {
-			break
+	// The first turn answers once more after the tool result before the user's next turn.
+	wait := func(n int32) {
+		t.Helper()
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) && turns.Load() < n {
+			time.Sleep(10 * time.Millisecond)
 		}
-		time.Sleep(10 * time.Millisecond)
+		if turns.Load() < n {
+			t.Fatalf("expected %d model requests, got %d", n, turns.Load())
+		}
 	}
+	wait(2)
+	send("second")
+	wait(3)
 	mu.Lock()
 	defer mu.Unlock()
-	if len(bodies) < 2 {
-		t.Fatalf("expected a second turn, got %d", len(bodies))
+	if next := bodies[2]; !strings.Contains(next, "Tasks waiting on your answer") || !strings.Contains(next, "Draft the fixture report") {
+		t.Fatalf("parked task was not surfaced: %s", next[:min(len(next), 600)])
 	}
-	if !strings.Contains(bodies[1], "Tasks waiting on your answer") || !strings.Contains(bodies[1], "Draft the fixture report") {
-		t.Fatalf("parked task was not surfaced: %s", bodies[1][:min(len(bodies[1]), 600)])
-	}
-	if strings.Contains(bodies[0], "Tasks waiting on your answer") {
-		t.Fatal("first turn claimed parked work")
+	for _, body := range bodies[:2] {
+		if strings.Contains(body, "Tasks waiting on your answer") {
+			t.Fatal("first turn claimed parked work")
+		}
 	}
 }
 

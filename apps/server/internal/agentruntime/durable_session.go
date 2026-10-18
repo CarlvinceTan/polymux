@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -138,15 +139,24 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (S
 	}()
 	registration := d
 	registration.ExtraTools = append(append([]agent.AgentTool{}, d.ExtraTools...), connected...)
+	if !d.Intro {
+		paired, err := deviceTools(d.Devices)
+		if err != nil {
+			return nil, err
+		}
+		registration.ExtraTools = append(registration.ExtraTools, paired...)
+	}
 	if d.TurnContext != nil {
 		registration.TurnContext = func() (context.Context, bool) {
 			return session.turnContext(conversation.Id(), ctx)
 		}
 	}
 	tools := Tools(registration, conversation.Id())
-	for _, name := range d.Tools {
-		if registration := builtinTool(name); registration != nil {
-			tools = append(tools, registration)
+	if !d.Intro {
+		for _, name := range d.Tools {
+			if registration := builtinTool(name); registration != nil {
+				tools = append(tools, registration)
+			}
 		}
 	}
 	var names []string
@@ -256,7 +266,7 @@ func (r *modelRegistry) runtime() *ai.Models {
 		if provider == nil {
 			return nil, fmt.Errorf("model %q is not registered", selected.ID)
 		}
-		return passthrough(provider)(ctx, selected, transcript, opts)
+		return passthrough(provider, r.client.Session)(ctx, selected, transcript, opts)
 	}
 	models := ai.CreateModels()
 	models.SetProvider(&ai.ModelsProvider{
@@ -284,10 +294,11 @@ func durableModels(baseURL, key, model string, client Client, extra ...string) *
 }
 
 // passthrough adapts an ai.Provider to the models runtime stream signature.
-func passthrough(provider ai.Provider) ai.ModelsStreamFunction {
+func passthrough(provider ai.Provider, session string) ai.ModelsStreamFunction {
 	return func(ctx context.Context, _ *ai.Model, transcript ai.TranscriptContext, opts ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
 		id := markerID(transcript)
 		opts.MaxRetries = new(0)
+		opts.Headers = sessionHeaders(opts.Headers, session, opts.SessionID)
 		if opts.Fetch == nil {
 			opts.Fetch = retryClient()
 		}
@@ -298,6 +309,20 @@ func passthrough(provider ai.Provider) ai.ModelsStreamFunction {
 		stream, err := provider.Stream(ctx, transcript, opts)
 		return retainPartial(ctx, id, stream), err
 	}
+}
+
+// sessionHeaders adds a stable per-conversation value under the configured header name.
+func sessionHeaders(headers ai.ProviderHeaders, name, id string) ai.ProviderHeaders {
+	if name == "" || id == "" {
+		return headers
+	}
+	merged := make(ai.ProviderHeaders, len(headers)+1)
+	for key, value := range headers {
+		merged[key] = value
+	}
+	value := fmt.Sprintf("polymux-%x", sha256.Sum256([]byte(id)))
+	merged[name] = &value
+	return merged
 }
 
 const maxFactBytes = 2048
@@ -650,7 +675,13 @@ func (s *durableSession) markRequest(_ context.Context, request harness.Generati
 
 var errApprovalPause = errors.New("waiting for approval")
 
-func (s *durableSession) Path() string { return durablePath(s.conversation.Id()) }
+// Path is empty for an ephemeral session, which must never be resumed.
+func (s *durableSession) Path() string {
+	if s.definition.Ephemeral {
+		return ""
+	}
+	return durablePath(s.conversation.Id())
+}
 func (s *durableSession) Reusable() bool {
 	return !s.degraded
 }

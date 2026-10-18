@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestEmbedMediaLive(t *testing.T) {
 		t.Skip("set POLYMUX_TEST_EMBED_URL to a llama-server /v1/embeddings endpoint")
 	}
 	ctx := t.Context()
-	e := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 512, Media: true,
+	e := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 768, Media: true,
 		Client: &http.Client{Timeout: 2 * time.Minute}}
 	if err := e.CheckMedia(ctx); err != nil {
 		t.Fatalf("media check: %v", err)
@@ -40,8 +41,8 @@ func TestEmbedMediaLive(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(v) != 512 {
-			t.Fatalf("embedded %d dimensions, want the truncated 512", len(v))
+		if len(v) != 768 {
+			t.Fatalf("embedded %d dimensions, want 768", len(v))
 		}
 		if model == "" {
 			t.Fatal("the endpoint named no model to key stored vectors on")
@@ -108,7 +109,7 @@ func TestSearchImageLive(t *testing.T) {
 	if err := s.Register(ctx, []contract.Agent{{ID: "a"}}); err != nil {
 		t.Fatal(err)
 	}
-	embedder := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 512, Media: true,
+	embedder := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 768, Media: true,
 		Client: &http.Client{Timeout: 2 * time.Minute}}
 	if err := embedder.CheckMedia(ctx); err != nil {
 		t.Fatalf("media check: %v", err)
@@ -180,14 +181,14 @@ func TestEmbedUndecodableMediaLive(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not a png at all"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 512, Media: true,
+	e := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 768, Media: true,
 		Client: &http.Client{Timeout: 2 * time.Minute}}
 	v, _, err := e.Embed(ctx, Input{Text: "a photo of a whiteboard", Attachments: []Asset{{Path: path, MimeType: "image/png"}}})
 	if err != nil {
 		t.Fatalf("media the server rejects should fall back to text: %v", err)
 	}
-	if len(v) != 512 {
-		t.Fatalf("embedded %d dimensions, want 512", len(v))
+	if len(v) != 768 {
+		t.Fatalf("embedded %d dimensions, want 768", len(v))
 	}
 }
 
@@ -213,4 +214,147 @@ func writeToneWAV(path string, freq float64) error {
 	header = append(header, []byte("data")...)
 	header = binary.LittleEndian.AppendUint32(header, uint32(len(samples)))
 	return os.WriteFile(path, append(header, samples...), 0o600)
+}
+
+// TestEmbedVideoLive checks that sampled video frames reach the model: text
+// describing a clip's colour must land nearer that clip than another one.
+func TestEmbedVideoLive(t *testing.T) {
+	url := os.Getenv("POLYMUX_TEST_EMBED_URL")
+	if url == "" {
+		t.Skip("set POLYMUX_TEST_EMBED_URL to a llama-server /v1/embeddings endpoint")
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	e := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 768, Media: true,
+		Client: &http.Client{Timeout: 2 * time.Minute}}
+	dir := t.TempDir()
+	clip := func(colour string) []float32 {
+		path := filepath.Join(dir, colour+".mp4")
+		cmd := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c="+colour+":s=320x240:d=8:r=10", "-pix_fmt", "yuv420p", path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("make clip: %v %s", err, out)
+		}
+		v, _, err := e.Embed(t.Context(), Input{Text: "", Attachments: []Asset{{Path: path, MimeType: "video/mp4"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	query := func(text string) []float32 {
+		v, _, err := e.Embed(t.Context(), Input{Text: text, Query: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	red, blue := clip("red"), clip("blue")
+	if got := cosine(red, blue); got > 0.995 {
+		t.Fatalf("red and blue clips embed alike (cosine %.4f), so frames are not reaching the model", got)
+	}
+	for _, c := range []struct {
+		text        string
+		want, other []float32
+	}{{"a solid red screen", red, blue}, {"a solid blue screen", blue, red}} {
+		q := query(c.text)
+		if cosine(q, c.want) <= cosine(q, c.other) {
+			t.Fatalf("%q is nearer the wrong clip (%.4f vs %.4f)", c.text, cosine(q, c.want), cosine(q, c.other))
+		}
+	}
+}
+
+// TestSearchVideoLive is TestSearchImageLive for clips: only the sampled frames
+// can tell the two messages apart.
+func TestSearchVideoLive(t *testing.T) {
+	url := os.Getenv("POLYMUX_TEST_EMBED_URL")
+	if url == "" {
+		t.Skip("set POLYMUX_TEST_EMBED_URL to a llama-server /v1/embeddings endpoint")
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	ctx := t.Context()
+	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Register(ctx, []contract.Agent{{ID: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	embedder := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 768, Media: true,
+		Client: &http.Client{Timeout: 2 * time.Minute}}
+	i := &Index{Store: s, Embedder: embedder, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	for _, colour := range []string{"red", "blue"} {
+		path := filepath.Join(t.TempDir(), colour+".mp4")
+		cmd := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c="+colour+":s=320x240:d=8:r=10", "-pix_fmt", "yuv420p", path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("make clip: %v %s", err, out)
+		}
+		size, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := "m-" + colour
+		attachment := contract.Attachment{ID: id, Kind: "video", Name: "clip.mp4",
+			MimeType: "video/mp4", Size: size.Size(), IndexingState: "ready"}
+		if err := s.SaveAttachment(ctx, attachment, path); err != nil {
+			t.Fatal(err)
+		}
+		body := "Here is a clip."
+		m := contract.Message{ID: id, ThreadID: "a", Role: "user", Status: "done", CreatedAt: store.Now(),
+			Parts: []contract.Part{{Kind: "text", Text: &body}, {Kind: "video", Attachment: &attachment}}}
+		if _, err := s.Append(ctx, contract.Event{ConversationID: "a", Type: "message.done"}, &m); err != nil {
+			t.Fatal(err)
+		}
+		if err := i.Ingest(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tt := range []struct{ query, want string }{
+		{"a solid blue screen", "m-blue"},
+		{"a solid red screen", "m-red"},
+	} {
+		hits, semantic, err := i.Search(ctx, "a", tt.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !semantic || len(hits) == 0 || hits[0].Message.ID != tt.want {
+			t.Fatalf("%q: semantic=%v hits=%d, want %s first", tt.query, semantic, len(hits), tt.want)
+		}
+	}
+}
+
+// TestEmbedVideoSoundLive checks that a clip's soundtrack changes its embedding.
+func TestEmbedVideoSoundLive(t *testing.T) {
+	url := os.Getenv("POLYMUX_TEST_EMBED_URL")
+	if url == "" {
+		t.Skip("set POLYMUX_TEST_EMBED_URL to a llama-server /v1/embeddings endpoint")
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	e := &HTTPEmbedder{URL: url, Model: "embeddinggemma-2", Dims: 768, Media: true,
+		Client: &http.Client{Timeout: 2 * time.Minute}}
+	dir := t.TempDir()
+	clip := func(name string, sound ...string) []float32 {
+		path := filepath.Join(dir, name+".mp4")
+		args := append([]string{"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x240:d=4:r=10"}, sound...)
+		args = append(args, "-shortest", "-pix_fmt", "yuv420p", path)
+		if out, err := exec.Command("ffmpeg", args...).CombinedOutput(); err != nil {
+			t.Fatalf("make clip: %v %s", err, out)
+		}
+		v, _, err := e.Embed(t.Context(), Input{Attachments: []Asset{{Path: path, MimeType: "video/mp4"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	silent := clip("silent")
+	tone := clip("tone", "-f", "lavfi", "-i", "sine=f=440:d=4")
+	if got := cosine(silent, tone); got > 0.999 {
+		t.Fatalf("a clip with sound embeds like a silent one (cosine %.4f), so its audio is ignored", got)
+	}
 }

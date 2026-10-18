@@ -189,7 +189,6 @@ private struct PanelHost: ViewModifier {
         content
             .environment(\.panelActive, active)
             .background { FocusWindow(memory: focus).frame(width: 0, height: 0).accessibilityHidden(true) }
-            .background { PanelChrome(active: active).frame(width: 0, height: 0).accessibilityHidden(true) }
             .disabled(active)
             .accessibilityHidden(active)
             .overlayPreferenceValue(PanelEntries.self) { entries in
@@ -234,49 +233,6 @@ private final class FocusMemory {
                   window.attachedSheet == nil, let previous else { return }
             if let view = previous as? NSView, view.window !== window { return }
             window.makeFirstResponder(previous)
-        }
-    }
-}
-
-private struct PanelChrome: NSViewRepresentable {
-    let active: Bool
-
-    func makeNSView(context: Context) -> ChromeAnchor {
-        let view = ChromeAnchor()
-        view.active = active
-        return view
-    }
-
-    func updateNSView(_ view: ChromeAnchor, context: Context) {
-        view.active = active
-        view.apply()
-    }
-}
-
-private final class ChromeAnchor: NSView {
-    var active = false
-    private var observers: [NSObjectProtocol] = []
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        observers = []
-        if let window {
-            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didUpdateNotification,
-                         NSWindow.didResizeNotification, NSWindow.didEnterFullScreenNotification] {
-                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                    self?.apply()
-                })
-            }
-        }
-        apply()
-    }
-
-    func apply() {
-        for window in NSApp.windows {
-            window.title = ""
-            window.titleVisibility = .hidden
-            window.toolbar?.isVisible = !active
         }
     }
 }

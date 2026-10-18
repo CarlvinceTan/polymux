@@ -155,10 +155,11 @@ struct ActivityReadTests {
         await chat.start()
         for _ in 0..<100 {
             let read = await probe.reads.contains(1)
-            if chat.activityEvents.count == 1, !visible || read { break }
+            let seen = try await cache.offMain { try $0.cursor(threadID: "one") } >= 1
+            if seen, !visible || read { break }
             try await Task.sleep(for: .milliseconds(5))
         }
-        #expect(chat.activityEvents.count == 1)
+        #expect(try await cache.offMain { try $0.cursor(threadID: "one") } >= 1)
         #expect(try await cache.offMain { try $0.threads().first?.unreadCount } == (visible ? 0 : 1))
         #expect((await probe.reads).contains(1) == visible)
     }
@@ -614,7 +615,6 @@ struct TransportTests {
         let api = APIClient(baseURL: URL(string: "http://\(host)")!,
                             session: URLSession(configuration: configuration), token: "test-device-token")
         #expect(try await api.agents().isEmpty)
-        #expect(await APIClient.localToken(URL(string: "https://untrusted.example")!) == nil)
     }
 
     @Test @MainActor func discoveryKeepsMainActorFree() async throws {
@@ -741,11 +741,6 @@ struct TransportTests {
             switch (request.httpMethod, path) {
             case ("GET", "/agents/a/routines"):
                 return (200, try JSONEncoder().encode([routine]))
-            case ("POST", "/agents/a/routines"):
-                #expect(try JSONDecoder().decode(RoutineRequest.self, from: requestBody(request)) == schedule)
-                return (201, try JSONEncoder().encode(routine))
-            case ("DELETE", "/agents/a/routines/daily"):
-                return (200, Data("{}".utf8))
             case ("GET", "/agents/a/proactivity"):
                 return (200, try JSONEncoder().encode(settings))
             case ("PATCH", "/agents/a/proactivity"):
@@ -757,34 +752,12 @@ struct TransportTests {
         defer { ProbeProtocol.routes.remove(host) }
         let api = client(host: host)
         #expect(try await api.routines(agentID: "a") == [routine])
-        #expect(try await api.createRoutine(agentID: "a", schedule: schedule) == routine)
-        try await api.cancelRoutine(agentID: "a", id: routine.id)
         #expect(try await api.proactivity(agentID: "a") == settings)
         #expect(try await api.setProactivity(agentID: "a", settings: settings) == settings)
     }
 
     private func cacheURL() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("polymux-transport-\(UUID())/cache.sqlite")
-    }
-
-    @Test func hostSwitchStaysReachableWithoutBackend() async throws {
-        let host = ProbeProtocol.routes.add { request in
-            guard request.url?.path == "/host" else { return (503, Data()) }
-            #expect(request.url?.port == 81)
-            if request.httpMethod == "PATCH" {
-                #expect(try JSONDecoder().decode(HostPatch.self, from: requestBody(request)).enabled == false)
-                return (200, try JSONEncoder().encode(HostState(enabled: false, running: true, pid: 123, error: "")))
-            }
-            return (200, try JSONEncoder().encode(HostState(enabled: true, running: true, pid: 123, error: "")))
-        }
-        defer { ProbeProtocol.routes.remove(host) }
-        let store = HostStore(client: client(host: host))
-        await store.refresh()
-        #expect(store.value?.enabled == true)
-        await store.setEnabled(false)
-        #expect(store.value?.enabled == false)
-        #expect(store.error == nil)
-        #expect(!store.saving)
     }
 
     @Test func notificationCursorIsIndependentAndRegistrationIsWriteOnly() async throws {
@@ -888,88 +861,6 @@ struct TransportTests {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [ProbeProtocol.self]
         return APIClient(baseURL: URL(string: "http://\(host)")!, session: URLSession(configuration: config))
-    }
-
-    private func interrupted(_ stream: AsyncThrowingStream<VoiceFragment, any Error>) async throws -> Bool {
-        try await withThrowingTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                do {
-                    for try await _ in stream {}
-                    return false
-                } catch { return error is DeliveryFailure }
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(3))
-                throw ClientError.response(408, "Voice delivery test timed out.")
-            }
-            defer { group.cancelAll() }
-            return try await group.next() ?? false
-        }
-    }
-
-    @Test(arguments: [0, 503, 400])
-    func disconnectedVoiceUsesDurableOutbox(failure: Int) async throws {
-        let probe = DeliveryProbe(failure: failure)
-        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
-        defer { ProbeProtocol.routes.remove(host) }
-        let url = cacheURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let cache = try await CacheWork.open(url)
-        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
-        #expect(!chat.isConnected)
-        #expect(try await interrupted(chat.voiceReply(text: "Keep this spoken message")))
-        let unsent = try #require(chat.messages.first)
-        #expect(unsent.text == "Keep this spoken message")
-        #expect(unsent.status == (failure == 400 ? "error" : "failed"))
-        let reopened = try await CacheWork.open(url)
-        #expect(try await reopened.offMain { try $0.messages(threadID: "one") } == [unsent])
-        let resumed = ChatStore(client: client(host: host), actor: LocalCacheActor(reopened), threadID: "one")
-        await probe.reconnect()
-        await resumed.retry(messageID: unsent.id)
-        let requests = await probe.requests
-        #expect(requests.count == 2)
-        #expect(requests[0] == requests[1])
-        #expect(resumed.messages.count == 1)
-        #expect(resumed.messages.first?.status == "done")
-        #expect(try await reopened.offMain { try $0.pending(threadID: "one") }.isEmpty)
-    }
-
-    @Test func voiceReplyInterruptionKeepsAcceptedMessage() async throws {
-        let probe = InterruptedProbe()
-        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
-        defer { ProbeProtocol.routes.remove(host) }
-        let url = cacheURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let cache = try await CacheWork.open(url)
-        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
-        defer { chat.stop() }
-        await chat.start()
-        #expect(try await interrupted(chat.voiceReply(text: "One spoken turn")))
-        let user = try #require(chat.messages.first { $0.role == "user" })
-        #expect(user.status == "done")
-        #expect(user.seq == 1)
-        #expect(try await cache.offMain { try $0.pending(threadID: "one") }.isEmpty)
-        #expect(chat.messages.first { $0.role == "assistant" }?.text == "Partial reply")
-        #expect(await probe.requests.count == 1)
-    }
-
-    @Test func failedVoiceFlushFinishesEveryQueuedTurn() async throws {
-        let probe = DeliveryProbe(failure: 503)
-        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
-        defer { ProbeProtocol.routes.remove(host) }
-        let url = cacheURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let cache = try await CacheWork.open(url)
-        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
-        let first = chat.voiceReply(text: "First queued voice")
-        let second = chat.voiceReply(text: "Second queued voice")
-        async let firstFailed = interrupted(first)
-        async let secondFailed = interrupted(second)
-        #expect(try await firstFailed)
-        #expect(try await secondFailed)
-        #expect(chat.messages.count == 2)
-        #expect(chat.messages.allSatisfy { $0.status == "failed" })
-        #expect(try await cache.offMain { try $0.pending(threadID: "one") }.count == 2)
     }
 
     @Test(arguments: [0, 408, 429, 500, 503, 400])
@@ -1491,47 +1382,6 @@ struct TransportTests {
         #expect(await probe.requests == [request])
         #expect(try await cache.offMain { try $0.queued() }.isEmpty)
         #expect(try await cache.offMain { try $0.messages(threadID: "inactive") }.first?.status == "done")
-    }
-
-    @Test func queuedVoiceRepliesUseTheirOwnUserIdentity() async throws {
-        let probe = VoiceProbe()
-        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
-        defer { ProbeProtocol.routes.remove(host) }
-        let url = cacheURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let cache = try await CacheWork.open(url)
-        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
-        defer { chat.stop() }
-        await chat.start()
-        for _ in 0..<200 {
-            if chat.isConnected { break }
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        #expect(chat.isConnected)
-        let first = chat.voiceReply(text: "First voice")
-        let second = chat.voiceReply(text: "Second voice")
-        let replies = try await withThrowingTaskGroup(of: VoiceFragment.self) { group in
-            for stream in [first, second] {
-                group.addTask {
-                    var reply = VoiceFragment(text: "")
-                    for try await fragment in stream {
-                        reply.text += fragment.text
-                        reply.agentID = fragment.agentID
-                    }
-                    return reply
-                }
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(5))
-                throw ClientError.response(408, "Voice correlation test timed out.")
-            }
-            var replies: [VoiceFragment] = []
-            for _ in 0..<2 { if let reply = try await group.next() { replies.append(reply) } }
-            group.cancelAll()
-            return replies
-        }
-        #expect(replies.contains(VoiceFragment(text: "Response to First voice", agentID: "b")))
-        #expect(replies.contains(VoiceFragment(text: "Response to Second voice", agentID: "c")))
     }
 
     @Test func catchupFetchesEveryPageBeforeLiveDelivery() async throws {

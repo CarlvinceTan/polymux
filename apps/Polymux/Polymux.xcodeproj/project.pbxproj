@@ -70,7 +70,6 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000001 /* PolymuxKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000020 /* PolymuxKit */; };
 		A10000000000000000000021 /* AvatarKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000022 /* AvatarKit */; };
-		A10000000000000000000031 /* PolymuxControl in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000032 /* PolymuxControl */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -88,7 +87,6 @@
 			files = (
 				A10000000000000000000001 /* PolymuxKit in Frameworks */,
 				A10000000000000000000021 /* AvatarKit in Frameworks */,
-				A10000000000000000000031 /* PolymuxControl in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -123,7 +121,6 @@
 				A10000000000000000000006 /* Sources */,
 				A10000000000000000000007 /* Frameworks */,
 				A10000000000000000000008 /* Resources */,
-				A10000000000000000000033 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -136,7 +133,6 @@
 			packageProductDependencies = (
 				A10000000000000000000020 /* PolymuxKit */,
 				A10000000000000000000022 /* AvatarKit */,
-				A10000000000000000000032 /* PolymuxControl */,
 			);
 			productName = Polymux;
 			productReference = A10000000000000000000002 /* Polymux.app */;
@@ -189,24 +185,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		A10000000000000000000033 /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/Control/embed.sh",
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "sh \"$SRCROOT/Control/embed.sh\"";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A10000000000000000000006 /* Sources */ = {
@@ -345,11 +323,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
 			productName = AvatarKit;
-		};
-		A10000000000000000000032 /* PolymuxControl */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
-			productName = PolymuxControl;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

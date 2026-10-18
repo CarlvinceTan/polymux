@@ -29,13 +29,13 @@ The native app needs a running Go agent server. After opening the app, use **Set
 
 For local macOS development with the default server data directory, the app discovers the server's owner-only local credential. The default backend address is `http://127.0.0.1:7337`. Backend routes require Bearer authentication, including history and streams.
 
-Changing the URL alone does not configure remote authentication. The native Settings panel has no general remote chat-token entry field; macOS computer-control pairing is separate. Remote and iOS deployment require an authenticated client setup beyond this local quickstart.
+Changing the URL alone does not configure remote authentication. The native Settings panel has no general remote chat-token entry field. Remote and iOS deployment require an authenticated client setup beyond this local quickstart.
 
 Use a trusted network and the authentication setup appropriate to your deployment. Do not expose an unauthenticated agent server to the public internet. See [Quickstart](/docs/quickstart/).
 
 ## macOS permissions
 
-Notifications, microphone input, speech recognition, and computer control have separate permission requirements. Enable only the features you intend to use. The native app does not require the older Hub's iMessage database access to show agent conversations.
+Notifications, microphone input, and speech recognition have separate permission requirements. Enable only the features you intend to use. The native app does not require the older Hub's iMessage database access to show agent conversations.
 
 A denied permission can be changed in **System Settings → Privacy & Security**. Restart Polymux after enabling access if macOS does not apply it immediately.
 
@@ -47,9 +47,7 @@ Check the release notes and distribution channel for the build you installed. Th
 
 The [public repository](https://github.com/CarlvinceTan/polymux) contains the app under `apps/Polymux`, the server under `apps/server`, and shared Swift packages under `packages`.
 
-Native builds need Xcode 27 and the matching SDKs. Before building macOS, stage its pinned embedded computer-control dependency with `python3 scripts/control/fetch_cua.py`. This stages a build dependency; it does not install or start a system service.
-
-The server module requires Go 1.27.1. Configure [model access](/docs/models-and-agents/) first, then start a local development server from the repository root:
+Native builds need Xcode 27 and the matching SDKs. The server module requires Go 1.27.1. Configure [model access](/docs/models-and-agents/) first, then start a local development server from the repository root:
 
 ```sh
 cd apps/server
@@ -58,4 +56,4 @@ go run -tags sqlite_fts5 ./cmd/server -listen 127.0.0.1:7337 -device-listen 127.
 
 This example keeps both listeners on loopback. The server reads its process environment; it does not automatically load a `.env` file. Its optional host controller is a separate unauthenticated interface and must stay on loopback.
 
-Build the `Polymux` scheme in `apps/Polymux/Polymux.xcodeproj`. `scripts/verify/verify.sh` is the repository's build-and-test entrypoint. Device installation and signed distribution require suitable Apple signing configuration.
+Build the `Polymux` scheme in `apps/Polymux/Polymux.xcodeproj`. Device installation and signed distribution require suitable Apple signing configuration.

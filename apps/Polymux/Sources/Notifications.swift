@@ -174,10 +174,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in URLRouter.shared.handler?(url) }
         }
     }
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Task { await ControlCoordinator.shared.stop(); sender.reply(toApplicationShouldTerminate: true) }
-        return .terminateLater
-    }
     func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Notifications.shared.received(deviceToken)
     }

@@ -77,7 +77,7 @@
     "benefits": [
       {"title": "Choose a mode", "description": "Use the native Voice controls rather than older provider-settings instructions."},
       {"title": "Keep models separate", "description": "Voice settings do not replace the server's text-agent model configuration."},
-      {"title": "Grant access deliberately", "description": "Microphone and speech permissions are separate from computer-control permissions."}
+      {"title": "Grant access deliberately", "description": "Microphone and speech permissions are optional and apply only when using voice."}
     ],
     "steps": ["Connect the app to your server and open Settings.", "Choose a voice mode and configure its Gemini model and key.", "Check the feature's status and required system permissions before using voice."],
     "example": {"title": "Choose your voice setup", "description": "Set up a voice mode without changing the model endpoint used for text conversations. Keep API keys out of chat messages."},

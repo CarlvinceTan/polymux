@@ -14,7 +14,7 @@ struct DraftPreview: View {
     private let side: CGFloat = 80
 
     var body: some View {
-        Button { if file.ready && file.url.isFileURL { preview = file.url } } label: {
+        Button { if file.url.isFileURL { preview = file.url } } label: {
             ZStack {
                 Color.secondary.opacity(0.1)
                 if let thumbnail {
@@ -54,9 +54,8 @@ struct DraftPreview: View {
             Button("Remove attachment", systemImage: "trash", action: remove)
         }
         .quickLookPreview($preview)
-        .task(id: DraftKey(url: file.url, scale: displayScale, ready: file.ready)) {
+        .task(id: DraftKey(url: file.url, scale: displayScale)) {
             thumbnail = nil
-            guard file.ready else { return }
             let image = await DraftThumbnails.image(file: file, side: side, scale: displayScale)
             guard !Task.isCancelled else { return }
             thumbnail = image
@@ -109,7 +108,6 @@ struct DraftPreview: View {
 private struct DraftKey: Hashable {
     let url: URL
     let scale: CGFloat
-    let ready: Bool
 }
 
 private final class DraftImage {

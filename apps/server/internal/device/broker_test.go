@@ -1,17 +1,12 @@
 package device
 
 import (
-	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 func fixture(t *testing.T) (*Broker, *Store, *httptest.Server, Enrollment) {
@@ -22,159 +17,83 @@ func fixture(t *testing.T) (*Broker, *Store, *httptest.Server, Enrollment) {
 	server.TLS = s.TLSConfig()
 	server.TLS.Certificates = []tls.Certificate{s.cert}
 	server.StartTLS()
-	t.Cleanup(func() { b.Close(); server.Close() })
-	ticket := issueTicket(t, s, server.URL, "assistant", []string{"native", "commands"})
-	p, err := s.Enroll(t.Context(), ticket.Code, "Mac", []string{"native", "commands"})
+	t.Cleanup(server.Close)
+	token, err := s.IssueAppToken(t.Context(), "Test app")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return b, s, server, p
-}
-
-func connect(t *testing.T, s *Store, server *httptest.Server, p Enrollment, hello Packet) *websocket.Conn {
-	t.Helper()
-	roots := x509.NewCertPool()
-	cert, err := x509.ParseCertificate(s.issuer.Raw)
+	pair, err := s.Authenticate(t.Context(), token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	roots.AddCert(cert)
-	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13}, HandshakeTimeout: time.Second}
-	ws, _, err := dialer.Dial("wss"+strings.TrimPrefix(server.URL, "https")+"/connect", http.Header{"Authorization": []string{"Bearer " + p.Token}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ws.Close() })
-	if err := ws.WriteJSON(hello); err != nil {
-		t.Fatal(err)
-	}
-	ws.SetReadDeadline(time.Now().Add(3 * time.Second))
-	var ack Packet
-	if err := ws.ReadJSON(&ack); err != nil {
-		t.Fatal(err)
-	}
-	if ack.Type != "ready" {
-		t.Fatal("connection not acknowledged")
-	}
-	return ws
+	return b, s, server, Enrollment{Pairing: pair, Token: token}
 }
 
-func TestBrokerDispatch(t *testing.T) {
+func redeem(b *Broker, code string, secure bool) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{"code":"`+code+`"}`))
+	if secure {
+		r.TLS = &tls.ConnectionState{}
+	}
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, r)
+	return w
+}
+
+func TestRedeemEnrollsApp(t *testing.T) {
 	t.Parallel()
-	b, s, server, p := fixture(t)
-	ws := connect(t, s, server, p, Packet{Type: "hello", Capabilities: []string{"commands"}})
-	if _, err := b.Call(t.Context(), "other", p.ID, "command", json.RawMessage(`{}`)); err == nil {
-		t.Fatal("agent boundary crossed")
+	b, s, _, _ := fixture(t)
+	code := codeOf(t, appCode(t, s, []string{"https://mac.example:7339"}))
+	w := redeem(b, code, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d", w.Code)
 	}
-	if _, err := b.Call(t.Context(), "assistant", p.ID, "click", json.RawMessage(`{}`)); err == nil {
-		t.Fatal("unready native capability accepted")
+	var enrolled Enrollment
+	if json.Unmarshal(w.Body.Bytes(), &enrolled) != nil || enrolled.ID == "" || len(enrolled.Token) != 43 {
+		t.Fatal("no app enrollment")
 	}
-	result := make(chan Packet, 1)
-	failed := make(chan error, 1)
-	go func() {
-		packet, err := b.Call(t.Context(), "assistant", p.ID, "command", json.RawMessage(`{"command":"/usr/bin/true"}`))
-		if err != nil {
-			failed <- err
-		} else {
-			result <- packet
-		}
-	}()
-	var request Packet
-	if err := ws.ReadJSON(&request); err != nil {
+	if _, err := s.Authenticate(t.Context(), enrolled.Token); err != nil {
 		t.Fatal(err)
 	}
-	if request.Type != "request" || request.ID == "" || request.Operation != "command" {
-		t.Fatal("wrong request")
+	all, err := b.All(t.Context())
+	if err != nil || len(all) != 2 {
+		t.Fatalf("devices=%d err=%v", len(all), err)
 	}
-	if err := ws.WriteJSON(Packet{Type: "result", ID: request.ID, Content: []Content{{Type: "text", Text: "verified fixture"}, {Type: "image", Data: "aW1hZ2U=", MimeType: "image/png"}}}); err != nil {
+	if err := s.Revoke(t.Context(), enrolled.ID); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case packet := <-result:
-		if len(packet.Content) != 2 || packet.Content[1].Type != "image" {
-			t.Fatal("lost image evidence")
-		}
-	case err := <-failed:
-		t.Fatal(err)
-	case <-time.After(3 * time.Second):
-		t.Fatal("call did not finish")
+	listed, err := b.All(t.Context())
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("revoked device listed: %d err=%v", len(listed), err)
 	}
-	states, err := b.List(t.Context(), "assistant")
-	if err != nil || len(states) != 1 || !states[0].Connected {
-		t.Fatal("device status missing")
-	}
-	states, err = b.List(t.Context(), "other")
-	if err != nil || len(states) != 0 {
-		t.Fatal("private device listed")
+	if replay := redeem(b, code, true); replay.Code != http.StatusForbidden {
+		t.Fatal("replayed code enrolled")
 	}
 }
 
-func TestBrokerInterruption(t *testing.T) {
+func TestDeviceIngress(t *testing.T) {
 	t.Parallel()
-	b, s, server, p := fixture(t)
-	ws := connect(t, s, server, p, Packet{Type: "hello", Capabilities: []string{"commands"}})
-	ctx, cancel := context.WithCancel(t.Context())
-	result := make(chan error, 1)
-	go func() { _, err := b.Call(ctx, "assistant", p.ID, "command", json.RawMessage(`{}`)); result <- err }()
-	var request Packet
-	if err := ws.ReadJSON(&request); err != nil {
-		t.Fatal(err)
-	}
-	cancel()
-	select {
-	case err := <-result:
-		if err == nil || !strings.Contains(err.Error(), "unknown") {
-			t.Fatal("interruption reported success")
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("call stuck")
-	}
-	if err := ws.ReadJSON(&request); err == nil {
-		t.Fatal("interrupted generation left open")
-	}
-}
-
-func TestBrokerRevocation(t *testing.T) {
-	t.Parallel()
-	b, s, server, p := fixture(t)
-	ws := connect(t, s, server, p, Packet{Type: "hello", Capabilities: []string{"commands"}})
-	if err := s.Revoke(t.Context(), p.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.Call(t.Context(), "assistant", p.ID, "command", json.RawMessage(`{}`)); err == nil {
-		t.Fatal("revoked call dispatched")
-	}
-	var request Packet
-	if err := ws.ReadJSON(&request); err == nil {
-		t.Fatal("revoked generation open")
-	}
-}
-
-func TestControlIngress(t *testing.T) {
-	t.Parallel()
-	b, s, server, p := fixture(t)
+	b := New(openStore(t))
 	for _, test := range []struct {
 		name   string
 		method string
 		path   string
-		token  string
+		code   string
 		origin string
 		tls    bool
 		want   int
 	}{
-		{"plaintext", "POST", "/enroll", "", "", false, 403},
-		{"unauthenticated", "GET", "/connect", "", "", true, 403},
-		{"browser", "GET", "/connect", p.Token, "https://example.com", true, 403},
-		{"unknown", "GET", "/unknown", p.Token, "", true, 404},
+		{"plaintext", "POST", "/redeem", "code", "", false, 403},
+		{"browser", "POST", "/redeem", "code", "https://example.com", true, 403},
+		{"no-code", "POST", "/redeem", "", "", true, 403},
+		{"unknown", "GET", "/unknown", "", "", true, 404},
+		{"enroll", "POST", "/enroll", "code", "", true, 404},
+		{"connect", "GET", "/connect", "", "", true, 404},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			r := httptest.NewRequest(test.method, "https://127.0.0.1"+test.path, nil)
+			r := httptest.NewRequest(test.method, "https://127.0.0.1"+test.path, strings.NewReader(`{"code":"`+test.code+`"}`))
 			if test.tls {
 				r.TLS = &tls.ConnectionState{}
-			} else {
-				r.TLS = nil
 			}
-			r.Header.Set("Authorization", "Bearer "+test.token)
 			r.Header.Set("Origin", test.origin)
 			w := httptest.NewRecorder()
 			b.ServeHTTP(w, r)
@@ -182,12 +101,5 @@ func TestControlIngress(t *testing.T) {
 				t.Fatalf("status=%d, want %d", w.Code, test.want)
 			}
 		})
-	}
-	_ = s
-	_ = server
-	for _, name := range []string{"get_browser_state", "page", "browser_click", "check_permissions", "config", "run_command"} {
-		if NativeTool(name) {
-			t.Fatal("unsafe native tool admitted")
-		}
 	}
 }

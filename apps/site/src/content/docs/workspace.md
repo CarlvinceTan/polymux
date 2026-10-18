@@ -34,4 +34,4 @@ Use **Search conversation**, or **⌘F** on macOS, to search the selected chat. 
 
 ## Settings
 
-The gear button opens Settings: theme, agent server, voice, notifications, and macOS computer control. There are no native **Settings → Hub**, **Drive**, **Providers**, or **Memory** pages at present. Tool and model configuration lives on the server.
+The gear button opens Settings: theme, agent server, voice, and notifications. There are no native **Settings → Hub**, **Drive**, **Providers**, or **Memory** pages at present. Tool and model configuration lives on the server.

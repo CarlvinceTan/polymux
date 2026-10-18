@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -324,15 +323,6 @@ func (s *Server) groupTurn(ctx context.Context, g *groupActor, id string) {
 			}
 		}
 	}
-}
-
-func hasMention(text, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	pattern := `(?i)(?:^|[^\p{L}\p{N}_-])@` + regexp.QuoteMeta(name) + `(?:$|[^\p{L}\p{N}_-])`
-	return regexp.MustCompile(pattern).MatchString(text)
 }
 
 func groupTargets(text string, members []contract.Agent, explicit []string, fallback bool, lead ...string) []string {

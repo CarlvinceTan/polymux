@@ -36,7 +36,7 @@ struct GroupEditor: View {
             }
         }
         .panel(item: $profiling) { agent in
-            AgentEditor(agent: agent, session: session)
+            ProfileView(agent: agent, session: session)
         }
         .panelDismiss(enabled: profiling == nil, onClose: { dismiss() })
         .onChange(of: name) { _, _ in save(delay: .milliseconds(550)) }

@@ -40,11 +40,7 @@ func TestRestrictedPolicy(t *testing.T) {
 				fmt.Fprint(w, "data: {\"id\":\"intro\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 			}))
 			defer provider.Close()
-			runtime, err := New(t.TempDir(), provider.URL+"/v1", "local/test", "test-key", Client{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer runtime.Close()
+			runtime := openDurable(t, provider)
 			ctx, cancel := context.WithCancel(t.Context())
 			definition := Definition{Agent: contract.Agent{ID: "a", Name: "Coach", Role: "Guide"},
 				Prompt: "Configured policy", Tools: test.tools,
@@ -101,18 +97,14 @@ func TestRestrictedPolicy(t *testing.T) {
 
 func TestUnavailableMCPReturnsNonReusableFallback(t *testing.T) {
 	testenv.PiG(t)
-	runtime, err := New(t.TempDir(), "http://127.0.0.1:1/v1", "local/test", "test-key", Client{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close()
+	runtime := openDurable(t, &httptest.Server{URL: "http://127.0.0.1:1"})
 	definition := Definition{Agent: contract.Agent{ID: "a"}, Tools: []string{"read"}, MCP: []MCPServer{{Name: "unavailable"}}}
 	session, err := runtime.Open(t.Context(), definition, "")
 	if err != nil {
 		t.Fatal("CLI fallback failed", err)
 	}
 	defer session.Close()
-	if session.(*pigSession).Reusable() {
+	if session.(*durableSession).Reusable() {
 		t.Fatal("missing MCP will never be retried")
 	}
 	definition.MCP = nil
@@ -121,7 +113,7 @@ func TestUnavailableMCPReturnsNonReusableFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer healthy.Close()
-	if !healthy.(*pigSession).Reusable() {
+	if !healthy.(*durableSession).Reusable() {
 		t.Fatal("healthy session not reusable")
 	}
 }

@@ -14,14 +14,14 @@ Historical Electron releases and dated comparison articles describe a different 
 - New Chat creates individual or group conversations with up to 16 agents.
 - An agent's profile edits its name, role, role description, and avatar. Group headers edit the group's name and members.
 - Conversations support file attachments, message replies, search, activity, and approval cards.
-- Settings includes appearance, the agent-server address, voice, notifications, and macOS computer control.
+- Settings includes appearance, the agent-server address, voice, and notifications.
 - Voice settings offer Cascaded and Full Duplex modes with Gemini configuration. Voice models are separate from the server's text model.
 
 ## Server and authentication
 
 The Go server runs agents and stores authoritative history. Native text-model startup configuration uses model.json in the server data directory or POLYMUX_MODEL_URL and POLYMUX_MODEL. Credentials use supported environment injection or an absolute owner-only key file. The durable runtime uses an OpenAI-compatible provider. Saving a provider-registry entry is not equivalent to selecting the active runtime model.
 
-Backend requests require device Bearer authentication. Local macOS discovery can use the default server's owner-only local credential. A server URL alone is not remote authentication; computer-control pairing is a separate capability. Do not expose an unauthenticated agent service or the host-controller interface to the internet.
+Backend requests require device Bearer authentication. Local macOS discovery can use the default server's owner-only local credential. A server URL alone is not remote authentication. Do not expose an unauthenticated agent service or the host-controller interface to the internet.
 
 ## Agent capabilities
 
@@ -34,7 +34,7 @@ Backend requests require device Bearer authentication. Local macOS discovery can
 
 Messages and attachments are sent to the connected server. If it runs on another computer, data is not confined to the app device. Hosted model providers and configured tools can receive task content under their own terms. Server filesystem access is not automatic access to the app device's filesystem.
 
-Microphone, speech, notifications, Accessibility, and Screen Recording have separate purposes and permission requirements. Tool installation is not blanket authorisation to send, publish, pay, delete, or act on every connected account. Review approval requests and the integration's own controls.
+Microphone, speech, and notifications have separate purposes and permission requirements. Tool installation is not blanket authorisation to send, publish, pay, delete, or act on every connected account. Review approval requests and the integration's own controls.
 
 ## Guides
 

@@ -11,6 +11,7 @@ final class LiveStore: VoiceSession {
     private(set) var level: Float = 0
     private(set) var issue: String?
     private(set) var muted = false
+    private(set) var silenced = false
     private(set) var usage: LiveUsage?
     private let options: LiveOptions
     private let reply: any VoiceReply
@@ -52,6 +53,7 @@ final class LiveStore: VoiceSession {
         closed = false
         issue = nil
         muted = false
+        silenced = false
         transcript = ""
         response = ""
         usage = nil
@@ -162,6 +164,12 @@ final class LiveStore: VoiceSession {
         await stop()
         guard !Task.isCancelled else { return }
         await start()
+    }
+
+    func toggleSilence() {
+        guard !closed else { return }
+        silenced.toggle()
+        sound.setSilenced(silenced)
     }
 
     func toggleMute() {

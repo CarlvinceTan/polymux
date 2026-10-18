@@ -1,0 +1,40 @@
+name: Report a bug
+description: Something in Polymux isn't working as expected.
+labels: bug
+body:
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Step-by-step, starting from a clean state.
+      placeholder: |
+        1. Open Polymux
+        2. Click X
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Actual behavior
+      description: What happens instead. Drag a screenshot or screen recording here; required for UI issues.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Polymux version
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: OS and device
+      placeholder: macOS 26, MacBook Pro M3
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Relevant logs
+      description: Remove API keys, tokens, emails, and home paths before posting.
+      render: text

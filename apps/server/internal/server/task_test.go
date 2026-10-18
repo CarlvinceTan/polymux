@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"context"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/testenv"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -59,11 +58,7 @@ func TestPiGCheckpointBlocksMixedBatchEffects(t *testing.T) {
 				}
 			}))
 			defer provider.Close()
-			runtime, err := agentruntime.New(t.TempDir(), provider.URL+"/v1", "local/test", "test-key", agentruntime.Client{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer runtime.Close()
+			runtime := durableRuntime(t, t.TempDir(), provider.URL+"/v1")
 			api, endpoint := startTest(t, runtime)
 			actor := api.actors["assistant"]
 			actor.mu.Lock()

@@ -24,15 +24,13 @@ Read the full [privacy policy](/privacy-policy/) for the current product and bro
 
 Server-managed provider credentials use the server's credential storage. A remote server's credentials do not live in the app's Settings panel. Avoid placing secrets in prompts, screenshots, skill instructions, source files, or public repositories.
 
-## Computer and browser access
-
-Computer control is a separate capability with its own connection and operating-system permissions. Confirm the intended computer and scope before enabling it. A remote agent server does not automatically gain control of every device running the app.
+## Browser access
 
 The older Electron extension's tab-inventory and tab-assignment model is not a native-app settings feature. Do not infer that your current browser tabs are shared because an older guide described them.
 
 ## Operating-system access
 
-Microphone input, speech recognition, notifications, Accessibility, and Screen Recording have different purposes. Enable only what you plan to use, and let the operating system handle its approval prompts. Text conversations do not require every optional permission.
+Microphone input, speech recognition, and notifications have different purposes. Enable only what you plan to use, and let the operating system handle its approval prompts. Text conversations do not require every optional permission.
 
 ## Consequential actions
 

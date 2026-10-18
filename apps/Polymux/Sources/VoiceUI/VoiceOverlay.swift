@@ -2,46 +2,33 @@ import SwiftUI
 import PolymuxKit
 
 struct VoiceOverlay: View {
-    @State private var store: (any VoiceSession)?
+    @State private var store: any VoiceSession
     @State private var closing = false
     @State private var retrying = false
     @State private var retryTask: Task<Void, Never>?
     @State private var lifetime: VoiceLifetime?
     @State private var owner = UUID()
-    private let makeStore: () -> any VoiceSession
     private let dismiss: () -> Void
-
-    @MainActor
-    init(
-        stream: @escaping (String) -> AsyncThrowingStream<VoiceFragment, Error>,
-        interrupt: @escaping () async -> Void,
-        dismiss: @escaping () -> Void
-    ) {
-        makeStore = { VoiceStore(reply: ClosureReply(stream: stream, interrupt: interrupt)) }
-        self.dismiss = dismiss
-    }
-
-    @MainActor
-    init(
-        send: @escaping (String) async throws -> String,
-        interrupt: @escaping () async -> Void,
-        dismiss: @escaping () -> Void
-    ) {
-        makeStore = { VoiceStore(reply: ClosureReply(send: send, interrupt: interrupt)) }
-        self.dismiss = dismiss
-    }
 
     @MainActor
     init(store: any VoiceSession, dismiss: @escaping () -> Void) {
         _store = State(initialValue: store)
-        makeStore = { store }
         self.dismiss = dismiss
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            if let issue = store?.issue {
-                VStack(spacing: 8) {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            VStack(spacing: 12) {
+                Text(status)
+                    .font(.title2).foregroundStyle(.tint)
+                    .accessibilityValue(caption ?? "")
+                if let caption {
+                    Text(caption)
+                        .font(.body).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).lineLimit(4)
+                }
+                if let issue = store.issue {
                     Text(issue)
                         .font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -50,50 +37,24 @@ struct VoiceOverlay: View {
                         .buttonStyle(.glass)
                         .disabled(retrying || closing)
                 }
-                .frame(maxWidth: 400)
             }
-            HStack(alignment: .bottom, spacing: 24) {
-                Button(action: mute) {
-                    Image(systemName: store?.muted == true ? "mic.slash.fill" : "mic.fill")
-                        .font(.system(size: 18))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: Circle())
-                .disabled(store == nil || store?.phase == .failed || closing)
-                .accessibilityLabel(store?.muted == true ? "Unmute microphone" : "Mute microphone")
-                .accessibilityValue(store?.muted == true ? "Muted" : "On")
-                .help(store?.muted == true ? "Unmute microphone" : "Mute microphone")
-                Spacer(minLength: 0)
-                ZStack {
-                    SpeechOrb(phase: store?.phase ?? .preparing, level: store?.level ?? 0,
-                              muted: store?.muted == true || closing)
-                }
-                .frame(width: 96, height: 96)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Speech conversation")
-                .accessibilityValue(caption.map { "\(status). \($0)" } ?? status)
-                Spacer(minLength: 0)
-                Button(action: close) {
-                    Image(systemName: "keyboard")
-                        .font(.system(size: 18))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: Circle())
-                .disabled(closing)
-                .accessibilityLabel("Switch to keyboard")
-                .help("Switch to keyboard")
+            .frame(maxWidth: 400).padding(.horizontal, 24)
+            Spacer(minLength: 0)
+            HStack(alignment: .top, spacing: 40) {
+                control(store.silenced ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                        store.silenced ? "Speaker off" : "Speaker", action: store.toggleSilence)
+                control("phone.down.fill", "End", fill: .red, ink: .white, action: close)
+                control(store.muted ? "mic.slash.fill" : "mic.fill",
+                        store.muted ? "Unmute" : "Mute", action: mute)
+                    .disabled(store.phase == .failed)
             }
+            .padding(.bottom, 24)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
         .task {
             guard !closing else { return }
-            let next = store ?? makeStore()
-            store = next
-            let lifetime = VoiceLifetime.shared(next)
+            let lifetime = VoiceLifetime.shared(store)
             self.lifetime = lifetime
             await lifetime.start(owner)
         }
@@ -104,10 +65,29 @@ struct VoiceOverlay: View {
         .onKeyPress(.escape) { close(); return .handled }
     }
 
+    private func control(_ icon: String, _ label: String, fill: Color? = nil, ink: Color = .primary,
+                         action: @escaping () -> Void) -> some View {
+        VStack(spacing: 8) {
+            Button(action: action) {
+                Image(systemName: icon)
+                    .font(.system(size: 26))
+                    .foregroundStyle(ink)
+                    .frame(width: 72, height: 72)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .background(fill ?? .clear, in: Circle())
+            .glassEffect(fill == nil ? .regular.interactive() : .identity, in: Circle())
+            .disabled(closing)
+            .accessibilityLabel(label)
+            Text(label).font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
     private var status: String {
         if closing { return "Ending speech" }
-        if store?.muted == true { return "Microphone muted" }
-        switch store?.phase ?? .preparing {
+        if store.muted { return "Microphone muted" }
+        switch store.phase {
         case .preparing: return "Preparing speech"
         case .failed: return "Speech unavailable"
         case .listening: return "Listening"
@@ -118,16 +98,16 @@ struct VoiceOverlay: View {
     }
 
     private var caption: String? {
-        guard !closing, let store, !store.muted, store.phase == .listening, !store.transcript.isEmpty else {
+        guard !closing, !store.muted, store.phase == .listening, !store.transcript.isEmpty else {
             return nil
         }
         return store.transcript
     }
 
-    private func mute() { store?.toggleMute() }
+    private func mute() { store.toggleMute() }
 
     private func retry() {
-        guard !retrying, !closing, let store else { return }
+        guard !retrying, !closing else { return }
         retrying = true
         retryTask = Task {
             await store.retry()

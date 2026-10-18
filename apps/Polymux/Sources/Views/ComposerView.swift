@@ -1,36 +1,31 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
-#if os(macOS)
-import AppKit
-#endif
 import PolymuxKit
 
 struct DraftFile: Identifiable {
     let id = UUID()
     let url: URL
     let kind: UTType
-    var ready = true
 }
 
 struct ComposerView: View {
     let client: APIClient
     let isVoiceActive: Bool
-    let send: (String, [LocalFile], ReplyContext?, [String], ContinuousClock.Instant) async -> Void
+    let send: (String, [Attachment], ReplyContext?, [String]) async -> Void
     var reply: ReplyContext? = nil
     var agentName = ""
     var clearReply: () -> Void = {}
     var drops: Binding<[URL]> = .constant([])
     var members: [Agent] = []
-    var trace = SignpostTrace()
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var dictation = DictationInput()
     @State private var dictationDraft = DictationDraft()
-    @State private var permissionBanner = false
-    @State private var sending = false
+    @State private var ignoresDictation = false
+    @State private var dictated: Range<Int>?
+    @State private var polishing = false
     @State private var mentions: [MentionToken] = []
     @State private var text = ""
     @State private var selection: TextSelection?
@@ -40,8 +35,8 @@ struct ComposerView: View {
     @State private var importing = false
     @State private var pickingPhotos = false
     @State private var camera = false
+    @State private var uploading = false
     @State private var loadingPhotos = false
-    @State private var ignoresDictation = false
     @State private var error: String?
     @State private var unsent = false
     @FocusState private var focused: Bool
@@ -49,38 +44,29 @@ struct ComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             controls
-            if permissionBanner {
-                HStack {
-                    Text("Enable microphone & speech recognition in Settings")
-                    Button("Settings") { openSettings() }
-                }
-                .font(.caption).padding(.leading, controlSize + 12)
-            }
             if unsent {
                 Button("Unsent", systemImage: "arrow.clockwise", action: submit)
                     .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                     .accessibilityLabel("Unsent. Resend message")
                     .padding(.leading, controlSize + 12)
             } else if let error {
-                Text(error).font(.caption2).foregroundStyle(.primary).padding(.leading, controlSize + 12)
+                Text(error).font(.caption2).foregroundStyle(.secondary).padding(.leading, controlSize + 12)
             }
         }
-        .background {
-            if dictation.active {
-                Button("Stop dictation") { Task { await stopDictation() } }
-                    .keyboardShortcut(.cancelAction)
-                    .hidden().accessibilityHidden(true)
-            }
-        }
-        #if os(macOS)
-        .background { PasteImages(focused: focused) { pasteImage() } }
-        #endif
+        .disabled(uploading || loadingPhotos)
         .onChange(of: isVoiceActive) { _, active in
             focused = !active
             if active {
                 attachments = false
                 Task { await stopDictation() }
             }
+        }
+        .onDisappear { Task { await stopDictation() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { Task { await stopDictation() } }
+        }
+        .onChange(of: dictation.active) { _, active in
+            if !active { dictationDraft.stop() }
         }
         .onChange(of: reply?.messageID) { _, value in
             if value != nil { focused = true }
@@ -94,14 +80,6 @@ struct ComposerView: View {
                 catch { self.error = error.localizedDescription }
             }
             focused = true
-        }
-        .onDisappear { Task { await stopDictation() } }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { Task { await stopDictation() } }
-            if phase == .active, !dictation.denied { permissionBanner = false }
-        }
-        .onChange(of: dictation.active) { _, active in
-            if !active { dictationDraft.stop() }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             do {
@@ -117,9 +95,8 @@ struct ComposerView: View {
                     for item in items {
                         let type = item.supportedContentTypes.first ?? .data
                         if let data = try await item.loadTransferable(type: Data.self) {
-                            let suffix = type.preferredFilenameExtension ?? "bin"
-                            let name = "Photo-\(UUID().uuidString.prefix(8)).\(suffix)"
-                            let file = FileManager.default.temporaryDirectory.appending(path: name)
+                            let file = FileManager.default.temporaryDirectory
+                                .appending(path: "Photo-\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "bin")")
                             try data.write(to: file, options: .atomic)
                             withAnimation { files.append(DraftFile(url: file, kind: type)) }
                         }
@@ -145,17 +122,12 @@ struct ComposerView: View {
             .ignoresSafeArea()
         }
         #endif
-        #if DICTATION_CHECK
-        .onChange(of: text) { _, value in Self.renderedDraft.text = value }
-        .onChange(of: files.count) { _, count in Self.renderedDraft.files = count }
-        #endif
     }
 
     private var controls: some View {
         HStack(alignment: .bottom, spacing: 12) {
             Button { attachments.toggle() } label: {
                 Image(systemName: "plus").font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(controlInk)
                     .frame(width: controlSize, height: controlSize)
                     .contentShape(Circle())
             }
@@ -170,12 +142,6 @@ struct ComposerView: View {
                         #if os(iOS)
                         .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                         #endif
-                    #if os(iOS)
-                    PasteButton(supportedContentTypes: [.image]) { providers in
-                        attachments = false
-                        paste(providers)
-                    }
-                    #endif
                 }
                 .padding(6).frame(minWidth: 190)
                 .presentationCompactAdaptation(.popover)
@@ -206,14 +172,10 @@ struct ComposerView: View {
                 TextField("Message", text: draftText, selection: $selection, axis: .vertical)
                     .lineLimit(1...7).textFieldStyle(.plain)
                     .scrollIndicators(.hidden).focused($focused)
+                    .opacity(polishing ? 0.5 : 1)
                     .onSubmit {
                         if let first = mentionChoices.first { mention(first) }
                         else { submit() }
-                    }
-                    .onKeyPress(.escape) {
-                        guard dictation.active else { return .ignored }
-                        Task { await stopDictation() }
-                        return .handled
                     }
                     .accessibilityLabel("Message")
                     .anchorPreference(key: MentionAnchor.self, value: .bounds) { $0 }
@@ -231,34 +193,41 @@ struct ComposerView: View {
                 }
             }
             .zIndex(1)
-            Button { toggleDictation() } label: {
-                Image(systemName: dictation.denied ? "mic.slash.fill" : "mic.fill")
-                    .font(.system(size: 15))
-                    .foregroundStyle(dictation.active ? (colorScheme == .dark ? Color.black : Color.white) : controlInk)
-                    .frame(width: controlSize, height: controlSize)
-                    .background(dictation.active ? Color.accentColor : .clear, in: Circle())
-                    .overlay {
-                        if dictation.active {
-                            Circle().stroke(controlInk, lineWidth: 2)
-                                .scaleEffect(reduceMotion ? 1 : 1 + CGFloat(dictation.level) * 0.18)
+            if uploading || loadingPhotos {
+                ProgressView().controlSize(.small).frame(width: controlSize, height: controlSize)
+            } else {
+                Button { toggleDictation() } label: {
+                    Group {
+                        if dictation.active || polishing {
+                            Waveform(level: dictation.level, animating: polishing)
+                        } else {
+                            Image(systemName: dictation.denied ? "mic.slash.fill" : "mic.fill").font(.system(size: 15))
                         }
                     }
-            }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
-            .accessibilityLabel(dictation.active ? "Stop dictation" : "Start dictation")
-            .accessibilityValue(dictation.denied ? "Permission denied" : dictation.active ? "Listening" : "")
-            .disabled(dictation.stopping || sending || isVoiceActive)
-            if hasContent {
-                Button { submit() } label: {
-                    Image(systemName: "arrow.up").font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(controlInk)
+                        .foregroundStyle(dictation.active ? (colorScheme == .dark ? Color.black : Color.white) : Color.primary)
                         .frame(width: controlSize, height: controlSize)
+                        .background(dictation.active ? Color.accentColor : .clear, in: Circle())
+                        .overlay {
+                            if dictation.active {
+                                Circle().stroke(Color.primary, lineWidth: 2)
+                                    .scaleEffect(reduceMotion ? 1 : 1 + CGFloat(dictation.level) * 0.18)
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
-                .accessibilityLabel("Send message")
-                .disabled(sending || loadingPhotos || files.contains { !$0.ready })
+                .accessibilityLabel(dictation.active ? "Stop dictation" : "Start dictation")
+                .accessibilityValue(dictation.denied ? "Permission denied" : dictation.active ? "Listening" : "")
+                .disabled(dictation.stopping || isVoiceActive)
+                if hasContent {
+                    Button { submit() } label: {
+                        Image(systemName: "arrow.up").font(.system(size: 15, weight: .semibold))
+                            .frame(width: controlSize, height: controlSize)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .accessibilityLabel("Send message")
+                }
             }
         }
     }
@@ -399,73 +368,8 @@ struct ComposerView: View {
         .buttonStyle(.plain)
     }
 
-    private func pastedFile() -> DraftFile {
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "Pasted-\(UUID().uuidString.prefix(8)).png")
-        let file = DraftFile(url: url, kind: .png, ready: false)
-        files.append(file)
-        error = nil
-        return file
-    }
-
-    private func finishPaste(_ file: DraftFile, data: Data?) async {
-        do {
-            guard let data else { throw CocoaError(.fileReadCorruptFile) }
-            try await Task.detached(priority: .userInitiated) {
-                try data.write(to: file.url, options: .atomic)
-            }.value
-            guard let index = files.firstIndex(where: { $0.id == file.id }) else {
-                try? FileManager.default.removeItem(at: file.url)
-                return
-            }
-            files[index].ready = true
-        } catch {
-            files.removeAll { $0.id == file.id }
-            self.error = error.localizedDescription
-        }
-    }
-
-    #if os(macOS)
-    private func pasteImage() {
-        let board = NSPasteboard.general
-        let png = board.data(forType: .png)
-        let tiff = png == nil ? board.data(forType: .tiff) : nil
-        guard png != nil || tiff != nil else { return }
-        let file = pastedFile()
-        Task {
-            let data = await Task.detached(priority: .userInitiated) { () -> Data? in
-                if let png { return png }
-                guard let tiff, let rep = NSBitmapImageRep(data: tiff) else { return nil as Data? }
-                return rep.representation(using: .png, properties: [:])
-            }.value
-            await finishPaste(file, data: data)
-        }
-    }
-    #endif
-
-    #if os(iOS)
-    private func paste(_ providers: [NSItemProvider]) {
-        for provider in providers {
-            let file = pastedFile()
-            Task {
-                let data = await Self.pasteData(provider)
-                await finishPaste(file, data: data)
-            }
-        }
-    }
-
-    private static func pasteData(_ provider: NSItemProvider) async -> Data? {
-        await withCheckedContinuation { continuation in
-            provider.loadObject(ofClass: UIImage.self) { object, _ in
-                continuation.resume(returning: (object as? UIImage)?.pngData())
-            }
-        }
-    }
-    #endif
-
     private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty }
     private var isExpanded: Bool { !files.isEmpty || reply != nil }
-    private var controlInk: Color { colorScheme == .dark ? .white : .black }
 
     private var controlSize: CGFloat {
         #if os(macOS)
@@ -492,15 +396,15 @@ struct ComposerView: View {
 
     private func toggleDictation() {
         if dictation.active {
-            Task { await stopDictation() }
+            Task { await stopDictation(polish: true) }
             return
         }
-        guard !dictation.denied else { permissionBanner = true; return }
-        permissionBanner = false
+        guard !dictation.denied else { error = "Allow microphone and speech recognition in Settings."; return }
         error = nil
         focused = true
         ignoresDictation = false
         dictationDraft.stop()
+        dictated = nil
         dictation.start { value in
             guard !ignoresDictation else { return }
             let range: NSRange
@@ -511,124 +415,61 @@ struct ComposerView: View {
             if let result = dictationDraft.update(value.text, start: value.start, final: value.final,
                                                   text: text, selection: range) {
                 editText(result.text, range: result.range)
+                dictated = (dictated?.lowerBound ?? result.range.location)..<result.cursor
                 let cursor = String.Index(utf16Offset: result.cursor, in: text)
                 selection = TextSelection(insertionPoint: cursor)
             }
         } failure: { failure in
-            if dictation.denied { permissionBanner = true }
-            else { error = failure.localizedDescription }
+            error = dictation.denied ? "Allow microphone and speech recognition in Settings." : failure.localizedDescription
         }
     }
 
-    private func stopDictation() async {
+    private func stopDictation(polish: Bool = false) async {
         await dictation.stop()
         dictationDraft.stop()
-    }
-
-    private func openSettings() {
-        #if os(macOS)
-        let pane = dictation.microphoneDenied ? "Privacy_Microphone" : "Privacy_SpeechRecognition"
-        let path = "x-apple.systempreferences:com.apple.preference.security?\(pane)"
-        #else
-        let path = UIApplication.openSettingsURLString
-        #endif
-        if let url = URL(string: path) { openURL(url) }
+        guard polish, let span = dictated else { return }
+        dictated = nil
+        let before = text
+        let utf16 = Array(before.utf16)
+        guard span.upperBound <= utf16.count else { return }
+        let raw = String(decoding: utf16[span], as: UTF16.self)
+        polishing = true
+        defer { polishing = false }
+        // Apply only if the draft is untouched, so edits made meanwhile are never overwritten.
+        guard let better = await DictationPolish.run(raw), better != raw, text == before else { return }
+        var updated = Array(utf16)
+        updated.replaceSubrange(span, with: Array(better.utf16))
+        let result = String(decoding: updated, as: UTF16.self)
+        editText(result, range: NSRange(location: span.lowerBound, length: raw.utf16.count))
+        selection = TextSelection(insertionPoint: String.Index(utf16Offset: span.lowerBound + better.utf16.count, in: result))
     }
 
     private func submit() {
-        guard !sending else { return }
-        sending = true
-        let tap = ContinuousClock().now
-        if dictation.active { Task { await stopDictation() } }
-        sendDraft(at: tap)
-    }
-
-    /// Clears the composer in the same frame, then hands the files to `send` to upload behind the bubble.
-    private func sendDraft(at tap: ContinuousClock.Instant) {
-        guard hasContent, !loadingPhotos, files.allSatisfy(\.ready) else { sending = false; return }
+        if dictation.active { ignoresDictation = true; Task { await stopDictation() } }
+        guard hasContent, !uploading, !loadingPhotos else { return }
         let draft = text
         let pending = files
         let quote = reply
         guard let targets = MentionToken.targets(mentions, in: draft, members: Set(members.map(\.id))) else {
             error = "A mentioned agent left this chat. Remove or reselect the mention before sending."
-            sending = false
             return
         }
+        uploading = true
         error = nil
         unsent = false
-        let send = self.send
-        InstantUI.interval("composer.cleared", budget: InstantUI.stateBudget, trace: trace, from: tap) {
-            ignoresDictation = true
-            dictationDraft.stop()
-            text = ""
-            selection = nil
-            mentions = []
-            files = []
-            photos = []
-        }
         Task {
-            await send(draft, pending.map(\.localFile), quote, targets, tap)
-            sending = false
+            do {
+                var attachments: [Attachment] = []
+                for file in pending { attachments.append(try await client.upload(file: file.url)) }
+                text = ""
+                mentions = []
+                let submitted = Set(pending.map(\.id))
+                withAnimation { files.removeAll { submitted.contains($0.id) } }
+                await send(draft, attachments, quote, targets)
+            } catch { unsent = true }
+            uploading = false
             focused = true
         }
-    }
-
-    #if DICTATION_CHECK
-    /// What the composer last rendered, so the snapshot harness can prove it cleared for real.
-    /// A harness-made view cannot observe its own State writes, so `onChange` reports them here.
-    nonisolated(unsafe) static var renderedDraft: (text: String, files: Int) = ("", 0)
-
-    static func fixture(input: DictationInput, text: String = "", banner: Bool = false,
-                        issue: String? = nil, focus: Bool = false, files: [DraftFile] = [],
-                        trace: SignpostTrace = SignpostTrace()) -> some View {
-        var view = ComposerView(client: APIClient(baseURL: URL(string: "http://127.0.0.1:1")!),
-                                isVoiceActive: false, send: { _, _, _, _, _ in }, trace: trace)
-        view._dictation = State(initialValue: input)
-        view._text = State(initialValue: text)
-        view._permissionBanner = State(initialValue: banner)
-        view._error = State(initialValue: issue)
-        view._files = State(initialValue: files)
-        return view.onAppear { view.focused = focus }
-    }
-
-    /// A composer that submits its draft on appear, so the harness watches the real handoff.
-    static func checkSubmitView(text: String, files: [DraftFile], reply: ReplyContext? = nil,
-                                trace: SignpostTrace,
-                                send: @escaping (String, [LocalFile], ReplyContext?, [String], ContinuousClock.Instant) async -> Void) -> some View {
-        var view = ComposerView(client: APIClient(baseURL: URL(string: "http://127.0.0.1:1")!),
-                                isVoiceActive: false, send: send, reply: reply, trace: trace)
-        view._text = State(initialValue: text)
-        view._files = State(initialValue: files)
-        return view.onAppear { view.submit() }
-    }
-
-    /// A filled composer the harness can drive with a real click and Return, like a user would.
-    static func checkReadyView(text: String, files: [DraftFile], reply: ReplyContext? = nil,
-                               trace: SignpostTrace,
-                               send: @escaping (String, [LocalFile], ReplyContext?, [String], ContinuousClock.Instant) async -> Void) -> some View {
-        var view = ComposerView(client: APIClient(baseURL: URL(string: "http://127.0.0.1:1")!),
-                                isVoiceActive: false, send: send, reply: reply, trace: trace)
-        view._text = State(initialValue: text)
-        view._files = State(initialValue: files)
-        return view
-    }
-    #endif
-}
-
-extension DraftFile {
-    var localFile: LocalFile {
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        return LocalFile(id: id.uuidString, url: url, name: url.lastPathComponent,
-                         kind: DraftFile.kindName(kind), mimeType: kind.preferredMIMEType ?? "",
-                         size: Int64(size))
-    }
-
-    static func kindName(_ kind: UTType) -> String {
-        if kind.conforms(to: .image) { return "image" }
-        if kind.conforms(to: .movie) { return "video" }
-        if kind.conforms(to: .audio) { return "audio" }
-        if kind.conforms(to: .html) { return "html" }
-        return ""
     }
 }
 
@@ -666,58 +507,6 @@ private enum MentionRank {
         return candidate.contains(query) ? 2 : nil
     }
 }
-
-#if os(macOS)
-/// Reads ⌘V while the composer is focused, before the field editor consumes the image.
-private struct PasteImages: NSViewRepresentable {
-    let focused: Bool
-    let paste: () -> Void
-
-    func makeNSView(context: Context) -> PasteAnchor { PasteAnchor() }
-
-    func updateNSView(_ anchor: PasteAnchor, context: Context) {
-        anchor.focused = focused
-        anchor.paste = paste
-    }
-
-    static func dismantleNSView(_ anchor: PasteAnchor, coordinator: ()) { anchor.detach() }
-}
-
-private final class PasteAnchor: NSView {
-    var focused = false
-    var paste: (() -> Void)?
-    private var monitor: Any?
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        detach()
-        guard window != nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard self?.intercept(event) == true else { return event }
-            return nil
-        }
-    }
-
-    func detach() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-    }
-
-    /// True when ⌘V belongs to the focused composer and the pasteboard holds an image.
-    private func intercept(_ event: NSEvent) -> Bool {
-        let board = NSPasteboard.general
-        guard focused, event.window === window,
-              event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-              event.charactersIgnoringModifiers?.lowercased() == "v",
-              board.string(forType: .string) == nil,
-              board.availableType(from: [.png, .tiff]) != nil else { return false }
-        paste?()
-        return true
-    }
-}
-#endif
 
 private struct MentionToken {
     let id: String
@@ -841,3 +630,25 @@ struct CameraView: UIViewControllerRepresentable {
     }
 }
 #endif
+
+/// Level bars shown in the mic button while listening; pulses while the text is being polished.
+private struct Waveform: View {
+    let level: Float
+    let animating: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let shape: [CGFloat] = [0.5, 0.8, 1, 0.7, 0.4]
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion || !animating)) { tick in
+            let time = tick.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 2.5) {
+                ForEach(shape.indices, id: \.self) { index in
+                    let wave = animating ? 0.5 + 0.5 * sin(time * 6 + Double(index)) : Double(level)
+                    Capsule().frame(width: 3, height: 5 + 13 * shape[index] * max(0.15, wave))
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.08), value: level)
+        .accessibilityHidden(true)
+    }
+}

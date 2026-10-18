@@ -61,6 +61,9 @@ func taskText(in Input) string {
 // It reports false for anything it cannot carry, because a non-media
 // attachment's text already reached the input through extraction.
 func mediaPart(asset Asset) (map[string]any, bool) {
+	if strings.HasPrefix(asset.MimeType, "video/") {
+		return nil, false
+	}
 	data, err := os.ReadFile(asset.Path)
 	if err != nil {
 		return nil, false
@@ -101,7 +104,18 @@ func (e *HTTPEmbedder) embedInput(in Input) (any, bool) {
 	}
 	parts := []any{map[string]any{"type": "text", "text": in.Text}}
 	for _, asset := range in.Attachments {
-		if part, ok := mediaPart(asset); ok {
+		if strings.HasPrefix(asset.MimeType, "video/") {
+			for _, frame := range videoFrames(asset.Path) {
+				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{
+					"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(frame),
+				}})
+			}
+			if sound := videoAudio(asset.Path); sound != nil {
+				parts = append(parts, map[string]any{"type": "input_audio", "input_audio": map[string]any{
+					"data": base64.StdEncoding.EncodeToString(sound), "format": "wav",
+				}})
+			}
+		} else if part, ok := mediaPart(asset); ok {
 			parts = append(parts, part)
 		}
 	}
@@ -230,7 +244,8 @@ func (e *HTTPEmbedder) ask(ctx context.Context, input Input, payload any) ([]flo
 	if model == "" {
 		model = e.Model
 	}
-	return v, model, nil
+	// Vectors of another size cannot be compared, so the size is part of the key.
+	return v, fmt.Sprintf("%s@%d", model, e.Dims), nil
 }
 
 func post(ctx context.Context, client *http.Client, url string, input, output any) error {
@@ -303,6 +318,12 @@ func (i *Index) Prepare(ctx context.Context, m contract.Message) (contract.Messa
 		}
 	}
 	return m, nil
+}
+
+// Reindex queues messages whose vectors were made at another size.
+func (i *Index) Reindex(ctx context.Context, dims int) error {
+	_, err := i.Store.DB.ExecContext(ctx, `UPDATE messages SET indexing_state='pending' WHERE id IN (SELECT message_id FROM media_vectors WHERE model NOT LIKE ?)`, fmt.Sprintf("%%@%d", dims))
+	return err
 }
 
 func (i *Index) Run(ctx context.Context) {

@@ -51,7 +51,6 @@ var builtinClass = map[string]ToolClass{
 	"manage_integrations": ToolConsequential,
 	"manage_triggers":     ToolConsequential,
 	"manage_tasks":        ToolReversible,
-	"control_device":      ToolConsequential,
 	"run_device":          ToolConsequential,
 	"finish_review":       ToolReversible,
 	"send_to_user":        ToolReversible,

@@ -45,8 +45,6 @@ struct SidebarOffMainTests {
         }
         rig.sidebar.rename("arlo", to: "Renamed")
         #expect(rig.sidebar.threads.first { $0.id == "arlo" }?.title == "Renamed")
-        rig.sidebar.pin("arlo")
-        #expect(rig.sidebar.threads.first?.id == "arlo")
         await rig.chat.markRead()
         await rig.sidebar.settled()
         #expect(rig.sidebar.threads.first { $0.id == "arlo" }?.unreadCount == 0)
@@ -54,7 +52,6 @@ struct SidebarOffMainTests {
         #expect(await rig.sidebar.cacheActor.saveCount <= 5)
         #expect(await rig.sidebar.cacheActor.saveCount >= 1)
         #expect(rig.cache.threadReads - beforeReads < 50)
-        #expect(try await rig.cache.offMain { try $0.pins() } == ["arlo"])
         #expect(try await rig.cache.offMain { try $0.threads() }.first { $0.id == "arlo" }?.title == "Renamed")
     }
 

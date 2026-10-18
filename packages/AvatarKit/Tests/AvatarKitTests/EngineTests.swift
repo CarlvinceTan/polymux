@@ -35,10 +35,7 @@ private struct EngineReference: Decodable {
     struct Particles: Decodable { var at: Double; var dots: [Dot] }
     struct Seed: Decodable { var a, k, tilt, speed, phase, sweep, hue, hueSpan, width, cx, cy: Double }
     struct CycleReference: Decodable {
-        struct Boundary: Decodable { var at: Double; var index: Int; var elapsed: Double }
         struct Clamp: Decodable { var state: StateID; var duration: Double }
-        var total: Double
-        var boundaries: [Boundary]
         var clamps: [Clamp]
     }
     var commit: String
@@ -170,7 +167,7 @@ final class EngineTests: XCTestCase {
         for sample in reference.look { frame(look.sample(sample.at), sample.frame, "look \(sample.at)") }
     }
 
-    func testSeededDecorAndCycleMeasurementsMatchUpstream() throws {
+    func testSeededDecorAndDurationsMatchUpstream() throws {
         let reference = try engineReference()
         for (actual, expected) in [(RINGS, reference.rings), (COMET_RIBBONS, reference.comet)] {
             XCTAssertEqual(actual.count, expected.count)
@@ -180,50 +177,6 @@ final class EngineTests: XCTestCase {
             }
         }
         for sample in reference.particles { particles(AvatarKit.particles(sample.at, 1), sample.dots, "particles") }
-        let blocks = defaultCycle().blocks
-        XCTAssertEqual(totalDuration(blocks), reference.cycle.total, accuracy: 1e-12)
-        for sample in reference.cycle.boundaries {
-            let position = blockAt(blocks, sample.at)
-            XCTAssertEqual(position.index, sample.index)
-            XCTAssertEqual(position.elapsed, sample.elapsed, accuracy: 1e-12)
-        }
         for sample in reference.cycle.clamps { XCTAssertEqual(clampDuration(sample.state, 0.1), sample.duration) }
-    }
-
-    func testCycleHoldSeekAndLoopReplay() {
-        let blocks = [makeBlock(.idle), makeBlock(.orbit), makeBlock(.comet)]
-        let player = CyclePlayer(engine: BotEngine(), blocks: blocks)
-        player.play(true)
-        _ = player.tick(0.05)
-        player.play(false)
-        let held = player.elapsed
-        let clock = player.clock
-        _ = player.tick(0.05)
-        XCTAssertEqual(player.elapsed, held)
-        XCTAssertGreaterThan(player.clock, clock)
-        player.seek(1, 0.6)
-        player.play(true)
-        _ = player.tick(0.05)
-        XCTAssertEqual(player.elapsed, 0.65, accuracy: 1e-12)
-        let first = player.rendAt(2.8)
-        _ = player.rendAt(20.8)
-        let replay = player.rendAt(2.8)
-        numbers(coordinates(first.bodyPath), coordinates(replay.bodyPath), "cycle random seek")
-        XCTAssertEqual(first.arcs.map(\.id), replay.arcs.map(\.id))
-        let loop = blockAt(blocks, totalDuration(blocks) + 0.4)
-        XCTAssertEqual(loop.index, 0)
-        XCTAssertEqual(loop.elapsed, 0.4, accuracy: 1e-12)
-    }
-
-    func testCycleParsingKeepsValidSiblingsAndBoundsInput() {
-        let raw = """
-        [null,42,{"id":"one","name":"","blocks":[{"state":"idle","duration":0.1},
-        {"state":"orbit","duration":0.1},{"state":"unknown","duration":2}]},
-        {"id":"one","name":"duplicate","blocks":[{"state":"idle","duration":2}]}]
-        """
-        let cycles = parseCycles(raw)
-        XCTAssertEqual(cycles.count, 1)
-        XCTAssertEqual(cycles[0].blocks, [Block(state: .idle, duration: 0.6), Block(state: .orbit, duration: 2.5)])
-        XCTAssertEqual(blocksWith(Array(repeating: makeBlock(.idle), count: MAX_BLOCS), .wink).count, MAX_BLOCS)
     }
 }

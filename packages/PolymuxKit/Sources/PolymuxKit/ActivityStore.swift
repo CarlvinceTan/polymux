@@ -20,14 +20,6 @@ public struct ActivityView: Equatable, Sendable {
     }
 }
 
-public struct ToolRow: Equatable, Sendable, Identifiable {
-    public var id: String
-    public var title: String
-    public var output: String
-    public var failed: Bool
-    public var running: Bool
-}
-
 @MainActor @Observable
 public final class ActivityStore {
     public private(set) var snapshots: [String: Run] = [:]
@@ -191,43 +183,4 @@ public final class ActivityStore {
     }
 
     private func key(_ conversation: String, _ agent: String) -> String { conversation + ":" + agent }
-
-    /// Chat rows for one run: a failed read keeps its own row, consecutive reads collapse.
-    public static func toolRows(for run: Run) -> [ToolRow] {
-        let tools = run.tools ?? []
-        var rows: [ToolRow] = []
-        var index = 0
-        while index < tools.count {
-            let reads = tools[index].name == "read" && ["completed", "running"].contains(tools[index].status)
-            var group = [tools[index]]
-            while reads, index + 1 < tools.count, tools[index + 1].name == "read", ["completed", "running"].contains(tools[index + 1].status) {
-                index += 1
-                group.append(tools[index])
-            }
-            rows.append(group.count > 1 ? readRow(group) : row(group[0]))
-            index += 1
-        }
-        return rows
-    }
-
-    /// Rows for a run this store has seen or restored, so a relaunch replays them.
-    public func toolRows(for runID: String) -> [ToolRow] {
-        snapshots[runID].map(Self.toolRows(for:)) ?? []
-    }
-    private static func row(_ tool: ToolActivity) -> ToolRow {
-        ToolRow(id: tool.id, title: title(for: tool.name, summary: tool.summary ?? ""),
-                output: [tool.summary ?? "", (tool.output ?? "").components(separatedBy: "\n").prefix(20).joined(separator: "\n")].filter { !$0.isEmpty }.joined(separator: "\n"),
-                failed: ["failed", "cancelled", "interrupted"].contains(tool.status), running: tool.status == "running")
-    }
-    private static func readRow(_ group: [ToolActivity]) -> ToolRow {
-        let parts = group.flatMap { [$0.summary ?? "", ($0.output ?? "").components(separatedBy: "\n").prefix(20).joined(separator: "\n")] }.filter { !$0.isEmpty }
-        return ToolRow(id: "reads:" + group[0].id, title: "Read \(group.count) files",
-                       output: parts.joined(separator: "\n"),
-                       failed: false, running: group.contains { $0.status == "running" })
-    }
-    private static func title(for name: String, summary: String) -> String {
-        if name == "bash" || name == "shell" { return "Ran " + (summary.isEmpty ? "a command" : summary) }
-        let file = summary.isEmpty ? "file" : (summary as NSString).lastPathComponent
-        return ["read": "Read", "write": "Wrote", "edit": "Edited", "find": "Searched", "ls": "Listed"][name].map { $0 + " " + file } ?? name
-    }
 }

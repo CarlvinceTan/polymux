@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/testenv"
-	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/durable/storage"
 )
 
@@ -99,60 +97,26 @@ func TestDurablePrompt(t *testing.T) {
 	}
 }
 
-func TestPromptParity(t *testing.T) {
-	testenv.PiG(t)
+func TestDurableOffersPairedDevices(t *testing.T) {
 	durable, err := NewDurable(t.Context(), t.TempDir(), "http://127.0.0.1:1/v1", "test-model", "test-key", Client{}, storage.NewMemoryStorage())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer durable.Close()
-	runtime, err := New(t.TempDir(), "http://127.0.0.1:1/v1", "local/test", "test-key", Client{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close()
-	path := filepath.Join(t.TempDir(), "SKILL.md")
-	if err := os.WriteFile(path, []byte("Parity skill contents"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"configured", "intro", "automatic", "extra tools"} {
-		t.Run(name, func(t *testing.T) {
-			definition := Definition{Agent: contract.Agent{ID: "coach", Name: "Coach", Role: "Guide"}, Prompt: "Configured policy", Skills: []string{path}, Intro: name == "intro", Automatic: name == "automatic", Ephemeral: true}
-			if !definition.Intro {
-				definition.Tools = []string{"read"}
-			}
-			if name == "extra tools" {
-				definition.Tools = nil
-				definition.ExtraTools = []agent.AgentTool{&stateTool{}, &deviceTool{devices: []Device{{Name: "mini", Host: "mini.local"}}}}
-			}
-			legacy, err := runtime.Open(t.Context(), definition, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer legacy.Close()
-			session, err := durable.Open(t.Context(), definition, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer session.Close()
-			agent, err := session.(*durableSession).conversation.Agent(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := legacy.(*pigSession).session.SystemPrompt()
-			if name == "extra tools" && !strings.Contains(want, `"Tools":["state_probe","run_device"]`) {
-				t.Fatalf("prompt omitted the matching extra tool list: %s", want)
-			}
-			if agent.Instructions == nil || *agent.Instructions != want {
-				t.Fatalf("durable instructions %v, want %q", agent.Instructions, want)
-			}
-			wantSkills := !definition.Intro && !definition.Automatic
-			for _, marker := range []string{"name: polymux", "name: report"} {
-				if strings.Contains(want, marker) != wantSkills {
-					t.Fatalf("prompt contains %s = %v, want %v", marker, strings.Contains(want, marker), wantSkills)
-				}
-			}
-		})
+	for _, intro := range []bool{false, true} {
+		definition := Definition{Agent: contract.Agent{ID: "coach", Name: "Coach"}, Devices: []Device{{Name: "mini", Host: "mini.local"}}, Intro: intro, Ephemeral: true}
+		session, err := durable.Open(t.Context(), definition, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := session.(*durableSession).conversation.Agent(t.Context())
+		session.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if offered := agent.Instructions != nil && strings.Contains(*agent.Instructions, `"Tools":["run_device"]`); offered == intro {
+			t.Fatalf("intro=%v offered run_device=%v", intro, offered)
+		}
 	}
 }
 
