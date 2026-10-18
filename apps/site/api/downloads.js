@@ -1,6 +1,6 @@
 import {publishedReleaseVersions} from '../lib/published-release-versions.js';
 
-const REPOSITORY = 'CarlvinceTan/Polymux';
+const REPOSITORY = 'CarlvinceTan/polymux';
 const PUBLISHED_RELEASE_VERSIONS = new Set(publishedReleaseVersions);
 const GITHUB_TIMEOUT_MS = 10_000;
 
@@ -52,7 +52,9 @@ export default async function handler(request, response) {
     if (tagged && !tagged.draft) release = tagged;
   } else {
     const releases = await fetchRelease('releases?per_page=10');
-    if (Array.isArray(releases)) release = releases.find((item) => !item.draft) ?? null;
+    if (Array.isArray(releases)) {
+      release = releases.find((item) => !item.draft && !/^app-v/.test(item.tag_name ?? '')) ?? null;
+    }
   }
 
   if (!release) {
@@ -63,7 +65,7 @@ export default async function handler(request, response) {
   const releaseUrl = release.html_url ?? `https://github.com/${REPOSITORY}/releases/latest`;
   response.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=60');
   return response.status(200).json({
-    version: release.tag_name?.replace(/^v/, '') ?? null,
+    version: release.tag_name?.replace(/^(?:app-)?v/, '') ?? null,
     publishedAt: release.published_at ?? null,
     releaseUrl,
     platforms: {

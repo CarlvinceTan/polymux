@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/gentpan/liquidglass",
+  "commit": "068ad226f53e1ca62d857f78bdc32f58f3c5fce7",
+  "entry": "lib/components.js",
+  "files": [
+    "lib/components.js",
+    "lib/liquid-glass.js"
+  ],
+  "license": "LiquidGlass-LICENSE.txt",
+  "iconLicense": "Lucide-LICENSE.txt",
+  "bundler": "esbuild 0.28.2",
+  "options": [
+    "--bundle",
+    "--format=iife",
+    "--global-name=PolymuxGlass",
+    "--platform=browser",
+    "--target=safari17",
+    "--minify",
+    "--legal-comments=inline"
+  ],
+  "sha256": "84b801afb1a7dda7a08e0d3dc77a4e2e4d02fd651ad026774767705b5f333642"
+}

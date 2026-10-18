@@ -1,7 +1,7 @@
 ---
 title: Quickstart
 slug: quickstart
-description: Download Polymux, choose a model, and complete your first useful task in a few minutes.
+description: Connect the native app to an agent server and start an individual or group conversation.
 section: Getting started
 sectionOrder: 1
 order: 2
@@ -10,41 +10,34 @@ published: true
 
 # Quickstart
 
-This guide takes you from a fresh install to your first conversation. You can connect messages, storage, and other tools later.
+You need a native Polymux build and a running, authenticated agent server. This quickstart uses the app and server on the same Mac with the default data directory, so local credentials can be discovered automatically. See [Installation](/docs/installation/) for source builds, older Electron downloads, and remote-authentication limitations.
 
-## 1. Download and open Polymux
+## 1. Connect the app
 
-[Download the latest release](/#download) for your operating system and open the app. On first launch, Polymux walks you through its short setup flow.
+Open **Settings** using the gear button. If the app cannot connect, use **Connection settings** on the connection screen.
 
-If your operating system asks for permission, only enable the access needed for the features you plan to use. You can change permissions later.
+Enter your server URL under **Agent server**, including its scheme and port. Use an address reachable from this device. `localhost` on an iPhone refers to the phone, not your Mac.
 
-## 2. Choose how Polymux thinks
+For the default local server, use `http://127.0.0.1:7337`. Do not paste a token into the URL.
 
-Select a model provider and model during setup. Depending on the provider, you may sign in, paste an API key, or select a compatible local runtime already running on your computer.
+The server address saves after a short pause or when you leave Settings. If connection fails, check the address, network access, and server state before changing model configuration.
 
-You can change this later under **Settings → Providers** and **Settings → Models**, including the full model and role configuration.
+## 2. Choose an agent
+
+Select a conversation in the sidebar, or press **New chat** (+). Choose an agent and press **Create**. The plus button inside New Chat creates a new agent; its profile can be edited afterwards.
+
+Choose several agents to create a group. You can give the group a name before creating it.
 
 ## 3. Start a conversation
 
-Open a new chat and make a concrete request. For example:
+Send a small request to check the connection and the server's model setup:
 
-> Find the latest Polymux release on GitHub and summarise what changed.
+> Help me plan three priorities for today.
 
-Polymux shows the agent’s progress in the conversation. If an action needs permission or your decision, the run pauses and asks.
+Follow the response and any activity or approval cards in the conversation. Available tools depend on the server's configuration; connecting the app does not configure every integration.
 
-## 4. Open the workspace
+## 4. Make the agent yours
 
-Use the workspace control to place supporting views beside the chat:
+Click the agent's avatar or name at the top of the conversation to open **Edit profile**. Change its name, role, or role description, then press **Save**. Click the avatar in the profile to customise its appearance.
 
-- Open **Browser** to keep research visible.
-- Open **Drive** to work with files.
-- Open **Hub** after connecting a messaging or email account.
-- Open **Tasks** or **Subagents** to follow delegated work.
-
-Views open as tabs, so the files and pages connected to a task can remain visible while you talk to the agent.
-
-## 5. Add connections when you need them
-
-Open Settings to connect storage, communication services, skills, or MCP servers. Nothing requires you to configure every integration up front.
-
-Next, read [The workspace](/docs/workspace/) for the main interface or [Models and agents](/docs/models-and-agents/) to customise the intelligence behind it.
+Next, read [Conversations](/docs/workspace/) for search, attachments, and groups, or [Models and agents](/docs/models-and-agents/) for the boundary between app settings and server configuration.

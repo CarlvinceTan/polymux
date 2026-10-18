@@ -1,7 +1,7 @@
 ---
 title: Introduction
 slug: introduction
-description: Meet Polymux, the desktop workspace that puts your assistant beside your messages, files, browser, and ongoing work.
+description: Meet the native Polymux app for conversations with your agents on macOS and iOS.
 section: Getting started
 sectionOrder: 1
 order: 1
@@ -10,27 +10,25 @@ published: true
 
 # Introduction
 
-Polymux is an open-source desktop workspace for working with an AI assistant. Chat, messages, email, files, browser tabs, scheduled work, and your choice of models live together instead of being split across separate tools.
+Polymux is an open-source native app for talking to AI agents. The SwiftUI app connects to a Go agent server, which runs the agents and stores their conversations.
 
-It is designed to feel useful after a normal desktop install while staying open to deeper configuration when you want it.
+These guides describe the **native app in the current source tree**. Older Electron releases have a different interface and feature set. Check [Installation](/docs/installation/) before choosing a build; a download from the older release line will not match these instructions.
 
-## What Polymux includes
+## In the native app
 
-- **Chat** is where you ask for work and follow the agent’s progress.
-- **Hub** brings supported messaging services and email into one inbox.
-- **Drive** works with local files, cloud drives, network folders, and S3-compatible storage.
-- **Browser** gives the agent an in-app browser and controlled access to assigned external tabs.
-- **Tasks and Subagents** keep delegated work visible without crowding the main conversation, including saved requests that run at a recurring time.
-- **Memory** preserves useful context locally between conversations.
+- Find conversations in the sidebar, with search, unread and active filters, and sorting.
+- Talk to an individual agent or create a group with several agents.
+- Give each agent a name, role, role description, and avatar.
+- Send attachments, reply to messages, and search within a conversation.
+- Review agent activity and answer approval requests in the chat.
+- Configure appearance, the server connection, voice, and notifications in Settings.
 
-## Agent-agnostic by design
+The app does not currently expose the older tabbed Hub, Drive, Browser, or Tasks workspace. Those older screenshots are not a guide to the native interface.
 
-Polymux includes Polymux Agent, but the workspace is not tied to it. A profile can connect another compatible agent through the open Agent Client Protocol (ACP). Polymux keeps ownership of the interface, conversations, run history, and permissions while the chosen runtime performs the agent work.
+## App and server
 
-You can also choose hosted model providers or local runtimes. The rest of the workspace stays the same when the model changes.
+The app keeps a local conversation cache; agent execution, tool access, and authoritative history belong to the connected server. A remote server is not the same as running everything on your phone or Mac. A URL alone does not configure remote authentication; see [Installation](/docs/installation/) for the current client-setup limitations.
 
-## Platform support
+The current native targets require **macOS 27 or iOS 27**. Windows and Linux packages in the older Electron release line are separate from these native targets.
 
-Polymux is available for macOS, Windows, and Linux. macOS currently receives the deepest testing and feature coverage, so some integrations and operating-system features may differ on Windows or Linux.
-
-Start with [Quickstart](/docs/quickstart/) for the shortest route from installation to your first useful request.
+Start with [Quickstart](/docs/quickstart/), then [Conversations](/docs/workspace/).

@@ -1,7 +1,7 @@
 ---
 title: Troubleshooting
 slug: troubleshooting
-description: Resolve common setup, provider, connection, browser, and permission problems.
+description: Diagnose native app connections, missing replies, upload failures, and differences from older screenshots.
 section: Help
 sectionOrder: 4
 order: 2
@@ -10,32 +10,32 @@ published: true
 
 # Troubleshooting
 
-Start with the narrowest failing surface. A provider problem, disconnected Hub bridge, unavailable storage account, and denied macOS permission have different fixes even when they interrupt the same agent request.
+Start by identifying whether the problem belongs to the app, the server, the model provider, or a tool. Changing unrelated permissions or provider keys can hide the original failure.
 
-## The agent cannot start
+## The app shows “Connect to Polymux”
 
-Open **Settings → Providers** and confirm the selected provider is connected. Then check **Settings → Models** for the model assigned to the current role.
+Use **Connection settings** and check the **Agent server** address. Include the scheme and port, confirm the server is running, and make sure this device can reach its network. On a phone, `localhost` does not refer to your development Mac.
 
-Common causes include an expired API key, provider rate limit, account-region restriction, unavailable local runtime, or model that is no longer offered by the provider.
+Cached conversations are not proof of a live connection. Watch for connection errors and retry after restoring access. If the server requires authentication, check the deployment's authentication setup rather than pasting a secret into a chat or URL.
 
-## A Hub account is offline
+## Chats load but the agent does not reply
 
-Open **Settings → Hub**, select the connection, and read its current state. Reconnect the account if its token or linked-device session expired.
+Inspect the conversation's activity and error state. A run may be waiting for your answer to an approval card. Otherwise, check the server's model configuration and logs for authentication errors, rate limits, unavailable models, or tool failures.
 
-For Telegram, confirm the API ID and hash. For iMessage on macOS, confirm Full Disk Access. For email, confirm the provider’s app password and IMAP/SMTP requirements.
+The native app does not have **Settings → Providers** or **Models**. Those older instructions are not a route to configuring the Go server.
 
-## Drive cannot reach a file
+## An attachment did not upload
 
-Check **Settings → Drive** for the provider state and active storage order. A network folder must be mounted. An S3-compatible provider needs the correct endpoint, region, credentials, and addressing mode.
+Check the failed attachment in the composer. Retry after restoring the connection, or remove it and choose the file again. A filename in the composer does not mean the upload succeeded. A local path typed into a message is not an upload to a remote server.
 
-## Browser control is unavailable
+## The interface does not match a screenshot
 
-For the in-app browser, check site permissions and browsing settings. For an external browser, confirm the extension is installed, the desktop app is connected, and the intended tab was explicitly assigned to the task.
+Check your app generation. Earlier Electron releases show a tabbed Hub, Drive, Browser, and Tasks workspace. Current native builds show agent conversations and groups. Read [Installation](/docs/installation/) before treating a missing older settings page as a bug.
 
-## A macOS permission was denied
+## Voice is unavailable
 
-Open **System Settings → Privacy & Security**, enable the relevant permission for Polymux, and restart the app. macOS may not repeat a system permission prompt after it has been denied once.
+Check Voice in Settings and its error state. Change only the microphone or speech permission needed for the feature, using the operating system's settings; a server or model problem is not fixed by granting broader device access.
 
 ## Still stuck
 
-Check the [GitHub issues](https://github.com/CarlvinceTan/Polymux/issues) for a matching report. When opening a new issue, include the Polymux version, operating system, the affected view or provider, and the exact error text. Remove keys, tokens, personal messages, and other private data first.
+Check the [GitHub issues](https://github.com/CarlvinceTan/polymux/issues) for a matching report. When opening a new issue, include the Polymux version, operating system, the affected view or provider, and the exact error text. Remove keys, tokens, personal messages, and other private data first.

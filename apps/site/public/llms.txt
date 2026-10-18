@@ -1,32 +1,30 @@
 # Polymux
 
-> Polymux is a desktop AI workspace that brings chats, email, files, browser tabs, and a user's choice of AI models together in one place.
+> Polymux is a native SwiftUI app for conversations with AI agents, backed by a Go agent server.
 
-Polymux runs on macOS, Windows, and Linux. It lets a user ask one assistant to find and work with the right conversation, file, or browser page while keeping the workspace and model choice together. Browser-extension access is limited to tab metadata and the exact tab assigned to a task.
+Current native source targets macOS 27 and iOS 27. It includes individual and group conversations, attachments, message search, agent profiles and avatars, and voice settings. The server runs agents, stores history and conversation-scoped memory, and connects tools.
 
-## Primary pages
+The native app is distinct from earlier Electron releases for macOS, Windows, and Linux. Website desktop download buttons select the Electron release line. Native source version 0.4.0 does not establish signed installer availability. The native app does not expose the older Hub, Drive, Browser, Tasks, Providers, Models, or Memory settings/workspace pages.
 
-- [Polymux home](https://polymux.com/): Product overview, supported connections, workspace views, and downloads.
-- [Polymux product](https://polymux.com/product/): Plain-language guides to the app and agent features in Polymux.
-- [Workspace](https://polymux.com/product/workspace/), [Hub](https://polymux.com/product/hub/), [Drive](https://polymux.com/product/drive/), and [Browser](https://polymux.com/product/browser/): Key app features.
-- [Memory](https://polymux.com/product/memory/), [Tasks and schedules](https://polymux.com/product/tasks-and-schedules/), [Models and agents](https://polymux.com/product/models-and-agents/), and [Skills and tools](https://polymux.com/product/skills-and-tools/): Key agent features.
-- [Polymux documentation](https://polymux.com/docs/): Installation, setup, workspace features, connections, models, extensions, privacy, and troubleshooting.
-- [Polymux blog](https://polymux.com/blog/): Product thinking, comparisons, and notes from building Polymux.
-- [Polymux releases](https://polymux.com/releases/): Versioned release notes, improvements, and desktop downloads.
-- [Polymux vs Hermes Agent, OpenClaw, and Khoj](https://polymux.com/blog/polymux-vs-hermes-openclaw-khoj/): A comparison of four different approaches to personal AI assistants.
-- [Privacy policy](https://polymux.com/privacy-policy/): How the desktop app and browser extension handle information.
-- [Latest release](https://github.com/CarlvinceTan/Polymux/releases/latest): Current desktop downloads for supported operating systems.
+## Current guides
 
-## Source and support
+- [Introduction](https://polymux.com/docs/): Native app scope and app/server boundaries.
+- [Installation](https://polymux.com/docs/installation/): Native targets, older downloads, and source builds.
+- [Quickstart](https://polymux.com/docs/quickstart/): Connect a configured server and start a conversation.
+- [Conversations](https://polymux.com/docs/workspace/): Chats, groups, attachments, search, and profiles.
+- [Models and agents](https://polymux.com/docs/models-and-agents/): Server text-model configuration versus native profiles and voice settings.
+- [Memory](https://polymux.com/docs/memory/): Agent-and-conversation-scoped SQLite memory on the server.
+- [Skills and MCP](https://polymux.com/docs/skills-and-mcp/): Trusted per-agent server integrations.
+- [Schedules and tasks](https://polymux.com/docs/schedules-and-tasks/): Routines, background reviews, and bounded child tasks.
+- [Privacy and permissions](https://polymux.com/docs/privacy-and-permissions/): App cache, remote server data, models, tools, and system permissions.
+- [Troubleshooting](https://polymux.com/docs/troubleshooting/): Connection and runtime failures, including older-interface differences.
 
-- [Source repository](https://github.com/CarlvinceTan/Polymux): Source code, issues, and release history.
-- [Privacy contact](mailto:carlvince@polymux.com): Privacy questions.
+## Product and history
 
-## Product facts
-
-- Product name: Polymux
-- Category: Desktop AI workspace
-- Platforms: macOS, Windows, Linux
-- Current site release: 0.2.3
-- Core surfaces: Chat, Hub, Drive, Browser
-- Connected services include messaging, email, cloud drives, local files, hosted AI providers, and local models.
+- [Product](https://polymux.com/product/): Native app and server capabilities.
+- [Release history](https://polymux.com/releases/): Version-specific notes; historical entries are not current native feature claims.
+- [GitHub Releases](https://github.com/CarlvinceTan/polymux/releases): Inspect the generation and assets before choosing a build.
+- [Blog](https://polymux.com/blog/): Dated articles may describe the earlier Electron app.
+- [Privacy policy](https://polymux.com/privacy-policy/): Product data handling and historical integration details.
+- [Source and issues](https://github.com/CarlvinceTan/polymux): Source code and support.
+- [Contact](mailto:carlvince@polymux.com): Privacy questions.

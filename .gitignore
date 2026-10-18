@@ -1,69 +1,47 @@
-node_modules
-.vite
-out
-src/renderer/dist
-src/renderer/test-results
-test-results
-
-# Bundled mautrix bridge binaries, fetched by scripts/fetch-bridges.mjs
-/resources/bridges/
-
-# Bundled Node runtime for skill scripts, fetched by scripts/fetch-node.mjs
-/resources/node/
-
-# Bundled speech-to-text runtime, fetched or built by scripts/fetch-whisper.mjs
-/resources/whisper/
-/resources/wechat-writer/
-
-# Phone-control runtimes fetched or built for the current platform
-/resources/phone/android/
-/resources/phone/ios/
-
-# Signed macOS helper binaries, built from resources/native/*.swift by Forge
-/resources/native/bin/
-
-# Stray root copy of the built main process (real output is .vite/build/main.js)
-/main.js
-
-# Electron Forge build output
-/out/
+node_modules/
 .DS_Store
-/dist/
-/apps/cli/dist/
-/apps/connect/relay/.wrangler/
+
+# Generated site routes
 /apps/site/blog/*/
 /apps/site/docs/*/
 /apps/site/releases/*/
 /apps/site/product/*/
 
-# Claude Code local settings (shared project settings stay tracked)
-.claude/settings.local.json
-
-# Local OAuth client ids and other development-only environment values
-.env
-!.env.example
-
-# Local experimentation workspace
+# Local tool settings and experiments
+.claude/
+.cursor/
 /experiments/
+/.proof/
+/.pig/
+.vercel/
+__pycache__/
+
+# Local environment and database state
+.env
+.env.*
+!.env.example
 *.sqlite.local
 *.sqlite.incomplete.local
 *.sqlite-wal
 *.sqlite-shm
 
-# Python bytecode from skill scripts run in place
-__pycache__/
-.vercel
-.env*
-!.env.example
+# Go build output
+/server
+/apps/*/server
+__debug_bin*
+*.test
+*.out
 
-# Publishable account key injected from .env / CI; never commit a filled copy.
-/apps/extension/locker/config.local.js
+# Swift and Xcode output
+.build/
+dist/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
 
-# Generated Safari Xcode projects (rebuilt via convert.sh / convert-ios.sh)
-/apps/extension/safari/Polymux/
-/apps/extension/safari/ios/
+# Bundled native dependencies staged for local builds
+/.vendor/
 
-
-
-# Local Supabase CLI link/cache state
-/supabase/.temp/
+# Machine-specific agent rules
+/AGENTS.local.md

@@ -1,0 +1,25 @@
+name: Branch topology
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Require dev to main
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate permanent branches
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$HEAD" != dev ] || [ "$BASE" != main ] || [ "$HEAD_REPO" != "$REPOSITORY" ]; then
+            echo "Only the dev -> main promotion pull request is allowed."
+            exit 1
+          fi

@@ -1,7 +1,7 @@
 ---
 title: Schedules and tasks
 slug: schedules-and-tasks
-description: Run recurring requests and follow work delegated to focused subagents.
+description: Ask agents to schedule routines, control background reviews, and delegate bounded work.
 section: Using Polymux
 sectionOrder: 2
 order: 5
@@ -10,22 +10,26 @@ published: true
 
 # Schedules and tasks
 
-Polymux can run recurring requests later and keep delegated work visible while the main conversation continues.
+Agents can schedule routines and delegate work on the Go server. The native app shows the conversation and profile controls rather than the older Tasks board and Subagents workspace tabs.
 
-## Tasks
+## Schedule a routine
 
-The Tasks view tracks work that needs attention and its progress. Tasks are scoped to the conversation so the board stays connected to the request that created them.
+Ask an agent in chat for a one-time or recurring request. Include the work, start time, timezone, and interval clearly. For example:
 
-## Schedule recurring work
+> Remind me in two hours to review the project brief. Confirm the time and timezone before saving it.
 
-Open **Tasks**, add a task, and mark it as recurring to describe what the agent should do each time. Choose the frequency and save the schedule. Active schedules appear alongside tasks on the same board, run locally through Polymux, and record their latest result.
+The current scheduler supports one-shot and interval routines, not a general cron-expression editor. Check the agent's confirmation and the routine's displayed next run rather than assuming it interpreted a calendar rule as intended.
 
-Use schedules for repeatable work such as checking a source, preparing a summary, or monitoring a condition. The computer and required connections must be available when the run starts.
+Open the agent's **Edit profile → Schedule** section to review routines and cancel one. A pending routine can be waiting for your approval. The server must be running with the necessary model and tool connections when work is due. Missed recurring intervals advance to a future run rather than replaying every missed occurrence.
 
-Notifications for successful or failed scheduled work can be configured under **Settings → General → Notifications**.
+## Background reviews
+
+The profile's **Background reviews** toggle controls the agent's periodic reviews. These become eligible after the first direct-chat user task; the normal cadence is four hours. You can also send the exact chat command `pause proactivity` or `resume proactivity`.
+
+Notifications are optional and configured in the native Settings panel. Whether a notification arrives also depends on operating-system permission and the server's delivery setup.
 
 ## Subagents
 
-Polymux Agent can delegate bounded pieces of work to subagents. Each subagent has its own activity and result while the main agent remains responsible for the overall response.
+An agent can use `spawn_task` to queue a bounded child task, optionally for another agent. The child receives the explicit task rather than the parent's whole conversation or private memory, and cannot recursively delegate more children.
 
-Open **Subagents** to inspect delegated work. A completed-looking row is only a summary; open the item when you need its full result or current state.
+Follow activity and results in the conversation. Starting a child task is not evidence that it has finished. There is no separate native Subagents tab or Tasks board at present.

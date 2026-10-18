@@ -1,28 +1,26 @@
-import bluesky from '../../../desktop/src/renderer/assets/platforms/bluesky.svg?url';
-import fastmail from '../../../desktop/src/renderer/assets/platforms/fastmail.svg?url';
-import gmail from '../../../desktop/src/renderer/assets/platforms/gmail.svg?url';
-import gmessages from '../../../desktop/src/renderer/assets/platforms/gmessages.svg?url';
-import googlechat from '../../../desktop/src/renderer/assets/platforms/googlechat.svg?url';
-import gvoice from '../../../desktop/src/renderer/assets/platforms/gvoice.svg?url';
-import icloud from '../../../desktop/src/renderer/assets/platforms/icloud.svg?url';
-import imessage from '../../../desktop/src/renderer/assets/platforms/imessage.svg?url';
-import instagram from '../../../desktop/src/renderer/assets/platforms/instagram.svg?url';
-import lark from '../../../desktop/src/renderer/assets/platforms/lark.png';
-import linkedin from '../../../desktop/src/renderer/assets/platforms/linkedin.svg?url';
-import mail from '../../../desktop/src/renderer/assets/platforms/mail.png';
-import matrix from '../../../desktop/src/renderer/assets/platforms/matrix.svg?url';
-import messenger from '../../../desktop/src/renderer/assets/platforms/messenger.svg?url';
-import outlook from '../../../desktop/src/renderer/assets/platforms/outlook.svg?url';
-import signal from '../../../desktop/src/renderer/assets/platforms/signal.svg?url';
-import slack from '../../../desktop/src/renderer/assets/platforms/slack.svg?url';
-import telegram from '../../../desktop/src/renderer/assets/platforms/telegram.svg?url';
-import twitter from '../../../desktop/src/renderer/assets/platforms/twitter.svg?url';
-import wechat from '../../../desktop/src/renderer/assets/platforms/wechat.svg?url';
-import whatsapp from '../../../desktop/src/renderer/assets/platforms/whatsapp.svg?url';
-import zulip from '../../../desktop/src/renderer/assets/platforms/zulip.svg?url';
+import bluesky from '../assets/platforms/bluesky.svg?url';
+import fastmail from '../assets/platforms/fastmail.svg?url';
+import gmail from '../assets/platforms/gmail.svg?url';
+import gmessages from '../assets/platforms/gmessages.svg?url';
+import googlechat from '../assets/platforms/googlechat.svg?url';
+import gvoice from '../assets/platforms/gvoice.svg?url';
+import icloud from '../assets/platforms/icloud.svg?url';
+import imessage from '../assets/platforms/imessage.svg?url';
+import instagram from '../assets/platforms/instagram.svg?url';
+import lark from '../assets/platforms/lark.png';
+import linkedin from '../assets/platforms/linkedin.svg?url';
+import mail from '../assets/platforms/mail.png';
+import matrix from '../assets/platforms/matrix.svg?url';
+import messenger from '../assets/platforms/messenger.svg?url';
+import outlook from '../assets/platforms/outlook.svg?url';
+import signal from '../assets/platforms/signal.svg?url';
+import slack from '../assets/platforms/slack.svg?url';
+import telegram from '../assets/platforms/telegram.svg?url';
+import twitter from '../assets/platforms/twitter.svg?url';
+import wechat from '../assets/platforms/wechat.svg?url';
+import whatsapp from '../assets/platforms/whatsapp.svg?url';
+import zulip from '../assets/platforms/zulip.svg?url';
 
-// Keep this mapping site-local so a standalone site build does not load the
-// desktop renderer's TypeScript project configuration.
 const bridgeLogos: Record<string, string> = {
   whatsapp,
   telegram,

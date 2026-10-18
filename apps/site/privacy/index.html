@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f7f5" />
+    <title>Privacy — Polymux</title>
+    <meta name="description" content="How the native Polymux app, your agent server, models, and connected tools handle your data." />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />
+    <link rel="canonical" href="https://polymux.com/privacy" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Polymux" />
+    <meta property="og:title" content="Privacy — Polymux" />
+    <meta property="og:description" content="Your app caches conversations; your configured server runs agents and stores their history." />
+    <meta property="og:url" content="https://polymux.com/privacy" />
+    <meta name="twitter:card" content="summary" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "@id": "https://polymux.com/privacy#webpage",
+        "url": "https://polymux.com/privacy",
+        "name": "Privacy — Polymux",
+        "description": "Data boundaries between the native app, agent server, models, and tools.",
+        "dateModified": "2026-10-16",
+        "isPartOf": {"@id": "https://polymux.com/#website"},
+        "about": {"@id": "https://polymux.com/#software"}
+      }
+    </script>
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <style>
+  :root {
+    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #171717;
+    background: #f7f7f5;
+    font-synthesis: none;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; min-width: 320px; background: #f7f7f5; }
+  a { color: inherit; text-decoration: none; }
+  ::selection { color: #fff; background: #171717; }
+
+  header,
+  footer {
+    width: min(900px, calc(100% - 40px));
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  header { height: 68px; border-bottom: 1px solid #deded9; }
+  footer { min-height: 100px; border-top: 1px solid #deded9; color: #6f6f6b; font-size: 12px; }
+
+  .brand { display: inline-flex; align-items: center; gap: 4.875px; color: #171717; font-size: 19.5px; font-weight: 750; letter-spacing: -.045em; text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased; }
+  .brand img { width: 26px; height: 26px; object-fit: contain; }
+  .home-link { color: #6f6f6b; font-size: 13px; }
+  .home-link:hover, article a:hover { color: #171717; }
+
+  main { width: min(900px, calc(100% - 40px)); margin: 0 auto; padding: 88px 0 112px; }
+  .title-block { padding-bottom: 48px; border-bottom: 1px solid #deded9; }
+  .eyebrow { margin: 0 0 18px; color: #6f6f6b; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  h1 { margin: 0; font-size: clamp(46px, 7vw, 72px); line-height: 1; letter-spacing: -.055em; font-weight: 620; }
+  .effective { margin: 20px 0 0; color: #6f6f6b; font-size: 13px; }
+
+  article { max-width: 680px; padding-top: 18px; }
+  section { padding: 34px 0; border-bottom: 1px solid #deded9; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 16px; font-size: 22px; line-height: 1.25; letter-spacing: -.025em; font-weight: 620; }
+  h3 { margin: 26px 0 8px; font-size: 15px; line-height: 1.4; font-weight: 650; }
+  p, li { color: #565652; font-size: 15px; line-height: 1.72; }
+  p { margin: 0; }
+  ul { margin: 12px 0 0; padding-left: 21px; }
+  li + li { margin-top: 7px; }
+  article a { color: #171717; text-decoration: underline; text-decoration-color: #b8b8b2; text-underline-offset: 3px; }
+
+  @media (max-width: 640px) {
+    header, footer, main { width: min(100% - 28px, 900px); }
+    main { padding: 64px 0 82px; }
+    .title-block { padding-bottom: 38px; }
+    section { padding: 28px 0; }
+  }
+</style>
+  </head>
+  <body>
+    <header>
+  <a class="brand" href="/" aria-label="Polymux home">
+    <img src="../src/assets/polymux.svg" alt="" />
+    <span>Polymux</span>
+  </a>
+  <a class="home-link" href="/">Back to home</a>
+</header>
+
+<main>
+  <div class="title-block">
+    <p class="eyebrow">Legal</p>
+    <h1>Privacy</h1>
+    <p class="effective">Last updated 16 October 2026</p>
+  </div>
+
+  <article>
+    <section>
+      <h2>Overview</h2>
+      <p>
+        Polymux has no separate hosted account to sign in to. The native app
+        connects to an agent server you configure. The general
+        <a href="/privacy-policy/">Polymux Privacy Policy</a> covers the product,
+        including details retained for older integrations.
+      </p>
+    </section>
+
+    <section>
+      <h2>Your data</h2>
+      <p>
+        The app caches conversations on its device. Messages and attachments
+        are sent to your configured server, which stores authoritative history
+        and runs agents. If the server is on another computer, your data is not
+        confined to the app device. Hosted models and configured tools can
+        receive task content under their own terms.
+      </p>
+    </section>
+
+    <section>
+      <h2>Agents and connections</h2>
+      <p>
+        An agent's MCP connections belong to you and run through its server
+        configuration. Installing a tool does not connect every account or
+        authorise every action. Review the service, account, access scope, and
+        approval requests. See <a href="/docs/privacy-and-permissions/">Privacy
+        and permissions</a> for native-app guidance.
+      </p>
+    </section>
+
+    <section>
+      <h2>Contact</h2>
+      <p>
+        Questions: <a href="mailto:team@polymux.com">team@polymux.com</a>.
+      </p>
+    </section>
+  </article>
+</main>
+
+<footer>
+  <a class="brand" href="/"><img src="../src/assets/polymux.svg" alt="" /><span>Polymux</span></a>
+  <span>Privacy</span>
+</footer>
+    <script type="module" src="/src/analytics.ts"></script>
+  </body>
+</html>

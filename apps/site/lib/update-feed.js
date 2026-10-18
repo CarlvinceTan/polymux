@@ -1,4 +1,8 @@
-const REPOSITORY = 'CarlvinceTan/Polymux';
+const REPOSITORY = 'CarlvinceTan/polymux';
+
+export function isElectronRelease(tag) {
+  return /^v0\.3\.\d+$/.test(tag);
+}
 
 function githubHeaders() {
   return {
@@ -10,7 +14,7 @@ function githubHeaders() {
 
 export async function updateFeed(platform, response) {
   const windows = platform === 'win32';
-  const latest = await fetch(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=10`, {
+  const latest = await fetch(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, {
     headers: githubHeaders(),
   });
   if (!latest.ok) {
@@ -19,7 +23,8 @@ export async function updateFeed(platform, response) {
   }
 
   const releases = await latest.json();
-  const release = releases.find((item) => !item.draft);
+  const release = releases.find((item) =>
+    !item.draft && !item.prerelease && isElectronRelease(item.tag_name));
   if (!release) {
     response.setHeader('Cache-Control', 'no-store');
     return response.status(503).send('No public Polymux release is available yet.');

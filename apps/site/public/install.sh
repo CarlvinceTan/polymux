@@ -21,7 +21,7 @@ if [ "$mode" = "connect" ]; then
   esac
 fi
 archive="polymux-cli.tar.gz"
-base="https://github.com/CarlvinceTan/Polymux/releases/latest/download"
+base="https://github.com/CarlvinceTan/polymux/releases/latest/download"
 asset_revision="20260831-1"
 node_version="24.20.0"
 case "$(uname -s 2>/dev/null)" in

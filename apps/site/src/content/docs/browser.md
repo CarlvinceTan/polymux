@@ -1,7 +1,7 @@
 ---
 title: Browser
 slug: browser
-description: Use Polymux’s in-app browser or explicitly assign an external browser tab to a task.
+description: Understand browser tools on the agent server and the absence of the older tabbed Browser workspace.
 section: Using Polymux
 sectionOrder: 2
 order: 4
@@ -10,24 +10,20 @@ published: true
 
 # Browser
 
-Browser keeps web research and actions inside the same workspace as the conversation. Polymux can use its built-in browser or work with an external tab that you explicitly assign.
+The native app does not currently include the Electron **Browser** workspace, browser-settings screen, or tab-assignment interface. You will not find an in-app address bar or browser tab strip beside the chat.
 
-## In-app browser
+## Research from a conversation
 
-Open **Browser** from the workspace to create tabs, navigate, search, inspect downloads, and keep relevant pages beside the chat. The agent can use this browser when a task requires web access.
+Ask the agent for research in the chat. Available web tools depend on the connected server. A working model connection alone does not guarantee browser access.
 
-The in-app browser maintains its own browsing state. Manage passwords, downloads, site permissions, and browsing data under **Settings → Browser**.
+When a task needs a real browser, confirm which computer, app, and account the agent is using. Do not assume a browser open on your phone or Mac is available to a remote server.
 
-## External browser tabs
+## Sign-ins and sensitive actions
 
-The optional browser extension connects supported external tabs to the local Polymux app. Its passive inventory is limited to tab metadata such as title, URL, active state, and window relationship.
+Keep sign-ins, system permission prompts, payments, and other personal checkpoints under your control. Review approval requests before continuing. A tool being installed is not permission to use every signed-in account.
 
-Page content and interaction become available only for the exact tab assigned to a task. Access ends when the task releases the tab, the tab closes, the app disconnects, or the extension is disabled.
+See [Privacy and permissions](/docs/privacy-and-permissions/) for the app/server boundary.
 
-## Downloads
+## Older Electron releases
 
-Files downloaded through the in-app browser appear in its Downloads view. From there, you can open the file or reveal it using the operating system.
-
-## When a site needs you
-
-Sign-ins, CAPTCHAs, payment confirmation, and other sensitive checkpoints may require manual attention. Polymux pauses or hands the surface to you instead of assuming permission to complete an irreversible action.
+Earlier releases had an embedded browser and optional external-tab extension. Those version-specific instructions do not establish browser access in the native app. Historical details remain in [Releases](/releases/).

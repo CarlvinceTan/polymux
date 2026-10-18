@@ -1,5 +1,5 @@
 <script lang="ts">
-  import logo from '../../desktop/src/renderer/public/polymux.svg';
+  import logo from './assets/polymux.svg';
   import {blogPosts, formatBlogDate} from './lib/blog';
   import MobileMenu from './lib/MobileMenu.svelte';
 

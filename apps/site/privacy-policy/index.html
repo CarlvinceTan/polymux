@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f7f5" />
     <title>Privacy Policy — Polymux</title>
-    <meta name="description" content="How the Polymux desktop app and browser extension handle browser tabs, assigned-tab activity, connected services, and locally stored data." />
+    <meta name="description" content="How the native Polymux app, your agent server, and earlier desktop integrations handle information." />
     <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />
     <link rel="canonical" href="https://polymux.com/privacy-policy/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Polymux" />
     <meta property="og:title" content="Privacy Policy — Polymux" />
-    <meta property="og:description" content="How the Polymux desktop app and browser extension handle information." />
+    <meta property="og:description" content="Data handling in the native app, your agent server, and earlier integrations." />
     <meta property="og:url" content="https://polymux.com/privacy-policy/" />
     <meta name="twitter:card" content="summary" />
 
@@ -22,8 +22,8 @@
         "@id": "https://polymux.com/privacy-policy/#webpage",
         "url": "https://polymux.com/privacy-policy/",
         "name": "Privacy Policy — Polymux",
-        "description": "How the Polymux desktop app and browser extension handle information.",
-        "dateModified": "2026-08-31",
+        "description": "Data handling in the native app, your agent server, and earlier integrations.",
+        "dateModified": "2026-10-16",
         "isPartOf": {"@id": "https://polymux.com/#website"},
         "about": {"@id": "https://polymux.com/#software"}
       }
@@ -87,7 +87,7 @@
   <body>
     <header>
   <a class="brand" href="/" aria-label="Polymux home">
-    <img src="../../desktop/src/renderer/public/polymux.svg" alt="" />
+    <img src="../src/assets/polymux.svg" alt="" />
     <span>Polymux</span>
   </a>
   <a class="home-link" href="/">Back to home</a>
@@ -97,22 +97,44 @@
   <div class="title-block">
     <p class="eyebrow">Legal</p>
     <h1>Privacy Policy</h1>
-    <p class="effective">Effective 31 August 2026</p>
+    <p class="effective">Updated 16 October 2026</p>
   </div>
 
   <article>
     <section>
       <h2>Overview</h2>
       <p>
-        Polymux is a desktop workspace that can connect to your browser, files,
-        messages, email, and AI providers when you ask it to. This policy
-        explains how the Polymux desktop app, mobile app, Personal Host,
-        Polymux Connect relay, and browser extension handle information.
+        Current Polymux source is a native app backed by an agent server you
+        configure. This policy also retains descriptions of the earlier
+        Electron app's Personal Host, Connect relay, and browser extension.
+        Those historical integration descriptions do not mean the native app
+        exposes the same features or setup screens.
       </p>
     </section>
 
     <section>
-      <h2>Information Polymux handles</h2>
+      <h2>Native app and agent server</h2>
+      <p>
+        The app caches conversations on its device and sends messages and
+        attachments to your configured server. That server stores authoritative
+        history and agent memory and executes tools. A server on another
+        computer is a separate data destination, not storage confined to the
+        app device. Hosted model providers and connected tools can receive task
+        content under their own configuration and terms. Forgetting active
+        memory does not delete conversation history or backups.
+      </p>
+      <p>
+        Microphone, speech, and notifications have separate
+        access requirements. Review system permissions and task approvals.
+        Native setup and current limitations are described in
+        <a href="/docs/privacy-and-permissions/">Privacy and permissions</a>.
+        The browser-extension and Connect-specific sections below describe the
+        earlier integrations, not a native browser workspace or relay setup.
+      </p>
+    </section>
+
+    <section>
+      <h2>Information handled by earlier integrations</h2>
       <h3>Browser tab information</h3>
       <p>
         The browser extension makes a local inventory of open-tab metadata,
@@ -198,7 +220,8 @@
     <section>
       <h2>Sharing and sale of data</h2>
       <p>
-        Polymux does not sell user data. It does not use or transfer user data
+        Polymux does not host public conversation links or sell user data.
+        It does not use or transfer user data
         for advertising, creditworthiness, lending, or purposes unrelated to
         the product's disclosed function. Information is shared with Cloudflare
         to operate Polymux Connect, or with another service provider only when
@@ -255,7 +278,7 @@
 </main>
 
 <footer>
-  <a class="brand" href="/"><img src="../../desktop/src/renderer/public/polymux.svg" alt="" /><span>Polymux</span></a>
+  <a class="brand" href="/"><img src="../src/assets/polymux.svg" alt="" /><span>Polymux</span></a>
   <span>Privacy Policy</span>
 </footer>
     <script type="module" src="/src/analytics.ts"></script>

@@ -1,0 +1,1867 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polymux.local/contracts/v1",
+  "title": "Polymux wire contract",
+  "$defs": {
+    "PushStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registered": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "registered",
+        "available"
+      ]
+    },
+    "Notice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "body",
+        "outcome",
+        "seq",
+        "conversationID",
+        "messageID",
+        "title",
+        "createdAt"
+      ]
+    },
+    "NoticePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "integer"
+        },
+        "notices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Notice"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "notices"
+      ]
+    },
+    "PushDevice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "token",
+        "environment",
+        "server",
+        "enabled"
+      ]
+    },
+    "HostState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "running",
+        "pid",
+        "error"
+      ]
+    },
+    "HostPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "Settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "appearance": {
+          "type": "string"
+        },
+        "sidebarWidth": {
+          "type": "number"
+        },
+        "voiceMode": {
+          "type": "string"
+        },
+        "liveProvider": {
+          "type": "string"
+        },
+        "liveModel": {
+          "type": "string"
+        },
+        "liveVoice": {
+          "type": "string"
+        },
+        "textProvider": {
+          "type": "string"
+        },
+        "textModel": {
+          "type": "string"
+        },
+        "voicePrompt": {
+          "type": "string"
+        },
+        "speechKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "appearance",
+        "sidebarWidth",
+        "voiceMode",
+        "liveProvider",
+        "liveModel",
+        "liveVoice",
+        "textProvider",
+        "textModel",
+        "voicePrompt",
+        "speechKeys"
+      ]
+    },
+    "SettingsPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "appearance": {
+          "type": "string"
+        },
+        "sidebarWidth": {
+          "type": "number"
+        },
+        "voiceMode": {
+          "type": "string"
+        },
+        "liveProvider": {
+          "type": "string"
+        },
+        "liveModel": {
+          "type": "string"
+        },
+        "liveVoice": {
+          "type": "string"
+        },
+        "textProvider": {
+          "type": "string"
+        },
+        "textModel": {
+          "type": "string"
+        },
+        "voicePrompt": {
+          "type": "string"
+        }
+      },
+      "required": []
+    },
+    "SpeechKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ]
+    },
+    "Agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "avatar": {
+          "$ref": "#/$defs/AvatarDesign"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "model",
+        "active"
+      ]
+    },
+    "Thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "leadAgentID": {
+          "type": "string"
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Run"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "lastReadSeq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastSeq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unreadCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastMessage": {
+          "$ref": "#/$defs/Message"
+        },
+        "title": {
+          "type": "string"
+        },
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinOrder": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sectionID": {
+          "type": "string"
+        },
+        "sectionOrder": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "runs",
+        "id",
+        "agentID",
+        "lastReadSeq",
+        "lastSeq",
+        "unreadCount",
+        "title",
+        "agentIDs"
+      ]
+    },
+    "Attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "html",
+            "file"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "url": {
+          "type": "string"
+        },
+        "thumbnailURL": {
+          "type": "string"
+        },
+        "extractedText": {
+          "type": "string"
+        },
+        "indexingState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "error"
+          ]
+        },
+        "width": {
+          "type": "number",
+          "minimum": 44,
+          "maximum": 550,
+          "description": "Requested HTML viewport width in logical CSS pixels; constrained by the native available width."
+        },
+        "height": {
+          "type": "number",
+          "minimum": 44,
+          "maximum": 400,
+          "description": "Requested HTML viewport height in logical CSS pixels; omitted for measured content height."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "mimeType",
+        "size",
+        "url",
+        "indexingState"
+      ]
+    },
+    "Part": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "text",
+            "attachment",
+            "tool",
+            "choice"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "name": {
+          "type": "string"
+        },
+        "args": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          }
+        },
+        "answerID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "ReplyContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageID": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "partIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The selected text or attachment index in the original message Parts; absent for a whole-message quote."
+        }
+      },
+      "required": [
+        "messageID",
+        "role",
+        "text"
+      ]
+    },
+    "Message": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runID": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "threadID": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system"
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Part"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "streaming",
+            "done",
+            "error"
+          ]
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Immutable sequence of the message.start event; 0 only for an optimistic unsent client message."
+        },
+        "replyToID": {
+          "type": "string",
+          "description": "The user message ID that triggered this assistant reply; used to correlate queued voice turns."
+        },
+        "reply": {
+          "$ref": "#/$defs/ReplyContext",
+          "description": "A durable snapshot of the message quoted by this user message."
+        },
+        "agentID": {
+          "type": "string",
+          "description": "The assistant member that authored this message."
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Explicit member IDs addressed by this user message."
+        }
+      },
+      "required": [
+        "id",
+        "threadID",
+        "role",
+        "parts",
+        "createdAt",
+        "status",
+        "seq"
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "Event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Monotonically increasing durable replay cursor scoped to conversationID."
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "message.start",
+            "message.delta",
+            "message.tool_call",
+            "message.attachment",
+            "message.error",
+            "message.done",
+            "agent.presence",
+            "run.start",
+            "run.update",
+            "run.done",
+            "tool.start",
+            "tool.update",
+            "tool.done",
+            "peer.delivery",
+            "group.handoff",
+            "approval_requested"
+          ]
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "runID": {
+          "type": "string"
+        },
+        "run": {
+          "$ref": "#/$defs/Run"
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolActivity"
+        },
+        "delivery": {
+          "$ref": "#/$defs/PeerDelivery"
+        },
+        "routineID": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        },
+        "approval": {
+          "$ref": "#/$defs/ApprovalRequest"
+        }
+      },
+      "required": [
+        "seq",
+        "conversationID",
+        "type",
+        "createdAt"
+      ]
+    },
+    "ApprovalRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "runID": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "args": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "runID",
+        "tool",
+        "args",
+        "expiresAt"
+      ]
+    },
+    "Usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens"
+      ]
+    },
+    "SendRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachmentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "replyToID": {
+          "type": "string",
+          "description": "An optional existing message in the same conversation to quote in this message."
+        },
+        "replyPart": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional source Parts index to quote one text or attachment; requires replyToID."
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "description": "Optional explicit mention IDs; only conversation members are woken."
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "attachmentIDs"
+      ]
+    },
+    "ReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "seq"
+      ]
+    },
+    "SearchHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "score": {
+          "type": "number"
+        },
+        "snippet": {
+          "type": "string"
+        },
+        "indexingState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "error"
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "score",
+        "snippet"
+      ]
+    },
+    "Routine": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "nextAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "active",
+            "cancelled",
+            "finished"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "id": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "once",
+            "interval"
+          ]
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "IANA zone for a wall-clock recurrence; empty means fixed elapsed intervals"
+        }
+      },
+      "required": [
+        "at",
+        "intervalSeconds",
+        "status",
+        "createdAt",
+        "id",
+        "agentID",
+        "trigger",
+        "prompt"
+      ]
+    },
+    "RoutineRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timezone": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "IANA zone for a wall-clock recurrence; empty means fixed elapsed intervals"
+        }
+      },
+      "required": [
+        "prompt",
+        "at",
+        "intervalSeconds"
+      ]
+    },
+    "Proactivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 3600,
+          "maximum": 604800
+        },
+        "nextAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "enabled",
+        "intervalSeconds"
+      ]
+    },
+    "Run": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobID": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "message",
+            "created",
+            "peer",
+            "handoff",
+            "routine",
+            "review",
+            "follow_up",
+            "task",
+            "event"
+          ]
+        },
+        "taskID": {
+          "type": "string"
+        },
+        "sourceMessageID": {
+          "type": "string"
+        },
+        "parentRunID": {
+          "type": "string"
+        },
+        "routineID": {
+          "type": "string"
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "toolID": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolActivity"
+          }
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "activity": {
+          "type": "string",
+          "enum": [
+            "preparing",
+            "generating",
+            "tool",
+            "rendering",
+            "handoff",
+            ""
+          ]
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting_input",
+            "waiting_peer",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "jobID",
+        "id",
+        "agentID",
+        "conversationID",
+        "trigger",
+        "status",
+        "activity",
+        "attempt",
+        "seq",
+        "createdAt",
+        "updatedAt",
+        "summary"
+      ]
+    },
+    "ToolActivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "runID": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "runID",
+        "name",
+        "status"
+      ]
+    },
+    "PeerDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sourceAgentID": {
+          "type": "string"
+        },
+        "targetAgentID": {
+          "type": "string"
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "parentRunID": {
+          "type": "string"
+        },
+        "runID": {
+          "type": "string"
+        },
+        "intent": {
+          "type": "string",
+          "enum": [
+            "request",
+            "question",
+            "result",
+            "status",
+            "handoff"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "delivered",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "sourceAgentID",
+        "targetAgentID",
+        "conversationID",
+        "parentRunID",
+        "intent",
+        "status",
+        "createdAt"
+      ]
+    },
+    "ChoiceOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ]
+    },
+    "FocusAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "optionID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "optionID"
+      ]
+    },
+    "FocusStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "posted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "posted"
+      ]
+    },
+    "CreateAgentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initialTask": {
+          "type": "string",
+          "maxLength": 64000
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 64000
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "avatar": {
+          "$ref": "#/$defs/AvatarDesign"
+        },
+        "sectionID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "prompt"
+      ]
+    },
+    "AgentProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/Agent"
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "prompt"
+      ]
+    },
+    "UpdateAgentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 64000
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "prompt"
+      ]
+    },
+    "AnimationBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "thinking",
+            "wink",
+            "wide",
+            "alert",
+            "notify",
+            "exclaim",
+            "sleep",
+            "egg",
+            "hexagon",
+            "play",
+            "orbit",
+            "burst",
+            "comet",
+            "swirl"
+          ]
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.6,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "duration"
+      ]
+    },
+    "AvatarDesign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "type": "string",
+          "enum": [
+            "cercle",
+            "galet",
+            "squircle",
+            "capsule",
+            "triangle",
+            "hexagone",
+            "nuage",
+            "goutte"
+          ]
+        },
+        "color": {
+          "type": "string",
+          "enum": [
+            "encre",
+            "brun",
+            "rouge",
+            "orange",
+            "ambre",
+            "vert",
+            "turquoise",
+            "bleu",
+            "violet",
+            "rose",
+            "gris",
+            "creme"
+          ]
+        },
+        "expression": {
+          "type": "string",
+          "enum": [
+            "neutre",
+            "attentif",
+            "surpris",
+            "excite",
+            "heureux",
+            "hilare",
+            "colere",
+            "triste",
+            "effraye",
+            "mefiant",
+            "confus",
+            "curieux",
+            "fier",
+            "timide",
+            "blase",
+            "somnolent"
+          ]
+        },
+        "followCursor": {
+          "type": "boolean"
+        },
+        "animates": {
+          "type": "boolean"
+        },
+        "playSequence": {
+          "type": "boolean"
+        },
+        "blocks": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/AnimationBlock"
+          }
+        }
+      },
+      "required": [
+        "shape",
+        "color",
+        "expression",
+        "followCursor",
+        "animates",
+        "playSequence",
+        "blocks"
+      ]
+    },
+    "DeleteResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted"
+      ]
+    },
+    "CreateThreadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "leadAgentID": {
+          "type": "string"
+        },
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "sectionID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentIDs"
+      ]
+    },
+    "VoiceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ]
+    },
+    "VoiceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "UpdateThreadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "leadAgentID": {
+          "type": "string"
+        },
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinOrder": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "minProperties": 1,
+      "required": []
+    },
+    "Section": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "order": {
+          "type": "number"
+        },
+        "collapsed": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "chatCount": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order",
+        "collapsed",
+        "createdAt",
+        "updatedAt",
+        "chatCount"
+      ]
+    },
+    "AgentConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "workspace",
+        "tools",
+        "skills"
+      ]
+    },
+    "ConfigurationPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "minProperties": 1
+    },
+    "MCPConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "shared": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "enabled",
+        "hidden",
+        "shared"
+      ]
+    },
+    "SidebarPlacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadID": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinOrder": {
+          "type": "number"
+        },
+        "sectionID": {
+          "type": "string"
+        },
+        "sectionOrder": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "threadID",
+        "pinned"
+      ]
+    },
+    "SidebarSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "integer"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Section"
+          }
+        },
+        "placements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SidebarPlacement"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "sections",
+        "placements"
+      ]
+    },
+    "SidebarEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Section"
+          }
+        },
+        "changedThreadIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "placements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SidebarPlacement"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "type",
+        "sections",
+        "changedThreadIDs",
+        "placements",
+        "createdAt"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Agent"
+    },
+    {
+      "$ref": "#/$defs/Thread"
+    },
+    {
+      "$ref": "#/$defs/Message"
+    },
+    {
+      "$ref": "#/$defs/Event"
+    },
+    {
+      "$ref": "#/$defs/Attachment"
+    },
+    {
+      "$ref": "#/$defs/Routine"
+    },
+    {
+      "$ref": "#/$defs/Run"
+    }
+  ],
+  "x-http": {
+    "GET /agents": {
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Agent"
+        }
+      }
+    },
+    "GET /threads": {
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Thread"
+        }
+      }
+    },
+    "GET /threads/{id}/messages": {
+      "query": {
+        "before": "exclusive message seq cursor",
+        "limit": "page size, default 100"
+      },
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Message"
+        }
+      }
+    },
+    "GET /threads/{id}/events": {
+      "query": {
+        "after": "exclusive durable event seq, default 0",
+        "limit": "page size, default 100, maximum 1000; keep fetching after last received seq until an empty page"
+      },
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Event"
+        }
+      },
+      "order": "ascending seq; event cursors are scoped to a conversation"
+    },
+    "GET /threads/{id}/stream": {
+      "query": {
+        "after": "exclusive durable event seq, default 0"
+      },
+      "response": "text/event-stream; each data field is one Event JSON; replay before live delivery"
+    },
+    "POST /threads/{id}/messages": {
+      "request": {
+        "$ref": "#/$defs/SendRequest"
+      },
+      "idempotency": "SendRequest.id is the client message identity; retries return the original accepted message without another agent turn"
+    },
+    "POST /threads/{id}/voice": {
+      "request": {
+        "$ref": "#/$defs/VoiceRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/VoiceResponse"
+      },
+      "privacy": "Private agent consultation, never accepted into typed chat or indexed. Only explicit send_to_user/show_html publications become messages.",
+      "cancellation": "Request disconnect cancels only this private task. No automatic replay; duplicate IDs are refused for the server lifetime."
+    },
+    "POST /threads/{id}/read": {
+      "request": {
+        "$ref": "#/$defs/ReadRequest"
+      }
+    },
+    "POST /threads/{id}/stop": {
+      "request": {
+        "type": "object"
+      }
+    },
+    "GET /threads/{id}/search": {
+      "query": {
+        "q": "query text, current conversation only"
+      },
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SearchHit"
+        }
+      }
+    },
+    "POST /attachments": {
+      "request": "multipart/form-data; file field",
+      "response": {
+        "$ref": "#/$defs/Attachment"
+      }
+    },
+    "POST /agents": {
+      "request": {
+        "$ref": "#/$defs/CreateAgentRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/Agent"
+      },
+      "status": 201
+    },
+    "GET /agents/{id}": {
+      "response": {
+        "$ref": "#/$defs/AgentProfile"
+      }
+    },
+    "PATCH /agents/{id}": {
+      "request": {
+        "$ref": "#/$defs/UpdateAgentRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/AgentProfile"
+      }
+    },
+    "PATCH /agents/{id}/avatar": {
+      "request": {
+        "$ref": "#/$defs/AvatarDesign"
+      },
+      "response": {
+        "$ref": "#/$defs/Agent"
+      }
+    },
+    "DELETE /agents/{id}": {
+      "response": {
+        "$ref": "#/$defs/DeleteResponse"
+      },
+      "status": 200,
+      "idempotency": "Deleting an already deleted identity returns deleted=true without recreating it."
+    },
+    "POST /threads": {
+      "request": {
+        "$ref": "#/$defs/CreateThreadRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/Thread"
+      },
+      "status": 201
+    },
+    "PATCH /threads/{id}": {
+      "request": {
+        "$ref": "#/$defs/UpdateThreadRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/Thread"
+      }
+    },
+    "POST /agents/{id}/focus": {
+      "request": null,
+      "response": {
+        "$ref": "#/$defs/FocusStatus"
+      },
+      "note": "post the deterministic first-run card once, while the conversation has no user turn"
+    },
+    "POST /agents/{id}/focus/answer": {
+      "request": {
+        "$ref": "#/$defs/FocusAnswer"
+      },
+      "response": {
+        "$ref": "#/$defs/FocusStatus"
+      },
+      "note": "record the chosen first-run option and post its deterministic acknowledgment"
+    }
+  }
+}

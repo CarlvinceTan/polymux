@@ -1,212 +1,170 @@
 [
   {
-    "group": "app",
-    "slug": "workspace",
-    "name": "Workspace",
-    "icon": "workspace",
-    "menuDescription": "Keep every source beside the conversation",
-    "title": "Everything you need, beside the conversation.",
-    "description": "Keep webpages, files, messages, tasks, and other useful material beside your Polymux conversation.",
-    "intro": "Polymux gives your assistant a real place to work. Instead of hiding every step in a stream of messages, it opens the useful material beside your conversation so you can follow along and stay in control.",
-    "imageKey": "workspace",
-    "imageAlt": "A Polymux conversation with a workspace view open beside it",
+    "group": "app", "slug": "workspace", "name": "Conversations", "icon": "workspace",
+    "menuDescription": "Find your agents and pick up a conversation",
+    "title": "A conversation with your agents.",
+    "description": "Talk to agents, attach files, and search messages in the native Polymux app.",
+    "intro": "The native app keeps your conversation list and selected chat close together. Find an agent, send a request, and follow its responses and activity without the older tabbed workspace.",
+    "demoTitle": "In a conversation",
+    "demoItems": [
+      {"label": "Find", "title": "Your conversation list", "description": "Search names and roles, filter unread chats, or sort by activity."},
+      {"label": "Ask", "title": "Messages and attachments", "description": "Send a request with the files it needs."},
+      {"label": "Follow", "title": "Replies and activity", "description": "Review responses and answer requests for your approval."}
+    ],
     "benefits": [
-      {"title": "Stay oriented", "description": "See the page, file, message, or task behind an answer without leaving the conversation."},
-      {"title": "Move naturally", "description": "Keep several views open as tabs, switch between them, and resize the workspace around what you are doing."},
-      {"title": "Keep work together", "description": "The conversation and its supporting material remain part of the same task instead of being scattered across apps."}
+      {"title": "Find the right chat", "description": "Use sidebar search, unread and active filters, and name or recent sorting."},
+      {"title": "Keep the reference", "description": "Reply to a message and search within the selected conversation."},
+      {"title": "Bring the file", "description": "Attach files from the composer, or drop them into a chat on macOS."}
     ],
-    "steps": [
-      "Ask Polymux for help as you normally would.",
-      "A useful file, page, conversation, or task opens beside the chat.",
-      "Review it, keep it open, or switch to another view while the conversation continues."
-    ],
-    "example": {"title": "Plan a trip without tab chaos", "description": "Keep a booking page, a saved itinerary, and a conversation with your travel companion open together while Polymux helps you compare the options."},
+    "steps": ["Connect the app to your running agent server.", "Choose a conversation or create one with New Chat.", "Send a request and follow its replies, activity, and approval cards."],
+    "example": {"title": "Plan the next step", "description": "Ask your agent to help turn a project brief into a short list of priorities, then keep refining the plan in the same conversation."},
     "docsPath": "/docs/workspace/"
   },
   {
-    "group": "app",
-    "slug": "hub",
-    "name": "Hub",
-    "icon": "hub",
-    "menuDescription": "Bring messages and email into one inbox",
-    "title": "Messages and email, in one calm place.",
-    "description": "Read, reply to, and work with supported messages and email from one Polymux inbox.",
-    "intro": "Hub brings the conversations that matter into one workspace. You can catch up, reply, and ask Polymux to help with the selected thread without constantly jumping between services.",
-    "imageKey": "hub",
-    "imageAlt": "The Polymux Hub showing connected conversations and a selected thread",
-    "benefits": [
-      {"title": "One place to catch up", "description": "See supported messaging services and email accounts in a single, familiar view."},
-      {"title": "Help with the right context", "description": "Ask for a summary, a draft, or an action while the relevant conversation is already selected."},
-      {"title": "You choose when to be seen", "description": "Use Incognito Mode with supported connections when you want to read without marking a message as seen."}
-    ],
-    "steps": [
-      "Connect the messaging and email accounts you want to use.",
-      "Choose a conversation from the Hub rail.",
-      "Reply yourself or ask Polymux to summarise, draft, find, or act on what is there."
-    ],
-    "example": {"title": "Turn an email into finished work", "description": "Open a request from a colleague, ask Polymux to find the related file, prepare a reply, and keep both visible until you are ready to send."},
-    "docsPath": "/docs/hub/"
-  },
-  {
-    "group": "app",
-    "slug": "drive",
-    "name": "Drive",
-    "icon": "drive",
-    "menuDescription": "Work across local and cloud files",
-    "title": "Your files, wherever they already live.",
-    "description": "Browse and work with local folders, cloud drives, network storage, and supported object storage in Polymux.",
-    "intro": "Drive gives you and your assistant one consistent way to work with files. Keep local folders and connected storage available without turning every task into a hunt through separate windows.",
-    "imageKey": "drive",
-    "imageAlt": "The Polymux Drive showing folders and files in the workspace",
-    "benefits": [
-      {"title": "Bring storage together", "description": "Browse local folders, supported cloud drives, network folders, and S3-compatible storage from one view."},
-      {"title": "Know where outputs belong", "description": "Files created during a conversation stay connected to the work that produced them."},
-      {"title": "Choose your preferred home", "description": "Arrange storage destinations so new files go to the place that makes sense for you."}
-    ],
-    "steps": [
-      "Connect the folders and storage services you want Polymux to use.",
-      "Browse or search from Drive, or simply describe the file you need.",
-      "Open, organise, or create files while keeping the task visible beside them."
-    ],
-    "example": {"title": "Build a report from scattered files", "description": "Ask Polymux to find notes in a local folder, images in cloud storage, and the latest draft, then keep the selected material together while the report takes shape."},
-    "docsPath": "/docs/drive/"
-  },
-  {
-    "group": "app",
-    "slug": "browser",
-    "name": "Browser",
-    "icon": "browser",
-    "menuDescription": "Research without losing your task",
-    "title": "Research without losing the conversation.",
-    "description": "Browse, research, and keep useful webpages beside your Polymux conversation.",
-    "intro": "Browser keeps web research close to the question that started it. Polymux can open pages in its built-in browser, keep the useful ones as tabs, and pause when a website needs your attention.",
-    "imageKey": "browser",
-    "imageAlt": "The Polymux Browser open beside a conversation",
-    "benefits": [
-      {"title": "Research in context", "description": "Keep sources beside the conversation instead of losing the trail across a separate browser window."},
-      {"title": "Use the right tab", "description": "Polymux works with the built-in browser or an external tab you explicitly assign when that is what the task needs."},
-      {"title": "Sensitive moments stay yours", "description": "Sign-ins, CAPTCHAs, payments, and other personal checkpoints can be handed back to you."}
-    ],
-    "steps": [
-      "Ask a question that needs current information or open Browser yourself.",
-      "Polymux visits relevant pages and keeps useful sources available as tabs.",
-      "Review the source beside the answer and take over whenever a personal decision is required."
-    ],
-    "example": {"title": "Compare before you buy", "description": "Keep the official product page, an independent review, and your shortlist visible together while Polymux helps you compare the details that matter to you."},
-    "docsPath": "/docs/browser/"
-  },
-  {
-    "group": "agent",
-    "slug": "memory",
-    "name": "Memory",
-    "icon": "memory",
-    "menuDescription": "Carry useful context between conversations",
-    "title": "An assistant that remembers what matters.",
-    "description": "Let Polymux retain useful preferences, project context, and boundaries between conversations.",
-    "intro": "Memory helps Polymux pick up where you left off. It is designed for useful, durable context—such as how you like to work or what a project is about—without treating every old conversation as equally important.",
-    "imageKey": null,
-    "imageAlt": "",
-    "demoTitle": "Useful context, kept simple",
+    "group": "app", "slug": "groups", "name": "Groups", "icon": "hub",
+    "menuDescription": "Bring several agents into the same conversation",
+    "title": "Give the conversation a team.",
+    "description": "Create native Polymux group chats with several agents and a shared name.",
+    "intro": "Choose several agents when starting a chat to create a group. Give it a name, keep the discussion in one place, and edit its membership from the conversation header as the work changes.",
+    "demoTitle": "A shared conversation",
     "demoItems": [
-      {"label": "Preference", "title": "Keep answers concise", "description": "A stable way you like Polymux to communicate."},
-      {"label": "Project", "title": "Polymux website", "description": "The product and workspace you are actively building."},
-      {"label": "Boundary", "title": "Ask before publishing", "description": "An important rule that should carry into later work."}
+      {"label": "Choose", "title": "Select your agents", "description": "Add recipients in New Chat."},
+      {"label": "Name", "title": "Set a shared purpose", "description": "Give the group an optional chat name."},
+      {"label": "Adjust", "title": "Edit the group", "description": "Open the header to change its name and members."}
     ],
     "benefits": [
-      {"title": "Start with less repetition", "description": "Useful preferences and project context can carry into a new conversation."},
-      {"title": "Keep additions reviewable", "description": "Explicit memories are recorded visibly instead of silently rewriting everything in the background."},
-      {"title": "Stay in control", "description": "Memory is local, separate from recent-screen history, and can be inspected or turned off."}
+      {"title": "Work together", "description": "Include up to 16 agents in a conversation."},
+      {"title": "Keep it recognisable", "description": "Use a group name to distinguish the discussion from individual chats."},
+      {"title": "Change the team", "description": "Edit group membership without creating another workspace."}
     ],
-    "steps": [
-      "Polymux notices when earlier context may help with a new request.",
-      "It retrieves only the relevant parts instead of loading every previous conversation.",
-      "You can explicitly ask it to remember something important or review the memory settings."
-    ],
-    "example": {"title": "Continue a project next week", "description": "Return to a project in a fresh conversation and let Polymux recover the important decisions, your preferred style, and the remaining boundaries without a long recap."},
-    "docsPath": "/docs/memory/"
+    "steps": ["Open New Chat and choose more than one agent.", "Add an optional group name and press Create.", "Use the group header when you need to edit its name or membership."],
+    "example": {"title": "Discuss a project", "description": "Bring a planning agent and a writing agent into a group to discuss a brief. Group membership is distinct from delegating a bounded child task."},
+    "docsPath": "/docs/workspace/"
   },
   {
-    "group": "agent",
-    "slug": "tasks-and-schedules",
-    "name": "Tasks & schedules",
-    "icon": "tasks",
-    "menuDescription": "Plan, delegate, and run work later",
-    "title": "Work that keeps moving when you step away.",
-    "description": "Track work, delegate focused pieces, and schedule recurring requests with Polymux.",
-    "intro": "Not every request should stay trapped in one long conversation. Polymux can keep work visible as tasks, hand focused pieces to subagents, and run repeatable requests on a schedule.",
-    "imageKey": "tasks",
-    "imageAlt": "The Polymux Tasks view showing work and its progress",
-    "benefits": [
-      {"title": "See what is happening", "description": "Follow work that is active, completed, or waiting for attention from the Tasks view."},
-      {"title": "Work in parallel", "description": "Polymux Agent can delegate bounded pieces of a larger request while remaining responsible for the final result."},
-      {"title": "Make routines automatic", "description": "Schedule repeatable checks, summaries, and monitoring jobs for later."}
-    ],
-    "steps": [
-      "Describe the outcome, including whether it should happen now or repeat later.",
-      "Polymux tracks the work and may delegate clearly separated pieces when useful.",
-      "Review progress and results from the workspace, with notifications when configured."
-    ],
-    "example": {"title": "Make a weekly review effortless", "description": "Schedule a Friday summary, let Polymux gather the relevant updates, and open the finished result when it is ready instead of rebuilding the routine each week."},
-    "docsPath": "/docs/schedules-and-tasks/"
-  },
-  {
-    "group": "agent",
-    "slug": "models-and-agents",
-    "name": "Models & agents",
-    "icon": "models",
-    "menuDescription": "Choose the intelligence behind your workspace",
-    "title": "Your choice of intelligence, one familiar workspace.",
-    "description": "Use hosted models, local models, Polymux Agent, or a compatible external agent without replacing your workspace.",
-    "intro": "Polymux separates the assistant experience from the AI running behind it. Choose a hosted service, use a model on your own computer, or connect a compatible agent while keeping the same conversations, files, and controls.",
-    "imageKey": null,
-    "imageAlt": "",
-    "demoTitle": "Choose what fits the task",
+    "group": "app", "slug": "profiles", "name": "Agent profiles", "icon": "models",
+    "menuDescription": "Shape each agent's identity and instructions",
+    "title": "Make each agent recognisable.",
+    "description": "Edit an agent's name, role, role description, avatar, and schedule controls.",
+    "intro": "An agent profile gives your conversation a recognisable identity and purpose. Edit its name, role, instructions, and avatar in the native app, with schedule controls alongside the profile.",
+    "demoTitle": "An agent's profile",
     "demoItems": [
-      {"label": "Hosted", "title": "Leading AI providers", "description": "Use a convenient online model for everyday work."},
-      {"label": "Local", "title": "Models on your computer", "description": "Keep suitable work on hardware you control."},
-      {"label": "Compatible agents", "title": "Bring another runtime", "description": "Connect supported agents without giving up the Polymux workspace."}
+      {"label": "Identity", "title": "Name and avatar", "description": "Recognise the agent in the list and chat header."},
+      {"label": "Purpose", "title": "Role description", "description": "Describe what the agent should do and how it should respond."},
+      {"label": "Schedule", "title": "Background work", "description": "Review routines and the background-review toggle."}
     ],
     "benefits": [
-      {"title": "Choose for each kind of work", "description": "Different profiles can use different models, providers, tools, and agent runtimes."},
-      {"title": "Switch without starting over", "description": "Changing the intelligence behind Polymux does not remove your existing chats or workspace content."},
-      {"title": "Keep one familiar experience", "description": "Polymux continues to provide the conversation, workspace, history, and permission controls around the selected agent."}
+      {"title": "Describe the job", "description": "Keep an agent's role and working instructions in its profile."},
+      {"title": "Choose its look", "description": "Customise the avatar from the profile editor."},
+      {"title": "Review its routines", "description": "See scheduled work and cancel routines from the same panel."}
     ],
-    "steps": [
-      "Connect the hosted or local providers you want available.",
-      "Choose a model or compatible agent for the current profile.",
-      "Use the same Polymux workspace while the selected intelligence handles future work."
-    ],
-    "example": {"title": "Match the model to the moment", "description": "Use a fast hosted model for everyday questions, a local model for suitable private work, and a specialised compatible agent for a focused workflow—all without changing apps."},
+    "steps": ["Open an individual agent conversation.", "Click the agent's header to open Edit profile.", "Edit its details and press Save; use the avatar control for appearance."],
+    "example": {"title": "A writing partner", "description": "Give an agent a writing role and describe the tone and review process you want. Model configuration remains a separate server setting."},
     "docsPath": "/docs/models-and-agents/"
   },
   {
-    "group": "agent",
-    "slug": "skills-and-tools",
-    "name": "Skills & tools",
-    "icon": "skills",
-    "menuDescription": "Teach repeatable ways of working",
-    "title": "Make Polymux useful for the way you work.",
-    "description": "Give Polymux trusted skills and connected tools for the workflows, services, and routines you use.",
-    "intro": "Skills give Polymux a reliable way to approach recurring work. Connected tools let it reach the services needed for a task. Together, they turn a general assistant into one that understands your preferred workflow.",
-    "imageKey": null,
-    "imageAlt": "",
-    "demoTitle": "A workflow, not just a prompt",
+    "group": "app", "slug": "voice", "name": "Voice", "icon": "hub",
+    "menuDescription": "Configure voice separately from text-agent models",
+    "title": "Choose how you use voice.",
+    "description": "Configure Cascaded or Full Duplex voice, Gemini models, and voice credentials in native Settings.",
+    "intro": "The native Settings panel offers Cascaded and Full Duplex voice modes. Configure the applicable Gemini model and credentials there, separately from the text model used by the Go agent server.",
+    "demoTitle": "Voice settings",
     "demoItems": [
-      {"label": "Skill", "title": "Your preferred process", "description": "A repeatable way to prepare, check, and finish a kind of task."},
-      {"label": "Tool", "title": "The service it needs", "description": "A connected app or source that supplies the real information."},
-      {"label": "Permission", "title": "Your decision boundary", "description": "A clear point where Polymux asks before anything sensitive happens."}
+      {"label": "Mode", "title": "Cascaded or Full Duplex", "description": "Choose the voice mode in Settings."},
+      {"label": "Provider", "title": "Gemini configuration", "description": "Set the applicable model, voice, and API key."},
+      {"label": "Permission", "title": "Microphone access", "description": "Approve the operating-system access required by the feature."}
     ],
     "benefits": [
-      {"title": "Be consistent", "description": "A trusted skill helps Polymux follow the same useful process each time."},
-      {"title": "Connect the right services", "description": "Tools and MCP servers can make information and actions available to the current profile."},
-      {"title": "Keep boundaries clear", "description": "Connecting a tool does not mean every sensitive action should happen without your approval."}
+      {"title": "Choose a mode", "description": "Use the native Voice controls rather than older provider-settings instructions."},
+      {"title": "Keep models separate", "description": "Voice settings do not replace the server's text-agent model configuration."},
+      {"title": "Grant access deliberately", "description": "Microphone and speech permissions are optional and apply only when using voice."}
     ],
-    "steps": [
-      "Add trusted skills and connections for the work you want Polymux to handle.",
-      "Polymux selects the relevant guidance and tools when a request matches.",
-      "You stay involved at permission, account, payment, publishing, and other important checkpoints."
+    "steps": ["Connect the app to your server and open Settings.", "Choose a voice mode and configure its Gemini model and key.", "Check the feature's status and required system permissions before using voice."],
+    "example": {"title": "Choose your voice setup", "description": "Set up a voice mode without changing the model endpoint used for text conversations. Keep API keys out of chat messages."},
+    "docsPath": "/docs/models-and-agents/"
+  },
+  {
+    "group": "agent", "slug": "memory", "name": "Memory", "icon": "memory",
+    "menuDescription": "Save useful notes within an agent conversation",
+    "title": "Keep useful context for later.",
+    "description": "Agents can save, recall, and forget conversation-scoped memory on the server.",
+    "intro": "The Go server provides explicit memory tools for useful notes. Memory is scoped to an agent and conversation, stored in SQLite on the server, and kept separate from the app's conversation cache.",
+    "demoTitle": "Memory boundaries",
+    "demoItems": [
+      {"label": "Save", "title": "A useful preference", "description": "Ask the agent to remember something for this conversation."},
+      {"label": "Recall", "title": "Relevant notes", "description": "The server retrieves notes within a bounded context budget."},
+      {"label": "Forget", "title": "Remove active memory", "description": "Forgetting is separate from deleting history or backups."}
     ],
-    "example": {"title": "Turn your routine into a reliable workflow", "description": "Give Polymux your preferred job-search process, connect the sources it needs, and keep application submission as a clear approval step that remains yours."},
+    "benefits": [
+      {"title": "Be explicit", "description": "Ask for a memory change and check the agent's result."},
+      {"title": "Respect the scope", "description": "Notes are not automatically shared with every agent or delegated child."},
+      {"title": "Know the location", "description": "A remote server stores memory on that server, not only on your app device."}
+    ],
+    "steps": ["Ask an agent to save a useful note in your conversation.", "Check that the memory operation succeeded.", "Ask it to recall or forget the note when needed."],
+    "example": {"title": "Keep a working preference", "description": "Ask an agent to remember your preferred review format for this conversation, rather than assuming every new chat shares the same memory."},
+    "docsPath": "/docs/memory/"
+  },
+  {
+    "group": "agent", "slug": "tasks-and-schedules", "name": "Tasks & schedules", "icon": "tasks",
+    "menuDescription": "Schedule routines and delegate bounded work",
+    "title": "Give work a time and a scope.",
+    "description": "Ask agents for one-shot or interval routines and bounded delegated tasks on the server.",
+    "intro": "Agents can schedule one-shot or interval routines and queue bounded child tasks. Review schedules in an agent's profile and follow work in the conversation, rather than looking for the older Tasks board.",
+    "demoTitle": "Ways work runs",
+    "demoItems": [
+      {"label": "Routine", "title": "A time to run", "description": "Specify the task, start time, timezone, and interval."},
+      {"label": "Review", "title": "Background reviews", "description": "Control periodic reviews from the agent's profile."},
+      {"label": "Delegate", "title": "A bounded child task", "description": "A child receives its explicit task, not the whole parent chat."}
+    ],
+    "benefits": [
+      {"title": "Check the timing", "description": "Confirm the next run instead of assuming a calendar rule became a supported interval."},
+      {"title": "Control background work", "description": "Toggle background reviews or cancel a routine in Edit profile."},
+      {"title": "Keep delegation bounded", "description": "Children cannot recursively delegate and do not automatically receive private parent memory."}
+    ],
+    "steps": ["Describe the work and its timing or delegation boundary in chat.", "Review any approval and the confirmed schedule or task state.", "Keep the server and required connections running, then check the result."],
+    "example": {"title": "Review a brief later", "description": "Ask for a one-time reminder with an explicit time and timezone. Confirm the saved routine and cancel it from the agent profile if plans change."},
+    "docsPath": "/docs/schedules-and-tasks/"
+  },
+  {
+    "group": "agent", "slug": "models-and-agents", "name": "Models & agents", "icon": "models",
+    "menuDescription": "Configure model access on your agent server",
+    "title": "The model runs behind your server.",
+    "description": "Configure the Go server's OpenAI-compatible model endpoint separately from agent profiles and voice.",
+    "intro": "The app displays conversations while the Go server runs agents. Configure the text model's compatible endpoint and credentials on that server; agent profiles and native voice settings are separate controls.",
+    "demoTitle": "Three separate controls",
+    "demoItems": [
+      {"label": "Server", "title": "Text model", "description": "Startup model.json or environment configuration."},
+      {"label": "Agent", "title": "Role and instructions", "description": "Edit the agent's profile in the app."},
+      {"label": "Voice", "title": "Gemini voice settings", "description": "Configure the applicable voice model in Settings."}
+    ],
+    "benefits": [
+      {"title": "Keep configuration clear", "description": "Know whether a problem belongs to the app connection, model endpoint, or agent instructions."},
+      {"title": "Keep secrets out of chat", "description": "Use server-side secret injection or an owner-only credential file."},
+      {"title": "Use current guidance", "description": "The native app has no general Providers, Models, or ACP settings page."}
+    ],
+    "steps": ["Configure a compatible model endpoint and model identifier on the server.", "Supply its credential through the server's supported secret configuration.", "Connect the app and send a small request to verify a reply."],
+    "example": {"title": "Diagnose the right connection", "description": "If conversations load but replies fail, inspect the server's model setup rather than searching the native app for an older Providers page."},
+    "docsPath": "/docs/models-and-agents/"
+  },
+  {
+    "group": "agent", "slug": "skills-and-tools", "name": "Skills & tools", "icon": "skills",
+    "menuDescription": "Connect trusted instructions and tools per agent",
+    "title": "Give an agent the tools it needs.",
+    "description": "Configure trusted Markdown skills and MCP connections for agents on the server.",
+    "intro": "Skills provide working instructions and MCP connections provide external tools. Configure trusted integrations for the agent on its server, remembering that server paths and processes are not your app device's paths and processes.",
+    "demoTitle": "Integration boundaries",
+    "demoItems": [
+      {"label": "Skill", "title": "Trusted Markdown", "description": "Register an existing absolute Markdown path on the server."},
+      {"label": "MCP", "title": "Connected tools", "description": "Use supported stdio or Streamable HTTP connections."},
+      {"label": "Review", "title": "Deliberate access", "description": "Confirm the account, scope, and approval classification."}
+    ],
+    "benefits": [
+      {"title": "Configure the right agent", "description": "Integration changes are persisted per agent from a direct conversation."},
+      {"title": "Know where tools run", "description": "Stdio integrations run on the server computer."},
+      {"title": "Review changes", "description": "Saved definition changes become available on the next turn."}
+    ],
+    "steps": ["Choose a trusted skill file or MCP service and its intended access.", "Ask the agent in a direct chat to manage the integration and review setup decisions.", "Use a new turn to check the saved configuration and available tools."],
+    "example": {"title": "Use a repeatable review process", "description": "Register a trusted review skill already present on the server, then ask the agent to use it for the next task. No native Skills settings page is required."},
     "docsPath": "/docs/skills-and-mcp/"
   }
 ]

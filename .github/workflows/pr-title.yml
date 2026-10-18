@@ -1,0 +1,26 @@
+name: PR title
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+permissions:
+  contents: read
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title for lane prefixes and ANSI codes
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf "Title: %q\n" "$TITLE"
+          fail=0
+          if printf "%s" "$TITLE" | grep -q $'\x1b'; then echo "::error::PR title contains ANSI escape codes"; fail=1; fi
+          # case-sensitive on purpose: plain titles like "Lane holds ..." must pass
+          case "$TITLE" in
+            "#"*) echo "::error::PR title starts with '#'"; fail=1 ;;
+            "["*) echo "::error::PR title starts with '['"; fail=1 ;;
+            lane*) echo "::error::PR title starts with 'lane'"; fail=1 ;;
+            agent:*) echo "::error::PR title starts with 'agent:'"; fail=1 ;;
+          esac
+          if [[ "$TITLE" =~ ^[A-Z]+[0-9]+: ]]; then echo "::error::PR title starts with an ID prefix like A20: or CL1:"; fail=1; fi
+          exit $fail

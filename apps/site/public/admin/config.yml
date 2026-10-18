@@ -1,13 +1,12 @@
 backend:
   name: github
-  repo: CarlvinceTan/Polymux
-  branch: main
+  repo: CarlvinceTan/polymux
+  branch: dev
   auth_methods: [token]
 
 site_url: https://polymux.com
 display_url: https://polymux.com
 logo_url: https://polymux.com/favicon-32.png
-publish_mode: editorial_workflow
 media_folder: apps/site/public/blog/uploads
 public_folder: /blog/uploads
 

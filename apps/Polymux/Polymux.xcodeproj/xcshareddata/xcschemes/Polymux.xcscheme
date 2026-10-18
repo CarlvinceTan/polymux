@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2700" version="1.3">
+  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
+    <BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A10000000000000000000009" BuildableName="Polymux.app" BlueprintName="Polymux" ReferencedContainer="container:Polymux.xcodeproj"/>
+    </BuildActionEntry>
+    <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="NO">
+      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B10000000000000000000008" BuildableName="PolymuxUITests.xctest" BlueprintName="PolymuxUITests" ReferencedContainer="container:Polymux.xcodeproj"/>
+    </BuildActionEntry></BuildActionEntries>
+  </BuildAction>
+  <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
+    <PreActions>
+      <ExecutionAction ActionType="Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+        <ActionContent title="Sign unsigned macOS test runner" scriptText="exec &gt;&quot;$PROJECT_DIR/../../.build/logs/runner-sign.log&quot; 2&gt;&amp;1&#10;echo &quot;Products: $BUILT_PRODUCTS_DIR&quot;&#10;if [ -d &quot;$BUILT_PRODUCTS_DIR/PolymuxUITests-Runner.app/Contents&quot; ] &amp;&amp; ! /usr/bin/codesign --verify &quot;$BUILT_PRODUCTS_DIR/PolymuxUITests-Runner.app&quot; 2&gt;/dev/null; then&#10;  /usr/bin/codesign --force --deep --sign - &quot;$BUILT_PRODUCTS_DIR/PolymuxUITests-Runner.app&quot;&#10;fi">
+          <EnvironmentBuildable><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A10000000000000000000009" BuildableName="Polymux.app" BlueprintName="Polymux" ReferencedContainer="container:Polymux.xcodeproj"/></EnvironmentBuildable>
+        </ActionContent>
+      </ExecutionAction>
+    </PreActions>
+    <Testables><TestableReference skipped="NO">
+      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B10000000000000000000008" BuildableName="PolymuxUITests.xctest" BlueprintName="PolymuxUITests" ReferencedContainer="container:Polymux.xcodeproj"/>
+    </TestableReference></Testables>
+  </TestAction>
+  <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
+    <BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A10000000000000000000009" BuildableName="Polymux.app" BlueprintName="Polymux" ReferencedContainer="container:Polymux.xcodeproj"/></BuildableProductRunnable>
+  </LaunchAction>
+  <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES">
+    <BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A10000000000000000000009" BuildableName="Polymux.app" BlueprintName="Polymux" ReferencedContainer="container:Polymux.xcodeproj"/></BuildableProductRunnable>
+  </ProfileAction>
+  <AnalyzeAction buildConfiguration="Debug"/>
+  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
+</Scheme>

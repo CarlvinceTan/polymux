@@ -1,7 +1,7 @@
 ---
 title: Privacy and permissions
 slug: privacy-and-permissions
-description: See how local data, browser access, credentials, and operating-system permissions are handled.
+description: Understand what stays on the app device, what reaches the agent server, and which permissions are optional.
 section: Help
 sectionOrder: 4
 order: 1
@@ -10,26 +10,28 @@ published: true
 
 # Privacy and permissions
 
-Polymux is a local desktop application, but the services and models you connect may process data under their own terms. Review a provider before giving it access to sensitive work.
+Polymux has no separate hosted account to sign in to. The native app connects to an agent server you configure, and that server may use external models and services. Review all of those destinations before sharing sensitive work.
 
-## Local data
+## App device and agent server
 
-Chats, run history, workspace state, memory, and connected-service configuration are stored locally by the desktop app. Cloud storage, messaging services, and hosted model providers receive only the information needed for the action you request through that service.
+The app caches conversations on its device. The connected server stores authoritative conversation history and runs agents and tools. Messages and attachments travel to that server. If it runs on another computer, that data is not confined to the app device.
+
+Hosted models and connected tools can receive task content according to their configuration and terms. A local app or server does not make a hosted model local. MCP connections and third-party service accounts belong to you, not a Polymux cloud account.
 
 Read the full [privacy policy](/privacy-policy/) for the current product and browser-extension details.
 
 ## Credentials
 
-Provider keys and connection credentials are stored through protected operating-system storage where supported. Avoid placing secrets directly in prompts, skill instructions, source files, or public repositories.
+Server-managed provider credentials use the server's credential storage. A remote server's credentials do not live in the app's Settings panel. Avoid placing secrets in prompts, screenshots, skill instructions, source files, or public repositories.
 
 ## Browser access
 
-The external browser extension can maintain local tab metadata, but it receives page content and interaction access only for an explicitly assigned tab. The in-app browser keeps its own browsing state and permissions.
+The older Electron extension's tab-inventory and tab-assignment model is not a native-app settings feature. Do not infer that your current browser tabs are shared because an older guide described them.
 
 ## Operating-system access
 
-Features such as microphone input, notifications, app automation, local screen context, and iMessage rely on operating-system permissions. Enable only what you plan to use. Polymux remains functional with optional permissions disabled, though the related feature will be unavailable.
+Microphone input, speech recognition, and notifications have different purposes. Enable only what you plan to use, and let the operating system handle its approval prompts. Text conversations do not require every optional permission.
 
 ## Consequential actions
 
-Giving a tool access does not automatically authorise every outcome. The agent may stop for confirmation before sending, publishing, paying, deleting, or completing another consequential external action.
+Review approval and confirmation cards in the conversation before answering them. Installing a tool does not authorise every send, publication, payment, deletion, or account action it can perform. Tool policies depend on the server and integration; do not assume every consequential action has an automatic confirmation guard.

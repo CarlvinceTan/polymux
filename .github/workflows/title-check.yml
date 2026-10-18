@@ -1,0 +1,68 @@
+name: Title check
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+concurrency:
+  group: title-check-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  title-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const item = context.payload.issue
+              ? (await github.rest.issues.get({
+                  ...context.repo, issue_number: context.payload.issue.number
+                })).data
+              : context.payload.pull_request;
+            const bad = /^(\[[^\]]+\]|#+|[A-Za-z-]+:)\s/.test(item.title);
+            const rule = 'Use plain English; put the area in labels.';
+            if (context.eventName === 'pull_request') {
+              if (bad) core.setFailed(`Title starts with a code prefix. ${rule}`);
+              return;
+            }
+            const repo = {...context.repo, issue_number: item.number};
+            const label = 'title-needs-fix';
+            if (!bad) {
+              try {
+                await github.rest.issues.removeLabel({...repo, name: label});
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+              return;
+            }
+            try {
+              await github.rest.issues.getLabel({...context.repo, name: label});
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              try {
+                await github.rest.issues.createLabel({
+                  ...context.repo, name: label, color: 'D93F0B',
+                  description: 'Title starts with a code prefix'
+                });
+              } catch (error) {
+                if (error.status !== 422) throw error;
+              }
+            }
+            await github.rest.issues.addLabels({...repo, labels: [label]});
+            const marker = '<!-- title-check -->';
+            const comments = await github.paginate(github.rest.issues.listComments, repo);
+            if (!comments.some(comment =>
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.includes(marker))) {
+              await github.rest.issues.createComment({
+                ...repo, body: `${marker}\nTitle starts with a code prefix. ${rule}`
+              });
+            }

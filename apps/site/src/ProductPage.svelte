@@ -1,5 +1,5 @@
 <script lang="ts">
-  import logo from '../../desktop/src/renderer/public/polymux.svg';
+  import logo from './assets/polymux.svg';
   import DownloadIcon from './lib/DownloadIcon.svelte';
   import FeatureIcon from './lib/FeatureIcon.svelte';
   import MobileMenu from './lib/MobileMenu.svelte';
@@ -26,7 +26,7 @@
     <meta name="description" content={feature.description} />
   {:else if !notFound}
     <title>Product — Polymux</title>
-    <meta name="description" content="Explore the app and agent features that make Polymux a complete personal assistant workspace." />
+    <meta name="description" content="Explore native Polymux conversations, groups, profiles, and the capabilities of its Go agent server." />
   {/if}
 </svelte:head>
 
@@ -38,8 +38,8 @@
       <a href="/docs/">Docs</a>
       <a href="/releases/">Releases</a>
     </nav>
-    <a class="product-download" href="/#download"><DownloadIcon />Download</a>
-    <MobileMenu />
+    <a class="product-download" href="/docs/installation/"><DownloadIcon />Install</a>
+    <MobileMenu downloadHref="/docs/installation/" />
   </div>
 </header>
 
@@ -52,23 +52,19 @@
         <h1>{feature.title}</h1>
         <p>{feature.intro}</p>
         <div class="feature-actions">
-          <a class="feature-primary" href="/#download"><DownloadIcon />Download</a>
+          <a class="feature-primary" href="/docs/quickstart/">Get started</a>
           <a class="feature-secondary" href={feature.docsPath}>Read the guide <span aria-hidden="true">→</span></a>
         </div>
       </div>
 
-      {#if feature.image}
-        <figure class="feature-visual screenshot"><img src={feature.image} alt={feature.imageAlt} /></figure>
-      {:else}
-        <div class="feature-visual feature-demo">
-          <p>{feature.demoTitle}</p>
-          <div>
-            {#each feature.demoItems ?? [] as item (item.title)}
-              <article><span>{item.label}</span><strong>{item.title}</strong><small>{item.description}</small></article>
-            {/each}
-          </div>
+      <div class="feature-visual feature-demo">
+        <p>{feature.demoTitle}</p>
+        <div>
+          {#each feature.demoItems ?? [] as item (item.title)}
+            <article><span>{item.label}</span><strong>{item.title}</strong><small>{item.description}</small></article>
+          {/each}
         </div>
-      {/if}
+      </div>
     </section>
 
     <section class="feature-benefits" aria-label={`${feature.name} benefits`}>
@@ -78,7 +74,7 @@
     </section>
 
     <section class="feature-how">
-      <div><p class="feature-eyebrow">How it feels to use</p><h2>Simple from the first step.</h2></div>
+      <div><p class="feature-eyebrow">Using Polymux</p><h2>Start with the right setup.</h2></div>
       <ol>
         {#each feature.steps as step, index (step)}
           <li><span>{index + 1}</span><p>{step}</p></li>
@@ -109,8 +105,8 @@
   <main class="product-overview">
     <section class="product-intro">
       <p class="feature-eyebrow">Polymux product</p>
-      <h1>A complete place for you and your assistant to work.</h1>
-      <p>Polymux combines a calm desktop workspace with an agent that can remember context, use your tools, and keep work moving.</p>
+      <h1>A place to talk with your agents.</h1>
+      <p>The native macOS and iOS app connects to your Go agent server. Explore conversations and agent capabilities below, then check the installation guide for build availability.</p>
     </section>
 
     <section class="feature-catalogue">
@@ -131,7 +127,7 @@
       </div>
     </section>
 
-    <section class="product-cta"><div><p class="feature-eyebrow">Get Polymux</p><h2>Ready when you are.</h2></div><a class="feature-primary" href="/#download"><DownloadIcon />Download</a></section>
+    <section class="product-cta"><div><p class="feature-eyebrow">Get Polymux</p><h2>Connect your app and server.</h2></div><a class="feature-primary" href="/docs/installation/">Installation guide</a></section>
   </main>
 {:else}
   <main class="product-not-found"><span>404</span><h1>That feature page isn’t here.</h1><a href="/product/">Explore Polymux features</a></main>
@@ -144,3 +140,8 @@
   <a href="/releases/">Releases</a>
   <a href="/privacy-policy/">Privacy</a>
 </footer>
+
+<style>
+  .feature-demo > p { color: var(--ink); }
+  .feature-demo small { color: var(--muted); }
+</style>

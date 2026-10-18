@@ -1,6 +1,6 @@
 <script lang="ts">
   import {onMount} from 'svelte';
-  import logo from '../../desktop/src/renderer/public/polymux.svg';
+  import logo from './assets/polymux.svg';
   import {formatBlogDate, getBlogPost, nextPosts} from './lib/blog';
   import MobileMenu from './lib/MobileMenu.svelte';
 

@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 200 200" role="img" aria-label="Polymux">
-  <rect width="200" height="200" fill="#fff"/>
-  <path fill="#000" transform="translate(-10 0)"
-        d="M 40 40 L 120 40 A 60 60 0 0 1 120 160 L 40 160 L 70 120 L 110 120 A 20 20 0 0 0 110 80 L 70 80 Z"/>
-</svg>

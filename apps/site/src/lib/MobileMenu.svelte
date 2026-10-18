@@ -59,7 +59,7 @@
         <DownloadIcon />
         <span>Download</span>
       </a>
-      <a class="mobile-menu-github" href="https://github.com/CarlvinceTan/Polymux" onclick={() => open = false}>
+      <a class="mobile-menu-github" href="https://github.com/CarlvinceTan/polymux" onclick={() => open = false}>
         <img src={github} alt="" />
         <span>GitHub</span>
       </a>

@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Chat Style">
-  <rect width="512" height="512" rx="120" fill="#7C3AED"/>
-  <path d="M108 136h296c52 0 94 42 94 94v140c0 52-42 94-94 94H244l-88 64v-64h-48c-52 0-94-42-94-94V230c0-52 42-94 94-94Z" fill="#fff"/>
-  <path d="M156 224h200M156 288h138" fill="none" stroke="#7C3AED" stroke-linecap="round" stroke-width="32"/>
-</svg>

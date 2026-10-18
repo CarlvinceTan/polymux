@@ -1,7 +1,9 @@
-const REPOSITORY = 'CarlvinceTan/Polymux';
+import {isElectronRelease} from '../lib/update-feed.js';
+
+const REPOSITORY = 'CarlvinceTan/polymux';
 
 export default async function handler(_request, response) {
-  const result = await fetch(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=10`, {
+  const result = await fetch(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, {
     headers: {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'Polymux-Updater',
@@ -15,7 +17,8 @@ export default async function handler(_request, response) {
   }
 
   const releases = await result.json();
-  const release = releases.find((item) => !item.draft);
+  const release = releases.find((item) =>
+    !item.draft && !item.prerelease && isElectronRelease(item.tag_name));
   if (!release) {
     response.setHeader('Cache-Control', 'no-store');
     return response.status(503).json({error: 'No public Polymux release is available yet.'});
