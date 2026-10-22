@@ -109,6 +109,7 @@ extension SettingsPatch {
         if let textProvider { value.textProvider = textProvider }
         if let textModel { value.textModel = textModel }
         if let voicePrompt { value.voicePrompt = voicePrompt }
+        if let voiceLanguage { value.voiceLanguage = voiceLanguage }
     }
 
     mutating func merge(_ value: SettingsPatch) {
@@ -121,5 +122,6 @@ extension SettingsPatch {
         textProvider = value.textProvider ?? textProvider
         textModel = value.textModel ?? textModel
         voicePrompt = value.voicePrompt ?? voicePrompt
+        voiceLanguage = value.voiceLanguage ?? voiceLanguage
     }
 }

@@ -16,7 +16,7 @@ func (*taskTool) Name() string                           { return "manage_tasks"
 func (*taskTool) Label() string                          { return "Manage resumable tasks" }
 func (*taskTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (*taskTool) Description() string {
-	return "List/cancel scoped multi-step tasks, or checkpoint this stage for a fresh automatic continuation after_seconds later. Call checkpoint alone at the end of a successful stage; no further tools can run. Save the established goal, next step and concrete evidence, never tool calls to replay or secrets. Set wait_for_user only when you need the user's answer; a dependency that may clear on its own is better served by after_seconds, which re-checks automatically. Only a direct user turn can resume parked/interrupted tasks after reviewing any ambiguous effects. Continuations are bounded to 8 stages/128 tools/256 KiB output; use this for real multi-step work, not an endless polling loop."
+	return "List/cancel scoped multi-step tasks, or checkpoint this stage for a fresh automatic continuation after_seconds later. Call checkpoint alone at the end of a successful stage; no further tools can run. Save the established goal, next step and concrete evidence, never tool calls to replay or secrets. Set wait_for_user only when you need the user's answer; a dependency that may clear on its own is better served by after_seconds, which re-checks automatically. Resume a parked task when its answer or dependency is available, and verify any ambiguous effects before retrying. Continuations are bounded to 8 stages/256 KiB output; use this for real multi-step work, not an endless polling loop."
 }
 func (t *taskTool) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
@@ -28,7 +28,7 @@ func (t *taskTool) Schema() ai.ToolSchema {
 }
 func (t *taskTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
-	if state == nil || state.work.Trigger == "created" || state.work.Trigger == "peer" || state.work.Trigger == "review" {
+	if state == nil || state.work.Trigger == "created" {
 		return agent.AgentToolResult{}, errors.New("no task scope")
 	}
 	var input struct {
@@ -57,9 +57,6 @@ func (t *taskTool) Execute(ctx context.Context, _ string, args json.RawMessage, 
 		}
 		return toolResult(map[string]bool{"cancelled": true})
 	case "resume":
-		if state.work.Trigger != "message" {
-			return agent.AgentToolResult{}, errors.New("resume requires a new user turn")
-		}
 		if err := t.server.Store.ResumeTask(ctx, owner, thread, input.ID, input.Checkpoint); err != nil {
 			return agent.AgentToolResult{}, err
 		}

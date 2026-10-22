@@ -117,6 +117,7 @@ public struct Settings: Codable, Hashable, Sendable {
     public var textProvider: String
     public var textModel: String
     public var voicePrompt: String
+    public var voiceLanguage: String
     public var speechKeys: [String]
 
     public init(
@@ -130,6 +131,7 @@ public struct Settings: Codable, Hashable, Sendable {
         textProvider: String = "",
         textModel: String = "",
         voicePrompt: String = "",
+        voiceLanguage: String = "",
         speechKeys: [String] = []
     ) {
         self.revision = revision
@@ -142,6 +144,7 @@ public struct Settings: Codable, Hashable, Sendable {
         self.textProvider = textProvider
         self.textModel = textModel
         self.voicePrompt = voicePrompt
+        self.voiceLanguage = voiceLanguage
         self.speechKeys = speechKeys
     }
 }
@@ -156,6 +159,7 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
     public var textProvider: String?
     public var textModel: String?
     public var voicePrompt: String?
+    public var voiceLanguage: String?
 
     public init(
         appearance: String? = nil,
@@ -166,7 +170,8 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         liveVoice: String? = nil,
         textProvider: String? = nil,
         textModel: String? = nil,
-        voicePrompt: String? = nil
+        voicePrompt: String? = nil,
+        voiceLanguage: String? = nil
     ) {
         self.appearance = appearance
         self.sidebarWidth = sidebarWidth
@@ -177,6 +182,7 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         self.textProvider = textProvider
         self.textModel = textModel
         self.voicePrompt = voicePrompt
+        self.voiceLanguage = voiceLanguage
     }
 }
 
@@ -313,6 +319,9 @@ public struct Part: Codable, Hashable, Sendable {
     public var question: String?
     public var options: [ChoiceOption]?
     public var answerID: String?
+    public var answerText: String?
+    public var allowText: Bool?
+    public var credential: CredentialRequest?
 
     public init(
         kind: String = "",
@@ -322,7 +331,10 @@ public struct Part: Codable, Hashable, Sendable {
         args: String? = nil,
         question: String? = nil,
         options: [ChoiceOption]? = nil,
-        answerID: String? = nil
+        answerID: String? = nil,
+        answerText: String? = nil,
+        allowText: Bool? = nil,
+        credential: CredentialRequest? = nil
     ) {
         self.kind = kind
         self.text = text
@@ -332,6 +344,9 @@ public struct Part: Codable, Hashable, Sendable {
         self.question = question
         self.options = options
         self.answerID = answerID
+        self.answerText = answerText
+        self.allowText = allowText
+        self.credential = credential
     }
 }
 
@@ -404,13 +419,16 @@ public struct Message: Codable, Hashable, Sendable {
 }
 
 public struct WireError: Codable, Hashable, Sendable {
+    public var detail: String?
     public var code: String
     public var message: String
 
     public init(
+        detail: String? = nil,
         code: String = "",
         message: String = ""
     ) {
+        self.detail = detail
         self.code = code
         self.message = message
     }
@@ -435,7 +453,6 @@ public struct Event: Codable, Hashable, Sendable {
     public var routineID: String?
     public var summary: String?
     public var usage: Usage?
-    public var approval: ApprovalRequest?
     public var payload: Activity?
 
     public init(
@@ -457,7 +474,6 @@ public struct Event: Codable, Hashable, Sendable {
         routineID: String? = nil,
         summary: String? = nil,
         usage: Usage? = nil,
-        approval: ApprovalRequest? = nil,
         payload: Activity? = nil
     ) {
         self.seq = seq
@@ -478,30 +494,7 @@ public struct Event: Codable, Hashable, Sendable {
         self.routineID = routineID
         self.summary = summary
         self.usage = usage
-        self.approval = approval
         self.payload = payload
-    }
-}
-
-public struct ApprovalRequest: Codable, Hashable, Sendable {
-    public var id: String
-    public var runID: String
-    public var tool: String
-    public var args: String
-    public var expiresAt: String
-
-    public init(
-        id: String = "",
-        runID: String = "",
-        tool: String = "",
-        args: String = "",
-        expiresAt: String = ""
-    ) {
-        self.id = id
-        self.runID = runID
-        self.tool = tool
-        self.args = args
-        self.expiresAt = expiresAt
     }
 }
 
@@ -583,6 +576,8 @@ public struct Routine: Codable, Hashable, Sendable {
     public var trigger: String
     public var prompt: String
     public var timezone: String?
+    public var crons: [String]?
+    public var watch: RoutineWatch?
 
     public init(
         at: String = "",
@@ -594,7 +589,9 @@ public struct Routine: Codable, Hashable, Sendable {
         agentID: String = "",
         trigger: String = "",
         prompt: String = "",
-        timezone: String? = nil
+        timezone: String? = nil,
+        crons: [String]? = nil,
+        watch: RoutineWatch? = nil
     ) {
         self.at = at
         self.nextAt = nextAt
@@ -606,6 +603,33 @@ public struct Routine: Codable, Hashable, Sendable {
         self.trigger = trigger
         self.prompt = prompt
         self.timezone = timezone
+        self.crons = crons
+        self.watch = watch
+    }
+}
+
+public struct RoutineRun: Codable, Hashable, Sendable {
+    public var id: String
+    public var status: String
+    public var summary: String
+    public var createdAt: String
+    public var finishedAt: String?
+    public var error: WireError?
+
+    public init(
+        id: String = "",
+        status: String = "",
+        summary: String = "",
+        createdAt: String = "",
+        finishedAt: String? = nil,
+        error: WireError? = nil
+    ) {
+        self.id = id
+        self.status = status
+        self.summary = summary
+        self.createdAt = createdAt
+        self.finishedAt = finishedAt
+        self.error = error
     }
 }
 
@@ -614,17 +638,23 @@ public struct RoutineRequest: Codable, Hashable, Sendable {
     public var at: String
     public var intervalSeconds: Int64
     public var timezone: String?
+    public var crons: [String]?
+    public var watch: RoutineWatch?
 
     public init(
         prompt: String = "",
         at: String = "",
         intervalSeconds: Int64 = 0,
-        timezone: String? = nil
+        timezone: String? = nil,
+        crons: [String]? = nil,
+        watch: RoutineWatch? = nil
     ) {
         self.prompt = prompt
         self.at = at
         self.intervalSeconds = intervalSeconds
         self.timezone = timezone
+        self.crons = crons
+        self.watch = watch
     }
 }
 
@@ -755,6 +785,7 @@ public struct PeerDelivery: Codable, Hashable, Sendable {
     public var intent: String
     public var status: String
     public var createdAt: String
+    public var hops: Int64?
 
     public init(
         id: String = "",
@@ -765,7 +796,8 @@ public struct PeerDelivery: Codable, Hashable, Sendable {
         runID: String? = nil,
         intent: String = "",
         status: String = "",
-        createdAt: String = ""
+        createdAt: String = "",
+        hops: Int64? = nil
     ) {
         self.id = id
         self.sourceAgentID = sourceAgentID
@@ -776,6 +808,7 @@ public struct PeerDelivery: Codable, Hashable, Sendable {
         self.intent = intent
         self.status = status
         self.createdAt = createdAt
+        self.hops = hops
     }
 }
 
@@ -1126,5 +1159,137 @@ public struct SidebarEvent: Codable, Hashable, Sendable {
         self.changedThreadIDs = changedThreadIDs
         self.placements = placements
         self.createdAt = createdAt
+    }
+}
+
+public struct SearchResult: Codable, Hashable, Sendable {
+    public var id: String
+    public var kind: String
+    public var title: String
+    public var snippet: String
+    public var threadID: String
+    public var score: Double
+    public var messageID: String?
+    public var agentID: String?
+    public var attachment: Attachment?
+    public var message: Message?
+
+    public init(
+        id: String = "",
+        kind: String = "",
+        title: String = "",
+        snippet: String = "",
+        threadID: String = "",
+        score: Double = 0,
+        messageID: String? = nil,
+        agentID: String? = nil,
+        attachment: Attachment? = nil,
+        message: Message? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.snippet = snippet
+        self.threadID = threadID
+        self.score = score
+        self.messageID = messageID
+        self.agentID = agentID
+        self.attachment = attachment
+        self.message = message
+    }
+}
+
+public struct Activity: Codable, Hashable, Sendable {
+    public var kind: String
+    public var verb: String
+    public var objectID: String
+    public var objectLabel: String
+    public var iconOrAgentID: String
+    public var at: String
+    public var agentIDs: [String]?
+    public var messageIDs: [String]?
+
+    public init(
+        kind: String = "",
+        verb: String = "",
+        objectID: String = "",
+        objectLabel: String = "",
+        iconOrAgentID: String = "",
+        at: String = WireDate.string(),
+        agentIDs: [String]? = nil,
+        messageIDs: [String]? = nil
+    ) {
+        self.kind = kind
+        self.verb = verb
+        self.objectID = objectID
+        self.objectLabel = objectLabel
+        self.iconOrAgentID = iconOrAgentID
+        self.at = at
+        self.agentIDs = agentIDs
+        self.messageIDs = messageIDs
+    }
+}
+
+public struct ChoiceAnswer: Codable, Hashable, Sendable {
+    public var optionID: String
+    public var text: String?
+
+    public init(
+        optionID: String = "",
+        text: String? = nil
+    ) {
+        self.optionID = optionID
+        self.text = text
+    }
+}
+
+public struct CredentialRequest: Codable, Hashable, Sendable {
+    public var name: String
+    public var label: String
+    public var origin: String
+    public var header: String
+    public var scheme: String
+    public var status: String
+
+    public init(
+        name: String = "",
+        label: String = "",
+        origin: String = "",
+        header: String = "",
+        scheme: String = "",
+        status: String = ""
+    ) {
+        self.name = name
+        self.label = label
+        self.origin = origin
+        self.header = header
+        self.scheme = scheme
+        self.status = status
+    }
+}
+
+public struct CredentialAnswer: Codable, Hashable, Sendable {
+    public var value: String?
+    public var skip: Bool
+
+    public init(
+        value: String? = nil,
+        skip: Bool = false
+    ) {
+        self.value = value
+        self.skip = skip
+    }
+}
+
+public struct RoutineWatch: Codable, Hashable, Sendable {
+    public var url: String
+    public var jsonPointers: [String]?
+
+    public init(
+        url: String = "",
+        jsonPointers: [String]? = nil
+    ) {
+        self.url = url
+        self.jsonPointers = jsonPointers
     }
 }

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Run Polymux on throwaway data, then delete it all on Ctrl-C. Usage: scripts/run.sh [--watch]
-# --watch rebuilds and restarts the server or relaunches the app when its sources change.
+# Run Polymux on throwaway data, then delete it all on Ctrl-C. Usage: scripts/run.sh [--watch|--no-watch]
+# Type r and Enter to rebuild and restart; --watch does it automatically when sources change.
 # Each run has its own id, data, port, and preferences, so several can run at once.
 # Never touches ~/.polymux, the installed Polymux.app, or its preferences.
 set -eu
@@ -8,7 +8,8 @@ watch=0
 case ${1:-} in
   "") ;;
   --watch) watch=1 ;;
-  *) echo "usage: $0 [--watch]" >&2; exit 2 ;;
+  --no-watch) watch=0 ;;
+  *) echo "usage: $0 [--watch|--no-watch]" >&2; exit 2 ;;
 esac
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BASE=${TMPDIR:-/tmp}/polymux-test
@@ -88,10 +89,28 @@ halt() {
   rm -f "$STATE/$1.pid"
 }
 
+# Model settings come from apps/server/.env so every instance gets the same key.
+load_env() {
+  [ -f "$ROOT/apps/server/.env" ] || return 0
+  set -a; . "$ROOT/apps/server/.env"; set +a
+  # The opencode-go endpoint rejects requests without a session header.
+  case ${POLYMUX_MODEL_URL:-} in
+    *opencode.ai*) echo '{"sessionHeader":"x-opencode-session"}' >"$STATE/data/model.json" ;;
+  esac
+}
+
 start_server() {
+  load_env
   POLYMUX_DATA_DIR="$STATE/data" POLYMUX_LOG_DIR="$STATE/logs" POLYMUX_NO_MDNS=1 POLYMUX_TUNNEL=0 \
-    "$STATE/polymux" serve -dev -listen "127.0.0.1:$PORT" >>"$STATE/server.log" 2>&1 &
+    "$STATE/polymux" serve -dev -listen "127.0.0.1:$PORT" -device-listen "127.0.0.1:0" >>"$STATE/server.log" 2>&1 &
   echo $! >"$STATE/server.pid"
+  attempts=0
+  until [ -s "$STATE/data/devices/local-token" ]; do
+    kill -0 "$(cat "$STATE/server.pid")" 2>/dev/null || return 1
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 100 ] || { echo "Server credential was not ready" >&2; return 1; }
+    sleep 0.1
+  done
 }
 
 start_app() {
@@ -115,21 +134,34 @@ echo "Polymux $ID running"
 echo "  server: $ADDRESS  (binary: $STATE/polymux)"
 echo "  data:   $STATE/data"
 echo "  logs:   $STATE/logs, $STATE/server.log, $STATE/app.log"
-[ "$watch" = 0 ] || echo "Watching for changes."
+if [ "$watch" = 1 ]; then
+  echo "Watching for changes."
+else
+  echo "Type r and Enter to rebuild and restart."
+fi
 echo "Press Ctrl-C to stop and delete it."
 
 touch "$STATE/server.stamp" "$STATE/app.stamp"
+input=1
 while :; do
-  sleep 1
-  [ "$watch" = 1 ] || continue
-  if changed "$STATE/server.stamp" "$ROOT/apps/server"; then
-    touch "$STATE/server.stamp"
-    echo "Server changed; rebuilding"
-    if build_server; then halt server; start_server; echo "Server restarted"; else echo "Server build failed; fix it and save again"; fi
+  if [ "$watch" = 1 ]; then
+    sleep 1
+  elif [ "$input" = 1 ]; then
+    command=
+    if ! IFS= read -r command; then input=0; fi
+    [ "$command" = r ] || continue
+  else
+    sleep 1
+    continue
   fi
-  if changed "$STATE/app.stamp" "$ROOT/apps/Polymux" "$ROOT/packages" "$ROOT/Package.swift"; then
+  if [ "$watch" = 0 ] || changed "$STATE/server.stamp" "$ROOT/apps/server"; then
+    touch "$STATE/server.stamp"
+    echo "Rebuilding server"
+    if build_server; then halt server; start_server; echo "Server restarted"; else echo "Server build failed; fix it and reload again"; fi
+  fi
+  if [ "$watch" = 0 ] || changed "$STATE/app.stamp" "$ROOT/apps/Polymux" "$ROOT/packages" "$ROOT/Package.swift"; then
     touch "$STATE/app.stamp"
-    echo "App changed; rebuilding"
-    if build_app; then halt app; start_app; echo "App relaunched"; else echo "App build failed; fix it and save again"; fi
+    echo "Rebuilding app"
+    if build_app; then halt app; start_app; echo "App relaunched"; else echo "App build failed; fix it and reload again"; fi
   fi
 done

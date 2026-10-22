@@ -28,6 +28,8 @@ def go_type(field):
     return {'string':'string','integer':'int64','number':'float64','boolean':'bool'}[kind]
 
 def swift_default(field):
+    if 'x-swift-default' in field:
+        return field['x-swift-default']
     if '$ref' in field:
         return None
     return {'string':'""','integer':'0','number':'0','boolean':'false','array':'[]'}[field['type']]
@@ -44,12 +46,13 @@ def generate():
         params = []
         for key, field in fields.items():
             optional = key not in required
-            typ = swift_type(field) + ('?' if optional else '')
+            swift_optional = optional or field.get('x-swift-optional', False)
+            typ = swift_type(field) + ('?' if swift_optional else '')
             swift.append(f'    public var {key}: {typ}')
-            default = 'nil' if optional else swift_default(field)
+            default = 'nil' if swift_optional else swift_default(field)
             params.append(f'{key}: {typ}' + (f' = {default}' if default is not None else ''))
             gt = go_type(field)
-            if optional and field.get('type') != 'array':
+            if optional and field.get('type') != 'array' and not field.get('x-go-value', False):
                 gt = '*' + gt
             gname = key[0].upper() + key[1:]
             if key == 'id':

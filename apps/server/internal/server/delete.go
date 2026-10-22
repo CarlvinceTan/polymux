@@ -19,28 +19,54 @@ type deletion struct {
 }
 
 func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	err := s.eraseAgent(r.Context(), r.PathValue("id"))
+	if s.profileError(w, err) {
+		return
+	}
+	if err != nil {
+		s.respond(w, nil, err)
+		return
+	}
+	write(w, 200, contract.DeleteResponse{Deleted: true})
+}
+
+func (s *Server) eraseAgent(ctx context.Context, id string) error {
 	s.actorsMu.Lock()
 	if s.closing {
 		s.actorsMu.Unlock()
-		fail(w, 503, "closing", "The server is restarting. Try again shortly.")
-		return
+		return errClosing
 	}
 	if pending := s.deletes[id]; pending != nil {
 		s.actorsMu.Unlock()
 		<-pending.done
-		if pending.err != nil {
-			s.respond(w, nil, pending.err)
-		} else {
-			write(w, 200, contract.DeleteResponse{Deleted: true})
-		}
-		return
+		return pending.err
 	}
-	threads, err := s.Store.Threads(r.Context())
+	pending := &deletion{done: make(chan struct{})}
+	s.deletes[id] = pending
+	s.workers.Add(1)
+	s.actorsMu.Unlock()
+	defer s.workers.Done()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	err := s.eraseReady(ctx, id)
+	s.actorsMu.Lock()
+	pending.err = err
+	delete(s.deletes, id)
+	close(pending.done)
+	s.actorsMu.Unlock()
+	return err
+}
+
+func (s *Server) eraseReady(ctx context.Context, id string) error {
+	s.actorsMu.Lock()
+	if s.closing {
+		s.actorsMu.Unlock()
+		return errClosing
+	}
+	threads, err := s.Store.Threads(ctx)
 	if err != nil {
 		s.actorsMu.Unlock()
-		s.respond(w, nil, err)
-		return
+		return err
 	}
 	var groups []*groupActor
 	for _, thread := range threads {
@@ -55,15 +81,9 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 			delete(s.groups, thread.ID)
 		}
 	}
-	pending := &deletion{done: make(chan struct{})}
-	s.deletes[id] = pending
 	a := s.actors[id]
 	delete(s.actors, id)
-	s.workers.Add(1)
 	s.actorsMu.Unlock()
-	defer s.workers.Done()
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-	defer cancel()
 	for _, group := range groups {
 		select {
 		case <-group.done:
@@ -88,15 +108,8 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	pending.err = err
-	delete(s.deletes, id)
-	close(pending.done)
 	s.actorsMu.Unlock()
-	if err != nil {
-		s.respond(w, nil, err)
-		return
-	}
-	write(w, 200, contract.DeleteResponse{Deleted: true})
+	return err
 }
 
 func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ...*groupActor) (bool, error) {
@@ -152,7 +165,7 @@ func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ..
 	if err != nil {
 		return false, err
 	}
-	cleanupErr := s.memory.Delete(ctx, id)
+	cleanupErr := errors.Join(s.memory.Delete(ctx, id), s.secrets.Delete(id, ""), s.removeMedia(id))
 	for _, path := range files {
 		base, err := filepath.Abs(filepath.Join(s.config.DataDir, "attachments"))
 		if err != nil {
@@ -200,6 +213,15 @@ func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ..
 				continue
 			}
 			threads = append(threads, group.id)
+		}
+		entries, err := os.ReadDir(filepath.Join(s.config.DataDir, "worktrees"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			s.config.Log.Warn("read task worktrees", "error", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && (strings.HasPrefix(entry.Name(), id+"--child-") || strings.HasPrefix(entry.Name(), id+"--peer-")) {
+				threads = append(threads, strings.TrimPrefix(entry.Name(), id+"--"))
+			}
 		}
 		for _, thread := range threads {
 			if err := s.worktrees.Remove(ctx, workspace, id, thread); err != nil {

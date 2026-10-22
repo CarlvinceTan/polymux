@@ -17,10 +17,21 @@ Apply these unless instructed otherwise.
 - Don't retain legacy code (old paths, compatibility shims, deprecated fallbacks) unless instructed; suggest keeping it if removal might be a concern.
 - Define what success looks like up front, and don't stop until it is achieved.
 
+## Reference Matching
+
+When asked to make something like another app or implementation, follow this order for the requested scope:
+
+1. Find the reference. Inspect and exercise the relevant feature in the app, or inspect its source code when available. Establish the appearance, behaviour, states, and timing to match.
+2. Match it exactly first. Reproduce the reference from its code or by direct visual and interaction comparison, before introducing project-specific customisations. When the source uses another language or framework, start with a faithful direct port, preserving its logic, structure, and behaviour even if the result is not yet idiomatic in this project.
+3. Verify parity. Compare the running implementation against the reference, including relevant interactions, states, and transitions. A successful build alone does not establish a match. If the reference cannot be accessed or a difference cannot be verified, state the gap rather than claiming parity.
+4. Adapt only after parity is verified. Apply the necessary project-specific differences, such as styling, and make intentional differences explicit. Repeat the comparisons to confirm that only those intended differences changed.
+5. Refactor into idiomatic project code as a separate pass after the matching baseline works. Repeat the same comparisons to ensure the refactor preserves appearance and behaviour, including any intentional project adaptations.
+
 ## Verification
 
 - After an implementation, test it end to end. For UI changes, build the app and exercise the real scenario.
 - Scope tests to the change: skip flow steps already verified earlier in the conversation and unaffected since.
+- Test in both light and dark mode only when the change could be affected by appearance mode, such as colours, contrast, materials, or mode-specific styling. For changes unaffected by appearance mode, testing in the current mode is enough.
 - Test enough to confirm the implementation works; no more.
 - Run tests and manual verification in an isolated instance: a temporary server and app named "Polymux N" (N is a number, unique per run) with their own throwaway configuration and app data. Never touch the user's real configuration or app data, or the installed copy of the app.
 - Use `scripts/run.sh` to start it, in the background. Stop it by killing that process, which also deletes its data. Always stop it when done. Several runs can go at once without affecting each other.

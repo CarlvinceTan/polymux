@@ -78,8 +78,12 @@ ON CONFLICT(id) DO UPDATE SET status=excluded.status,next_at=excluded.next_at,da
 func sealTask(ctx context.Context, tx *sql.Tx, run *contract.Run, checkpoint *Checkpoint, tools, output int) error {
 	if checkpoint != nil {
 		var peers int
-		if err:=tx.QueryRowContext(ctx,`SELECT count(*) FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`,run.ID).Scan(&peers);err!=nil{return err}
-		if peers>0{return ErrTask}
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`, run.ID).Scan(&peers); err != nil {
+			return err
+		}
+		if peers > 0 {
+			return ErrTask
+		}
 	}
 	var task Task
 	if run.TaskID != nil {
@@ -112,7 +116,7 @@ func sealTask(ctx context.Context, tx *sql.Tx, run *contract.Run, checkpoint *Ch
 		task.Status = "completed"
 		return saveTask(ctx, tx, task, nil)
 	}
-	if !checkpoint.Valid() || task.Generation >= 8 || task.Tools > 128 || task.Output > 256<<10 {
+	if !checkpoint.Valid() || task.Generation >= 8 || task.Output > 256<<10 {
 		return ErrTask
 	}
 	var unresolved int
@@ -227,7 +231,7 @@ func (s *Store) ResumeTask(ctx context.Context, owner, thread, id string, checkp
 	if task.Status != "parked" && task.Status != "needs_review" {
 		return ErrTask
 	}
-	if task.Generation >= 8 || task.Tools >= 128 || task.Output >= 256<<10 {
+	if task.Generation >= 8 || task.Output >= 256<<10 {
 		return ErrTask
 	}
 	task.Checkpoint = checkpoint

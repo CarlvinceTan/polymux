@@ -27,12 +27,18 @@ struct VoiceSettings: View {
                     }
                     ModelSetting(store: store, live: false).id("pipeline")
                 }
+                Picker("Language", selection: binding(\.voiceLanguage) { SettingsPatch(voiceLanguage: $0) }) {
+                    Text("System").tag("")
+                    ForEach(Self.languages, id: \.self) { Text(VoiceConfig.language($0)).tag($0) }
+                }
                 VoiceKeyView(store: store, provider: settings.voiceMode == "live" ? settings.liveProvider : settings.textProvider)
             }
             .disabled(!store.isConnected)
             .panelRow()
         }
     }
+
+    private static let languages = ["en", "es", "fr", "de", "it", "pt", "nl", "pl", "ru", "tr", "ar", "hi", "id", "ja", "ko", "th", "vi", "zh"]
 
     private func binding(_ path: KeyPath<PolymuxKit.Settings, String>, patch: @escaping (String) -> SettingsPatch) -> Binding<String> {
         Binding(get: { store.value?[keyPath: path] ?? "" }, set: { store.edit(patch($0)) })

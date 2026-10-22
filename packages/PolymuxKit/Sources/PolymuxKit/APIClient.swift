@@ -44,6 +44,15 @@ public struct APIClient: Sendable {
         try validate(response, data: data)
     }
 
+    public func labelDevice(_ id: String, label: String) async throws {
+        var request = try await request("network/devices/\(id)")
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["label": label])
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
     public func removeDevice(_ id: String) async throws {
         var request = try await request("network/devices/\(id)")
         request.httpMethod = "DELETE"
@@ -186,6 +195,14 @@ public struct APIClient: Sendable {
         try await post("agents/\(agentID)/focus/answer", FocusAnswer(optionID: optionID))
     }
 
+    public func answerChoice(threadID: String, messageID: String, optionID: String, text: String? = nil) async throws -> Message {
+        try await post("threads/\(threadID)/messages/\(messageID)/answer", ChoiceAnswer(optionID: optionID, text: text))
+    }
+
+    public func answerCredential(threadID: String, messageID: String, value: String? = nil, skip: Bool = false) async throws -> Message {
+        try await post("threads/\(threadID)/messages/\(messageID)/credential", CredentialAnswer(value: value, skip: skip))
+    }
+
     private func post<Value: Decodable>(_ path: String) async throws -> Value {
         var request = try await request(path)
         request.httpMethod = "POST"
@@ -240,6 +257,26 @@ public struct APIClient: Sendable {
         return try await get("threads/\(threadID)/messages", query: query)
     }
 
+    public func sidebar() async throws -> SidebarSnapshot {
+        try await get("sidebar")
+    }
+
+    public func createSection(name: String) async throws -> Section {
+        try await write("sections", method: "POST", body: SectionPatch(name: name))
+    }
+
+    public func updateSection(id: String, name: String? = nil, collapsed: Bool? = nil) async throws -> Section {
+        try await write("sections/\(id)", method: "PATCH", body: SectionPatch(name: name, collapsed: collapsed))
+    }
+
+    public func reorderSection(id: String, beforeID: String? = nil, afterID: String? = nil) async throws {
+        try await post("sidebar/reorder", body: SectionOrder(kind: "sections", id: id, beforeID: beforeID, afterID: afterID))
+    }
+
+    public func placeThread(id: String, sectionID: String?) async throws -> Thread {
+        try await write("threads/\(id)/placement", method: "PATCH", body: ChatPlacement(sectionID: sectionID))
+    }
+
     public func toolRuns(threadID: String, before: Int64? = nil) async throws -> [Run] {
         var query = [URLQueryItem(name: "limit", value: "100")]
         if let before { query.append(URLQueryItem(name: "before", value: String(before))) }
@@ -271,6 +308,10 @@ public struct APIClient: Sendable {
 
     public func stop(threadID: String, withdrawQueued: Bool = false) async throws {
         try await post("threads/\(threadID)/stop", body: ReadRequest(), query: withdrawQueued ? [URLQueryItem(name: "queued", value: "1")] : [])
+    }
+
+    public func search(query: String, kind: String) async throws -> [SearchResult] {
+        try await get("search", query: [URLQueryItem(name: "q", value: query), URLQueryItem(name: "type", value: kind)])
     }
 
     public func search(threadID: String, query: String) async throws -> [SearchHit] {
@@ -328,6 +369,16 @@ public struct APIClient: Sendable {
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
+    }
+
+    private func write<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body) async throws -> T {
+        var request = try await request(path)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
     private func request(_ path: String, query: [URLQueryItem] = []) async throws -> URLRequest {
@@ -392,5 +443,28 @@ public struct APIClient: Sendable {
             let error = try? JSONDecoder().decode(WireError.self, from: data)
             throw ClientError.response(http.statusCode, error?.message ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
         }
+    }
+}
+
+private struct SectionPatch: Encodable {
+    var name: String? = nil
+    var collapsed: Bool? = nil
+}
+
+private struct SectionOrder: Encodable {
+    let kind: String
+    let id: String
+    let beforeID: String?
+    let afterID: String?
+}
+
+private struct ChatPlacement: Encodable {
+    let sectionID: String?
+    private enum CodingKeys: String, CodingKey { case pinned, sectionID }
+
+    func encode(to encoder: Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        try fields.encode(false, forKey: .pinned)
+        try fields.encode(sectionID, forKey: .sectionID)
     }
 }

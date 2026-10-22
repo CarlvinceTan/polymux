@@ -83,12 +83,11 @@ func NewDurable(ctx context.Context, dir, baseURL, model, key string, client Cli
 	return &DurableRuntime{harness: opened, registry: registry, models: models, model: model, dir: dir, client: client}, nil
 }
 
-// builtinTool maps a Polymux builtin name to its durable registration. Durable has no find or
-// ls; bash covers both.
+// builtinTool selects tools provided directly by durable; find and ls use coding definitions.
 func builtinTool(name string) *durable.ToolRegistration {
 	switch name {
 	case "read":
-		return tools.CreateReadTool()
+		return tools.CreateReadTool(nil)
 	case "write":
 		return tools.CreateWriteTool()
 	case "edit":
@@ -130,13 +129,16 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (S
 	}
 	connected, clients, mcpErr := connectMCP(ctx, servers, cwd)
 	session := &durableSession{conversation: conversation, definition: d, attachments: filepath.Join(r.dir, "attachments"), clients: clients, runtime: r, degraded: mcpErr != nil}
-	connected = wrapMCP(connected, session.beforeMCP)
 	opened := false
 	defer func() {
 		if !opened {
 			_ = session.Close()
 		}
 	}()
+	connected, err = wrapMCP(connected, session.beforeMCP)
+	if err != nil {
+		return nil, err
+	}
 	registration := d
 	registration.ExtraTools = append(append([]agent.AgentTool{}, d.ExtraTools...), connected...)
 	if !d.Intro {
@@ -145,6 +147,11 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (S
 			return nil, err
 		}
 		registration.ExtraTools = append(registration.ExtraTools, paired...)
+		directories, err := directoryTools(cwd, d.Tools)
+		if err != nil {
+			return nil, err
+		}
+		registration.ExtraTools = append(registration.ExtraTools, directories...)
 	}
 	if d.TurnContext != nil {
 		registration.TurnContext = func() (context.Context, bool) {
@@ -184,7 +191,7 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (S
 	}
 	// An explicit selection, even an empty one: a conversation without a filter would
 	// otherwise inherit every tool ever installed.
-	change.Tools = harness.SetTo(harness.ToolChange{Exact: true, List: tools})
+	change.Tools = harness.SetTo(harness.ToolChange{List: tools})
 	if hooks := session.hooks(); len(hooks) > 0 {
 		extension := &durable.Extension{Name: "polymux:hooks:" + strconv.FormatInt(int64(conversation.Id()), 10), Hooks: hooks}
 		if err := r.registry.Install(extension); err != nil {
@@ -192,7 +199,7 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (S
 		}
 		session.extensions = append(session.extensions, extension)
 	}
-	change.Extensions = harness.SetTo(harness.ExtensionChange{Exact: true, List: session.extensions})
+	change.Extensions = harness.SetTo(harness.ExtensionChange{List: append([]*durable.Extension{}, session.extensions...)})
 	if err := conversation.Configure(ctx, change); err != nil {
 		return nil, err
 	}
@@ -511,7 +518,7 @@ func (s *durableSession) report(delta Delta) {
 
 // hooks bridge Polymux's tool gate and effect reporting to the durable tool task. Durable
 // runs tools on its own line, so the gate must be reinstalled here or an unattended turn
-// would bypass budgets, the automatic-turn tool gate and effect receipts.
+// would bypass stage boundaries and effect receipts.
 func (s *durableSession) hooks() []durable.HookRegistration {
 	generation := &harness.GenerationHooks{BeforeRequest: s.prepareRequest}
 	if s.definition.BeforeTool == nil {
@@ -523,11 +530,11 @@ func (s *durableSession) hooks() []durable.HookRegistration {
 			return nil
 		}
 		_ = s.conversation.Abort(ctx, nil)
-		return errApprovalPause
+		return errStageEnded
 	}
 	return []durable.HookRegistration{
 		{Task: "pi.tool", Handlers: &harness.ToolHooks{
-			BeforeTool: func(ctx context.Context, call ai.ToolCall, api harness.HookApi) (*harness.BeforeToolResult, error) {
+			BeforeTool: func(ctx context.Context, call harness.ToolHookCall, api harness.HookApi) (*harness.BeforeToolResult, error) {
 				if call.Name == "codemode" {
 					return nil, nil
 				}
@@ -556,17 +563,17 @@ func (s *durableSession) hooks() []durable.HookRegistration {
 				if len(decision.Args) == 0 {
 					return nil, nil
 				}
-				arguments := durable.JsonObject{}
+				arguments := map[string]any{}
 				if json.Unmarshal(decision.Args, &arguments) != nil {
 					return nil, nil
 				}
 				return &harness.BeforeToolResult{Arguments: arguments}, nil
 			},
-			AfterTool: func(ctx context.Context, call ai.ToolCall, result durable.ToolExecutionResult, api harness.HookApi) (*durable.ToolExecutionResult, error) {
+			AfterTool: func(ctx context.Context, call harness.ToolHookCall, result durable.ToolExecutionResult, api harness.HookApi) (*durable.ToolExecutionResult, error) {
 				if _, ok := s.turnContext(api.ConversationId(), ctx); !ok {
 					return nil, nil
 				}
-				s.report(Delta{Kind: "tool.done", ToolID: call.ID, Tool: call.Name, Failed: result.IsError != nil && *result.IsError, Output: toolExcerpt(result.Content)})
+				s.report(Delta{Kind: "tool.done", ToolID: call.ID, Tool: call.Name, Failed: result.IsError != nil && *result.IsError, Output: toolExcerpt(result.Output)})
 				return nil, nil
 			},
 		}},
@@ -673,7 +680,7 @@ func (s *durableSession) markRequest(_ context.Context, request harness.Generati
 	return &harness.GenerationRequest{Messages: messages}, nil
 }
 
-var errApprovalPause = errors.New("waiting for approval")
+var errStageEnded = errors.New("tool stage ended")
 
 // Path is empty for an ephemeral session, which must never be resumed.
 func (s *durableSession) Path() string {
@@ -791,10 +798,16 @@ func (s *durableSession) Send(ctx context.Context, m contract.Message, emit func
 func (s *durableSession) Resume(ctx context.Context, submissionID int64, emit func(Delta) error) (Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	conversationID := strconv.FormatInt(int64(s.conversation.Id()), 10)
+	sink := bindRetry(conversationID, emit)
+	if sink != nil {
+		emit = sink.send
+	}
 	s.emitMu.Lock()
 	s.emit = emit
 	s.emitMu.Unlock()
 	defer func() {
+		unbindRetry(conversationID, sink)
 		s.emitMu.Lock()
 		s.emit = nil
 		s.emitMu.Unlock()
@@ -834,7 +847,15 @@ func (s *durableSession) owned(ctx context.Context, id int64) (durable.Submissio
 
 func (s *durableSession) replay(ctx context.Context) (Result, error) {
 	conversation := s.conversation.Id()
+	var cutoff durable.EntryId
 	value, err := s.conversation.Commit(ctx, func(tx durable.Tx) (any, error) {
+		entries, err := tx.ScanEntries(durable.EntryQuery{ConversationId: conversation}, 1, nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries.Items) > 0 {
+			cutoff = entries.Items[0].Id
+		}
 		return durable.CreateTask(tx, harness.GenerationTask, harness.GenerationInput{}, durable.TaskOptions{
 			Ownership:      durable.TaskOwnership{Kind: durable.TaskOwnedByConversation},
 			ConversationId: &conversation,
@@ -854,33 +875,28 @@ func (s *durableSession) replay(ctx context.Context) (Result, error) {
 	if settled.State.Outcome == nil || settled.State.Outcome.Status != durable.OutcomeCompleted {
 		return Result{}, errors.New("resume did not finish")
 	}
-	view, err := s.conversation.Context(ctx)
-	if err != nil {
+	// A tool round completes its generation before starting the next one.
+	if err := s.conversation.WaitForIdle(ctx); err != nil {
 		return Result{}, err
 	}
-	text := ""
-	usage := contract.Usage{}
-	for _, message := range view.Messages {
-		assistant, ok := message.(ai.AssistantMessage)
-		if !ok {
-			continue
+	query := durable.EntryQuery{MinEntryId: new(cutoff + 1)}
+	var cursor durable.Cursor
+	for {
+		entries, err := s.conversation.Entries(ctx, query, 128, cursor)
+		if err != nil {
+			return Result{}, err
 		}
-		current := ""
-		for _, block := range assistant.Content {
-			if content, ok := block.(ai.TextContent); ok {
-				current += content.Text
+		for _, entry := range entries.Items {
+			if entry.Kind == durable.AssistantEntry.Kind {
+				text, usage, err := s.answer(ctx, entry.Id)
+				return Result{Text: text, Usage: usage}, err
 			}
 		}
-		if current == "" {
-			continue
+		if entries.Next == nil {
+			return Result{}, errors.New("resume did not finish")
 		}
-		text = current
-		usage = contract.Usage{InputTokens: int64(assistant.Usage.Input), OutputTokens: int64(assistant.Usage.Output)}
+		cursor = *entries.Next
 	}
-	if text == "" {
-		return Result{}, errors.New("resume did not finish")
-	}
-	return Result{Text: text, Usage: usage}, nil
 }
 
 func (s *durableSession) outcome(ctx context.Context, settled durable.SettledSubmissionRecord) (Result, error) {

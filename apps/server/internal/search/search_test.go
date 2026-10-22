@@ -98,7 +98,9 @@ func TestIndexUnavailableLogsOnce(t *testing.T) {
 }
 
 func TestQueryEscaping(t *testing.T) {
-	if got := Query(`balloon" OR thread_id:*; DROP TABLE`); got != `"balloon" OR "OR" OR "thread" OR "id" OR "DROP" OR "TABLE"` {
+	got := Query(`balloon" OR thread_id:*; DROP TABLE`)
+	want := `"balloon" OR "OR" OR "thread" OR "id" OR "DROP" OR "TABLE"*`
+	if got != want {
 		t.Fatalf("query %q", got)
 	}
 }
@@ -302,7 +304,7 @@ func TestCheckMediaDistinguishesImages(t *testing.T) {
 	}
 }
 
-func TestReindexQueuesVectorsOfOtherSizes(t *testing.T) {
+func TestReindexQueuesStaleVectors(t *testing.T) {
 	ctx := t.Context()
 	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "db"))
 	if err != nil {
@@ -312,7 +314,7 @@ func TestReindexQueuesVectorsOfOtherSizes(t *testing.T) {
 	if err := s.Register(ctx, []contract.Agent{{ID: "a"}}); err != nil {
 		t.Fatal(err)
 	}
-	for id, model := range map[string]string{"old": "m@512", "new": "m@768"} {
+	for id, model := range map[string]string{"size": "m@512", "model": "old@768", "current": "m@768"} {
 		body := id
 		m := contract.Message{ID: id, ThreadID: "a", Role: "user", Status: "done", CreatedAt: store.Now(),
 			Parts: []contract.Part{{Kind: "text", Text: &body}}}
@@ -326,10 +328,11 @@ func TestReindexQueuesVectorsOfOtherSizes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := (&Index{Store: s}).Reindex(ctx, 768); err != nil {
+	index := &Index{Store: s, Embedder: &fixedEmbedding{model: "m@768"}}
+	if err := index.Reindex(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]string{"old": "pending", "new": "ready"} {
+	for id, want := range map[string]string{"size": "pending", "model": "pending", "current": "ready"} {
 		var got string
 		if err := s.DB.QueryRowContext(ctx, `SELECT indexing_state FROM messages WHERE id=?`, id).Scan(&got); err != nil {
 			t.Fatal(err)
@@ -338,4 +341,15 @@ func TestReindexQueuesVectorsOfOtherSizes(t *testing.T) {
 			t.Fatalf("%s is %s, want %s", id, got, want)
 		}
 	}
+}
+
+type fixedEmbedding struct {
+	model string
+	calls int
+	err   error
+}
+
+func (e *fixedEmbedding) Embed(context.Context, Input) ([]float32, string, error) {
+	e.calls++
+	return []float32{1, 0, 0}, e.model, e.err
 }

@@ -50,9 +50,9 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 		}
 		return agent.AgentToolResult{}, err
 	}
-	// An unattended turn must not widen its own tool surface.
-	if state.work.Trigger != "message" {
-		return agent.AgentToolResult{}, errors.New("integration setup requires a user turn")
+	// Introductions stay tool-free.
+	if state.work.Trigger == "created" {
+		return agent.AgentToolResult{}, errors.New("integration setup requires a working turn")
 	}
 	var input struct {
 		Action     string   `json:"action"`

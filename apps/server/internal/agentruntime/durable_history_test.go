@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/MichaelKinsy/PiG/chord/delta"
 	"github.com/MichaelKinsy/PiG/durable"
 	"github.com/MichaelKinsy/PiG/durable/harness"
 )
@@ -328,7 +329,7 @@ func TestDurableHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := counted.bounded
-		view, err := conversation.Context(t.Context())
+		view, err := conversation.Context(t.Context(), nil)
 		if err != nil || len(view.Messages) < i+1 {
 			t.Fatalf("context after append: %v, %v", view, err)
 		}
@@ -336,7 +337,7 @@ func TestDurableHistory(t *testing.T) {
 			t.Fatalf("decoded %d history entries after append, want 1", counted.bounded-before)
 		}
 		before = counted.bounded
-		if _, err := conversation.Context(t.Context()); err != nil {
+		if _, err := conversation.Context(t.Context(), nil); err != nil {
 			t.Fatal(err)
 		}
 		if counted.bounded != before {
@@ -373,7 +374,7 @@ func TestHistoryDetached(t *testing.T) {
 		t.Fatal(err)
 	}
 	*first.Items[0].Head = 99
-	first.Items[0].Data.(map[string]any)["nested"].([]any)[0].(map[string]any)["text"] = "changed"
+	first.Items[0].Data.(*delta.JsonObject).Value("nested").([]any)[0].(*delta.JsonObject).Set("text", "changed")
 	first.Items[0].Model[0] = ai.UserMessage{Content: ai.UserText("changed")}
 	first.Items[0].Model[1].(ai.UserMessage).Content.(ai.UserContentBlocks)[0] = ai.TextContent{Text: "changed"}
 	first.Items[0].Model[2].(ai.AssistantMessage).Content[0].(ai.ToolCall).Arguments["text"] = "changed"

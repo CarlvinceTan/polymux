@@ -59,7 +59,7 @@ func TestDurableHarnessRunsATurn(t *testing.T) {
 		Execute: func(ctx context.Context, _ any, _ durable.ToolExecutionApi) (durable.ToolExecutionResult, error) {
 			toolRan = true
 			callerContextReachedTool = ctx.Value(turnMarker{}) != nil
-			return durable.ToolExecutionResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "probed"}}}, nil
+			return durable.ToolExecutionResult{Output: []ai.ToolResultMessageContent{ai.TextContent{Text: "probed"}}}, nil
 		},
 	}}}
 	if err := registry.Install(probe); err != nil {

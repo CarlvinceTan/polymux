@@ -146,7 +146,7 @@ func TestDeleteCancelledCloseRetainsHandle(t *testing.T) {
 	}
 	closing := make(chan struct{})
 	s := New(root)
-	s.sessions["a"] = dsession.NewSessionImpl(storage, dsession.Hooks{BeforeClose: func() { <-closing }})
+	s.sessions["a"] = dsession.NewSessionImpl(storage, dsession.Hooks{BeforeClose: func() { <-closing }}, nil, nil)
 	defer s.Close()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

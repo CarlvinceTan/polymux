@@ -178,6 +178,44 @@ func TestPERetryingEvent(t *testing.T) {
 	}
 }
 
+func TestResumeReportsRetries(t *testing.T) {
+	clock := &recordClock{}
+	useClock(t, clock)
+	var requests atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch requests.Add(1) {
+		case 1:
+			sse(w, "first", nil)
+		case 2:
+			http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+		default:
+			sse(w, "resumed", nil)
+		}
+	}))
+	defer provider.Close()
+	runtime := openDurable(t, provider)
+	session, err := runtime.Open(t.Context(), Definition{Agent: contract.Agent{ID: "resume", Name: "Resume"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Send(t.Context(), turn("continue this turn"), nil); err != nil {
+		t.Fatal(err)
+	}
+	var retries atomic.Int32
+	result, err := session.(*durableSession).Resume(t.Context(), 0, func(delta Delta) error {
+		if delta.Kind == "run.retrying" {
+			retries.Add(1)
+		}
+		return nil
+	})
+	if err != nil || result.Text != "resumed" {
+		t.Fatalf("resume: %+v, %v", result, err)
+	}
+	if retries.Load() != 1 || requests.Load() != 3 {
+		t.Fatalf("resume reported %d retries from %d requests", retries.Load(), requests.Load())
+	}
+}
+
 type onceTool struct{ n atomic.Int32 }
 
 func (*onceTool) Name() string                           { return "once_tool" }

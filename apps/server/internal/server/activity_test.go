@@ -297,15 +297,8 @@ type peerFactory struct {
 }
 
 func (f *peerFactory) Open(_ context.Context, d agentruntime.Definition, path string) (agentruntime.Session, error) {
-	if d.Agent.ID == "b" && (path != "" || !strings.HasPrefix(d.Scope, "peer-")) {
-		return nil, errors.New("peer session inherited private history")
-	}
-	if d.Agent.ID == "b" {
-		for _, tool := range d.ExtraTools {
-			if tool.Name() == "track_work" {
-				return nil, errors.New("peer session can access private scratchpad")
-			}
-		}
+	if d.Agent.ID == "b" && d.Scope != "" {
+		return nil, errors.New("peer did not use its main session")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &peerSession{factory: f, definition: d, done: ctx.Done(), cancel: cancel}, nil
@@ -320,6 +313,10 @@ type peerSession struct {
 
 func (s *peerSession) Send(ctx context.Context, m contract.Message, emit func(agentruntime.Delta) error) (agentruntime.Result, error) {
 	text := "Peer result"
+	state, _ := ctx.Value(turnKey{}).(*turnState)
+	if state != nil && state.work.Trigger == "follow_up" {
+		return agentruntime.Result{Text: "Peer synthesis"}, nil
+	}
 	done := ctx.Done()
 	if s.factory.abort {
 		done = s.done
@@ -340,7 +337,7 @@ func (s *peerSession) Send(ctx context.Context, m contract.Message, emit func(ag
 			}
 		} else {
 			s.factory.received <- m
-			_, err := tool.Execute(ctx, "recursive", json.RawMessage(`{"agent_id":"a","message":"Loop back","intent":"request"}`), nil)
+			_, err := tool.Execute(ctx, "recursive", json.RawMessage(`{"agent_id":"a","message":"Acknowledged","intent":"fyi"}`), nil)
 			s.factory.refused <- (err != nil)
 			if s.factory.blocked {
 				<-done
@@ -366,7 +363,7 @@ func (s *peerSession) Abort(ctx context.Context) error {
 func (s *peerSession) Close() error { s.cancel(); return nil }
 func (s *peerSession) Path() string { return s.definition.Agent.ID + ".jsonl" }
 
-func TestPeerIsolation(t *testing.T) {
+func TestPeerMainSession(t *testing.T) {
 	dir := t.TempDir()
 	db, err := store.Open(t.Context(), filepath.Join(dir, "db"))
 	if err != nil {
@@ -395,14 +392,14 @@ func TestPeerIsolation(t *testing.T) {
 	case received := <-f.received:
 		text := store.Text(received)
 		private := strings.Contains(text, "PRIVATE_USER_TEXT") || strings.Contains(text, "PRIVATE_PROMPT")
-		if private || strings.Contains(text, "PRIVATE_OPEN_WORK") || !strings.Contains(text, "Only the public task") {
-			t.Fatal("peer disclosure was not bounded", text)
+		if private || !strings.Contains(text, "PRIVATE_OPEN_WORK") || !strings.Contains(text, "Only the public task") {
+			t.Fatal("peer mixed source context with its own context", text)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("peer never ran")
 	}
-	if !<-f.refused {
-		t.Fatal("peer request recursively woke source")
+	if <-f.refused {
+		t.Fatal("peer could not send an FYI to its source")
 	}
 	awaitRun(t, db, store.NewRun("peer-start", "a", "a", "message").ID, "completed")
 	deadline := time.Now().Add(3 * time.Second)

@@ -49,7 +49,11 @@ func TestCM1ApprovalStillGates(t *testing.T) {
 	session.BindTurn(func(context.Context, string, string, json.RawMessage) agent.ToolCallHookResult {
 		return agent.ToolCallHookResult{Block: true, Terminate: true, Reason: "Waiting for approval"}
 	}, nil)
-	tool := wrapMCP([]agent.AgentTool{probe}, session.beforeMCP)[0]
+	wrapped, err := wrapMCP([]agent.AgentTool{probe}, session.beforeMCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := wrapped[0]
 	params := json.RawMessage(`{"code":"text(await tools.state_probe({}))"}`)
 	result, err := tool.Execute(t.Context(), "call", params, nil)
 	if err != nil || !result.IsError || probe.ran.Load() || !session.park.Load() || !strings.Contains(result.Text(), "Waiting for approval") {
@@ -71,5 +75,21 @@ func TestCM1InfiniteLoopHalts(t *testing.T) {
 	result, err := tool.Execute(ctx, "loop", json.RawMessage(`{"code":"// @options: {\"timeout_ms\": 20}\nwhile(true){}"}`), nil)
 	if err != nil || !result.IsError || !strings.Contains(result.Text(), "codemode_timeout") {
 		t.Fatalf("loop: %+v %v", result, err)
+	}
+}
+
+func TestCM1DiscoveryRuns(t *testing.T) {
+	probe := &stateTool{}
+	wrapped, err := wrapMCP([]agent.AgentTool{probe}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := json.RawMessage(`{"code":"text(await searchTools('state')); text(await describeTool('state_probe')); text(await tools.state_probe({}));"}`)
+	result, err := wrapped[0].Execute(t.Context(), "discover", params, nil)
+	if err != nil || result.IsError || !probe.ran.Load() {
+		t.Fatalf("discover and call: %+v, %v", result, err)
+	}
+	if !strings.Contains(result.Text(), "state_probe") || !strings.Contains(result.Text(), "probed") {
+		t.Fatalf("discovery output: %s", result.Text())
 	}
 }

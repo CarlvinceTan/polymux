@@ -21,7 +21,7 @@ func GrokBotAvatarDesign(shape, color string) *AvatarDesign {
 		mappedShape = "cercle"
 	}
 	if mappedColor == "" {
-		mappedColor = "encre" // TODO(avatar-defaults): match Grok Bot sidebar when specs/avatar-defaults.md lands
+		mappedColor = "encre"
 	}
 	return &AvatarDesign{
 		Shape:        mappedShape,
@@ -36,11 +36,11 @@ func GrokBotAvatarDesign(shape, color string) *AvatarDesign {
 func mapGrokShape(shape string) string {
 	switch shape {
 	case "blob":
-		return "galet"
-	case "wedge":
-		return "triangle"
-	case "square":
-		return "squircle"
+		return "cercle"
+	case "square", "sparkle", "clover", "heart", "flower", "tablet", "wedge", "house", "star":
+		return shape
+	case "teardrop":
+		return "goutte"
 	case "hex":
 		return "hexagone"
 	case "cloud":
@@ -69,6 +69,14 @@ func mapGrokColor(color string) string {
 		return "orange"
 	case "black":
 		return "encre"
+	case "brown":
+		return "brun"
+	case "red":
+		return "rouge"
+	case "green":
+		return "vert"
+	case "gray":
+		return "gris"
 	default:
 		return ""
 	}

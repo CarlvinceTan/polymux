@@ -114,9 +114,18 @@ func TestBackgroundReviews(t *testing.T) {
 			if !d.Automatic || !d.Ephemeral || len(d.Tools) != 0 || len(d.MCP) != 0 {
 				t.Fatal("automatic review inherited permissions")
 			}
+			for _, name := range []string{"finish_review", "track_work", "message_agent", "create_agent", "manage_routines", "ask_user"} {
+				found := false
+				for _, tool := range d.ExtraTools {
+					found = found || tool.Name() == name
+				}
+				if !found {
+					t.Fatal("background tool missing", name)
+				}
+			}
 			for _, tool := range d.ExtraTools {
-				if tool.Name() != "finish_review" && tool.Name() != "track_work" && tool.Name() != "recall_history" && tool.Name() != "save_memory" && tool.Name() != "recall_memory" && tool.Name() != "forget_memory" && tool.Name() != "manage_integrations" {
-					t.Fatal("review exposed effect tool", tool.Name())
+				if sidebarToolName(tool.Name()) {
+					t.Fatal("review exposed unavailable sidebar tool", tool.Name())
 				}
 			}
 			if !strings.Contains(store.Text(<-f.sent), raw) {
@@ -151,33 +160,33 @@ func TestAutomaticToolGate(t *testing.T) {
 		state := &turnState{work: store.Work{Trigger: trigger}}
 		ctx := context.WithValue(t.Context(), turnKey{}, state)
 		for _, name := range []string{"bash", "read", "mcp_external_write", "message_agent", "manage_routines"} {
-			if result := beforeTool(ctx, "call", name, nil); !result.Block {
-				t.Fatal("automatic run allowed effect", trigger, name)
+			if result := beforeTool(ctx, "call", name, nil); result.Block {
+				t.Fatal("automatic run blocked tool", trigger, name)
 			}
 		}
 		if result := beforeTool(ctx, "call", "track_work", nil); result.Block {
 			t.Fatal("automatic run cannot track work", trigger)
 		}
-		if result := beforeTool(ctx, "call", "show_html", nil); result.Block != (trigger == "review") {
+		if result := beforeTool(ctx, "call", "show_html", nil); result.Block {
 			t.Fatal("wrong HTML permission", trigger)
 		}
 	}
 }
 
-func TestRoutineToolsNeedUserTurn(t *testing.T) {
+func TestRoutineToolsInWorkingTurns(t *testing.T) {
 	api, _ := startTest(t, &testFactory{})
 	tool := &routineTool{server: api}
 	for _, trigger := range []string{"created", "peer", "routine", "review", "follow_up"} {
 		state := &turnState{work: store.Work{Trigger: trigger}, run: contract.Run{AgentID: "assistant", ConversationID: "assistant"}}
 		ctx := context.WithValue(t.Context(), turnKey{}, state)
-		if _, err := tool.Execute(ctx, "call", json.RawMessage(`{"action":"list"}`), nil); err == nil {
+		if _, err := tool.Execute(ctx, "call", json.RawMessage(`{"action":"list"}`), nil); (err != nil) != (trigger == "created") {
 			t.Fatal("automatic run obtained routine management", trigger)
 		}
 	}
 	peer := &turnState{work: store.Work{Trigger: "peer"}, run: contract.Run{AgentID: "assistant", ConversationID: "assistant"}}
 	ctx := context.WithValue(t.Context(), turnKey{}, peer)
-	if _, err := (&workTool{store: api.Store}).Execute(ctx, "call", json.RawMessage(`{"action":"list"}`), nil); err == nil {
-		t.Fatal("peer request read private scratchpad")
+	if _, err := (&workTool{store: api.Store}).Execute(ctx, "call", json.RawMessage(`{"action":"list"}`), nil); err != nil {
+		t.Fatal("peer request could not read its own scratchpad", err)
 	}
 }
 

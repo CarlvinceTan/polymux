@@ -3,17 +3,21 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/MichaelKinsy/PiG/agent"
 )
 
 func TestMemoryScope(t *testing.T) {
@@ -38,7 +42,7 @@ func TestMemoryScope(t *testing.T) {
 	if err != nil || strings.Contains(store.Text(message), "concise answers") {
 		t.Fatal("group received private memory", err)
 	}
-	for _, trigger := range []string{"created", "peer"} {
+	for _, trigger := range []string{"created"} {
 		s := &turnState{run: state.run, work: store.Work{Trigger: trigger}}
 		ctx := context.WithValue(t.Context(), turnKey{}, s)
 		for _, action := range []string{"save", "recall", "forget"} {
@@ -56,6 +60,54 @@ func TestMemoryScope(t *testing.T) {
 	message, err = api.memoryContext(t.Context(), state.run, contract.Message{}, "")
 	if err != nil || len(store.Text(message)) > 33000 || !utf8.ValidString(store.Text(message)) {
 		t.Fatal("memory context exceeded valid byte budget", len(store.Text(message)), err)
+	}
+}
+
+func TestSharedMemory(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	tool := &memoryTool{store: api.Store, provider: api.memory, action: "save"}
+	writer := &turnState{run: contract.Run{ID: "run", AgentID: "assistant", ConversationID: "assistant"}, work: store.Work{Trigger: "message"}}
+	ctx := context.WithValue(t.Context(), turnKey{}, writer)
+	if _, err := tool.Execute(ctx, "save", json.RawMessage(`{"name":"timezone","text":"User lives in Sydney","revision":"","shared":true}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tool.Execute(ctx, "save", json.RawMessage(`{"name":"draft","text":"Private draft notes","revision":""}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	reader := contract.Run{ID: "other", AgentID: "researcher", ConversationID: "group"}
+	message, err := api.memoryContext(t.Context(), reader, contract.Message{}, "")
+	if err != nil || !strings.Contains(store.Text(message), "User lives in Sydney") || strings.Contains(store.Text(message), "Private draft") {
+		t.Fatalf("shared memory not isolated from private memory: %q %v", store.Text(message), err)
+	}
+	tool.action = "recall"
+	result, err := tool.Execute(ctx, "recall", json.RawMessage(`{"shared":true}`), nil)
+	data, _ := json.Marshal(result)
+	if err != nil || !strings.Contains(string(data), "Sydney") || strings.Contains(string(data), "Private draft") {
+		t.Fatalf("shared recall returned the wrong scope: %s %v", data, err)
+	}
+	if strings.Contains(store.Text(message), `"agent":"assistant"`) || !strings.Contains(store.Text(message), `"agent":"`) {
+		t.Fatalf("shared fact not tagged with the bot's name: %q", store.Text(message))
+	}
+	documents, err := api.memory.List(t.Context(), "assistant", sharedScope)
+	if err != nil || len(documents) != 1 {
+		t.Fatal("shared fact not in its writer's shard", documents, err)
+	}
+	if err := api.Store.SaveDefinition(t.Context(), contract.Agent{ID: "researcher", Name: "Researcher"}, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	other := &turnState{run: contract.Run{ID: "run2", AgentID: "researcher", ConversationID: "researcher"}, work: store.Work{Trigger: "message"}}
+	ctx = context.WithValue(t.Context(), turnKey{}, other)
+	for _, action := range []string{"save", "forget"} {
+		tool.action = action
+		args := `{"name":"timezone","text":"User lives in Perth","revision":"` + documents[0].Revision + `","shared":true}`
+		if _, err := tool.Execute(ctx, action, json.RawMessage(args), nil); !errors.Is(err, errOwned) {
+			t.Fatal("another bot changed a shared fact", action, err)
+		}
+	}
+	deleteRequest(t, api, "assistant", 200)
+	message, err = api.memoryContext(t.Context(), other.run, contract.Message{}, "")
+	if err != nil || strings.Contains(store.Text(message), "Sydney") {
+		t.Fatal("deleted bot's shared facts remain", err)
 	}
 }
 
@@ -98,8 +150,67 @@ func TestHistoryTool(t *testing.T) {
 		t.Fatal("history crossed acceptance boundary", string(data), err)
 	}
 	state.work.Trigger = "peer"
-	if _, err := tool.Execute(ctx, "history", json.RawMessage(`{}`), nil); err == nil {
-		t.Fatal("peer retrieved private history")
+	if _, err := tool.Execute(ctx, "history", json.RawMessage(`{}`), nil); err != nil {
+		t.Fatal("peer could not retrieve its own history", err)
+	}
+}
+
+func TestHistoryMatchesTail(t *testing.T) {
+	for _, test := range []struct{ name, prefix string }{
+		{name: "prose", prefix: strings.Repeat("Earlier conversation details. ", 300)},
+		{name: "long token", prefix: strings.Repeat("x", 9000) + " "},
+		{name: "unicode token", prefix: strings.Repeat("界", 3000) + " "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			api, _ := startTest(t, &testFactory{})
+			text := test.prefix + "The flight is SQ322 on Friday."
+			old := contract.Message{
+				ID: "long", ThreadID: "assistant", Role: "assistant", Status: "done",
+				Parts: []contract.Part{{Kind: "text", Text: &text}},
+			}
+			if _, err := api.Store.Append(t.Context(), contract.Event{ConversationID: "assistant", Type: "message.start"}, &old); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := api.Store.DB.ExecContext(t.Context(), `INSERT INTO messages_fts(message_id,thread_id,body) VALUES(?,?,?)`, old.ID, old.ThreadID, text); err != nil {
+				t.Fatal(err)
+			}
+			state := &turnState{run: contract.Run{AgentID: "assistant", ConversationID: "assistant"}, work: store.Work{Trigger: "message"}}
+			ctx := context.WithValue(t.Context(), turnKey{}, state)
+			result, err := (&historyTool{store: api.Store}).Execute(ctx, "history", json.RawMessage(`{"query":"SQ322"}`), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output struct{ Messages []struct{ Text string } }
+			if err := json.Unmarshal([]byte(result.Text()), &output); err != nil {
+				t.Fatal(err)
+			}
+			if len(output.Messages) != 1 {
+				t.Fatal("missing history match", output)
+			}
+			excerpt := output.Messages[0].Text
+			if !strings.Contains(excerpt, "The flight is SQ322 on Friday.") {
+				t.Fatal("history match omitted the evidence beyond the initial text bound")
+			}
+			if len(excerpt) > 4096 || !utf8.ValidString(excerpt) {
+				t.Fatal("history match exceeded its valid UTF-8 text budget", len(excerpt))
+			}
+			if strings.ContainsAny(excerpt, "\x01\x02") {
+				t.Fatal("history match exposed highlight markers")
+			}
+		})
+	}
+}
+
+func TestHistoryExcerptBudget(t *testing.T) {
+	text := strings.Repeat("界", 3000) + "\x01SQ322\x02 on Friday."
+	for _, limit := range []int{1, 2, 3, 16, 4096} {
+		excerpt := historyExcerpt(text, limit)
+		if len(excerpt) > limit || !utf8.ValidString(excerpt) || strings.ContainsAny(excerpt, "\x01\x02") {
+			t.Fatalf("invalid excerpt with a %d byte budget: %q", limit, excerpt)
+		}
+		if limit >= 16 && !strings.Contains(excerpt, "SQ322") {
+			t.Fatal("bounded excerpt omitted its match", limit)
+		}
 	}
 }
 
@@ -184,5 +295,92 @@ func TestMemoryRankingIgnoresOpenWork(t *testing.T) {
 	var selected []memory.Document
 	if !ok || json.Unmarshal([]byte(data), &selected) != nil || len(selected) == 0 || selected[0].Name != "schedule" {
 		t.Fatal("current request did not rank its memory first")
+	}
+}
+
+func TestMemoryTiers(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	for _, d := range []memory.Document{
+		{Name: "trip", Text: "Planning a trip to Tokyo"},
+		{Name: "snack", Text: "Liked the almonds", Tier: "note"},
+		{Name: "name", Text: "User is called Sam", Tier: "profile"},
+	} {
+		if _, err := api.memory.Save(t.Context(), "assistant", "assistant", d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	documents, err := api.memory.List(t.Context(), "assistant", "assistant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordered := tierMemory(documents, time.Now())
+	if ordered[0].Name != "name" || ordered[len(ordered)-1].Name != "snack" {
+		t.Fatal("profile not first or note not last", ordered)
+	}
+	if faded := tierMemory(documents, time.Now().Add(noteFade+time.Hour)); slices.ContainsFunc(faded, func(d memory.Document) bool { return d.Name == "snack" }) {
+		t.Fatal("old note stayed in the turn context")
+	}
+	trip := documents[slices.IndexFunc(documents, func(d memory.Document) bool { return d.Name == "trip" })]
+	trip.Tier = "profile"
+	if saved, err := api.memory.Save(t.Context(), "assistant", "assistant", trip); err != nil || saved.Tier != "profile" {
+		t.Fatal("same text could not change tier", saved, err)
+	}
+	if _, err := api.memory.Save(t.Context(), "assistant", "assistant", memory.Document{Name: "x", Text: "y", Tier: "forever"}); err == nil {
+		t.Fatal("unknown tier accepted")
+	}
+}
+
+func TestProjectMemory(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	for _, id := range []string{"researcher", "outsider"} {
+		if err := api.Store.SaveDefinition(t.Context(), contract.Agent{ID: id, Name: strings.ToUpper(id[:1]) + id[1:]}, json.RawMessage(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	turn := func(agent string) context.Context {
+		return context.WithValue(t.Context(), turnKey{}, &turnState{run: contract.Run{ID: "run-" + agent, AgentID: agent, ConversationID: agent}, work: store.Work{Trigger: "message"}})
+	}
+	projects := &projectTool{store: api.Store}
+	call := func(ctx context.Context, tool interface {
+		Execute(context.Context, string, json.RawMessage, agent.ToolUpdateCallback) (agent.AgentToolResult, error)
+	}, args string) error {
+		_, err := tool.Execute(ctx, "call", json.RawMessage(args), nil)
+		return err
+	}
+	if err := call(turn("assistant"), projects, `{"action":"create","slug":"launch","name":"Launch"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := call(turn("researcher"), projects, `{"action":"join","slug":"launch"}`); err != nil {
+		t.Fatal(err)
+	}
+	save := &memoryTool{store: api.Store, provider: api.memory, action: "save"}
+	if err := call(turn("outsider"), save, `{"name":"date","text":"Launch is in May","revision":"","project":"launch"}`); err == nil {
+		t.Fatal("non-member wrote project memory")
+	}
+	if err := call(turn("assistant"), save, `{"name":"date","text":"Launch is in May","revision":"","project":"launch"}`); err != nil {
+		t.Fatal(err)
+	}
+	seen := func(agent string) string {
+		message, err := api.memoryContext(t.Context(), contract.Run{AgentID: agent, ConversationID: agent}, contract.Message{}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.Text(message)
+	}
+	if !strings.Contains(seen("researcher"), "Launch is in May") || strings.Contains(seen("outsider"), "Launch is in May") {
+		t.Fatal("project memory reached the wrong bots")
+	}
+	documents, err := api.memory.List(t.Context(), "assistant", projectScope("launch"))
+	if err != nil || len(documents) != 1 {
+		t.Fatal(documents, err)
+	}
+	if err := call(turn("researcher"), save, `{"name":"date","text":"Launch is in June","revision":"`+documents[0].Revision+`","project":"launch"}`); !errors.Is(err, errOwned) {
+		t.Fatal("member changed another bot's project fact", err)
+	}
+	if err := call(turn("researcher"), projects, `{"action":"leave","slug":"launch"}`); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(seen("researcher"), "Launch is in May") {
+		t.Fatal("left project still in context")
 	}
 }

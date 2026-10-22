@@ -258,3 +258,30 @@ func TestAvatarUpdateIsAtomicAndKeepsPresence(t *testing.T) {
 		t.Fatalf("avatar update lost prompt %+v %v", profile, err)
 	}
 }
+
+func TestProjectMembership(t *testing.T) {
+	s := runStore(t)
+	if _, err := s.CreateProject(t.Context(), "a", "Not A Slug", "x", ""); !errors.Is(err, ErrProjectSlug) {
+		t.Fatal("invalid slug accepted", err)
+	}
+	if err := s.JoinProject(t.Context(), "a", "launch"); !errors.Is(err, ErrProjectMissing) {
+		t.Fatal("joined a missing project", err)
+	}
+	created, err := s.CreateProject(t.Context(), "a", "launch", "Launch", "")
+	if err != nil || !created {
+		t.Fatal(created, err)
+	}
+	if created, err = s.CreateProject(t.Context(), "a", "launch", "Other", ""); err != nil || created {
+		t.Fatal("create did not join the existing project", created, err)
+	}
+	projects, err := s.Projects(t.Context())
+	if err != nil || len(projects) != 1 || projects[0].Name != "Launch" || len(projects[0].Members) != 1 {
+		t.Fatal(projects, err)
+	}
+	if err := s.LeaveProject(t.Context(), "a", "launch"); err != nil {
+		t.Fatal(err)
+	}
+	if projects, _ = s.Projects(t.Context()); len(projects[0].Members) != 0 {
+		t.Fatal("leave kept membership", projects)
+	}
+}

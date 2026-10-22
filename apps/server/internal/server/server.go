@@ -30,8 +30,10 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/secrets"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/settings"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 )
 
 type Factory interface {
@@ -56,6 +58,9 @@ type Server struct {
 	Store      *store.Store
 	memory     *memory.Store
 	settings   *settings.Store
+	secrets    *secrets.Store
+	secretMu   sync.Mutex
+	outputs    *outputFiles
 	worktrees  *agentruntime.Worktrees
 	config     Config
 	ctx        context.Context
@@ -87,6 +92,7 @@ type actor struct {
 	revision   uint64
 	sessionRev uint64
 	sessionMCP [32]byte
+	sessionDir string
 	mu         sync.Mutex
 	sessionMu  sync.Mutex
 	session    agentruntime.Session
@@ -110,6 +116,10 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 		return nil, fmt.Errorf("remove onedrive directory: %w", err)
 	}
 	preferences, err := settings.Open(filepath.Join(c.DataDir, "settings.json"))
+	if err != nil {
+		return nil, err
+	}
+	vault, err := secrets.Open(filepath.Join(c.DataDir, "credentials"), s.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +204,8 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	v := &Server{Store: s, settings: preferences, memory: memory.New(filepath.Join(c.DataDir, "memory")), worktrees: agentruntime.NewWorktrees(filepath.Join(c.DataDir, "worktrees")), config: c, ctx: ctx, cancel: cancel, actors: map[string]*actor{}, groups: map[string]*groupActor{}, presence: map[string]int{}, deletes: map[string]*deletion{}, voices: map[string]*voiceWork{}, voiceSeen: map[string]bool{}, mux: http.NewServeMux(), slots: make(chan struct{}, 4)}
+	v.secrets = vault
+	v.outputs = &outputFiles{store: s, dir: filepath.Join(c.DataDir, "attachments")}
 	for _, d := range definitions {
 		actorCtx, stop := context.WithCancel(ctx)
 		a := &actor{id: d.Agent.ID, definition: d, stop: stop, done: make(chan struct{})}
@@ -216,6 +228,10 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 	go func() { defer v.workers.Done(); c.Index.Run(ctx) }()
 	v.workers.Add(1)
 	go v.schedule(ctx)
+	v.workers.Add(1)
+	go v.runWatches(ctx)
+	v.workers.Add(1)
+	go v.runMedia(ctx)
 	if c.Push != nil {
 		v.workers.Add(1)
 		go v.sendNotices(ctx)
@@ -326,6 +342,24 @@ func (s *Server) renameDevice(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
+// labelDevice names any device; an empty name goes back to the one it reports.
+func (s *Server) labelDevice(w http.ResponseWriter, r *http.Request) {
+	if s.config.Devices == nil {
+		fail(w, 404, "not_found", "Device pairing is unavailable.")
+		return
+	}
+	var input struct{ Label string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+		fail(w, 400, "invalid", "Send a device name.")
+		return
+	}
+	if err := s.config.Devices.Relabel(r.Context(), r.PathValue("id"), strings.TrimSpace(input.Label)); err != nil {
+		fail(w, 400, "invalid", err.Error())
+		return
+	}
+	w.WriteHeader(204)
+}
+
 // removeDevice revokes another device; a device cannot remove itself.
 func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -370,6 +404,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /network", s.network)
 	s.mux.HandleFunc("GET /network/invite", s.networkInvite)
 	s.mux.HandleFunc("PATCH /network/devices/self", s.renameDevice)
+	s.mux.HandleFunc("PATCH /network/devices/{id}", s.labelDevice)
 	s.mux.HandleFunc("DELETE /network/devices/{id}", s.removeDevice)
 	s.mux.HandleFunc("GET /agents", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.Agents(r.Context())
@@ -383,6 +418,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /agents/{id}/avatar", s.updateAvatar)
 	s.mux.HandleFunc("DELETE /agents/{id}", s.deleteAgent)
 	s.mux.HandleFunc("GET /agents/{id}/routines", s.listRoutines)
+	s.mux.HandleFunc("GET /agents/{id}/routines/{routineID}/runs", s.routineRuns)
 	s.mux.HandleFunc("POST /agents/{id}/routines", s.createRoutine)
 	s.mux.HandleFunc("DELETE /agents/{id}/routines/{routineID}", s.deleteRoutine)
 	s.mux.HandleFunc("POST /agents/{id}/focus", s.focus)
@@ -399,35 +435,64 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /threads/{id}/messages", s.messages)
 	s.mux.HandleFunc("GET /threads/{id}/tool-runs", s.toolRuns)
 	s.mux.HandleFunc("POST /threads/{id}/messages", s.send)
+	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/answer", s.answerChoice)
+	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/credential", s.answerCredential)
 	s.mux.HandleFunc("POST /threads/{id}/voice", s.voice)
 	s.mux.HandleFunc("GET /threads/{id}/events", s.events)
 	s.mux.HandleFunc("GET /threads/{id}/stream", s.stream)
 	s.mux.HandleFunc("POST /threads/{id}/read", s.read)
 	s.mux.HandleFunc("POST /threads/{id}/stop", s.stop)
 	s.mux.HandleFunc("GET /threads/{id}/search", s.search)
+	s.mux.HandleFunc("GET /search", s.globalSearch)
 	s.mux.HandleFunc("POST /attachments", s.upload)
 	s.mux.HandleFunc("GET /attachments/{id}/content", s.download)
 	s.mux.HandleFunc("GET /attachments/{id}/thumbnail", s.thumbnail)
-	s.mux.HandleFunc("GET /runs/{id}/approvals", s.listApprovals)
-	s.mux.HandleFunc("POST /approvals/{id}/approve", s.approveApproval)
-	s.mux.HandleFunc("POST /approvals/{id}/deny", s.denyApproval)
 }
+
+var errProfile = errors.New("invalid agent profile")
 
 func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	var request contract.CreateAgentRequest
 	if !decode(w, r, &request) {
 		return
 	}
-	request.Name = strings.TrimSpace(request.Name)
-	request.Role = strings.TrimSpace(request.Role)
-	request.Prompt = strings.TrimSpace(request.Prompt)
-	if request.Name == "" || len(request.Name) > 128 || len(request.Role) > 256 || len(request.Prompt) > 64000 || request.InitialTask != nil && len(*request.InitialTask) > 64000 {
-		fail(w, 400, "invalid_agent", "Enter an agent name and keep its profile within the size limit.")
+	a, err := s.addAgent(r.Context(), request)
+	if s.profileError(w, err) || s.sidebarError(w, err) {
 		return
 	}
-	if request.Avatar != nil && !validAvatar(*request.Avatar) {
-		fail(w, 400, "invalid_avatar", "Choose a valid avatar and animation sequence.")
+	if err != nil {
+		s.respond(w, nil, err)
 		return
+	}
+	write(w, http.StatusCreated, a)
+}
+
+func (s *Server) profileError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, errProfile):
+		fail(w, 400, "invalid_agent", err.Error())
+	case errors.Is(err, errClosing):
+		fail(w, 503, "closing", "The server is restarting. Try again shortly.")
+	case errors.Is(err, sql.ErrNoRows):
+		fail(w, 404, "not_found", "Agent not found.")
+	default:
+		return false
+	}
+	return true
+}
+
+func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentRequest) (contract.Agent, error) {
+	request.Name = strings.TrimSpace(request.Name)
+	if request.Name == "" {
+		request.Name = "New Bot"
+	}
+	request.Role = strings.TrimSpace(request.Role)
+	request.Prompt = strings.TrimSpace(request.Prompt)
+	if len(request.Name) > 128 || len(request.Role) > 256 || len(request.Prompt) > 64000 || request.InitialTask != nil && len(*request.InitialTask) > 64000 {
+		return contract.Agent{}, fmt.Errorf("%w: Enter an agent name and keep its profile within the size limit.", errProfile)
+	}
+	if request.Avatar != nil && !validAvatar(*request.Avatar) {
+		return contract.Agent{}, fmt.Errorf("%w: Choose a valid avatar and animation sequence.", errProfile)
 	}
 	if request.Avatar != nil && request.Avatar.Blocks == nil {
 		request.Avatar.Blocks = []contract.AnimationBlock{}
@@ -440,8 +505,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if request.Model != nil {
 		model = strings.TrimSpace(*request.Model)
 		if model == "" || len(model) > 256 {
-			fail(w, 400, "invalid_model", "Enter a valid model identifier.")
-			return
+			return contract.Agent{}, fmt.Errorf("%w: Enter a valid model identifier.", errProfile)
 		}
 	}
 	d := agentruntime.Definition{
@@ -451,22 +515,17 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := json.Marshal(d)
 	if err != nil {
-		s.respond(w, nil, err)
-		return
+		return contract.Agent{}, err
 	}
 	// Creation and shutdown share the lock so no worker can be added after Wait starts.
 	s.actorsMu.Lock()
 	if s.closing || s.ctx.Err() != nil {
 		s.actorsMu.Unlock()
-		fail(w, 503, "closing", "The server is restarting. Try again shortly.")
-		return
+		return contract.Agent{}, errClosing
 	}
-	if err := s.Store.CreateDefinition(r.Context(), d.Agent, data, request.InitialTask, request.SectionID); err != nil {
+	if err := s.Store.CreateDefinition(ctx, d.Agent, data, request.InitialTask, request.SectionID); err != nil {
 		s.actorsMu.Unlock()
-		if !s.sidebarError(w, err) {
-			s.respond(w, nil, err)
-		}
-		return
+		return contract.Agent{}, err
 	}
 	actorCtx, stop := context.WithCancel(s.ctx)
 	a := &actor{id: d.Agent.ID, definition: d, stop: stop, done: make(chan struct{})}
@@ -474,7 +533,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	s.workers.Add(1)
 	go s.work(actorCtx, a)
 	s.actorsMu.Unlock()
-	write(w, http.StatusCreated, d.Agent)
+	return d.Agent, nil
 }
 
 func (s *Server) agentProfile(w http.ResponseWriter, r *http.Request) {
@@ -494,73 +553,91 @@ type updateAgentRequest struct {
 	Workspace *string `json:"workspace,omitempty"`
 }
 
+type agentPatch struct {
+	Name      *string                `json:"name,omitempty"`
+	Role      *string                `json:"role,omitempty"`
+	Prompt    *string                `json:"prompt,omitempty"`
+	Workspace *string                `json:"workspace,omitempty"`
+	Avatar    *contract.AvatarDesign `json:"avatar,omitempty"`
+}
+
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	var request updateAgentRequest
 	if !decode(w, r, &request) {
 		return
 	}
-	request.Name = strings.TrimSpace(request.Name)
-	request.Role = strings.TrimSpace(request.Role)
-	request.Prompt = strings.TrimSpace(request.Prompt)
-	if request.Name == "" || len(request.Name) > 128 || len(request.Role) > 256 || len(request.Prompt) > 64000 {
-		fail(w, 400, "invalid_agent", "Enter an agent name and keep its profile within the size limit.")
-		return
+	profile, err := s.editAgent(r.Context(), r.PathValue("id"), agentPatch{Name: &request.Name, Role: &request.Role, Prompt: &request.Prompt, Workspace: request.Workspace})
+	if !s.profileError(w, err) {
+		s.respond(w, profile, err)
 	}
-	if request.Workspace != nil {
-		workspace := strings.TrimSpace(*request.Workspace)
+}
+
+func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (contract.AgentProfile, error) {
+	var empty contract.AgentProfile
+	if patch.Name != nil && (strings.TrimSpace(*patch.Name) == "" || len(*patch.Name) > 128) || patch.Role != nil && len(*patch.Role) > 256 || patch.Prompt != nil && len(*patch.Prompt) > 64000 {
+		return empty, errProfile
+	}
+	if patch.Workspace != nil {
+		workspace := strings.TrimSpace(*patch.Workspace)
 		if workspace != "" && (len(workspace) > 4096 || !filepath.IsAbs(workspace)) {
-			fail(w, 400, "invalid_workspace", "Enter the absolute path of a git repository on the server Mac.")
-			return
+			return empty, errProfile
 		}
-		request.Workspace = &workspace
+		patch.Workspace = &workspace
+	}
+	if patch.Avatar != nil && !validAvatar(*patch.Avatar) {
+		return empty, errProfile
 	}
 	s.actorsMu.RLock()
 	defer s.actorsMu.RUnlock()
 	if s.closing || s.ctx.Err() != nil {
-		fail(w, 503, "closing", "The server is restarting. Try again shortly.")
-		return
+		return empty, errClosing
 	}
-	a := s.actors[r.PathValue("id")]
+	a := s.actors[id]
 	if a == nil {
-		fail(w, 404, "not_found", "Agent not found.")
-		return
+		return empty, sql.ErrNoRows
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	d := a.definition
-	d.Agent.Name = request.Name
-	d.Agent.Role = request.Role
-	d.Agent.Active = false
-	d.Prompt = request.Prompt
-	if request.Workspace != nil {
-		d.Workspace = *request.Workspace
+	if patch.Name != nil {
+		d.Agent.Name = strings.TrimSpace(*patch.Name)
 	}
+	if patch.Role != nil {
+		d.Agent.Role = strings.TrimSpace(*patch.Role)
+	}
+	if patch.Prompt != nil {
+		d.Prompt = strings.TrimSpace(*patch.Prompt)
+	}
+	if patch.Workspace != nil {
+		d.Workspace, d.WorkspaceSet = *patch.Workspace, true
+	}
+	if patch.Avatar != nil {
+		d.Agent.Avatar = patch.Avatar
+	}
+	d.Agent.Active = false
 	data, err := json.Marshal(d)
 	if err != nil {
-		s.respond(w, nil, err)
-		return
+		return empty, err
 	}
-	agent, err := s.Store.UpdateDefinition(r.Context(), d.Agent, data)
+	agent, err := s.Store.UpdateDefinition(ctx, d.Agent, data)
 	if err != nil {
-		s.respond(w, nil, err)
-		return
-	}
-	if a.definition.Prompt != d.Prompt || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace {
-		a.revision++
+		return empty, err
 	}
 	changedPrompt := a.definition.Prompt != d.Prompt
+	if changedPrompt || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace {
+		a.revision++
+	}
 	a.definition = d
 	if changedPrompt {
 		payload, err := store.NewActivity("instructions.updated", d.Agent.ID, "")
-		if err == nil {
-			err = s.Store.Activity(r.Context(), d.Agent.ID, d.Agent.ID, payload)
-		}
 		if err != nil {
-			s.respond(w, nil, err)
-			return
+			return empty, err
+		}
+		if err := s.Store.Activity(ctx, d.Agent.ID, d.Agent.ID, payload); err != nil {
+			return empty, err
 		}
 	}
-	write(w, 200, contract.AgentProfile{Agent: agent, Prompt: d.Prompt})
+	return contract.AgentProfile{Agent: agent, Prompt: d.Prompt}, nil
 }
 
 func write(w http.ResponseWriter, status int, value any) {
@@ -1032,7 +1109,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	writeCtx, end := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
 	defer end()
 	user := work.Message
-	delegated := work.Trigger == "peer" || work.Trigger == "child"
+	delegated := work.Trigger == "child"
 	run := store.NewRun(user.ID, user.ThreadID, a.id, work.Trigger)
 	if existing, e := s.Store.Run(writeCtx, run.ID); e == nil {
 		run = existing
@@ -1061,28 +1138,26 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	if work.TaskID != "" {
 		run.TaskID = &work.TaskID
 	}
-	// Capture before flipping to running. Approval resume injects a turn; crash resume replays the saved tool result.
-	resuming := run.Status == "waiting_input"
+	// Crash resume replays the saved tool result.
 	continuing := run.Status == "resuming"
 	run.Status, run.Activity, run.Summary, run.StartedAt, run.FinishedAt = "running", "preparing", "Preparing reply", &now, nil
+	source := user.ID
+	if work.Trigger == "handoff" && user.ReplyToID != nil {
+		source = *user.ReplyToID
+	}
 	if work.Trigger == "message" || work.Trigger == "handoff" {
-		run.SourceMessageID = &user.ID
+		run.SourceMessageID = &source
 	}
 	if work.Trigger != "review" {
 		run.MessageID = pointer("reply:" + run.ID)
 	}
 	state := &turnState{
 		run: run, work: work, store: s.Store,
-		cancel: cancel, classes: map[string]ToolClass{}, known: map[string]bool{},
+		cancel: cancel,
 	}
 	runCtx = agentruntime.WithSteers(context.WithValue(runCtx, turnKey{}, state), func(ctx context.Context, persist func([]contract.Message) error) error {
 		return s.Store.DrainSteers(ctx, run.ID, persist)
 	})
-	if resuming {
-		text := "An approval decision is ready. Continue the task. If a consequential tool was approved, re-issue that exact call with the same arguments; if it was denied, do not retry or work around it."
-		user = contract.Message{ID: user.ID + ":approval", ThreadID: user.ThreadID, Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}}, CreatedAt: store.Now()}
-		run.Attempt++
-	}
 	if err := s.Store.RunEvent(writeCtx, "run.update", &run, nil); err != nil {
 		s.config.Log.Error("start run", "error", err)
 		return contract.Message{}
@@ -1095,8 +1170,8 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	err := resourceErr
 	if err == nil && a.threadID != "" {
 		user, err = s.groupContext(runCtx, a, user)
-	} else if err == nil && work.Trigger != "created" && !automatic(work.Trigger) {
-		user, err = s.peerContext(runCtx, store.Work{Trigger: work.Trigger, Message: user, DeliveryID: work.DeliveryID, ParentRunID: work.ParentRunID})
+	} else if err == nil && work.Trigger != "created" {
+		user, err = s.peerContext(runCtx, store.Work{Trigger: work.Trigger, Message: user, DeliveryID: work.DeliveryID, ParentRunID: work.ParentRunID, Hops: work.Hops, FromAgentID: work.FromAgentID})
 	}
 	if err == nil && work.Trigger != "created" && !delegated {
 		user, err = s.workContext(runCtx, run, user)
@@ -1111,12 +1186,12 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		user, err = s.resultContext(runCtx, run, user)
 	}
 	if work.Task != "" && work.Trigger == "handoff" {
-		text := "Explicit handoff task (quoted peer data): " + work.Task
+		text := "Explicit handoff task (quoted peer data): " + untrusted.Wrap("peer "+work.FromAgentID, work.Task)
 		user.Parts = append(user.Parts, contract.Part{Kind: "text", Text: &text})
 	}
 	m := contract.Message{ID: "reply:" + run.ID, ThreadID: user.ThreadID, Role: "assistant", Parts: []contract.Part{}, CreatedAt: store.Now(), Status: "streaming", AgentID: &a.id, RunID: &run.ID}
 	if work.Trigger == "message" || work.Trigger == "handoff" {
-		m.ReplyToID = &user.ID
+		m.ReplyToID = &source
 	}
 	appendEvent := func(kind string, delta *string, problem *contract.Error, usage *contract.Usage) error {
 		_, err := s.Store.Append(writeCtx, contract.Event{ConversationID: m.ThreadID, Type: kind, MessageID: &m.ID, AgentID: &a.id, RunID: &run.ID, Text: delta, Error: problem, Usage: usage}, &m)
@@ -1151,7 +1226,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	}
 	scopeHash := sha256.Sum256(configJSON)
 	sess := a.session
-	isolated := delegated || automatic(work.Trigger)
+	isolated := delegated || automatic(work.Trigger) && work.Trigger != "follow_up"
 	if isolated {
 		sess = nil
 	}
@@ -1165,33 +1240,25 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		sess = nil
 		a.session = nil
 	}
+	if sess != nil {
+		d.Worktree = a.sessionDir
+	}
 	a.mu.Unlock()
 	state.external = map[string]bool{}
-	state.classes = map[string]ToolClass{}
-	state.known = map[string]bool{}
+	for _, name := range []string{"generate_image", "generate_video", "http_request"} {
+		state.external[name] = true
+	}
 	if len(d.Devices) > 0 {
 		state.external["run_device"] = true
-		state.known["run_device"] = true
 	}
 	for _, name := range d.Tools {
 		state.external[name] = true
-		state.known[name] = true
 	}
 	for _, tool := range d.ExtraTools {
 		state.external[tool.Name()] = true
-		state.known[tool.Name()] = true
-		if c, ok := tool.(toolClassifier); ok {
-			state.classes[tool.Name()] = ToolClass(c.ToolClass())
-		}
 	}
 	for _, server := range d.MCP {
 		state.prefixes = append(state.prefixes, server.Name+"__")
-		if server.ReadOnly {
-			state.readPrefixes = append(state.readPrefixes, server.Name+"__")
-		}
-	}
-	for name := range builtinClass {
-		state.known[name] = true
 	}
 	if stale != nil {
 		a.sessionMu.Lock()
@@ -1234,32 +1301,34 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 				if work.Trigger != "review" {
 					d.ExtraTools = append(d.ExtraTools, s.sidebarTools()...)
 				}
-				if !d.Automatic {
+				if work.Trigger != "child" {
 					d.ExtraTools = append(d.ExtraTools,
-						&peerTool{server: s, handoff: a.threadID != ""}, &spawnTool{server: s}, &routineTool{server: s}, &triggerTool{server: s})
+						&peerTool{server: s, handoff: a.threadID != ""}, &spawnTool{server: s}, &subagentTool{server: s}, &groupTool{server: s}, &routineTool{server: s}, &triggerTool{server: s},
+						&agentTool{server: s, action: "create"}, &agentTool{server: s, action: "update"}, &agentTool{server: s, action: "delete"}, &groupEdit{server: s}, &chatTool{store: s.Store}, &chatTool{store: s.Store, question: true})
 				}
-				if work.Trigger == "message" && a.threadID == "" {
+				if work.Trigger != "child" && a.threadID == "" {
 					d.ExtraTools = append(d.ExtraTools, &integrationTool{server: s})
+					for _, action := range []string{"request", "list", "forget"} {
+						d.ExtraTools = append(d.ExtraTools, &credentialTool{server: s, action: action})
+					}
 					state.external["manage_integrations"] = true
 				}
 				if !delegated {
 					d.ExtraTools = append(d.ExtraTools, &workTool{store: s.Store})
-					if work.Trigger != "review" {
-						d.ExtraTools = append(d.ExtraTools, &taskTool{server: s})
-					}
+					d.ExtraTools = append(d.ExtraTools, &taskTool{server: s})
 					d.ExtraTools = append(d.ExtraTools, &historyTool{store: s.Store})
 					for _, action := range []string{"save", "recall", "forget"} {
 						d.ExtraTools = append(d.ExtraTools, &memoryTool{store: s.Store, provider: s.memory, action: action})
 					}
+					d.ExtraTools = append(d.ExtraTools, &projectTool{store: s.Store})
 				}
 				if work.Trigger == "review" {
 					d.ExtraTools = append(d.ExtraTools, &reviewTool{})
-				} else {
-					d.ExtraTools = append(d.ExtraTools,
-						&htmlTool{store: s.Store, dir: filepath.Join(s.config.DataDir, "attachments")})
 				}
+				d.ExtraTools = append(d.ExtraTools, &htmlTool{store: s.Store, dir: filepath.Join(s.config.DataDir, "attachments")})
+				d.ExtraTools = append(d.ExtraTools, &attachTool{files: s.outputs}, &mediaTool{server: s, files: s.outputs, kind: "image"}, &mediaTool{server: s, files: s.outputs, kind: "video"}, &httpTool{server: s})
 			}
-			if err == nil && !isolated && !d.Intro && d.Workspace != "" {
+			if err == nil && !d.Intro && d.Workspace != "" {
 				// Prepare the conversation's checkout before a session opens; a
 				// failure ends the turn with its own explanation.
 				d.Worktree, err = s.worktrees.Ensure(runCtx, d.Workspace, d.Agent.ID, agentruntime.WorkspaceThread(d))
@@ -1287,6 +1356,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 				a.session = sess
 				a.sessionRev = revision
 				a.sessionMCP = scopeHash
+				a.sessionDir = d.Worktree
 				a.mu.Unlock()
 			}
 		}
@@ -1343,7 +1413,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	}
 	var messageMu sync.Mutex
 	accepting := true
-	scope := &htmlScope{messageID: m.ID, publish: func(toolCtx context.Context, attachment contract.Attachment, path string) error {
+	scope := &htmlScope{messageID: m.ID, cwd: outputCWD(d, s.config.DataDir), publish: func(toolCtx context.Context, attachment contract.Attachment, path string) error {
 		messageMu.Lock()
 		defer messageMu.Unlock()
 		if err := toolCtx.Err(); err != nil {
@@ -1470,24 +1540,12 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 				if externalTool(state, delta.Tool) {
 					effectErr = s.Store.EndEffect(writeCtx, run.ID, delta.ToolID, delta.Failed)
 				}
-				claimID := ""
-				if state.claims != nil {
-					claimID = state.claims[delta.ToolID]
-					delete(state.claims, delta.ToolID)
-				}
 				if effectErr != nil {
 					state.hookErr = effectErr
 				}
 				state.mu.Unlock()
 				if effectErr != nil {
 					return effectErr
-				}
-				if claimID != "" {
-					status := "completed"
-					if delta.Failed {
-						status = "failed"
-					}
-					_ = s.Store.SaveApprovalResult(writeCtx, claimID, json.RawMessage(`{"status":"`+status+`"}`))
 				}
 				status := "completed"
 				if delta.Failed {
@@ -1562,7 +1620,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 				if e := s.Store.RunEvent(writeCtx, "tool.start", &run, &tool); e != nil {
 					return e
 				}
-				if delta.Tool == "show_html" {
+				if delta.Tool == "show_html" || delta.Tool == "send_to_user" || delta.Tool == "ask_user" || delta.Tool == "request_secret" || delta.Tool == "attach_file" || delta.Tool == "generate_image" || delta.Tool == "generate_video" {
 					return nil
 				}
 				if work.Trigger == "review" {
@@ -1596,6 +1654,9 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			}
 			content.WriteString(delta.Text)
 			text := content.String()
+			if strings.HasPrefix("NO_RESPONSE", strings.TrimSpace(text)) {
+				return nil
+			}
 			var found bool
 			for n := range m.Parts {
 				if m.Parts[n].Kind == "text" {
@@ -1654,39 +1715,25 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		err = runCtx.Err()
 	}
 	state.mu.Lock()
-	toolLimit := 32
-	if work.Trigger == "review" {
-		toolLimit = 8
-	}
-	budgetExceeded := state.tools > toolLimit
 	handed := state.handoff != nil
 	hookErr := state.hookErr
 	checkpoint := state.checkpoint
 	taskTools := state.tools
-	awaiting := state.approval != nil
+	posted := state.posts > 0
 	state.mu.Unlock()
-	if chain, _ := runCtx.Value(chainKey{}).(*chainState); chain != nil {
-		chain.mu.Lock()
-		budgetExceeded = budgetExceeded || chain.tools > 64
-		chain.mu.Unlock()
-	}
-	if budgetExceeded {
-		err = errors.New("execution tool budget exhausted")
-	}
 	if hookErr != nil {
 		err = errors.Join(err, hookErr)
-	}
-	if awaiting {
-		err = nil
-	} else if errors.Is(err, context.Canceled) {
-		// keep cancel handling below
 	}
 	// Leave a saved tool result running so the next process can resume it once.
 	if err != nil && ctx.Err() != nil && run.Attempt <= 1 && s.Store.ResumeReady(writeCtx, run) {
 		messageMu.Unlock()
 		return contract.Message{}
 	}
-	if result.Text != "" && result.Text != content.String() {
+	silent := !handed && (strings.TrimSpace(result.Text) == "NO_RESPONSE" || result.Text == "" && strings.TrimSpace(content.String()) == "NO_RESPONSE" || result.Text == "" && content.Len() == 0 && posted)
+	if silent {
+		m.Parts = []contract.Part{}
+	}
+	if !silent && result.Text != "" && result.Text != content.String() {
 		found := false
 		for n := range m.Parts {
 			if m.Parts[n].Kind == "text" {
@@ -1699,12 +1746,8 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			m.Parts = append(m.Parts, contract.Part{Kind: "text", Text: &result.Text})
 		}
 	}
-	if err == nil && !awaiting && !handed && work.Trigger != "review" && len(m.Parts) == 0 {
+	if err == nil && !silent && !handed && work.Trigger != "review" && len(m.Parts) == 0 {
 		err = errEmptyReply
-	}
-	if awaiting && len(m.Parts) == 0 {
-		text := "Waiting for approval."
-		m.Parts = append(m.Parts, contract.Part{Kind: "text", Text: &text})
 	}
 	if err == nil {
 		if handed {
@@ -1722,12 +1765,14 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			text := "Handed off to " + bounded(label, 128) + "."
 			m.Parts = append(m.Parts, contract.Part{Kind: "text", Text: &text})
 		}
-		if awaiting {
-			m.Status = "waiting_input"
-		} else {
-			m.Status = "done"
+		m.Status = "done"
+		if silent {
+			m.Status = "silent"
 		}
 		run.Status, run.Summary, run.Outcome = "completed", "Reply complete", pointer("reply")
+		if silent {
+			run.Outcome = pointer("silent")
+		}
 		if work.Trigger == "created" {
 			run.Outcome = pointer("introduced")
 		}
@@ -1855,7 +1900,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			a.mu.Unlock()
 		}
 	}
-	if finalized && work.DeliveryID != "" {
+	if finalized && store.Terminal(run.Status) && work.DeliveryID != "" {
 		if e := s.Store.Receipt(writeCtx, work.DeliveryID, run, m); e != nil {
 			s.config.Log.Error("publish peer result", "error", e)
 		} else if work.ParentRunID != nil {
@@ -1873,6 +1918,18 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			chain.mu.Lock()
 			chain.next = &handoffWork{work: *pending, target: target}
 			chain.mu.Unlock()
+		}
+	}
+	state.mu.Lock()
+	removals := slices.Clone(state.removals)
+	state.mu.Unlock()
+	if finalized && (m.Status == "done" || m.Status == "silent") {
+		for _, id := range removals {
+			go func() {
+				if err := s.eraseAgent(context.WithoutCancel(ctx), id); err != nil {
+					s.config.Log.Error("remove bot", "agent", id, "error", err)
+				}
+			}()
 		}
 	}
 	return m

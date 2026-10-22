@@ -43,6 +43,35 @@ func avatarRequest(t *testing.T, api *Server, path string, avatar contract.Avata
 	return a
 }
 
+func TestCreationAvatars(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	for _, shape := range []string{"square", "sparkle", "heart", "tablet", "wedge", "house"} {
+		t.Run(shape, func(t *testing.T) {
+			avatar := avatarDesign()
+			avatar.Shape = shape
+			data, err := json.Marshal(contract.CreateAgentRequest{Name: shape, Avatar: &avatar})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := httptest.NewRecorder()
+			api.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(string(data))))
+			var created contract.Agent
+			if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil || recorder.Code != 201 {
+				t.Fatalf("create status=%d body=%s err=%v", recorder.Code, recorder.Body.String(), err)
+			}
+			if !reflect.DeepEqual(created.Avatar, &avatar) {
+				t.Fatalf("created avatar %+v", created.Avatar)
+			}
+			avatar.Color = "violet"
+			avatarRequest(t, api, "/agents/"+created.ID+"/avatar", avatar, 200)
+			profile := profileRequest(t, api, http.MethodGet, "/agents/"+created.ID, "", 200)
+			if !reflect.DeepEqual(profile.Agent.Avatar, &avatar) {
+				t.Fatalf("saved avatar %+v", profile.Agent.Avatar)
+			}
+		})
+	}
+}
+
 func TestMissingAvatarGetsPersistentServerDefault(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

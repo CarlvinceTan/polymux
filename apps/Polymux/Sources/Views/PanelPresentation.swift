@@ -2,7 +2,7 @@ import SwiftUI
 
 enum PanelSize {
     static let width: CGFloat = 620
-    static let maximumHeight: CGFloat = 720
+    static let maximumHeight: CGFloat = 600
 
     static func height(_ content: CGFloat?, available: CGFloat = .infinity) -> CGFloat {
         let limit = max(0, min(maximumHeight, available - 48))
@@ -17,21 +17,17 @@ struct PanelHeight: PreferenceKey {
     }
 }
 
+struct PanelWidth: PreferenceKey {
+    static var defaultValue: CGFloat? { nil }
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
 struct PanelAction {
     var action: () -> Void = {}
 
     @MainActor func callAsFunction() { action() }
-}
-
-private struct PanelActiveKey: EnvironmentKey {
-    static var defaultValue: Bool { false }
-}
-
-extension EnvironmentValues {
-    var panelActive: Bool {
-        get { self[PanelActiveKey.self] }
-        set { self[PanelActiveKey.self] = newValue }
-    }
 }
 
 struct PanelContext {
@@ -130,6 +126,7 @@ private struct PanelSheet<Content: View>: View {
             .presentationSizing(PanelFit())
             .presentationDetents([.height(PanelSize.maximumHeight)])
             .transformPreference(PanelHeight.self) { $0 = nil }
+            .transformPreference(PanelWidth.self) { $0 = nil }
     }
 }
 
@@ -187,13 +184,12 @@ private struct PanelHost: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .environment(\.panelActive, active)
             .background { FocusWindow(memory: focus).frame(width: 0, height: 0).accessibilityHidden(true) }
             .disabled(active)
             .accessibilityHidden(active)
             .overlayPreferenceValue(PanelEntries.self) { entries in
                 if let entry = entries.last {
-                    AnyView(PanelLayer(entry: entry).id(entry.id).ignoresSafeArea())
+                    AnyView(PanelLayer(entry: entry).id(entry.id))
                 }
             }
             .onPreferenceChange(PanelKeys.self) { keys in
@@ -265,6 +261,7 @@ private struct PanelLayer: View {
     let entry: PanelEntry
     @State private var exit: PanelExit?
     @State private var height: CGFloat?
+    @State private var width: CGFloat?
     @Namespace private var focus
 
     var body: some View {
@@ -279,9 +276,10 @@ private struct PanelLayer: View {
                 .focusable(false)
                 .accessibilityLabel("Dismiss panel")
                 entry.view
-                    .frame(width: max(0, min(PanelSize.width, proxy.size.width - 48)),
+                    .frame(width: max(0, min(width ?? PanelSize.width, proxy.size.width - 48)),
                            height: PanelSize.height(height, available: proxy.size.height))
                     .onPreferenceChange(PanelHeight.self) { height = $0 }
+                    .onPreferenceChange(PanelWidth.self) { width = $0 }
                     .clipShape(RoundedRectangle(cornerRadius: 24))
                     .overlay {
                         RoundedRectangle(cornerRadius: 24).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5)
@@ -298,9 +296,12 @@ private struct PanelLayer: View {
             .accessibilityAddTraits(.isModal)
             .panelHost()
         }
+        // Centre on the whole window, not the area below the toolbar.
+        .ignoresSafeArea()
         .allowsWindowActivationEvents()
         .transformPreference(PanelDismissal.self) { $0 = nil }
         .transformPreference(PanelHeight.self) { $0 = nil }
+        .transformPreference(PanelWidth.self) { $0 = nil }
     }
 
     private func close() {

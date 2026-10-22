@@ -114,6 +114,41 @@ func TestCreationQueue(t *testing.T) {
 	}
 }
 
+func TestCreationMessage(t *testing.T) {
+	s := runStore(t)
+	a := contract.Agent{ID: "new", Name: "New Bot"}
+	if err := s.CreateDefinition(t.Context(), a, json.RawMessage(`{"agent":{"id":"new"}}`), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.Job(t.Context(), a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intro := NewRun(id, a.ID, a.ID, "created")
+	intro.Status = "running"
+	if err := s.RunEvent(t.Context(), "run.update", &intro, nil); err != nil {
+		t.Fatal(err)
+	}
+	request := contract.SendRequest{ID: "first-task", Text: "Hire a specialist"}
+	if _, _, err := s.Send(t.Context(), a.ID, request, []contract.Part{{Kind: "text", Text: &request.Text}}, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	work, err := s.Work(t.Context(), request.ID)
+	if err != nil || work.ParentRunID != nil {
+		t.Fatal("first task was steered into the introduction", work, err)
+	}
+	intro.Status = "completed"
+	if err := s.RunEvent(t.Context(), "run.done", &intro, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finish(t.Context(), intro.JobID); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := s.Job(t.Context(), a.ID); err != nil || next != request.ID {
+		t.Fatal("first task did not survive the introduction", next, err)
+	}
+}
+
 func TestPeerReceipts(t *testing.T) {
 	s := runStore(t)
 	parent := NewRun("request", "a", "a", "message")
@@ -163,7 +198,7 @@ func TestPeerReceipts(t *testing.T) {
 		}
 	}
 	messages, err := s.Messages(t.Context(), "a", 0, 100)
-	if err != nil || len(messages) != 1 || Text(messages[0]) != answer || *messages[0].AgentID != "b" {
+	if err != nil || len(messages) != 2 || messages[0].ID != "sent:delivery" || Text(messages[1]) != answer || *messages[1].AgentID != "b" {
 		t.Fatalf("receipt %+v %v", messages, err)
 	}
 }

@@ -67,7 +67,11 @@ func TestMCPComposition(t *testing.T) {
 		t.Fatalf("tools %+v", tools)
 	}
 	params, _ := json.Marshal(map[string]string{"code": `text(await searchTools("echo")); text(await describeTool("notes__echo0")); text(await tools.notes__echo0({text:"hello"})); text(await tools.notes__echo0({text:"again"}));`})
-	result, err := wrapMCP(tools, nil)[0].Execute(t.Context(), "call", params, nil)
+	wrapped, err := wrapMCP(tools, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := wrapped[0].Execute(t.Context(), "call", params, nil)
 	if err != nil || result.IsError || strings.Count(result.Text(), "tool reply") != 2 {
 		t.Fatalf("MCP result %+v %v", result, err)
 	}

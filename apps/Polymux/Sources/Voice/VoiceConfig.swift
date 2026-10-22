@@ -20,8 +20,14 @@ struct VoiceConfig: Equatable {
         provider = mode == .live ? settings.liveProvider : settings.textProvider
         model = mode == .live ? settings.liveModel : settings.textModel
         voice = settings.liveVoice
-        prompt = settings.voicePrompt
+        prompt = settings.voicePrompt + "\nAlways speak \(Self.language(settings.voiceLanguage))."
         hasKey = settings.speechKeys.contains(provider)
+    }
+
+    // An empty code follows the system language.
+    static func language(_ code: String) -> String {
+        let code = code.isEmpty ? (Locale.current.language.languageCode?.identifier ?? "en") : code
+        return Locale(identifier: "en").localizedString(forIdentifier: code) ?? "English"
     }
 
     func session(client: APIClient, reply: any VoiceReply, agent: String) -> any VoiceSession {

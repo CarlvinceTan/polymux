@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
 )
@@ -76,7 +77,7 @@ func (t *deviceTool) Execute(ctx context.Context, _ string, args json.RawMessage
 	command.Stdout = output
 	command.Stderr = output
 	err := command.Run()
-	text := output.String()
+	text := untrusted.Wrap("device "+host, output.String())
 	if err != nil {
 		text += "\nRemote command failed or interrupted; inspect remote state before retrying."
 	}

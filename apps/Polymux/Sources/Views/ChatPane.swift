@@ -11,6 +11,7 @@ struct ChatPane: View {
     let thread: PolymuxKit.Thread
     let session: AppSession
     let drops: Binding<[URL]>
+    let destination: SearchDestination?
     @State private var store: ChatStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSearch = false
@@ -27,6 +28,7 @@ struct ChatPane: View {
     @State private var target: ReplyTarget?
     @State private var highlight: ReplyTarget?
     @State private var jumpID = UUID()
+    @State private var revealed: UUID?
     @State private var atBottom = true
     @State private var composerHeight: CGFloat = 70
     @State private var reply: ReplyContext?
@@ -40,11 +42,12 @@ struct ChatPane: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let mobileEdge: CGFloat = 24
 
-    init(agent: Agent, thread: PolymuxKit.Thread, session: AppSession, drops: Binding<[URL]>) {
+    init(agent: Agent, thread: PolymuxKit.Thread, session: AppSession, drops: Binding<[URL]>, destination: SearchDestination? = nil) {
         self.agent = agent
         self.thread = thread
         self.session = session
         self.drops = drops
+        self.destination = destination
         _store = State(initialValue: ChatStore(client: session.client, actor: session.sidebar.cacheActor, threadID: thread.id, sidebar: session.sidebar))
     }
 
@@ -155,6 +158,11 @@ struct ChatPane: View {
                         .disabled(openingVoice || showVoice)
                 }
             }
+            #if os(macOS)
+            if !showSearch {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+            #endif
         }
         .panel(isPresented: $showProfile) {
             if thread.isGroup { GroupEditor(thread: thread, session: session) }
@@ -168,8 +176,12 @@ struct ChatPane: View {
             store.isVisible = scenePhase == .active
             store.onUpdate = { event, tap in session.sidebar.note(event, at: tap) }
             await store.start()
+            reveal()
             await store.markRead()
         }
+        .onChange(of: destination?.id) { _, _ in reveal() }
+        .onChange(of: store.isConnected) { _, _ in reveal() }
+        .onChange(of: store.error) { _, _ in reveal() }
         .task(id: agent.id) { await offerFocus() }
         .onDisappear { store.stop(); clearDate(); highlight = nil; target = nil }
         .onChange(of: scenePhase) { _, phase in
@@ -264,27 +276,28 @@ struct ChatPane: View {
     private var topInset: CGFloat { showSearch ? 8 : max(0, headerHeight - toolbarInset) + 8 }
 
     private var composer: some View {
-        VStack(spacing: 4) {
-            ZStack(alignment: .bottom) {
-                ComposerView(client: session.client,
-                             isVoiceActive: showVoice || showSearch || openingVoice,
-                             send: { text, attachments, quote, mentions in
-                                 await store.send(text: text, attachments: attachments, reply: quote, mentions: mentions)
-                                 if reply == quote { reply = nil }
-                             },
-                             reply: reply, agentName: reply.flatMap { quote in session.sidebar.agents.first { $0.id == quote.agentID }?.name } ?? agent.name,
-                             clearReply: { reply = nil }, drops: drops, members: thread.isGroup ? members : [])
-                    .frame(height: showVoice ? 0 : nil)
-                    .opacity(showVoice ? 0 : 1)
-                    .allowsHitTesting(!showVoice)
-                    .accessibilityHidden(showVoice)
-            }
-        }
-        .frame(maxWidth: 720)
+        ComposerView(client: session.client,
+                     isVoiceActive: showVoice || showSearch || openingVoice,
+                     send: { text, attachments, quote, mentions in
+                         session.avatars.poke(agent.id, .nod)
+                         await store.send(text: text, attachments: attachments, reply: quote, mentions: mentions)
+                         if reply == quote { reply = nil }
+                     },
+                     reply: reply, agentName: reply.flatMap { quote in session.sidebar.agents.first { $0.id == quote.agentID }?.name } ?? agent.name,
+                     clearReply: { reply = nil }, drops: drops, members: thread.isGroup ? members : [],
+                     drafting: { active in
+                         for member in members {
+                             store.activity.setListening(active, conversationID: thread.id, agentID: member.id)
+                         }
+                     })
+            .frame(height: showVoice ? 0 : nil)
+            .opacity(showVoice ? 0 : 1)
+            .allowsHitTesting(!showVoice)
+            .accessibilityHidden(showVoice)
         #if os(iOS)
         .padding(.horizontal, mobileEdge).padding(.bottom, mobileEdge).padding(.top, 10)
         #else
-        .padding(.horizontal, 20).padding(.bottom, 14).padding(.top, 10)
+        .padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 10)
         #endif
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
     }
@@ -325,7 +338,7 @@ struct ChatPane: View {
                                       sending: store.isSending, retry: { await store.retry(messageID: message.id) },
                                       respond: { reply = $0 }, jump: { jump(to: $0.messageID, part: $0.partIndex) },
                                       ask: { text in Task { await store.send(text: text) } },
-                                       highlight: highlight, activity: bubbleActivity(message))
+                                      highlight: highlight)
                         .id(message.id)
                         .modifier(JumpGlow(active: highlight == ReplyTarget(id: message.id, part: nil)))
                         .background {
@@ -338,23 +351,13 @@ struct ChatPane: View {
                             .allowsHitTesting(false)
                         }
                     }
-                    ForEach(members, id: \.id) { member in
-                        let presentation = store.activity.view(conversationID: thread.id, agentID: member.id, connected: store.isConnected)
-                        if presentation.label != "Ready" && store.isConnected && !store.messages.contains(where: { $0.agentID == member.id && $0.status == "streaming" && $0.text.isEmpty }) {
-                            HStack(spacing: 8) {
-                                if presentation.typing { ThinkingDots() }
-                                Text("\(thread.isGroup ? member.name + ": " : "")\(presentation.label)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                            }
-                            .accessibilityElement(children: .combine)
-                        }
-                    }
+                    TypingRow(members: members.compactMap { member in
+                        let view = store.activity.view(conversationID: thread.id, agentID: member.id, connected: store.isConnected)
+                        return (view.typing || view.working) && store.isConnected ? (member, view) : nil
+                    }, session: session, conversationID: thread.id, group: thread.isGroup)
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .frame(maxWidth: 720)
                 .padding(.horizontal, 20).padding(.vertical, 14)
-                .frame(maxWidth: .infinity)
             }
             .coordinateSpace(name: scrollSpace)
             .scrollIndicators(.hidden)
@@ -422,15 +425,10 @@ struct ChatPane: View {
     /// Mirrors Rakazo's focus prompt: offer the deterministic card once the chat settles,
     /// and only while the user has not spoken. The server decides whether it still applies.
     private func offerFocus() async {
-        guard !thread.isGroup, store.messages.isEmpty else { return }
-        do { try await Task.sleep(for: .seconds(10)) } catch { return }
-        guard !Task.isCancelled, store.messages.isEmpty, !store.isSending else { return }
+        guard !thread.isGroup, !store.messages.contains(where: { $0.role == "user" }) else { return }
+        do { try await Task.sleep(for: .seconds(session.sidebar.agents.count <= 1 ? 0 : 10)) } catch { return }
+        guard !Task.isCancelled, !store.messages.contains(where: { $0.role == "user" }), !store.isSending else { return }
         _ = try? await session.client.requestFocus(agentID: agent.id)
-    }
-
-    private func bubbleActivity(_ message: Message) -> ActivityView? {
-        guard let runID = message.runID, let run = store.runs.first(where: { $0.id == runID }) else { return nil }
-        return ActivityStore.present(runs: [run], conversationID: thread.id, agentID: run.agentID, connected: store.isConnected)
     }
 
     private func updateDate() {
@@ -479,6 +477,14 @@ struct ChatPane: View {
         let previous = store.messages[index - 1].date
         let current = store.messages[index].date
         return !Calendar.current.isDate(previous, inSameDayAs: current) || current.timeIntervalSince(previous) > 1800
+    }
+
+    private func reveal() {
+        guard let destination, destination.id != revealed, destination.threadID == thread.id,
+              store.isConnected || store.error != nil, let messageID = destination.messageID else { return }
+        revealed = destination.id
+        closeSearch()
+        jump(to: messageID)
     }
 
     private func jump(to id: String, part: Int64? = nil) {
@@ -533,13 +539,12 @@ struct MessageBubble: View {
     /// Sends text a card produced through `polymuxSend` to the agent as the user's next message.
     let ask: (String) -> Void
     var highlight: ReplyTarget?
-    var activity: ActivityView?
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 36) {
             if message.role == "user" { Spacer(minLength: 0) }
             VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 6) {
-                if showAuthor {
+                if showAuthor && (message.status != "streaming" || !displayParts.isEmpty) {
                     Text(agentName).font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 12)
                 }
                 VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 12) {
@@ -551,19 +556,11 @@ struct MessageBubble: View {
                                 if index == displayParts.last?.offset { contentWidth = width }
                             }
                     }
-                    if displayParts.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if message.status == "streaming", activity?.typing == true {
-                                ThinkingDots()
-                            } else if message.status == "streaming" {
-                                Text(activity?.label ?? "Receiving reply").foregroundStyle(.secondary)
-                            } else {
-                                Text(message.status == "error" ? "Reply failed" : "Reply stopped")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(12)
-                        .background(bubble, in: RoundedRectangle(cornerRadius: BubbleStyle.radius))
+                    if displayParts.isEmpty && message.status != "streaming" {
+                        Text(message.status == "error" ? "Reply failed" : "Reply stopped")
+                            .foregroundStyle(.secondary)
+                            .padding(12)
+                            .background(bubble, in: RoundedRectangle(cornerRadius: BubbleStyle.radius))
                     }
                 }
                 if let reply = message.reply {
@@ -596,12 +593,12 @@ struct MessageBubble: View {
     private var displayParts: [(offset: Int, element: Part)] {
         let parts = Array(message.parts.enumerated())
         let attachments = parts.filter { $0.element.attachment != nil }
-        let choices = parts.filter { $0.element.kind == "choice" }
+        let choices = parts.filter { $0.element.kind == "choice" || $0.element.kind == "credential" }
         // A reply still being written is shown whole when it finishes, not as it arrives.
         // Its text is still recorded, so a stopped reply keeps what it managed to say.
         if message.status == "streaming" { return attachments + choices }
         return attachments + choices +
-            parts.filter { $0.element.attachment == nil && $0.element.kind != "choice" && !($0.element.text ?? "").isEmpty }
+            parts.filter { $0.element.attachment == nil && $0.element.kind != "choice" && $0.element.kind != "credential" && !($0.element.text ?? "").isEmpty }
     }
 
     @ViewBuilder private func partView(_ part: Part, index: Int) -> some View {
@@ -609,7 +606,9 @@ struct MessageBubble: View {
             MediaView(attachment: attachment, client: client, bubbleColor: bubble,
                       respond: { respond(to: index) }, action: ask)
         } else if part.kind == "choice" {
-            FocusCard(part: part, client: client, agentID: message.agentID ?? "", bubble: bubble)
+            ChoiceCard(part: part, client: client, message: message, bubble: bubble)
+        } else if let request = part.credential, part.kind == "credential" {
+            CredentialCard(request: request, client: client, message: message, bubble: bubble)
         } else if let text = part.text {
             Text(text).fixedSize(horizontal: false, vertical: true)
                 .padding(12)
@@ -642,29 +641,80 @@ struct MessageBubble: View {
     }
 }
 
-private struct ThinkingDots: View {
+private struct TypingRow: View {
+    let members: [(Agent, ActivityView)]
+    let session: AppSession
+    let conversationID: String
+    let group: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scene
     @State private var visible = false
 
+    private var typers: [Agent] { members.filter { $0.1.typing }.map(\.0) }
+    private var mark: Agent? { members.first(where: { $0.1.typing })?.0 ?? members.first?.0 }
+    private var markSize: CGFloat { group ? 22 : 28 }
+
+    private var text: String {
+        if typers.isEmpty, let first = members.first {
+            return group ? "\(first.0.name): \(first.1.label)" : first.1.label
+        }
+        guard group else { return "Typing…" }
+        let names = typers.map(\.name)
+        switch names.count {
+        case 1: return "\(names[0]) is typing"
+        case 2: return "\(names[0]) and \(names[1]) are typing"
+        case 3: return "\(names[0]), \(names[1]) and \(names[2]) are typing"
+        default: return "\(names[0]), \(names[1]) and \(names.count - 2) more are typing"
+        }
+    }
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || !visible || scene != .active)) { context in
-            HStack(spacing: 5) {
-                ForEach(0..<3) { index in
-                    let phase = context.date.timeIntervalSinceReferenceDate * 4 - Double(index) * 0.7
-                    let pulse = reduceMotion ? 0.5 : (sin(phase) + 1) / 2
-                    Circle().fill(.secondary)
-                        .frame(width: 7, height: 7)
-                        .opacity(0.4 + pulse * 0.6)
-                        .scaleEffect(0.85 + pulse * 0.15)
+        Group {
+            if !members.isEmpty {
+                HStack(spacing: group ? 8 : 14) {
+                    if let mark {
+                        AgentAvatar(agentID: mark.id, conversationID: conversationID,
+                                    activity: session.sidebar.activity, connected: true)
+                            .frame(width: markSize * 316 / 200, height: markSize * 316 / 200)
+                            .frame(width: markSize, height: markSize)
+                    }
+                    label
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .frame(height: 32)
+                .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(text)
+                .onAppear { visible = true }
+                .onDisappear { visible = false }
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: members.map { $0.0.id })
+    }
+
+    private var label: some View {
+        Text(text)
+            .foregroundStyle(.primary.opacity(0.75))
+            .overlay {
+                if !reduceMotion {
+                    Text(text).foregroundStyle(.primary)
+                        .mask {
+                            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !visible || scene != .active)) { context in
+                                GeometryReader { geometry in
+                                    let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.2) / 2.2
+                                    LinearGradient(stops: [.init(color: .clear, location: 0.25),
+                                                           .init(color: .white, location: 0.6),
+                                                           .init(color: .clear, location: 0.75)],
+                                                   startPoint: .leading, endPoint: .trailing)
+                                        .frame(width: geometry.size.width * 2)
+                                        .offset(x: geometry.size.width * (phase * 4 - 2))
+                                }
+                            }
+                        }
                 }
             }
-            .frame(width: 34, height: 20)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Thinking")
-        .onAppear { visible = true }
-        .onDisappear { visible = false }
+            .font(.system(size: 14))
     }
 }
 

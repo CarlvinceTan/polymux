@@ -167,7 +167,6 @@ func TestCreateAgentSurvivesRestart(t *testing.T) {
 func TestCreateAgentValidation(t *testing.T) {
 	api, _ := startTest(t, &testFactory{})
 	for _, body := range []string{
-		`{}`, `{"name":" ","role":"guide","prompt":"help"}`,
 		`{"name":"` + strings.Repeat("n", 129) + `","role":"","prompt":""}`,
 		`{"name":"Guide","role":"guide","prompt":"help","model":" "}`,
 		`{"name":"Guide","role":"guide","prompt":"help","tools":["bash"]}`,

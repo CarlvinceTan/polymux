@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import PolymuxKit
 
 struct RowMenu: NSViewRepresentable {
     let profile: () -> Void
@@ -9,6 +10,10 @@ struct RowMenu: NSViewRepresentable {
     var avatar: (() -> Void)? = nil
     var delete: (() -> Void)? = nil
     var title = "Edit profile"
+    var sections: [PolymuxKit.Section] = []
+    var sectionID: String?
+    var move: ((String?) -> Void)?
+    var create: (() -> Void)?
 
     func makeNSView(context: Context) -> MenuAnchor {
         let view = MenuAnchor()
@@ -23,6 +28,10 @@ struct RowMenu: NSViewRepresentable {
         view.avatar = avatar
         view.delete = delete
         view.title = title
+        view.sections = sections
+        view.sectionID = sectionID
+        view.move = move
+        view.create = create
         view.enabled = context.environment.isEnabled
         view.attach()
     }
@@ -37,6 +46,10 @@ final class MenuAnchor: NSView {
     var avatar: (() -> Void)?
     var delete: (() -> Void)?
     var title = "Edit profile"
+    var sections: [PolymuxKit.Section] = []
+    var sectionID: String?
+    var move: ((String?) -> Void)?
+    var create: (() -> Void)?
     var enabled = true
     private var keyboardMenu: TableMenu?
 
@@ -91,8 +104,25 @@ final class MenuAnchor: NSView {
 
     func populate(_ menu: NSMenu) {
         menu.removeAllItems()
+        menu.allowsContextMenuPlugIns = false
         menu.autoenablesItems = false
         if pin != nil { add(pinned ? "Unpin" : "Pin", symbol: pinned ? "pin.slash" : "pin", action: #selector(togglePin), to: menu) }
+        if move != nil {
+            let item = add("Move to", symbol: "folder", action: #selector(moveChat(_:)), to: menu)
+            let destinations = NSMenu()
+            destinations.autoenablesItems = false
+            for section in sections {
+                let choice = add(section.name, symbol: "folder", action: #selector(moveChat(_:)), to: destinations)
+                choice.representedObject = section.id
+                choice.state = !pinned && sectionID == section.id ? .on : .off
+            }
+            let main = add("Unassigned", symbol: "folder", action: #selector(moveChat(_:)), to: destinations)
+            main.state = !pinned && sectionID == nil ? .on : .off
+            destinations.addItem(.separator())
+            add("Create section", symbol: "folder.badge.plus", action: #selector(createSection), to: destinations)
+            item.submenu = destinations
+        }
+        menu.addItem(.separator())
         add(title, symbol: "pencil", action: #selector(editProfile), to: menu)
         if avatar != nil { add("Customise avatar", symbol: "face.smiling", action: #selector(editAvatar), to: menu) }
         if delete != nil {
@@ -119,6 +149,8 @@ final class MenuAnchor: NSView {
     }
 
     @objc private func togglePin() { pin?() }
+    @objc private func moveChat(_ item: NSMenuItem) { move?(item.representedObject as? String) }
+    @objc private func createSection() { create?() }
     @objc private func editProfile() { profile?() }
     @objc private func editAvatar() { avatar?() }
     @objc private func deleteAgent() { delete?() }

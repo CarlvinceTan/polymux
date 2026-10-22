@@ -31,6 +31,8 @@ struct ChatHeader: View {
             }
             .frame(maxWidth: 260)
             .fixedSize(horizontal: false, vertical: true)
+            // Dims as one layer when disabled, so the pill never shows through the avatar.
+            .compositingGroup()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

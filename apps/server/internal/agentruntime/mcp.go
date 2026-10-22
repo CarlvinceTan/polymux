@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/mcp"
@@ -113,7 +114,7 @@ func (t *mcpTool) Execute(ctx context.Context, _ string, params json.RawMessage,
 		if block.Type == "image" {
 			out.Content = append(out.Content, ai.ImageContent{MimeType: block.MimeType, Data: block.Data})
 		} else {
-			out.Content = append(out.Content, ai.TextContent{Text: block.Text})
+			out.Content = append(out.Content, ai.TextContent{Text: untrusted.Wrap(t.schema.Name, block.Text)})
 		}
 	}
 	return out, nil

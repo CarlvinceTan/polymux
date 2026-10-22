@@ -26,7 +26,12 @@ type Document struct {
 	Revision  string `json:"revision"`
 	UpdatedAt string `json:"updatedAt"`
 	Source    string `json:"source"`
+	Agent     string `json:"agent,omitempty"`
+	Tier      string `json:"tier,omitempty"`
 }
+
+// Tiers ranks a document's tier for the turn context; empty means log.
+var Tiers = map[string]int{"profile": 0, "": 1, "log": 1, "note": 2}
 
 type Provider interface {
 	List(context.Context, string, string) ([]Document, error)
@@ -39,11 +44,9 @@ type book struct {
 }
 
 var documents = durable.DefineDocFamily(durable.DocFamilyDefinition[book, durable.JsonValue]{
-	CommonDocDefinition: durable.CommonDocDefinition[book]{
-		Kind: "polymux.memory", Version: 1,
-		// Current-only bases replace old content instead of accumulating sensitive deltas.
-		CheckpointWhen: func(book, []durable.Op, durable.CheckpointInfo) bool { return true },
-	},
+	Kind: "polymux.memory", Version: 1, Family: true,
+	// Current-only bases replace old content instead of accumulating sensitive deltas.
+	CheckpointWhen:    func(book, []durable.Op, durable.CheckpointInfo) bool { return true },
 	DocumentSemantics: durable.DocumentSemantics{Scope: durable.ScopeSession},
 	Initial:           func(durable.JsonValue) book { return book{Entries: []Document{}} },
 })
@@ -108,7 +111,7 @@ func (s *Store) List(ctx context.Context, owner, scope string) ([]Document, erro
 }
 
 func (s *Store) Save(ctx context.Context, owner, scope string, input Document) (Document, error) {
-	if strings.TrimSpace(input.Name) == "" || len(input.Name) > 128 || strings.TrimSpace(input.Text) == "" || len(input.Text) > 4096 || len(input.Source) > 512 {
+	if _, ok := Tiers[input.Tier]; !ok || strings.TrimSpace(input.Name) == "" || len(input.Name) > 128 || strings.TrimSpace(input.Text) == "" || len(input.Text) > 4096 || len(input.Source) > 512 {
 		return Document{}, errors.New("invalid memory document")
 	}
 	s.mu.Lock()
@@ -131,7 +134,8 @@ func (s *Store) Save(ctx context.Context, owner, scope string, input Document) (
 			return Document{}, ErrConflict
 		}
 		duplicate := slices.IndexFunc(current.Entries, func(d Document) bool { return d.Text == input.Text })
-		if duplicate >= 0 {
+		retier := duplicate >= 0 && duplicate == index && current.Entries[index].Tier != input.Tier
+		if duplicate >= 0 && !retier {
 			input = current.Entries[duplicate]
 			if index < 0 || index == duplicate {
 				return input, nil

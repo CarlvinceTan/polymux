@@ -4,6 +4,24 @@ import Testing
 
 @Suite
 struct CacheTests {
+    @Test func silentTurnsStayHiddenAfterRelaunch() throws {
+        let url = location()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let cache = try LocalCache(url: url)
+        try cache.save(agents: [Agent(id: "a", name: "A", role: "", model: "", active: true)],
+                       threads: [Thread(id: "a", agentID: "a")])
+        let progress = Message(id: "progress", threadID: "a", role: "assistant", parts: [Part(kind: "text", text: "Working")], createdAt: WireDate.string(), status: "done", seq: 1)
+        try cache.apply(Event(seq: 1, conversationID: "a", type: "message.start", message: progress, createdAt: progress.createdAt))
+        var reply = Message(id: "reply", threadID: "a", role: "assistant", parts: [], createdAt: WireDate.string(), status: "streaming", seq: 2)
+        try cache.apply(Event(seq: 2, conversationID: "a", type: "message.start", message: reply, createdAt: reply.createdAt))
+        reply.status = "silent"
+        try cache.apply(Event(seq: 3, conversationID: "a", type: "message.done", message: reply, createdAt: reply.createdAt))
+        let relaunched = try LocalCache(url: url)
+        #expect(try relaunched.messages(threadID: "a").map(\.id) == ["progress"])
+        #expect(try relaunched.threads().first?.lastMessage?.id == "progress")
+        #expect(try relaunched.threads().first?.unreadCount == 1)
+    }
+
     private func location() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("polymux-tests-\(UUID())/cache.sqlite")
     }

@@ -11,7 +11,14 @@ public struct NetworkInfo: Codable, Sendable {
 
     public struct Device: Codable, Sendable, Identifiable {
         public let id: String
+        /// What the device reports, such as its hostname.
         public let name: String
+        /// The name someone chose for it; empty when unset.
+        public var label: String?
+
+        public var title: String {
+            if let label, !label.isEmpty { label } else { name }
+        }
     }
 
     public let server: Server

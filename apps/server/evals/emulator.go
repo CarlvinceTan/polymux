@@ -72,6 +72,7 @@ type Emulator struct {
 	key      string
 	mu       sync.Mutex
 	steps    []Step
+	summary  func(*ChatRequest) Response
 	index    int
 	requests []*ChatRequest
 	times    []time.Time
@@ -79,8 +80,11 @@ type Emulator struct {
 }
 
 // StartEmulator serves scripted SSE responses on a loopback listener.
-func StartEmulator(steps []Step) *Emulator {
+func StartEmulator(steps []Step, summary ...func(*ChatRequest) Response) *Emulator {
 	e := &Emulator{model: evalModel, key: evalKey, steps: append([]Step(nil), steps...)}
+	if len(summary) > 0 {
+		e.summary = summary[0]
+	}
 	e.server = httptest.NewServer(http.HandlerFunc(e.serve))
 	e.URL = e.server.URL + "/v1"
 	return e
@@ -201,6 +205,12 @@ func (e *Emulator) serve(w http.ResponseWriter, r *http.Request) {
 		e.fail("expected streaming model request")
 		e.mu.Unlock()
 		writeFixtureError(w, http.StatusInternalServerError)
+		return
+	}
+	if e.summary != nil && strings.Contains(requestText(&req), "You are a context summarization assistant") {
+		stepIndex := e.index
+		e.mu.Unlock()
+		e.writeReply(w, r, stepIndex, e.summary(&req))
 		return
 	}
 	if e.index >= len(e.steps) {

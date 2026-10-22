@@ -62,8 +62,8 @@ func (s *Store) Spawn(ctx context.Context, parent, call, target, task string) (c
 	if err := json.Unmarshal([]byte(data), &source); err != nil {
 		return run, err
 	}
-	if source.Status != "running" || source.Trigger != "message" {
-		return run, errors.New("spawning requires a running user turn")
+	if source.Status != "running" || source.Trigger == "child" || source.Trigger == "created" {
+		return run, errors.New("spawning requires a running bot turn")
 	}
 	var count int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM thread_members WHERE thread_id=? AND agent_id=?`, target, target).Scan(&count); err != nil {
@@ -94,4 +94,63 @@ func (s *Store) Spawn(ctx context.Context, parent, call, target, task string) (c
 		return run, err
 	}
 	return run, tx.Commit()
+}
+
+var ErrChild = errors.New("no child task with that ID was spawned by this bot")
+
+const childOwner = `FROM runs c JOIN runs p ON p.id=json_extract(c.data,'$.parentRunID')
+WHERE json_extract(c.data,'$.trigger')='child' AND p.agent_id=?`
+
+// Children lists the newest child tasks spawned by an agent's runs.
+func (s *Store) Children(ctx context.Context, agent string) ([]contract.Run, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT c.data `+childOwner+` ORDER BY json_extract(c.data,'$.createdAt') DESC LIMIT 20`, agent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []contract.Run{}
+	for rows.Next() {
+		var data string
+		var run contract.Run
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(data), &run); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+// StopChild withdraws a queued child task or stops a running one with its descendants. It
+// returns the run IDs whose executions the caller must cancel.
+func (s *Store) StopChild(ctx context.Context, agent, id string) ([]string, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var status, job string
+	err = tx.QueryRowContext(ctx, `SELECT c.status,c.job_id `+childOwner+` AND c.id=?`, agent, id).Scan(&status, &job)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrChild
+	}
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	if status == "queued" {
+		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=? AND state='queued'`, job); err != nil {
+			return nil, err
+		}
+		if err := finishRuns(ctx, tx, job); err != nil {
+			return nil, err
+		}
+	} else if !Terminal(status) {
+		if ids, err = stopTree(ctx, tx, "id", id); err != nil {
+			return nil, err
+		}
+	}
+	return ids, tx.Commit()
 }

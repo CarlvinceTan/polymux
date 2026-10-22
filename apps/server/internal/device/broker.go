@@ -22,6 +22,10 @@ func (b *Broker) Rename(ctx context.Context, id, name string) error {
 	return b.store.Rename(ctx, id, name)
 }
 
+func (b *Broker) Relabel(ctx context.Context, id, label string) error {
+	return b.store.Relabel(ctx, id, label)
+}
+
 func (b *Broker) Revoke(ctx context.Context, id string) error {
 	return b.store.Revoke(ctx, id)
 }

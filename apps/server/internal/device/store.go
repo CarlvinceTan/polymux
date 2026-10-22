@@ -32,6 +32,7 @@ const Version = 1
 type Pairing struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
+	Label        string   `json:"label"`
 	Agent        string   `json:"agent"`
 	Capabilities []string `json:"capabilities"`
 	Revoked      bool     `json:"revoked"`
@@ -84,6 +85,9 @@ CREATE TABLE IF NOT EXISTS tickets(hash TEXT PRIMARY KEY, agent TEXT NOT NULL, c
 CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, name TEXT NOT NULL, agent TEXT NOT NULL, capabilities TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS app_lock(caller TEXT PRIMARY KEY, fails INTEGER NOT NULL, until INTEGER NOT NULL);`)
 	if err == nil {
+		err = s.addLabel(ctx)
+	}
+	if err == nil {
 		err = s.identity(ctx, hostname)
 	}
 	if err != nil {
@@ -91,6 +95,16 @@ CREATE TABLE IF NOT EXISTS app_lock(caller TEXT PRIMARY KEY, fails INTEGER NOT N
 		return nil, err
 	}
 	return s, nil
+}
+
+// addLabel adds the user-chosen device name to stores created before it existed.
+func (s *Store) addLabel(ctx context.Context) error {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('devices') WHERE name='label'`).Scan(&exists); err != nil || exists > 0 {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN label TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -213,7 +227,7 @@ func (s *Store) Authenticate(ctx context.Context, token string) (Pairing, error)
 }
 
 func (s *Store) List(ctx context.Context) ([]Pairing, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,agent,capabilities,revoked FROM devices ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,label,agent,capabilities,revoked FROM devices ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +236,7 @@ func (s *Store) List(ctx context.Context) ([]Pairing, error) {
 	for rows.Next() {
 		var p Pairing
 		var caps string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Agent, &caps, &p.Revoked); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Agent, &caps, &p.Revoked); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(caps), &p.Capabilities); err != nil {
@@ -252,6 +266,21 @@ func (s *Store) Rename(ctx context.Context, id, name string) error {
 		return errors.New("invalid device name")
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE devices SET name=? WHERE id=? AND revoked=0`, name, id)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err == nil && n != 1 {
+		return errors.New("device not found")
+	}
+	return err
+}
+
+// Relabel sets the name people chose for a device; empty falls back to the one it reports.
+func (s *Store) Relabel(ctx context.Context, id, label string) error {
+	if len(label) > 128 || strings.ContainsAny(label, "\x00\r\n") {
+		return errors.New("invalid device name")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE devices SET label=? WHERE id=? AND revoked=0`, label, id)
 	if err != nil {
 		return err
 	}

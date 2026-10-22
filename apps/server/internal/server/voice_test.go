@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
 )
@@ -138,6 +140,79 @@ func TestVoicePrivacyAndPermissions(t *testing.T) {
 		if err := api.Store.DB.QueryRowContext(t.Context(), "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("private execution persisted in %s: %d %v", table, count, err)
 		}
+	}
+}
+
+func TestVoiceMemoryScope(t *testing.T) {
+	for _, mode := range []string{"peer", "group"} {
+		t.Run(mode, func(t *testing.T) {
+			var group string
+			factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, message contract.Message) (agentruntime.Result, error) {
+				if d.TurnContext == nil {
+					return agentruntime.Result{}, fmt.Errorf("private tools lost their turn context")
+				}
+				restored, ok := d.TurnContext()
+				if !ok || restored.Value(turnKey{}) == nil || restored.Value(voiceKey{}) == nil || restored.Value(htmlKey{}) == nil {
+					return agentruntime.Result{}, fmt.Errorf("private tool context is incomplete")
+				}
+				state := restored.Value(turnKey{}).(*turnState)
+				want := d.Agent.ID + " private fact"
+				other := "b private fact"
+				if d.Agent.ID == "b" {
+					other = "a private fact"
+				}
+				if mode == "group" {
+					want, other = "group fact", "private fact"
+					if state.run.ConversationID != group {
+						return agentruntime.Result{}, fmt.Errorf("group consultation changed memory scope")
+					}
+				} else if state.run.ConversationID != d.Agent.ID {
+					return agentruntime.Result{}, fmt.Errorf("peer consultation used the sender's memory scope")
+				}
+				if text := store.Text(message); !strings.Contains(text, want) || strings.Contains(text, other) {
+					return agentruntime.Result{}, fmt.Errorf("private context lost or mixed scoped memory")
+				}
+				recalled, err := botCall(restored, d, "recall_memory", `{}`)
+				if err != nil || !strings.Contains(recalled.Text(), want) || strings.Contains(recalled.Text(), other) {
+					return agentruntime.Result{}, fmt.Errorf("private tool lost or mixed scoped memory: %v", err)
+				}
+				if d.Agent.ID == "a" {
+					name, args := "message_agent", `{"agent_id":"b","message":"Consult privately","intent":"request"}`
+					if mode == "group" {
+						name, args = "handoff_agent", `{"agent_id":"b","message":"Consult privately"}`
+					}
+					_, err = botCall(restored, d, name, args)
+				}
+				return agentruntime.Result{Text: "Private result"}, err
+			}}
+			api, web := voiceTest(t, factory)
+			for _, id := range []string{"a", "b"} {
+				if _, err := api.memory.Save(t.Context(), id, id, memory.Document{Name: "private", Text: id + " private fact"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			thread := "a"
+			if mode == "group" {
+				created, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				group, thread = created.ID, created.ID
+				for _, id := range []string{"a", "b"} {
+					if _, err := api.memory.Save(t.Context(), id, group, memory.Document{Name: "shared", Text: "group fact"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if status, _ := voicePost(t, web, thread, "scoped-voice"); status != http.StatusOK {
+				t.Fatal("private consultation failed", status)
+			}
+			factory.mu.Lock()
+			defer factory.mu.Unlock()
+			if len(factory.opened) != 2 {
+				t.Fatal("consultation did not reach the peer")
+			}
+		})
 	}
 }
 
@@ -288,6 +363,18 @@ func TestVoiceCancellationIsPrivate(t *testing.T) {
 	}
 	<-done
 	privateChat(t, api, "a")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var status string
+		if err := api.Store.DB.QueryRowContext(t.Context(), `SELECT status FROM runs WHERE thread_id='a'`).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status == "cancelled" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("cancelled voice consultation remained active")
 }
 
 var _ agent.AgentTool = (*voicePublish)(nil)

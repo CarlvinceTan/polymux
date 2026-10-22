@@ -5,6 +5,7 @@ import PolymuxKit
 /// Pairs another device: a QR code and link for this server, or a link pasted from another one.
 struct AddDevice: View {
     let client: APIClient?
+    let onBack: () -> Void
     let join: (URL) -> Void
     @Environment(\.panelClose) private var close
     @State private var invite: Invite?
@@ -13,7 +14,7 @@ struct AddDevice: View {
     @State private var pasteIssue: String?
 
     var body: some View {
-        PanelView("Add device", onClose: { close() }) {
+        PanelView("Add device", onClose: { close() }, onBack: onBack) {
             Form {
                 Section {
                     if let invite {

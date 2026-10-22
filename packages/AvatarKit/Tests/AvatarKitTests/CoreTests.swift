@@ -32,7 +32,8 @@ private func reference() throws -> Reference {
 @Suite
 struct CoreTests {
     @Test func catalogsPreserveEveryUpstreamOption() {
-        #expect(ShapeID.allCases.count == 8)
+        #expect(Set(ShapeID.creationShapes).count == 13)
+        #expect(Set(ShapeID.creationShapes).isSubset(of: Set(ShapeID.allCases)))
         #expect(ColorID.allCases.count == 12)
         #expect(ExpressionID.allCases.count == 16)
         #expect(SHAPES.map(\.id) == ShapeID.allCases)

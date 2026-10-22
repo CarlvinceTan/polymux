@@ -216,7 +216,7 @@ func runServer(args []string) error {
 	}
 	if embedder != nil {
 		index.Embedder = embedder
-		if err := index.Reindex(ctx, embedDims); err != nil {
+		if err := index.Reindex(ctx); err != nil {
 			log.Warn("reindex stale vectors", "error", err)
 		}
 		if embedder.Media {

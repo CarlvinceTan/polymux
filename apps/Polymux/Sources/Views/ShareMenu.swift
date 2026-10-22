@@ -42,7 +42,7 @@ private struct ShareMenu<Menu: View>: ViewModifier {
             #if os(macOS)
             .background { ShareAnchor(store: sharing).accessibilityHidden(true) }
             #endif
-            .contextMenu {
+            .appMenu {
                 menu(item.map { item in
                     ShareButton {
                         #if os(macOS)

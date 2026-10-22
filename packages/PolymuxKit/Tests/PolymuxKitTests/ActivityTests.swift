@@ -10,6 +10,58 @@ import Testing
             createdAt: created, updatedAt: created, activity: activity, agentID: "a", status: status, summary: status)
     }
 
+    @Test func toolsUseStructuredNamesForScenarioMoods() {
+        for (name, mood) in [("web_search", "searching"), ("read_file", "reading"),
+                             ("apply_patch", "writing"), ("message_agent", "sending"),
+                             ("bash", "working")] {
+            var probe = run(activity: "tool")
+            probe.tools = [ToolActivity(id: "old", name: "web_search", status: "completed"),
+                           ToolActivity(id: "current", name: name, status: "running")]
+            probe.toolID = "current"
+            let value = ActivityStore.present(runs: [probe], conversationID: "group", agentID: "a")
+            #expect(value.mood == mood)
+            #expect(value.working && !value.typing)
+        }
+    }
+
+    @Test func streamingAndListeningAreLiveAndConversationScoped() {
+        let store = ActivityStore()
+        var probe = run()
+        store.restore([probe])
+        store.setListening(true, conversationID: "private", agentID: "a")
+        #expect(store.view(conversationID: "private", agentID: "a").mood == "listening")
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "thinking")
+        let delta = Event(seq: 2, conversationID: "group", type: "message.delta", agentID: "a", text: "Hello")
+        store.receive(delta, live: false)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "thinking")
+        store.receive(delta, live: true)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "streaming")
+        #expect(store.view(conversationID: "group", agentID: "b").mood == "idle")
+        probe.activity = "tool"; probe.seq = 3
+        store.receive(Event(seq: 3, conversationID: "group", type: "tool.start", run: probe), live: true)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "working")
+        probe.activity = "generating"; probe.seq = 4
+        store.receive(Event(seq: 4, conversationID: "group", type: "run.update", run: probe), live: true)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "thinking")
+        store.retain([])
+        #expect(store.view(conversationID: "private", agentID: "a").mood == "idle")
+    }
+
+    @Test func contextualMoodsPreserveRunPriorityAndRestingIdentity() {
+        for (status, mood) in [("waiting_input", "blocked"), ("failed", "failed"),
+                               ("interrupted", "interrupted"), ("waiting_peer", "receiving")] {
+            let view = ActivityStore.present(runs: [run(status: status)], conversationID: "group", agentID: "a", listening: true)
+            #expect(view.mood == mood)
+        }
+        #expect(ActivityStore.present(runs: [], conversationID: "group", agentID: "a", connected: false, listening: true).mood == nil)
+        let store = ActivityStore()
+        var probe = run(status: "completed")
+        probe.outcome = "artifact"
+        store.receive(Event(seq: 1, conversationID: "group", type: "run.done", run: probe), live: true)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "celebrate")
+        #expect(ActivityStore.present(runs: [probe], conversationID: "group", agentID: "a").mood == "idle")
+    }
+
     @Test func statesMapToExistingAnimations() {
         let cases: [(Run, String, Bool)] = [
             (run(status: "queued"), "idle", false),
@@ -253,6 +305,58 @@ import Testing
         #expect(restored.cues.isEmpty)
         store.retain([])
         #expect(store.cues.isEmpty)
+    }
+
+    @Test func creationSpawnsFromSnapshotsUntilTheReplyActuallyStreams() {
+        let store = ActivityStore()
+        var intro = run("intro", trigger: "created")
+        store.restore([intro])
+        let initial = store.view(conversationID: "group", agentID: "a")
+        #expect(initial.animation == "wide" && initial.mood == "spawning")
+        #expect(initial.typing && initial.working)
+        #expect(store.cues.isEmpty)
+        #expect(ActivityStore.present(runs: [intro], conversationID: "group", agentID: "a").mood == "spawning")
+        intro.seq = 2
+        intro.updatedAt = "2026-10-09T12:00:10Z"
+        store.restore([intro])
+        store.receive(Event(seq: 2, conversationID: "group", type: "run.update", run: intro), live: true)
+        #expect(store.view(conversationID: "group", agentID: "a") == initial)
+        store.receive(Event(seq: 3, conversationID: "group", type: "message.delta", agentID: "a",
+                            text: "Hello", runID: intro.id), live: true)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "streaming")
+        store.receive(Event(seq: 4, conversationID: "group", type: "message.done", agentID: "a", runID: intro.id), live: true)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "thinking")
+        intro.seq = 5
+        store.restore([intro])
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "thinking")
+        intro.seq = 6
+        intro.status = "completed"
+        intro.outcome = "reply"
+        store.receive(Event(seq: 6, conversationID: "group", type: "run.done", run: intro), live: true)
+        #expect(store.view(conversationID: "group", agentID: "a").mood == "done")
+    }
+
+    @Test func restoredCreationDoesNotMaskOtherWorkOrReplayOutput() {
+        for activity in ["preparing", "generating"] {
+            let store = ActivityStore()
+            let intro = run("intro", activity: activity, trigger: "created")
+            store.receive(Event(seq: 1, conversationID: "group", type: "run.update", run: intro), live: false)
+            #expect(store.view(conversationID: "group", agentID: "a").mood == "spawning")
+            #expect(store.view(conversationID: "private", agentID: "a").mood == "idle")
+            #expect(store.view(conversationID: "group", agentID: "b").mood == "idle")
+        }
+        let restored = ActivityStore()
+        var intro = run("intro", trigger: "created")
+        intro.tools = [ToolActivity(id: "finished", name: "read_file", status: "completed")]
+        restored.restore([intro])
+        #expect(restored.view(conversationID: "group", agentID: "a").mood == "thinking")
+        let replayed = ActivityStore()
+        intro.tools = nil
+        replayed.restore([intro])
+        replayed.receive(Event(seq: 2, conversationID: "group", type: "message.delta", agentID: "a",
+                               text: "Hello", runID: intro.id), live: false)
+        #expect(replayed.view(conversationID: "group", agentID: "a").mood == "thinking")
+        #expect(replayed.cues.isEmpty)
     }
 
     @Test func replayNeverCelebratesAndCuesDeduplicate() {

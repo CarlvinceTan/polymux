@@ -69,7 +69,7 @@ func TestDurablePrompt(t *testing.T) {
 				t.Fatalf("requests %d, want 1", len(seen))
 			}
 			prompt := promptText(t, seen[0])
-			toolList := `"Tools":["read"]`
+			toolList := `"Tools":["ls","read"]`
 			if definition.Intro {
 				toolList = `"Tools":null`
 			}
@@ -81,7 +81,7 @@ func TestDurablePrompt(t *testing.T) {
 			if !strings.Contains(prompt, "Configured MCP connections are unavailable this turn; no MCP tools are exposed.") {
 				t.Fatal("prompt omitted the MCP limitation")
 			}
-			if strings.Contains(prompt, "unconnected") || strings.Contains(prompt, `"ls"`) {
+			if strings.Contains(prompt, "unconnected") || definition.Intro && strings.Contains(prompt, `"ls"`) {
 				t.Fatal("prompt listed an unavailable tool or connection")
 			}
 			if strings.Contains(prompt, skill) == definition.Intro {

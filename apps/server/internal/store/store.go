@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS sessions(agent_id TEXT PRIMARY KEY, path TEXT NOT NUL
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(message_id UNINDEXED, thread_id UNINDEXED, body);
 CREATE TABLE IF NOT EXISTS media_index(message_id TEXT PRIMARY KEY REFERENCES messages(id), text TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS media_vectors(message_id TEXT PRIMARY KEY REFERENCES messages(id), thread_id TEXT NOT NULL, embedding BLOB NOT NULL, model TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS vectors_scope ON media_vectors(thread_id);`)
+CREATE INDEX IF NOT EXISTS vectors_scope ON media_vectors(thread_id);
+CREATE TABLE IF NOT EXISTS search_entities(id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE, body TEXT NOT NULL, embedding BLOB NOT NULL, model TEXT NOT NULL);`)
 	if err != nil {
 		return err
 	}
@@ -90,9 +91,6 @@ PRAGMA user_version=2;`)
 	if err := s.migrateNotices(ctx); err != nil {
 		return err
 	}
-	if err := s.migrateApprovals(ctx); err != nil {
-		return err
-	}
 	if err := s.migratePins(ctx); err != nil {
 		return err
 	}
@@ -100,6 +98,9 @@ PRAGMA user_version=2;`)
 		return err
 	}
 	if err := s.migrateMCP(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateProjects(ctx); err != nil {
 		return err
 	}
 	return s.migrateSidebar(ctx)
@@ -171,7 +172,7 @@ func (s *Store) saveDefinition(ctx context.Context, a contract.Agent, definition
 		if _, err := tx.ExecContext(ctx, `UPDATE threads SET section_id=?,section_order=(SELECT COALESCE(max(section_order)+1,0) FROM threads WHERE section_id IS ?) WHERE id=?`, section, section, a.ID); err != nil {
 			return err
 		}
-		text := "You were just created. In one reply, say what you understood your role to be from your role and instructions, and ask for anything you need to get started. Do not perform work or use tools."
+		text := "You were just created. Greet the user in one or two short sentences. If a role is configured, briefly say what you can help with; otherwise ask what they want help with first. A focus card handles setup separately. Do not list setup questions or discuss tool configuration. Do not perform work or use tools."
 		work := Work{Trigger: "created", Message: contract.Message{ID: "created:" + a.ID, ThreadID: a.ID, Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}}, CreatedAt: Now()}}
 		if err := queueTx(ctx, tx, work, a.ID); err != nil {
 			return err
@@ -319,6 +320,7 @@ func (s *Store) Profile(ctx context.Context, id string) (contract.AgentProfile, 
 }
 
 func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definition json.RawMessage) (contract.Agent, error) {
+	avatar := a.Avatar
 	if !json.Valid(definition) {
 		return a, fmt.Errorf("invalid agent definition")
 	}
@@ -345,10 +347,15 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	if err := tx.QueryRowContext(ctx, `SELECT data FROM agents WHERE id=?`, a.ID).Scan(&data); err != nil {
 		return a, err
 	}
-	if err := json.Unmarshal([]byte(data), &a); err != nil {
+	var saved contract.Agent
+	if err := json.Unmarshal([]byte(data), &saved); err != nil {
 		return a, err
 	}
-	if avatar := contract.GrokBotAvatarFromDefinition(definition); avatar != nil {
+	a = saved
+	if avatar == nil {
+		avatar = contract.GrokBotAvatarFromDefinition(definition)
+	}
+	if avatar != nil {
 		a.Avatar = avatar
 		agentData, err := json.Marshal(a)
 		if err != nil {
@@ -448,13 +455,13 @@ func (s *Store) Agents(ctx context.Context) ([]contract.Agent, error) {
 
 func (s *Store) Threads(ctx context.Context) ([]contract.Thread, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT t.id,t.agent_id,t.last_read_seq,t.last_seq,
- (SELECT count(*) FROM messages m WHERE m.thread_id=t.id AND m.role='assistant' AND m.seq>t.last_read_seq
+ (SELECT count(*) FROM messages m WHERE m.thread_id=t.id AND m.status!='silent' AND m.role='assistant' AND m.seq>t.last_read_seq
   AND NOT EXISTS(SELECT 1 FROM events e,json_each(e.data,'$.payload.messageIDs') hidden
    WHERE e.thread_id=t.id AND json_extract(e.data,'$.type')='activity' AND hidden.value=m.id))
  + (SELECT count(*) FROM events e WHERE e.thread_id=t.id AND e.seq>t.last_read_seq
     AND json_extract(e.data,'$.type')='activity'
     AND json_extract(e.data,'$.payload.kind') IN ('agent.messaged','subagent.finished')),
- (SELECT data FROM messages m WHERE m.thread_id=t.id ORDER BY seq DESC LIMIT 1),
+ (SELECT data FROM messages m WHERE m.thread_id=t.id AND m.status!='silent' ORDER BY seq DESC LIMIT 1),
 	 COALESCE(NULLIF(t.title,''),json_extract(a.data,'$.name')),
 	 (SELECT json_group_array(agent_id) FROM (SELECT agent_id FROM thread_members WHERE thread_id=t.id ORDER BY position)),
 	 t.pinned,t.pin_order,t.section_id,t.section_order
@@ -572,9 +579,6 @@ func appendTx(ctx context.Context, tx *sql.Tx, event contract.Event, message *co
 			if err := resolvePeers(ctx, tx, event.Run); err != nil {
 				return event, err
 			}
-			if err := resolveApprovals(ctx, tx, event.Run); err != nil {
-				return event, err
-			}
 			if event.Run.Status == "waiting_peer" || event.Run.Status == "waiting_input" {
 				event.Type = "run.update"
 			}
@@ -625,7 +629,7 @@ func appendTx(ctx context.Context, tx *sql.Tx, event contract.Event, message *co
 	if err == nil {
 		err = noticeTx(ctx, tx, message, event)
 	}
-	if err == nil && event.Run != nil && event.Run.ParentRunID != nil && (event.Type == "run.start" && newRun || event.Type == "run.done") {
+	if err == nil && event.Run != nil && event.Run.ParentRunID != nil && event.Run.Trigger == "child" && (event.Type == "run.start" && newRun || event.Type == "run.done") {
 		err = childActivity(ctx, tx, event)
 	}
 	if err == nil && event.Run != nil && endsChildren(event.Run.Status) {
@@ -734,7 +738,7 @@ func (s *Store) Messages(ctx context.Context, id string, before int64, limit int
 	if before <= 0 {
 		before = 1 << 62
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT data FROM (SELECT data,seq FROM messages WHERE thread_id=? AND seq<? ORDER BY seq DESC LIMIT ?) ORDER BY seq`, id, before, limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT data FROM (SELECT data,seq FROM messages WHERE thread_id=? AND status!='silent' AND seq<? ORDER BY seq DESC LIMIT ?) ORDER BY seq`, id, before, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -869,7 +873,7 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 	var parent *string
 	if len(targets) == 1 {
 		var id string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE thread_id=? AND agent_id=? AND status='running' ORDER BY rowid DESC LIMIT 1`, thread, targets[0]).Scan(&id)
+		err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE thread_id=? AND agent_id=? AND status='running' AND json_extract(data,'$.trigger')!='created' ORDER BY rowid DESC LIMIT 1`, thread, targets[0]).Scan(&id)
 		if err == nil {
 			parent = &id
 		} else if !errors.Is(err, sql.ErrNoRows) {
@@ -926,9 +930,6 @@ func (s *Store) Finish(ctx context.Context, id string) error {
 		return err
 	}
 	if err := finishPeer(ctx, tx, id); err != nil {
-		return err
-	}
-	if err := resumeJobTx(ctx, tx, id); err != nil {
 		return err
 	}
 	return tx.Commit()

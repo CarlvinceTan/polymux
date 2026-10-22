@@ -267,14 +267,10 @@ func TestMCPVoiceScope(t *testing.T) {
 	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
 		state := ctx.Value(turnKey{}).(*turnState)
 		names := []string{}
-		reads := []string{}
 		for _, config := range d.MCP {
 			names = append(names, config.Name+"__")
-			if config.ReadOnly {
-				reads = append(reads, config.Name+"__")
-			}
 		}
-		if !slices.Equal(state.prefixes, names) || !slices.Equal(state.readPrefixes, reads) {
+		if !slices.Equal(state.prefixes, names) {
 			return agentruntime.Result{}, errors.New("voice policy used a different MCP scope")
 		}
 		return agentruntime.Result{Text: "Private result"}, nil
@@ -311,6 +307,10 @@ func TestMCPVoiceScope(t *testing.T) {
 func TestMCPAutomaticScope(t *testing.T) {
 	factory := &scopeFactory{}
 	api, _ := startTest(t, factory)
+	routine, err := api.Store.CreateRoutine(t.Context(), contract.Routine{ID: "mcp-scope", AgentID: "assistant", Prompt: "Check connection scope", At: "2099-01-01T00:00:00Z", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: "notes", Command: "fixture-notes"}, "", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestMCPAutomaticScope(t *testing.T) {
 		if err := api.Store.BindMCP(t.Context(), "assistant", "notes", &enabled, nil, false); err != nil {
 			t.Fatal(err)
 		}
-		result := api.execute(t.Context(), api.actors["assistant"], store.Work{Trigger: "follow_up", Message: contract.Message{ID: []string{"automatic-enabled", "automatic-disabled"}[index], ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: new("Continue")}}}})
+		result := api.execute(t.Context(), api.actors["assistant"], store.Work{Trigger: "routine", RoutineID: &routine.ID, Message: contract.Message{ID: []string{"automatic-enabled", "automatic-disabled"}[index], ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: new("Continue")}}}})
 		if result.Status != "done" {
 			t.Fatal("automatic fixture turn failed", result.Status)
 		}

@@ -18,8 +18,7 @@ struct ComposerView: View {
     var clearReply: () -> Void = {}
     var drops: Binding<[URL]> = .constant([])
     var members: [Agent] = []
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var drafting: (Bool) -> Void = { _ in }
     @Environment(\.scenePhase) private var scenePhase
     @State private var dictation = DictationInput()
     @State private var dictationDraft = DictationDraft()
@@ -29,6 +28,7 @@ struct ComposerView: View {
     @State private var mentions: [MentionToken] = []
     @State private var text = ""
     @State private var selection: TextSelection?
+    @State private var insertion = NSRange(location: 0, length: 0)
     @State private var files: [DraftFile] = []
     @State private var photos: [PhotosPickerItem] = []
     @State private var attachments = false
@@ -39,6 +39,7 @@ struct ComposerView: View {
     @State private var loadingPhotos = false
     @State private var error: String?
     @State private var unsent = false
+    @State private var draftTask: Task<Void, Never>?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -54,6 +55,7 @@ struct ComposerView: View {
             }
         }
         .disabled(uploading || loadingPhotos)
+        .task { await dictation.refresh() }
         .onChange(of: isVoiceActive) { _, active in
             focused = !active
             if active {
@@ -61,12 +63,39 @@ struct ComposerView: View {
                 Task { await stopDictation() }
             }
         }
-        .onDisappear { Task { await stopDictation() } }
+        .onDisappear {
+            draftTask?.cancel()
+            drafting(false)
+            Task { await stopDictation() }
+        }
+        .onChange(of: text) { _, value in
+            draftTask?.cancel()
+            drafting(!value.isEmpty && focused)
+            draftTask = Task {
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                drafting(recording)
+            }
+        }
+        .onChange(of: focused) { _, value in
+            if !value, !recording { drafting(false) }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { Task { await stopDictation() } }
+            if phase == .active { Task { await dictation.refresh() } }
         }
         .onChange(of: dictation.active) { _, active in
             if !active { dictationDraft.stop() }
+        }
+        .onChange(of: recording) { _, active in
+            drafting(active)
+            if !active, !isVoiceActive {
+                focused = true
+                Task { @MainActor in
+                    await Task.yield()
+                    guard !recording, let range = Range(insertion, in: text) else { return }
+                    selection = TextSelection(range: range)
+                }
+            }
         }
         .onChange(of: reply?.messageID) { _, value in
             if value != nil { focused = true }
@@ -126,63 +155,74 @@ struct ComposerView: View {
 
     private var controls: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            Button { attachments.toggle() } label: {
-                Image(systemName: "plus").font(.system(size: 17, weight: .regular))
-                    .frame(width: controlSize, height: controlSize)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain).frame(width: controlSize, height: controlSize)
-            .glassEffect(.regular.interactive(), in: Circle())
-            .accessibilityLabel("Add attachment")
-            .popover(isPresented: $attachments, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 0) {
-                    attachmentButton("Files", icon: "doc") { importing = true }
-                    attachmentButton("Photos", icon: "photo") { pickingPhotos = true }
-                    attachmentButton("Camera", icon: "camera") { camera = true }
-                        #if os(iOS)
-                        .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
-                        #endif
+            if !recording {
+                Button { attachments.toggle() } label: {
+                    Image(systemName: "plus").font(.system(size: 17, weight: .regular))
+                        .frame(width: controlSize, height: controlSize)
+                        .contentShape(Circle())
                 }
-                .padding(6).frame(minWidth: 190)
-                .presentationCompactAdaptation(.popover)
+                .buttonStyle(.plain).frame(width: controlSize, height: controlSize)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .accessibilityLabel("Add attachment")
+                .popover(isPresented: $attachments, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        attachmentButton("Files", icon: "doc") { importing = true }
+                        attachmentButton("Photos", icon: "photo") { pickingPhotos = true }
+                        attachmentButton("Camera", icon: "camera") { camera = true }
+                            #if os(iOS)
+                            .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                            #endif
+                    }
+                    .padding(6).frame(minWidth: 190)
+                    .presentationCompactAdaptation(.popover)
+                }
             }
             VStack(alignment: .leading, spacing: 10) {
-                if let reply {
-                    HStack(alignment: .top, spacing: 8) {
-                        ReplyPreview(reply: reply, agentName: agentName, client: client)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Cancel reply", systemImage: "xmark") { clearReply() }
-                            .labelStyle(.iconOnly).buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
+                if recording {
+                    Color.clear.frame(height: 18).accessibilityHidden(true)
+                } else {
+                    if let reply {
+                        HStack(alignment: .top, spacing: 8) {
+                            ReplyPreview(reply: reply, agentName: agentName, client: client)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("Cancel reply", systemImage: "xmark") { clearReply() }
+                                .labelStyle(.iconOnly).buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                if !files.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack(alignment: .center, spacing: 10) {
-                            ForEach(files) { file in
-                                DraftPreview(file: file) {
-                                    withAnimation { files.removeAll { $0.id == file.id } }
+                    if !files.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack(alignment: .center, spacing: 10) {
+                                ForEach(files) { file in
+                                    DraftPreview(file: file) {
+                                        withAnimation { files.removeAll { $0.id == file.id } }
+                                    }
                                 }
                             }
                         }
+                        .scrollIndicators(.hidden)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    .scrollIndicators(.hidden)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    TextField("Message", text: draftText, selection: $selection, axis: .vertical)
+                        .lineLimit(1...7).textFieldStyle(.plain)
+                        .scrollIndicators(.hidden).focused($focused)
+                        .opacity(polishing ? 0.5 : 1)
+                        .onSubmit {
+                            if let first = mentionChoices.first { mention(first) }
+                            else { submit() }
+                        }
+                        .accessibilityLabel("Message")
+                        .anchorPreference(key: MentionAnchor.self, value: .bounds) { $0 }
                 }
-                TextField("Message", text: draftText, selection: $selection, axis: .vertical)
-                    .lineLimit(1...7).textFieldStyle(.plain)
-                    .scrollIndicators(.hidden).focused($focused)
-                    .opacity(polishing ? 0.5 : 1)
-                    .onSubmit {
-                        if let first = mentionChoices.first { mention(first) }
-                        else { submit() }
-                    }
-                    .accessibilityLabel("Message")
-                    .anchorPreference(key: MentionAnchor.self, value: .bounds) { $0 }
             }
             .padding(.horizontal, 15).padding(.vertical, isExpanded ? 12 : 7)
             .frame(minHeight: controlSize)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: isExpanded ? 24 : controlSize / 2))
+            .overlay {
+                if recording {
+                    Waveform(level: dictation.level).padding(.horizontal, 15)
+                }
+            }
             .overlayPreferenceValue(MentionAnchor.self) { anchor in
                 GeometryReader { geometry in
                     if let anchor, !mentionChoices.isEmpty {
@@ -197,32 +237,22 @@ struct ComposerView: View {
                 ProgressView().controlSize(.small).frame(width: controlSize, height: controlSize)
             } else {
                 Button { toggleDictation() } label: {
-                    Group {
-                        if dictation.active || polishing {
-                            Waveform(level: dictation.level, animating: polishing)
-                        } else {
-                            Image(systemName: dictation.denied ? "mic.slash.fill" : "mic.fill").font(.system(size: 15))
-                        }
-                    }
-                        .foregroundStyle(dictation.active ? (colorScheme == .dark ? Color.black : Color.white) : Color.primary)
+                    Image(systemName: recording ? "pause.fill" : dictation.denied ? "mic.slash.fill" : "mic.fill")
+                        .font(.system(size: 15))
                         .frame(width: controlSize, height: controlSize)
-                        .background(dictation.active ? Color.accentColor : .clear, in: Circle())
-                        .overlay {
-                            if dictation.active {
-                                Circle().stroke(Color.primary, lineWidth: 2)
-                                    .scaleEffect(reduceMotion ? 1 : 1 + CGFloat(dictation.level) * 0.18)
-                            }
-                        }
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
-                .accessibilityLabel(dictation.active ? "Stop dictation" : "Start dictation")
-                .accessibilityValue(dictation.denied ? "Permission denied" : dictation.active ? "Listening" : "")
+                .inputAccessory()
+                .accessibilityLabel(recording ? "Pause dictation" : "Start dictation")
+                .accessibilityValue(dictation.denied ? "Permission denied" : recording ? "Listening" : "")
                 .disabled(dictation.stopping || isVoiceActive)
-                if hasContent {
+                if hasContent && !recording {
                     Button { submit() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 15, weight: .semibold))
                             .frame(width: controlSize, height: controlSize)
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Circle())
@@ -369,7 +399,8 @@ struct ComposerView: View {
     }
 
     private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty }
-    private var isExpanded: Bool { !files.isEmpty || reply != nil }
+    private var recording: Bool { dictation.active && !dictation.stopping }
+    private var isExpanded: Bool { !recording && (!files.isEmpty || reply != nil) }
 
     private var controlSize: CGFloat {
         #if os(macOS)
@@ -399,22 +430,22 @@ struct ComposerView: View {
             Task { await stopDictation(polish: true) }
             return
         }
-        guard !dictation.denied else { error = "Allow microphone and speech recognition in Settings."; return }
         error = nil
-        focused = true
+        if case let .selection(bounds) = selection?.indices,
+           bounds.lowerBound >= text.startIndex, bounds.upperBound <= text.endIndex {
+            insertion = NSRange(bounds, in: text)
+        } else { insertion = NSRange(location: text.utf16.count, length: 0) }
+        focused = false
+        attachments = false
         ignoresDictation = false
         dictationDraft.stop()
         dictated = nil
         dictation.start { value in
             guard !ignoresDictation else { return }
-            let range: NSRange
-            if case let .selection(bounds) = selection?.indices,
-               bounds.lowerBound >= text.startIndex, bounds.upperBound <= text.endIndex {
-                range = NSRange(bounds, in: text)
-            } else { range = NSRange(location: text.utf16.count, length: 0) }
             if let result = dictationDraft.update(value.text, start: value.start, final: value.final,
-                                                  text: text, selection: range) {
+                                                  text: text, selection: insertion) {
                 editText(result.text, range: result.range)
+                insertion = NSRange(location: result.cursor, length: 0)
                 dictated = (dictated?.lowerBound ?? result.range.location)..<result.cursor
                 let cursor = String.Index(utf16Offset: result.cursor, in: text)
                 selection = TextSelection(insertionPoint: cursor)
@@ -631,24 +662,47 @@ struct CameraView: UIViewControllerRepresentable {
 }
 #endif
 
-/// Level bars shown in the mic button while listening; pulses while the text is being polished.
 private struct Waveform: View {
     let level: Float
-    let animating: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let shape: [CGFloat] = [0.5, 0.8, 1, 0.7, 0.4]
+    @State private var samples: [Sample] = []
+    @State private var volume: Float = 0
+    @State private var envelope: Float = 0
+    @State private var smooth: Float = 0
+
+    private struct Sample: Identifiable {
+        let id = UUID()
+        let level: Float
+    }
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion || !animating)) { tick in
-            let time = tick.date.timeIntervalSinceReferenceDate
+        GeometryReader { geometry in
+            let count = max(1, Int(ceil(geometry.size.width / 5.5)) + 1)
             HStack(spacing: 2.5) {
-                ForEach(shape.indices, id: \.self) { index in
-                    let wave = animating ? 0.5 + 0.5 * sin(time * 6 + Double(index)) : Double(level)
-                    Capsule().frame(width: 3, height: 5 + 13 * shape[index] * max(0.15, wave))
+                ForEach(samples) { sample in
+                    Capsule().fill(Color.primary)
+                        .frame(width: 3, height: 5 + 13 * CGFloat(sample.level))
+                        .transition(.identity)
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
+            .clipped()
+            .task(id: count) {
+                while !Task.isCancelled {
+                    envelope += (volume * 0.65 - envelope) * 0.4
+                    smooth += (envelope - smooth) * 0.4
+                    withAnimation(reduceMotion ? nil : .linear(duration: 0.06)) {
+                        samples.insert(Sample(level: smooth), at: 0)
+                        if samples.count > count { samples.removeLast(samples.count - count) }
+                    }
+                    do { try await Task.sleep(for: .milliseconds(60)) }
+                    catch { break }
                 }
             }
         }
-        .animation(.easeOut(duration: 0.08), value: level)
-        .accessibilityHidden(true)
+        .frame(height: 18)
+        .onChange(of: level, initial: true) { _, value in volume = min(1, max(0, value)) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Recording")
     }
 }

@@ -12,6 +12,8 @@ import (
 var shapes = map[string]bool{
 	"cercle": true, "galet": true, "squircle": true, "capsule": true,
 	"triangle": true, "hexagone": true, "nuage": true, "goutte": true,
+	"star": true, "clover": true, "flower": true, "burst": true, "pentagon": true,
+	"square": true, "sparkle": true, "heart": true, "tablet": true, "wedge": true, "house": true,
 }
 var colors = map[string]bool{
 	"encre": true, "brun": true, "rouge": true, "orange": true,

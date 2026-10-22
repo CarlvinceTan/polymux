@@ -3,6 +3,8 @@ import Foundation
 public enum ShapeID: String, CaseIterable, Codable, Identifiable, Sendable {
     case circle = "cercle", pebble = "galet", squircle, capsule, triangle
     case hexagon = "hexagone", cloud = "nuage", droplet = "goutte"
+    case star, clover, flower, burst, pentagon
+    case square, sparkle, heart, tablet, wedge, house
     public var id: String { rawValue }
     public var label: String {
         switch self {
@@ -14,9 +16,25 @@ public enum ShapeID: String, CaseIterable, Codable, Identifiable, Sendable {
         case .hexagon: "Hexagon"
         case .cloud: "Cloud"
         case .droplet: "Droplet"
+        case .star: "Star"
+        case .clover: "Clover"
+        case .flower: "Flower"
+        case .burst: "Burst"
+        case .pentagon: "Pentagon"
+        case .square: "Square"
+        case .sparkle: "Sparkle"
+        case .heart: "Heart"
+        case .tablet: "Tablet"
+        case .wedge: "Wedge"
+        case .house: "House"
         }
     }
     public var radii: [Double] { SHAPE_BY_ID[rawValue]!.radii }
+
+    public static let creationShapes: [ShapeID] = [
+        .circle, .cloud, .square, .sparkle, .clover, .heart, .flower,
+        .droplet, .tablet, .wedge, .house, .star, .hexagon
+    ]
 }
 
 public enum ColorID: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -73,6 +91,18 @@ public let SHAPES: [BotShape] = {
     ]), 1.02)
     let droplet = normalize(profileFromPolygon(hullOfCircles(0, 0.28, 0.66, 0, -0.96, 0.05), 0, 0), 1.04)
     let capsule = profileFromPolygon(hullOfCircles(-0.42, 0, 0.62, 0.42, 0, 0.62), 0, 0)
+    let clover = normalize(unionOfCirclesProfile([-0.38, 0.38].flatMap { x in
+        [-0.38, 0.38].map { y in CircleSpec(x: x, y: y, r: 0.52) }
+    }), 1.04)
+    let flower = normalize(unionOfCirclesProfile([CircleSpec(x: 0, y: 0, r: 0.36)] + (0..<6).map {
+        let angle = -.pi / 2 + Double($0) * TAU / 6
+        return CircleSpec(x: 0.58 * cos(angle), y: 0.58 * sin(angle), r: 0.33)
+    }), 1.13)
+    let burst = normalize(angles.map { 0.8 + 0.2 * cos(7 * $0 - .pi / 2) }, 1.1)
+    let house = normalize(profileFromPolygon(roundedPolygon([
+        Point(x: -0.85, y: 0.85), Point(x: -0.85, y: -0.1), Point(x: 0, y: -0.95),
+        Point(x: 0.85, y: -0.1), Point(x: 0.85, y: 0.85)
+    ], 0.16), 0, 0), 1.12)
     return [
         BotShape(id: .circle, radii: [Double](repeating: 1, count: PROFILE_SAMPLES)),
         BotShape(id: .pebble, radii: pebble),
@@ -80,7 +110,15 @@ public let SHAPES: [BotShape] = {
         BotShape(id: .capsule, radii: capsule),
         BotShape(id: .triangle, radii: regularPolygonProfile(3, 1.12, 0.34, -90)),
         BotShape(id: .hexagon, radii: regularPolygonProfile(6, 1.04, 0.26, 0)),
-        BotShape(id: .cloud, radii: cloud), BotShape(id: .droplet, radii: droplet)
+        BotShape(id: .cloud, radii: cloud), BotShape(id: .droplet, radii: droplet),
+        BotShape(id: .star, radii: STAR_CONTOUR), BotShape(id: .clover, radii: clover),
+        BotShape(id: .flower, radii: flower), BotShape(id: .burst, radii: burst),
+        BotShape(id: .pentagon, radii: regularPolygonProfile(5, 1.08, 0.3, -90)),
+        BotShape(id: .square, radii: normalize(superellipseProfile(5), 1.12)),
+        BotShape(id: .sparkle, radii: SPARKLE_CONTOUR), BotShape(id: .heart, radii: HEART_CONTOUR),
+        BotShape(id: .tablet, radii: normalize(profileFromPolygon(hullOfCircles(-0.4, 0, 0.65, 0.4, 0, 0.65), 0, 0), 1.12)),
+        BotShape(id: .wedge, radii: regularPolygonProfile(3, 1.15, 0.3, -90)),
+        BotShape(id: .house, radii: house)
     ]
 }()
 
@@ -88,12 +126,12 @@ public let SHAPE_BY_ID = Dictionary(uniqueKeysWithValues: SHAPES.map { ($0.id.ra
 public let DEFAULT_SHAPE = ShapeID.circle
 
 public let COLORS: [BotColor] = [
-    BotColor(id: .ink, hex: "#0a0a0c"), BotColor(id: .brown, hex: "#8b5e3c"),
-    BotColor(id: .red, hex: "#e8483f"), BotColor(id: .orange, hex: "#f08a24"),
-    BotColor(id: .amber, hex: "#f0b429"), BotColor(id: .green, hex: "#3ecf8e"),
-    BotColor(id: .turquoise, hex: "#2fbfa0"), BotColor(id: .blue, hex: "#3b93f0"),
-    BotColor(id: .purple, hex: "#8b5cf6"), BotColor(id: .pink, hex: "#e152b0"),
-    BotColor(id: .grey, hex: "#a3a3a3"), BotColor(id: .cream, hex: "#f1efe9")
+    BotColor(id: .ink, hex: "#000000"), BotColor(id: .brown, hex: "#936439"),
+    BotColor(id: .red, hex: "#FF263C"), BotColor(id: .orange, hex: "#FF6700"),
+    BotColor(id: .amber, hex: "#FF9800"), BotColor(id: .green, hex: "#00C972"),
+    BotColor(id: .turquoise, hex: "#00BCA6"), BotColor(id: .blue, hex: "#1084FE"),
+    BotColor(id: .purple, hex: "#9159FE"), BotColor(id: .pink, hex: "#FF309B"),
+    BotColor(id: .grey, hex: "#777777"), BotColor(id: .cream, hex: "#f1efe9")
 ]
 public let COLOR_BY_ID = Dictionary(uniqueKeysWithValues: COLORS.map { ($0.id.rawValue, $0) })
 public let DEFAULT_COLOR = ColorID.ink

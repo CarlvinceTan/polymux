@@ -24,10 +24,12 @@
       "additionalProperties": false,
       "properties": {
         "body": {
-          "type": "string"
+          "type": "string",
+          "x-swift-optional": true
         },
         "outcome": {
-          "type": "string"
+          "type": "string",
+          "x-swift-optional": true
         },
         "seq": {
           "type": "integer"
@@ -172,6 +174,9 @@
         "voicePrompt": {
           "type": "string"
         },
+        "voiceLanguage": {
+          "type": "string"
+        },
         "speechKeys": {
           "type": "array",
           "items": {
@@ -190,6 +195,7 @@
         "textProvider",
         "textModel",
         "voicePrompt",
+        "voiceLanguage",
         "speechKeys"
       ]
     },
@@ -222,6 +228,9 @@
           "type": "string"
         },
         "voicePrompt": {
+          "type": "string"
+        },
+        "voiceLanguage": {
           "type": "string"
         }
       },
@@ -416,7 +425,8 @@
             "text",
             "attachment",
             "tool",
-            "choice"
+            "choice",
+            "credential"
           ]
         },
         "text": {
@@ -442,6 +452,16 @@
         },
         "answerID": {
           "type": "string"
+        },
+        "answerText": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "allowText": {
+          "type": "boolean"
+        },
+        "credential": {
+          "$ref": "#/$defs/CredentialRequest"
         }
       },
       "required": [
@@ -521,7 +541,8 @@
             "pending",
             "streaming",
             "done",
-            "error"
+            "error",
+            "silent"
           ]
         },
         "seq": {
@@ -564,7 +585,8 @@
       "additionalProperties": false,
       "properties": {
         "detail": {
-          "type": "string"
+          "type": "string",
+          "x-go-value": true
         },
         "code": {
           "type": "string"
@@ -608,7 +630,8 @@
             "tool.done",
             "peer.delivery",
             "group.handoff",
-            "approval_requested"
+            "activity",
+            "message.read"
           ]
         },
         "messageID": {
@@ -657,8 +680,8 @@
         "usage": {
           "$ref": "#/$defs/Usage"
         },
-        "approval": {
-          "$ref": "#/$defs/ApprovalRequest"
+        "payload": {
+          "$ref": "#/$defs/Activity"
         }
       },
       "required": [
@@ -666,35 +689,6 @@
         "conversationID",
         "type",
         "createdAt"
-      ]
-    },
-    "ApprovalRequest": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "runID": {
-          "type": "string"
-        },
-        "tool": {
-          "type": "string"
-        },
-        "args": {
-          "type": "string"
-        },
-        "expiresAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "required": [
-        "id",
-        "runID",
-        "tool",
-        "args",
-        "expiresAt"
       ]
     },
     "Usage": {
@@ -818,7 +812,8 @@
             "pending",
             "active",
             "cancelled",
-            "finished"
+            "finished",
+            "paused"
           ]
         },
         "createdAt": {
@@ -835,7 +830,9 @@
           "type": "string",
           "enum": [
             "once",
-            "interval"
+            "interval",
+            "cron",
+            "watch"
           ]
         },
         "prompt": {
@@ -845,6 +842,17 @@
           "type": "string",
           "maxLength": 64,
           "description": "IANA zone for a wall-clock recurrence; empty means fixed elapsed intervals"
+        },
+        "crons": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "watch": {
+          "$ref": "#/$defs/RoutineWatch"
         }
       },
       "required": [
@@ -856,6 +864,38 @@
         "agentID",
         "trigger",
         "prompt"
+      ]
+    },
+    "RoutineRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary",
+        "createdAt"
       ]
     },
     "RoutineRequest": {
@@ -879,6 +919,17 @@
           "type": "string",
           "maxLength": 64,
           "description": "IANA zone for a wall-clock recurrence; empty means fixed elapsed intervals"
+        },
+        "crons": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "watch": {
+          "$ref": "#/$defs/RoutineWatch"
         }
       },
       "required": [
@@ -1102,7 +1153,8 @@
             "question",
             "result",
             "status",
-            "handoff"
+            "handoff",
+            "fyi"
           ]
         },
         "status": {
@@ -1119,6 +1171,11 @@
         "createdAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "hops": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
         }
       },
       "required": [
@@ -1182,7 +1239,6 @@
         },
         "name": {
           "type": "string",
-          "minLength": 1,
           "maxLength": 128
         },
         "role": {
@@ -1305,7 +1361,18 @@
             "triangle",
             "hexagone",
             "nuage",
-            "goutte"
+            "goutte",
+            "star",
+            "clover",
+            "flower",
+            "burst",
+            "pentagon",
+            "square",
+            "sparkle",
+            "heart",
+            "tablet",
+            "wedge",
+            "house"
           ]
         },
         "color": {
@@ -1677,6 +1744,187 @@
         "placements",
         "createdAt"
       ]
+    },
+    "SearchResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "snippet": {
+          "type": "string"
+        },
+        "threadID": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "snippet",
+        "threadID",
+        "score"
+      ]
+    },
+    "Activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "verb": {
+          "type": "string"
+        },
+        "objectID": {
+          "type": "string"
+        },
+        "objectLabel": {
+          "type": "string"
+        },
+        "iconOrAgentID": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "x-swift-default": "WireDate.string()"
+        },
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "messageIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "verb",
+        "objectID",
+        "objectLabel",
+        "iconOrAgentID",
+        "at"
+      ]
+    },
+    "ChoiceAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "optionID": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "optionID"
+      ]
+    },
+    "CredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "header": {
+          "type": "string"
+        },
+        "scheme": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "saved",
+            "skipped"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "origin",
+        "header",
+        "scheme",
+        "status"
+      ]
+    },
+    "CredentialAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "skip": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "skip"
+      ]
+    },
+    "RoutineWatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "jsonPointers": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      },
+      "required": [
+        "url"
+      ]
     }
   },
   "oneOf": [
@@ -1862,6 +2110,15 @@
         "$ref": "#/$defs/FocusStatus"
       },
       "note": "record the chosen first-run option and post its deterministic acknowledgment"
+    },
+    "POST /threads/{id}/messages/{messageID}/answer": {
+      "request": {
+        "$ref": "#/$defs/ChoiceAnswer"
+      },
+      "response": {
+        "$ref": "#/$defs/Message"
+      },
+      "note": "save a question answer and queue a turn for its author atomically"
     }
   }
 }

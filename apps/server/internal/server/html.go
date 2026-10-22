@@ -60,6 +60,7 @@ type htmlKey struct{}
 
 type htmlScope struct {
 	messageID string
+	cwd       string
 	publish   func(context.Context, contract.Attachment, string) error
 }
 

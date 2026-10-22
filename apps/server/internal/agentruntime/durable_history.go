@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/MichaelKinsy/PiG/chord/delta"
 	"github.com/MichaelKinsy/PiG/durable"
 )
 
@@ -248,6 +249,15 @@ func copyJSON(value any) any {
 	switch typed := value.(type) {
 	case nil, bool, string, float64, int, int64:
 		return value
+	case *delta.JsonObject:
+		if typed == nil {
+			return typed
+		}
+		copied := delta.NewJsonObject(typed.Len())
+		for key, item := range typed.All() {
+			copied.Set(key, copyJSON(item))
+		}
+		return copied
 	case map[string]any:
 		if typed == nil {
 			return typed
@@ -273,6 +283,11 @@ func copyJSON(value any) any {
 
 // Storage reads must be detached, including nested tool arguments and message content.
 func copyHistory(value reflect.Value) reflect.Value {
+	if value.CanInterface() {
+		if object, ok := value.Interface().(*delta.JsonObject); ok {
+			return reflect.ValueOf(copyJSON(object))
+		}
+	}
 	switch value.Kind() {
 	case reflect.Interface, reflect.Pointer:
 		if value.IsNil() {

@@ -256,7 +256,9 @@ struct ApprovalFixture: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            FocusCard(part: part, client: client, agentID: "t-approval", bubble: BubbleStyle.incoming(scheme))
+            ChoiceCard(part: part, client: client,
+                       message: Message(id: "focus:t-approval", threadID: "t-approval", role: "assistant", parts: [part], createdAt: "", status: "done"),
+                       bubble: BubbleStyle.incoming(scheme))
             Button("Fail answer") { VerifyFixture.failAnswers() }
                 .accessibilityValue(scheme == .dark ? "dark" : "light")
         }

@@ -44,8 +44,8 @@ func (t *triggerTool) Schema() ai.ToolSchema {
 }
 func (t *triggerTool) Execute(ctx context.Context, call string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
-	if state == nil || state.work.Trigger != "message" || state.run.AgentID != state.run.ConversationID {
-		return agent.AgentToolResult{}, errors.New("trigger management requires a direct user turn")
+	if state == nil || state.work.Trigger == "created" {
+		return agent.AgentToolResult{}, errors.New("trigger management requires an active bot turn")
 	}
 	var input struct {
 		Action string `json:"action"`

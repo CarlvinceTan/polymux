@@ -66,9 +66,17 @@ struct AvatarOptions: Codable, Equatable, Sendable {
     }
 }
 
+/// One-off body moves for an agent's avatars; a new value plays them once.
+struct AvatarPoke: Equatable {
+    let moves: [Poke]
+    let id = UUID()
+    let at = Date()
+}
+
 @MainActor @Observable final class AvatarStore {
     let trace = SignpostTrace()
     private(set) var saved: [String: AvatarOptions] = [:]
+    private(set) var pokes: [String: AvatarPoke] = [:]
     private(set) var dirtyIDs: Set<String> = []
     @ObservationIgnored private let sidebar: SidebarStore
     @ObservationIgnored private var editing: [String: Set<UUID>] = [:]
@@ -92,6 +100,10 @@ struct AvatarOptions: Codable, Equatable, Sendable {
         saved[agentID] ?? .default
     }
 
+    func poke(_ agentID: String, _ moves: Poke...) {
+        pokes[agentID] = AvatarPoke(moves: moves)
+    }
+
     func set(_ options: AvatarOptions, for agentID: String) {
         guard !agentID.isEmpty, !removedIDs.contains(agentID) else { return }
         let value = options.sanitized()
@@ -108,6 +120,7 @@ struct AvatarOptions: Codable, Equatable, Sendable {
         removedIDs.insert(id)
         writes.removeValue(forKey: id)?.task.cancel()
         saved.removeValue(forKey: id)
+        pokes.removeValue(forKey: id)
         dirtyIDs.remove(id)
         editing.removeValue(forKey: id)
         knownIDs?.remove(id)

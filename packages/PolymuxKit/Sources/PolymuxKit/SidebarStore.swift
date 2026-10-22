@@ -553,7 +553,10 @@ public final class SidebarStore {
         let localSend = event.seq == 0 && event.message?.role == "user"
         guard incoming || localSend else { return false }
         if incoming { thread.lastSeq = event.seq }
-        if let message = project(event, onto: thread),
+        if event.message?.status == "silent" {
+            if thread.lastMessage?.id == event.message?.id { thread.lastMessage = nil }
+            if event.seq > thread.lastReadSeq { thread.unreadCount = max(0, thread.unreadCount - 1) }
+        } else if let message = project(event, onto: thread),
            message.seq >= (thread.lastMessage?.seq ?? 0) || localSend {
             thread.lastMessage = message
         }

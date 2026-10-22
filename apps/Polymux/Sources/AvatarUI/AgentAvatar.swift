@@ -24,9 +24,10 @@ struct AgentAvatar: View {
         let view = presentation
         AvatarView(options: avatars.options(for: agentID),
                    state: StateID(rawValue: view.animation) ?? .idle,
-                    expression: view.expression.flatMap(ExpressionID.init(rawValue:)),
+                    expression: view.mood == nil ? view.expression.flatMap(ExpressionID.init(rawValue:)) : nil,
                     frozenAt: view.animation == "notify" && view.cueID == nil ? POSES[.notify] : nil,
-                    overlapGap: overlapGap, repeating: view.working || speaking, cueID: view.cueID)
+                    overlapGap: overlapGap, repeating: view.working || speaking, cueID: view.cueID,
+                    poke: avatars.pokes[agentID], mood: view.mood.flatMap(MoodID.init(rawValue:)))
             .accessibilityLabel(view.label)
     }
 }

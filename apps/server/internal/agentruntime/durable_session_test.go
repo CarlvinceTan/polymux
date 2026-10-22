@@ -82,7 +82,7 @@ func TestDurableHelpInstructions(t *testing.T) {
 			if *state.Instructions != want {
 				t.Error("conversation instructions do not match the configured prompt")
 			}
-			wantSkills := !tc.intro && !tc.automatic
+			wantSkills := !tc.intro
 			markers := []string{
 				"name: polymux",
 				"name: report",

@@ -64,7 +64,24 @@ func TestParkedTaskSurfacesOnAUserTurn(t *testing.T) {
 	if err != nil || len(tasks) == 0 || tasks[0].Status != "parked" {
 		t.Fatalf("task did not park: %+v %v", tasks, err)
 	}
-	// The first turn answers once more after the tool result before the user's next turn.
+	var completed bool
+	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); {
+		runs, err := api.Store.Runs(t.Context(), "assistant")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(runs) == 1 && runs[0].Status == "completed" && runs[0].FinishedAt != nil && runs[0].Outcome != nil && *runs[0].Outcome == "checkpoint" {
+			completed = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !completed {
+		t.Fatal("checkpoint turn did not finish")
+	}
+	if turns.Load() != 1 {
+		t.Fatalf("checkpoint made %d model requests, want 1", turns.Load())
+	}
 	wait := func(n int32) {
 		t.Helper()
 		deadline := time.Now().Add(8 * time.Second)
@@ -75,18 +92,15 @@ func TestParkedTaskSurfacesOnAUserTurn(t *testing.T) {
 			t.Fatalf("expected %d model requests, got %d", n, turns.Load())
 		}
 	}
-	wait(2)
 	send("second")
-	wait(3)
+	wait(2)
 	mu.Lock()
 	defer mu.Unlock()
-	if next := bodies[2]; !strings.Contains(next, "Tasks waiting on your answer") || !strings.Contains(next, "Draft the fixture report") {
+	if next := bodies[1]; !strings.Contains(next, "Tasks waiting on your answer") || !strings.Contains(next, "Draft the fixture report") {
 		t.Fatalf("parked task was not surfaced: %s", next[:min(len(next), 600)])
 	}
-	for _, body := range bodies[:2] {
-		if strings.Contains(body, "Tasks waiting on your answer") {
-			t.Fatal("first turn claimed parked work")
-		}
+	if strings.Contains(bodies[0], "Tasks waiting on your answer") {
+		t.Fatal("first turn claimed parked work")
 	}
 }
 

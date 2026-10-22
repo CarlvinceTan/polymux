@@ -286,12 +286,12 @@ func TestSectionToolPolicy(t *testing.T) {
 	for _, tool := range api.sidebarTools() {
 		state := &turnState{work: store.Work{Trigger: "review"}}
 		ctx := context.WithValue(t.Context(), turnKey{}, state)
-		if result := beforeTool(ctx, "call", tool.Name(), json.RawMessage(`{}`)); !result.Block {
-			t.Fatal("review widened its tool scope", tool.Name())
+		if result := beforeTool(ctx, "call", tool.Name(), json.RawMessage(`{}`)); result.Block {
+			t.Fatal("review tool was gated", tool.Name())
 		}
 	}
 	var count int
-	if err := api.Store.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM approvals`).Scan(&count); err != nil || count != 0 {
+	if err := api.Store.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE name='approvals'`).Scan(&count); err != nil || count != 0 {
 		t.Fatal("sidebar tools created approval requests", count, err)
 	}
 }

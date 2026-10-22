@@ -1,0 +1,106 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/MichaelKinsy/PiG/agent"
+	"github.com/MichaelKinsy/PiG/ai"
+)
+
+type chatTool struct {
+	store    *store.Store
+	question bool
+}
+
+func (t *chatTool) Name() string {
+	if t.question {
+		return "ask_user"
+	}
+	return "send_to_user"
+}
+func (*chatTool) Label() string                          { return "Message user" }
+func (*chatTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
+func (*chatTool) ToolClass() string                      { return "reversible" }
+func (t *chatTool) Description() string {
+	if t.question {
+		return "Post a question card with choices and optional free text. Continue independent work; the user's answer starts a new turn in this chat. Use stable unique option IDs. Only ask when the answer is needed."
+	}
+	return "Send a short progress message to the user's chat immediately, then continue working. Avoid repeating it in your final reply."
+}
+func (t *chatTool) Schema() ai.ToolSchema {
+	properties := map[string]any{"text": map[string]any{"type": "string", "minLength": 1, "maxLength": 8192}}
+	required := []string{"text"}
+	if t.question {
+		properties = map[string]any{
+			"question":   map[string]any{"type": "string", "minLength": 1, "maxLength": 4096},
+			"options":    map[string]any{"type": "array", "minItems": 2, "maxItems": 8, "items": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"id": map[string]any{"type": "string", "maxLength": 64}, "label": map[string]any{"type": "string", "maxLength": 256}}, "required": []string{"id", "label"}}},
+			"allow_text": map[string]any{"type": "boolean", "description": "Allow an alternative answer; defaults to true"},
+		}
+		required = []string{"question", "options"}
+	}
+	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}}
+}
+func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+	state, _ := ctx.Value(turnKey{}).(*turnState)
+	if state == nil {
+		return agent.AgentToolResult{}, errors.New("no active turn")
+	}
+	var input struct {
+		Text      string                  `json:"text"`
+		Question  string                  `json:"question"`
+		Options   []contract.ChoiceOption `json:"options"`
+		AllowText *bool                   `json:"allow_text"`
+	}
+	if err := json.Unmarshal(args, &input); err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	part := contract.Part{Kind: "text", Text: &input.Text}
+	if t.question {
+		input.Question = strings.TrimSpace(input.Question)
+		if input.Question == "" || len(input.Question) > 4096 || len(input.Options) < 2 || len(input.Options) > 8 {
+			return agent.AgentToolResult{}, errors.New("provide a question and two to eight choices")
+		}
+		seen := map[string]bool{}
+		for _, option := range input.Options {
+			if strings.TrimSpace(option.ID) == "" || strings.HasPrefix(option.ID, "_") || len(option.ID) > 64 || strings.TrimSpace(option.Label) == "" || len(option.Label) > 256 || seen[option.ID] {
+				return agent.AgentToolResult{}, errors.New("provide unique option ids and nonempty labels")
+			}
+			seen[option.ID] = true
+		}
+		allow := input.AllowText == nil || *input.AllowText
+		part = contract.Part{Kind: "choice", Question: &input.Question, Options: input.Options, AllowText: &allow}
+	} else if strings.TrimSpace(input.Text) == "" || len(input.Text) > 8192 {
+		return agent.AgentToolResult{}, errors.New("provide a short nonempty message")
+	}
+	message, err := t.store.PostMessage(ctx, contract.Message{ID: t.Name() + ":" + state.run.ID + ":" + call, ThreadID: state.run.ConversationID, Role: "assistant", Status: "done", CreatedAt: store.Now(), AgentID: &state.run.AgentID, RunID: &state.run.ID, Parts: []contract.Part{part}})
+	if err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	state.mu.Lock()
+	state.posts++
+	state.mu.Unlock()
+	return toolResult(map[string]any{"message_id": message.ID, "posted": true})
+}
+
+func (s *Server) answerChoice(w http.ResponseWriter, r *http.Request) {
+	thread, ok := s.thread(w, r)
+	if !ok {
+		return
+	}
+	var answer contract.ChoiceAnswer
+	if !decode(w, r, &answer) {
+		return
+	}
+	card, err := s.Store.AnswerChoice(r.Context(), thread.ID, r.PathValue("messageID"), answer)
+	if errors.Is(err, store.ErrChoice) {
+		fail(w, http.StatusConflict, "choice", "This question is unavailable or has already been answered.")
+		return
+	}
+	s.respond(w, card, err)
+}

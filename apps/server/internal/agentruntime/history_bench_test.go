@@ -16,7 +16,7 @@ func BenchmarkDurableHistory(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		view, err := conversation.Context(b.Context())
+		view, err := conversation.Context(b.Context(), nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -42,7 +42,7 @@ func BenchmarkDurableHistoryAppend(b *testing.B) {
 			b.Fatal(err)
 		}
 		b.StartTimer()
-		view, err := conversation.Context(b.Context())
+		view, err := conversation.Context(b.Context(), nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func benchHistory(b *testing.B) harness.Conversation {
 		b.Fatal(err)
 	}
 	// Context uses the same history path as durable generation without provider latency.
-	if _, err := conversation.Context(context.Background()); err != nil {
+	if _, err := conversation.Context(context.Background(), nil); err != nil {
 		b.Fatal(err)
 	}
 	return conversation

@@ -194,6 +194,11 @@ func (s *Store) PatchRoutine(ctx context.Context, owner, id string, patch Routin
 			status, kind = "active", "routine.resumed"
 		}
 		if r.Status != status {
+			if *patch.Enabled {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM routine_failures WHERE routine_id=?`, id); err != nil {
+					return r, err
+				}
+			}
 			r.Status = status
 			kinds = append(kinds, kind)
 		}
@@ -205,6 +210,9 @@ func (s *Store) PatchRoutine(ctx context.Context, owner, id string, patch Routin
 			date = *r.NextAt
 		}
 		at, err := time.Parse(time.RFC3339, date)
+		if len(r.Crons) > 0 && (r.NextAt == nil || at.Before(time.Now())) {
+			at, err = cronTime(r, time.Now())
+		}
 		if err != nil {
 			return r, err
 		}

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
 	sandbox "github.com/MichaelKinsy/PiG/codemode"
@@ -18,26 +19,42 @@ import (
 type codeTool struct {
 	tools  []agent.AgentTool
 	before agent.BeforeToolCallHook
+	schema ai.ToolSchema
 }
 
-func wrapMCP(tools []agent.AgentTool, before agent.BeforeToolCallHook) []agent.AgentTool {
+func wrapMCP(tools []agent.AgentTool, before agent.BeforeToolCallHook) ([]agent.AgentTool, error) {
 	if len(tools) == 0 {
-		return nil
+		return nil, nil
 	}
-	return []agent.AgentTool{&codeTool{tools: tools, before: before}}
+	tool := &codeTool{tools: tools, before: before}
+	schema, err := tool.makeSchema()
+	if err != nil {
+		return nil, err
+	}
+	tool.schema = schema
+	return []agent.AgentTool{tool}, nil
 }
 func (t *codeTool) Name() string                           { return "codemode" }
 func (t *codeTool) Label() string                          { return "codemode" }
 func (t *codeTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
-func (t *codeTool) Schema() ai.ToolSchema {
+func (t *codeTool) Schema() ai.ToolSchema                  { return t.schema }
+
+func (t *codeTool) makeSchema() (ai.ToolSchema, error) {
 	declared := make([]extension.AgentTool, 0, len(t.tools))
 	for _, tool := range t.tools {
 		schema := tool.Schema()
-		params, _ := json.Marshal(schema.Parameters)
+		params, err := json.Marshal(schema.Parameters)
+		if err != nil {
+			return ai.ToolSchema{}, fmt.Errorf("MCP tool schema: %w", err)
+		}
 		declared = append(declared, extension.AgentTool{Name: schema.Name, Description: schema.Description, Parameters: params})
 	}
 	budget := builtin.DefaultInlineBudget
-	return ai.ToolSchema{Name: t.Name(), Description: builtin.CreateDescription(declared, builtin.DescriptionOptions{InlineBudget: &budget}), Parameters: map[string]any{"type": "object", "properties": map[string]any{"code": map[string]any{"type": "string"}}, "required": []string{"code"}}}
+	description, err := builtin.CreateDescription(declared, builtin.DescriptionOptions{InlineBudget: &budget})
+	if err != nil {
+		return ai.ToolSchema{}, fmt.Errorf("MCP tool declarations: %w", err)
+	}
+	return ai.ToolSchema{Name: t.Name(), Description: description, Parameters: map[string]any{"type": "object", "properties": map[string]any{"code": map[string]any{"type": "string"}}, "required": []string{"code"}}}, nil
 }
 func (t *codeTool) Execute(ctx context.Context, id string, params json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	var input struct {
@@ -85,7 +102,7 @@ func (t *codeTool) Execute(ctx context.Context, id string, params json.RawMessag
 		}})
 	}
 	globals := []sandbox.Tool{
-		{Name: "searchTools", Signature: "(query: string) => string", Execute: func(_ context.Context, args json.RawMessage) (json.RawMessage, error) {
+		{Name: "searchTools", Signature: new("(query: string) => Promise<string>"), Execute: func(_ context.Context, args json.RawMessage) (json.RawMessage, error) {
 			var query string
 			if err := json.Unmarshal(args, &query); err != nil {
 				return nil, err
@@ -96,16 +113,24 @@ func (t *codeTool) Execute(ctx context.Context, id string, params json.RawMessag
 					matches = append(matches, tool)
 				}
 			}
-			return json.Marshal(sandbox.RenderDeclarations(sandbox.RenderDeclarationsOptions{Tools: matches}))
+			declarations, err := sandbox.RenderDeclarations(sandbox.RenderDeclarationsOptions{Tools: matches})
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(declarations)
 		}},
-		{Name: "describeTool", Signature: "(name: string) => string", Execute: func(_ context.Context, args json.RawMessage) (json.RawMessage, error) {
+		{Name: "describeTool", Signature: new("(name: string) => Promise<string>"), Execute: func(_ context.Context, args json.RawMessage) (json.RawMessage, error) {
 			var name string
 			if err := json.Unmarshal(args, &name); err != nil {
 				return nil, err
 			}
 			for _, tool := range tools {
 				if name == tool.Name || name == sandbox.ToCodemodeIdentifier(tool.Name) {
-					return json.Marshal(sandbox.RenderDeclarations(sandbox.RenderDeclarationsOptions{Tools: []sandbox.Tool{tool}}))
+					declarations, err := sandbox.RenderDeclarations(sandbox.RenderDeclarationsOptions{Tools: []sandbox.Tool{tool}})
+					if err != nil {
+						return nil, err
+					}
+					return json.Marshal(declarations)
 				}
 			}
 			return nil, fmt.Errorf("codemode_unknown_tool: %s", name)
@@ -129,11 +154,11 @@ func (t *codeTool) Execute(ctx context.Context, id string, params json.RawMessag
 		if item.Type == "image" {
 			out.Content = append(out.Content, ai.ImageContent{Data: item.Data, MimeType: item.MimeType})
 		} else {
-			out.Content = append(out.Content, ai.TextContent{Text: item.Text})
+			out.Content = append(out.Content, ai.TextContent{Text: untrusted.Wrap("codemode", item.Text)})
 		}
 	}
 	if result.Value != nil {
-		out.Content = append(out.Content, ai.TextContent{Text: string(result.Value)})
+		out.Content = append(out.Content, ai.TextContent{Text: untrusted.Wrap("codemode", string(result.Value))})
 	}
 	if result.Error != nil {
 		out.Content = append(out.Content, ai.TextContent{Text: fmt.Sprintf("codemode_%s: %s", result.Error.Kind, result.Error.Message)})

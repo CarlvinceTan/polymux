@@ -124,6 +124,31 @@ func TestNetworkDevices(t *testing.T) {
 	if phoneID == "" || network.Current != phoneID || len(network.Devices) != 2 {
 		t.Fatalf("network %+v", network)
 	}
+	label := func(body string) string {
+		if response := call(local, "PATCH", "/network/devices/"+phoneID, body); response.StatusCode != 204 {
+			t.Fatalf("label status %d", response.StatusCode)
+		}
+		call(phone, "PATCH", "/network/devices/self", `{"name":"Phone"}`)
+		var listed struct{ Devices []struct{ ID, Name, Label string } }
+		if err := json.NewDecoder(call(phone, "GET", "/network", "").Body).Decode(&listed); err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range listed.Devices {
+			if d.ID == phoneID {
+				if d.Name != "Phone" {
+					t.Fatalf("hostname lost: %+v", d)
+				}
+				return d.Label
+			}
+		}
+		return "missing"
+	}
+	if got := label(`{"label":"Work phone"}`); got != "Work phone" {
+		t.Fatalf("label %q", got)
+	}
+	if got := label(`{"label":""}`); got != "" {
+		t.Fatalf("cleared label %q", got)
+	}
 	if response := call(phone, "DELETE", "/network/devices/"+phoneID, ""); response.StatusCode != 409 {
 		t.Fatalf("self removal status %d", response.StatusCode)
 	}

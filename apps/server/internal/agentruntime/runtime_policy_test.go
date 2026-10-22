@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestRestrictedPolicy(t *testing.T) {
 				t.Fatal("turn exposed wrong configured tools", len(tools), want)
 			}
 			message := string(body["messages"])
-			wantHelp := !test.intro && !test.automatic
+			wantHelp := !test.intro
 			for _, marker := range []string{"name: polymux", "name: report"} {
 				if strings.Contains(message, marker) != wantHelp {
 					t.Fatalf("prompt contains %s = %v, want %v", marker, strings.Contains(message, marker), wantHelp)
@@ -90,6 +91,48 @@ func TestRestrictedPolicy(t *testing.T) {
 			}
 			if test.automatic && !strings.Contains(message, "bounded automatic turn") {
 				t.Fatal("automatic turn omitted its permission boundary")
+			}
+		})
+	}
+}
+
+func TestPromptToolAvailability(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		definition Definition
+		tools      []string
+		want       string
+	}{
+		{name: "intro", definition: Definition{Intro: true}, tools: []string{"update_agent", "recall_memory"}},
+		{name: "child", tools: []string{"bash", "show_html"}},
+		{name: "voice", definition: Definition{Ephemeral: true}, tools: []string{"recall_history", "recall_memory", "save_memory", "track_work", "manage_routines"}, want: "Use recall_history to retrieve older evidence"},
+		{name: "automatic", definition: Definition{Automatic: true}, tools: []string{"read"}, want: "Advance established goals with the available tools."},
+		{name: "review", definition: Definition{Automatic: true}, tools: []string{"finish_review"}, want: "For a review, use finish_review"},
+		{name: "integration-repair", tools: []string{"manage_integrations"}, want: "Use available CLI tools or manage_integrations to repair"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			prompt, err := buildPrompt(test.definition, test.tools, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundled, err := skills.Bundled()
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy := strings.ReplaceAll(prompt, bundled, "")
+			for _, name := range []string{"update_agent", "create_agent", "create_group_chat", "update_group_chat", "track_work", "send_to_user", "ask_user", "save_memory", "recall_memory", "forget_memory", "recall_history", "manage_routines", "manage_integrations", "manage_tasks", "manage_triggers", "run_device", "finish_review"} {
+				available := !test.definition.Intro && slices.Contains(test.tools, name)
+				if strings.Contains(policy, name) != available {
+					t.Errorf("guidance for %s present=%v, offered=%v", name, strings.Contains(policy, name), available)
+				}
+			}
+			if test.want != "" && !strings.Contains(policy, test.want) {
+				t.Fatalf("offered capability omitted guidance %q", test.want)
+			}
+			for _, preserved := range []string{"Polymux policy", "Identity and available tools", "NO_RESPONSE", "Configured MCP connections are unavailable"} {
+				if !strings.Contains(policy, preserved) {
+					t.Errorf("policy omitted %q", preserved)
+				}
 			}
 		})
 	}

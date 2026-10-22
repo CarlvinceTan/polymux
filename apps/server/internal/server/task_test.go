@@ -21,7 +21,7 @@ type probeTool struct{ calls *atomic.Int32 }
 func (*probeTool) Name() string                           { return "probe_effect" }
 func (*probeTool) Label() string                          { return "Probe" }
 func (*probeTool) Description() string                    { return "Synthetic test effect" }
-func (*probeTool) ToolClass() string                      { return string(ToolReversible) }
+func (*probeTool) ToolClass() string                      { return "reversible" }
 func (*probeTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (*probeTool) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: "probe_effect", Description: "Synthetic test", Parameters: map[string]any{"type": "object", "properties": map[string]any{}, "required": []string{}}}

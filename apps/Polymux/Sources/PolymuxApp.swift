@@ -43,7 +43,7 @@ struct PolymuxApp: App {
             AppRoot()
                 .tint(Color("AccentColor"))
                 #if os(macOS)
-                .frame(minWidth: 780, minHeight: 500)
+                .frame(minWidth: 780, minHeight: 720)
                 #else
                 .frame(minWidth: 360, minHeight: 500)
                 #endif
@@ -52,6 +52,7 @@ struct PolymuxApp: App {
         .defaultSize(width: 1060, height: 760)
         .commands {
             CommandGroup(replacing: .sidebar) {}
+            SettingsCommands()
         }
         #endif
     }
@@ -59,15 +60,18 @@ struct PolymuxApp: App {
 
 @MainActor
 final class AppSession {
+    let address: String
     let client: APIClient
     let cache: LocalCache
     let sidebar: SidebarStore
+    let layout: SidebarLayout
     let settings: SettingsStore
     let avatars: AvatarStore
     /// Carries the connection when the server is only reachable from another network.
     let tunnel: Tunnel?
 
     init(address: String) async throws {
+        self.address = address
         guard let url = ServerAddress.resolve(address, defaults: .standard) else {
             throw URLError(.badURL)
         }
@@ -90,22 +94,27 @@ final class AppSession {
         }.value
         sidebar = SidebarStore(client: client, cache: cache)
         await sidebar.load()
+        layout = SidebarLayout(client: client, cache: sidebar.cacheActor)
+        await layout.load()
         settings = SettingsStore(client: client)
         avatars = AvatarStore(sidebar: sidebar)
     }
 
     private static func connect(_ address: String, url: URL) async throws -> (APIClient, Tunnel?) {
-        let ticket = try? String(contentsOf: ClientPaths.ticket(address), encoding: .utf8)
+        let (ticket, token) = await Task.detached {
+            (try? String(contentsOf: ClientPaths.ticket(address), encoding: .utf8),
+             try? String(contentsOf: ClientPaths.token(address), encoding: .utf8))
+        }.value
         let (base, tunnel) = try await Tunnel.route(url, ticket: ticket)
-        guard tunnel != nil else { return (APIClient(baseURL: url), nil) }
+        guard tunnel != nil else { return (APIClient(baseURL: url, token: token), nil) }
         // The tunnel's local address is not the one the credential was saved under.
-        let token = try? String(contentsOf: ClientPaths.token(address), encoding: .utf8)
         return (APIClient(baseURL: base, token: token), tunnel)
     }
 }
 
 struct AppRoot: View {
     @AppStorage("serverAddress") private var address = "http://127.0.0.1:7337"
+    @State private var servers = ServerStore()
     @State private var session: AppSession?
     @State private var error: String?
     @State private var showSettings = false
@@ -124,18 +133,22 @@ struct AppRoot: View {
         }
         #if os(macOS)
         .allowsWindowActivationEvents()
+        .focusedSceneValue(\.settingsPanel, $showSettings)
         #endif
         .neutralBackground()
         .task(id: address) {
             #if DEBUG
             guard !CommandLine.arguments.contains("--verify-approval") else { return }
             #endif
+            servers.remember(address)
+            let target = address
             while !Task.isCancelled {
                 do {
-                    let opened = try await AppSession(address: address)
+                    let opened = try await AppSession(address: target)
+                    try Task.checkCancellation()
                     session = opened
                     error = nil
-                    Task { await announce(opened.client) }
+                    Task { await announce(opened) }
                     #if DEBUG
                     if !VerifyFixture.local { Notifications.shared.connect(opened.client) }
                     #else
@@ -143,11 +156,11 @@ struct AppRoot: View {
                     #endif
                     while !Task.isCancelled {
                         await opened.settings.refresh()
-                        if !opened.sidebar.isConnected { break }
                         do { try await Task.sleep(for: .seconds(3)) }
                         catch { break }
                     }
                 } catch {
+                    guard !Task.isCancelled else { return }
                     session = nil
                     self.error = error.localizedDescription
                 }
@@ -160,7 +173,8 @@ struct AppRoot: View {
             URLRouter.shared.handler = { handleConnect($0) }
         }
         .panel(isPresented: $showSettings) {
-            ConnectionView(address: $address, settings: session?.settings, client: session?.client,
+            ConnectionView(address: $address, servers: servers, settings: activeSession?.settings,
+                           client: activeSession?.client,
                            onClose: { showSettings = false })
                 .id(address)
         }
@@ -194,18 +208,24 @@ struct AppRoot: View {
             try? value.write(to: path, atomically: true, encoding: .utf8)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
         }
+        servers.remember(target)
         address = target
     }
 
     /// Names this device on the server so the Devices list can tell it apart.
-    private func announce(_ client: APIClient) async {
+    private func announce(_ session: AppSession) async {
         #if os(macOS)
         let name = await Task.detached { Host.current().localizedName ?? "Mac" }.value
         #else
         let name = UIDevice.current.name
         #endif
-        try? await client.renameDevice(name)
+        try? await session.client.renameDevice(name)
+        if let network = try? await session.client.network() {
+            servers.remember(session.address, name: network.server.name)
+        }
     }
+
+    private var activeSession: AppSession? { session?.address == address ? session : nil }
 
     private var appearance: String {
         #if DEBUG
@@ -219,7 +239,7 @@ struct AppRoot: View {
 
     private var content: some View {
         Group {
-            if let session {
+            if let session = activeSession {
                 ShellView(session: session, showSettings: $showSettings)
                     .id(address)
             } else if let error {
@@ -239,19 +259,36 @@ struct AppRoot: View {
 
 struct ConnectionView: View {
     @Binding var address: String
+    let servers: ServerStore
     let settings: SettingsStore?
     let client: APIClient?
     let onClose: () -> Void
-    @State private var draft = ""
-    @FocusState private var serverFocused: Bool
     @State private var network: NetworkInfo? = nil
     @State private var networkIssue: String?
-    @State private var removeIssue: String?
+    @State private var deviceIssue: String?
+    @State private var renaming: NetworkInfo.Device?
     @State private var refreshing = false
     @State private var adding = false
 
     var body: some View {
-        PanelView("Settings", onClose: close) {
+        // One container, so returning from a sub-view doesn't refetch over optimistic edits.
+        ZStack {
+            if adding {
+                AddDevice(client: client, onBack: { adding = false }) { link in
+                    URLRouter.shared.handler?(link)
+                    onClose()
+                }
+            } else if let renaming {
+                DeviceView(device: renaming, onBack: { self.renaming = nil }) { rename(renaming, to: $0) }
+            } else {
+                settingsPanel
+            }
+        }
+        .task(id: client?.baseURL) { await loadNetwork() }
+    }
+
+    private var settingsPanel: some View {
+        PanelView("Settings", onClose: onClose) {
             Form {
                 Section("Appearance") {
                     Picker("Theme", selection: Binding(get: { settings?.value?.appearance ?? "system" },
@@ -264,19 +301,14 @@ struct ConnectionView: View {
                 }
                 .panelRow()
                 Section("Server") {
-                    LabeledContent(network?.server.name ?? "Server", value: network?.server.platform ?? "")
-                    TextField("Server address", text: $draft)
-                        .labelsHidden()
-                        .accessibilityIdentifier("settings.server")
-                        .lineLimit(1)
-                        .multilineTextAlignment(.leading)
-                        .autocorrectionDisabled()
-                        .focused($serverFocused)
-                        .onSubmit { save() }
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        #endif
+                    Picker("Server", selection: $address) {
+                        ForEach(servers.devices) { device in
+                            Text(device.name).tag(device.address)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .accessibilityIdentifier("settings.server")
                 }
                 .panelRow()
                 Section {
@@ -292,9 +324,9 @@ struct ConnectionView: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                 } footer: {
-                    if let removeIssue {
-                        Text(removeIssue).font(.footnote).foregroundStyle(.red)
-                    } else if let networkIssue {
+                    if let deviceIssue {
+                        Text(deviceIssue).font(.footnote).foregroundStyle(.red)
+                    } else if let networkIssue, settings?.error == nil {
                         Text(networkIssue).font(.footnote).foregroundStyle(.red)
                             .accessibilityIdentifier("settings.network-error")
                     }
@@ -320,60 +352,39 @@ struct ConnectionView: View {
                 .panelRow()
             }
             .formStyle(.grouped)
-            .defaultFocus($serverFocused, false)
             .accessibilityIdentifier("settings.form")
         }
-        .panelDismiss(onClose: close)
-        #if os(macOS)
-        .background { SettingsFocus().frame(width: 0, height: 0).accessibilityHidden(true) }
-        #endif
-        .onAppear { draft = address; serverFocused = false }
-        .task(id: draft) {
-            guard ServerAddress.parse(draft) != nil else { return }
-            do { try await Task.sleep(for: .milliseconds(600)) }
-            catch { return }
-            save()
-        }
-        .onDisappear { save() }
-        .task(id: client?.baseURL) { await loadNetwork() }
-        .onChange(of: address) { _, _ in Task { await loadNetwork() } }
-        .panel(isPresented: $adding) {
-            AddDevice(client: client) { link in
-                URLRouter.shared.handler?(link)
-                adding = false
-                onClose()
-            }
-        }
+        .panelDismiss(onClose: onClose)
     }
 
-    private static let rowHeight: CGFloat = 40
-    private static let visibleRows = 4
-
-    /// Client devices in a window that shows four rows and scrolls past them, so the panel keeps its height.
-    private var devices: some View {
-        let rows = (network?.devices ?? []).sorted { $0.id == network?.current && $1.id != network?.current }
-        let height = CGFloat(min(max(rows.count, 1), Self.visibleRows)) * Self.rowHeight
-        return ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(rows) { device in
-                    HStack {
-                        Text(device.name).lineLimit(1)
-                        Spacer(minLength: 8)
-                        if device.id == network?.current { Text("This device").foregroundStyle(.secondary) }
-                    }
-                    .frame(height: Self.rowHeight)
-                    .contentShape(Rectangle())
-                    .contextMenu {
-                        if device.id != network?.current {
-                            Button("Remove", systemImage: "trash", role: .destructive) { remove(device) }
-                        }
-                    }
+    /// Client devices, this one first.
+    @ViewBuilder private var devices: some View {
+        if network == nil && networkIssue == nil {
+            ProgressView().frame(maxWidth: .infinity).accessibilityIdentifier("settings.network-loading")
+        }
+        ForEach(servers.devices.filter { server in
+            !(network?.devices.contains { $0.name == server.name } ?? false)
+        }) { device in
+            Text(device.name).lineLimit(1)
+        }
+        ForEach((network?.devices ?? []).sorted { $0.id == network?.current && $1.id != network?.current }) { device in
+            Button { renaming = device } label: {
+                LabeledContent {
+                    if device.id == network?.current { Text("This device") }
+                } label: {
+                    Text(device.title).lineLimit(1)
+                    if device.title != device.name { Text(device.name).lineLimit(1) }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .appMenu {
+                Button("Rename", systemImage: "pencil") { renaming = device }
+                if device.id != network?.current {
+                    Button("Remove", systemImage: "trash", role: .destructive) { remove(device) }
                 }
             }
         }
-        .scrollIndicators(.hidden)
-        .frame(height: height)
-        .overlay { if network == nil && networkIssue == nil { ProgressView().accessibilityIdentifier("settings.network-loading") } }
     }
 
     private func loadNetwork() async {
@@ -382,10 +393,16 @@ struct ConnectionView: View {
         guard let url = ServerAddress.parse(address) else { return }
         if network == nil, let cached = Self.networks[address] { network = cached }
         do {
-            let api = client ?? APIClient(baseURL: url)
+            let target = address
+            let token = await Task.detached {
+                try? String(contentsOf: ClientPaths.token(target), encoding: .utf8)
+            }.value
+            let api = client ?? APIClient(baseURL: url, token: token)
             let fresh = try await api.network()
+            try Task.checkCancellation()
             Self.networks[address] = fresh
             network = fresh
+            servers.remember(address, name: fresh.server.name)
             networkIssue = nil
         } catch {
             // Keep what is already shown; only say why it could not refresh.
@@ -395,53 +412,55 @@ struct ConnectionView: View {
 
     private static var networks: [String: NetworkInfo] = [:]
 
-    private func remove(_ device: NetworkInfo.Device) {
-        guard let client, let index = network?.devices.firstIndex(where: { $0.id == device.id }) else { return }
-        network?.devices.remove(at: index)
-        removeIssue = nil
+    private func rename(_ device: NetworkInfo.Device, to name: String) {
+        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let client, label != (device.label ?? ""),
+              let index = network?.devices.firstIndex(where: { $0.id == device.id }) else { return }
+        network?.devices[index].label = label
+        deviceIssue = nil
         Task {
-            do { try await client.removeDevice(device.id) }
+            do { try await client.labelDevice(device.id, label: label) }
             catch {
-                network?.devices.insert(device, at: min(index, network?.devices.count ?? 0))
-                removeIssue = "Couldn't remove \(device.name): \(error.localizedDescription)"
+                if let at = network?.devices.firstIndex(where: { $0.id == device.id }) { network?.devices[at].label = device.label }
+                deviceIssue = "Couldn't rename \(device.title): \(error.localizedDescription)"
             }
         }
     }
 
-    private func save() {
-        guard let url = ServerAddress.parse(draft), url.absoluteString != address else { return }
-        address = url.absoluteString
-    }
-
-    private func close() {
-        save()
-        onClose()
+    private func remove(_ device: NetworkInfo.Device) {
+        guard let client, let index = network?.devices.firstIndex(where: { $0.id == device.id }) else { return }
+        network?.devices.remove(at: index)
+        deviceIssue = nil
+        Task {
+            do { try await client.removeDevice(device.id) }
+            catch {
+                network?.devices.insert(device, at: min(index, network?.devices.count ?? 0))
+                deviceIssue = "Couldn't remove \(device.title): \(error.localizedDescription)"
+            }
+        }
     }
 }
 
 #if os(macOS)
-import AppKit
-
-private struct SettingsFocus: NSViewRepresentable {
-    func makeNSView(context: Context) -> SettingsAnchor { SettingsAnchor() }
-    func updateNSView(_ view: SettingsAnchor, context: Context) {}
+private struct SettingsKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
 }
 
-private final class SettingsAnchor: NSView {
-    override var acceptsFirstResponder: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+private extension FocusedValues {
+    var settingsPanel: Binding<Bool>? {
+        get { self[SettingsKey.self] }
+        set { self[SettingsKey.self] = newValue }
+    }
+}
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard let window else { return }
-        // Native form focus settles after the panel is inserted, even when SwiftUI focus starts false.
-        DispatchQueue.main.async { [weak self, weak window] in
-            DispatchQueue.main.async { [weak self, weak window] in
-                guard let self, let window, self.window === window, window.isKeyWindow else { return }
-                if window.firstResponder is NSTextField || (window.firstResponder as? NSTextView)?.isFieldEditor == true {
-                    window.makeFirstResponder(self)
-                }
-            }
+private struct SettingsCommands: Commands {
+    @FocusedValue(\.settingsPanel) private var settings
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { settings?.wrappedValue = true }
+                .keyboardShortcut(",", modifiers: .command)
+                .disabled(settings == nil)
         }
     }
 }

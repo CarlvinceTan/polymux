@@ -74,7 +74,7 @@ func (s *Server) activityObject(w http.ResponseWriter, r *http.Request) {
 			fail(w, 404, "not_found", "Memory is no longer available.")
 			return
 		}
-		documents, err := s.memory.List(r.Context(), *event.AgentID, thread)
+		documents, err := s.visibleMemory(r.Context(), *event.AgentID, thread)
 		if err != nil {
 			s.respond(w, nil, err)
 			return

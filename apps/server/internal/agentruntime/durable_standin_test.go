@@ -134,6 +134,13 @@ func TestDurableConnectsMCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	configured, err := session.(*durableSession).conversation.Agent(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.Instructions == nil || !strings.Contains(*configured.Instructions, `"Tools":["codemode"]`) || strings.Contains(*configured.Instructions, "notes__echo") {
+		t.Fatal("prompt did not describe the offered MCP wrapper")
+	}
 	if _, err := session.Send(t.Context(), turn("read fixture"), nil); err != nil {
 		t.Fatal(err)
 	}

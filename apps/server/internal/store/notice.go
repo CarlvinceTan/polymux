@@ -119,6 +119,9 @@ func noticeTx(ctx context.Context, tx *sql.Tx, m *contract.Message, event contra
 }
 
 func turnNotice(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
+	if run.Outcome != nil && *run.Outcome == "silent" {
+		return nil
+	}
 	outcome, body := "", ""
 	switch run.Status {
 	case "completed":
@@ -129,7 +132,7 @@ func turnNotice(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
 			body += ": " + run.Error.Message
 		}
 	case "waiting_input":
-		outcome, body = "waiting_input", "Needs your approval"
+		outcome, body = "waiting_input", "Needs your input"
 	default:
 		return nil
 	}

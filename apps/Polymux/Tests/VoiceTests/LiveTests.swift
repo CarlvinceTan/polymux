@@ -278,5 +278,8 @@ private func call(_ id: String = "one", name: String = "ask_agent") -> LiveCall 
     #expect(config.voice == "Kore")
     #expect(config.provider == "gemini")
     #expect(config.hasKey)
-    #expect(config.prompt == "Represent {target}.")
+    #expect(config.prompt.hasPrefix("Represent {target}."))
+    #expect(config.prompt.hasSuffix("Always speak \(VoiceConfig.language(""))."))
+    settings.voiceLanguage = "es"
+    #expect(VoiceConfig(settings: settings).prompt.hasSuffix("Always speak Spanish."))
 }

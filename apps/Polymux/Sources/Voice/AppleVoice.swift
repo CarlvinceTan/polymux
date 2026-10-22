@@ -10,34 +10,44 @@ final class VoiceAudio {
     let engine = AVAudioEngine()
     let player = AVAudioPlayerNode()
     let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+    private let duplex: Bool
     private var tapped = false
     private var muted = false
 
-    init() {
-        engine.attach(player)
+    init(duplex: Bool = true) {
+        self.duplex = duplex
+        if duplex { engine.attach(player) }
     }
 
     func start(capture: any AudioCapture) throws {
         #if os(iOS)
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        if duplex {
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        } else {
+            try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
+        }
         try session.setActive(true)
         #endif
 
         let input = engine.inputNode
-        do {
-            try input.setVoiceProcessingEnabled(true)
-            input.isVoiceProcessingInputMuted = muted
-        } catch {
-            throw VoiceFailure.echo(error.localizedDescription)
+        if duplex {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+                input.isVoiceProcessingInputMuted = muted
+            } catch {
+                throw VoiceFailure.echo(error.localizedDescription)
+            }
         }
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw VoiceFailure.audio
         }
-        try engine.connectNode(player, to: engine.mainMixerNode, format: format)
-        try engine.connectNode(engine.mainMixerNode, to: engine.outputNode, format: format)
-        try input.__installTap(onBus: 0, bufferSize: 1024, format: format, error: ()) { @Sendable buffer, time in
+        if duplex {
+            try engine.connectNode(player, to: engine.mainMixerNode, format: format)
+            try engine.connectNode(engine.mainMixerNode, to: engine.outputNode, format: format)
+        }
+        try input.__installTap(onBus: 0, bufferSize: 1024, format: duplex ? format : inputFormat, error: ()) { @Sendable buffer, time in
             capture.consume(buffer, time: time)
         }
         tapped = true
@@ -57,7 +67,7 @@ final class VoiceAudio {
     }
 
     func stop() {
-        player.stop()
+        if duplex { player.stop() }
         engine.stop()
         muted = false
         if tapped {

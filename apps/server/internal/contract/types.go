@@ -41,29 +41,31 @@ type HostPatch struct {
 }
 
 type Settings struct {
-	Revision     int64    `json:"revision"`
-	Appearance   string   `json:"appearance"`
-	SidebarWidth float64  `json:"sidebarWidth"`
-	VoiceMode    string   `json:"voiceMode"`
-	LiveProvider string   `json:"liveProvider"`
-	LiveModel    string   `json:"liveModel"`
-	LiveVoice    string   `json:"liveVoice"`
-	TextProvider string   `json:"textProvider"`
-	TextModel    string   `json:"textModel"`
-	VoicePrompt  string   `json:"voicePrompt"`
-	SpeechKeys   []string `json:"speechKeys"`
+	Revision      int64    `json:"revision"`
+	Appearance    string   `json:"appearance"`
+	SidebarWidth  float64  `json:"sidebarWidth"`
+	VoiceMode     string   `json:"voiceMode"`
+	LiveProvider  string   `json:"liveProvider"`
+	LiveModel     string   `json:"liveModel"`
+	LiveVoice     string   `json:"liveVoice"`
+	TextProvider  string   `json:"textProvider"`
+	TextModel     string   `json:"textModel"`
+	VoicePrompt   string   `json:"voicePrompt"`
+	VoiceLanguage string   `json:"voiceLanguage"`
+	SpeechKeys    []string `json:"speechKeys"`
 }
 
 type SettingsPatch struct {
-	Appearance   *string  `json:"appearance,omitempty"`
-	SidebarWidth *float64 `json:"sidebarWidth,omitempty"`
-	VoiceMode    *string  `json:"voiceMode,omitempty"`
-	LiveProvider *string  `json:"liveProvider,omitempty"`
-	LiveModel    *string  `json:"liveModel,omitempty"`
-	LiveVoice    *string  `json:"liveVoice,omitempty"`
-	TextProvider *string  `json:"textProvider,omitempty"`
-	TextModel    *string  `json:"textModel,omitempty"`
-	VoicePrompt  *string  `json:"voicePrompt,omitempty"`
+	Appearance    *string  `json:"appearance,omitempty"`
+	SidebarWidth  *float64 `json:"sidebarWidth,omitempty"`
+	VoiceMode     *string  `json:"voiceMode,omitempty"`
+	LiveProvider  *string  `json:"liveProvider,omitempty"`
+	LiveModel     *string  `json:"liveModel,omitempty"`
+	LiveVoice     *string  `json:"liveVoice,omitempty"`
+	TextProvider  *string  `json:"textProvider,omitempty"`
+	TextModel     *string  `json:"textModel,omitempty"`
+	VoicePrompt   *string  `json:"voicePrompt,omitempty"`
+	VoiceLanguage *string  `json:"voiceLanguage,omitempty"`
 }
 
 type SpeechKey struct {
@@ -111,14 +113,17 @@ type Attachment struct {
 }
 
 type Part struct {
-	Kind       string         `json:"kind"`
-	Text       *string        `json:"text,omitempty"`
-	Attachment *Attachment    `json:"attachment,omitempty"`
-	Name       *string        `json:"name,omitempty"`
-	Args       *string        `json:"args,omitempty"`
-	Question   *string        `json:"question,omitempty"`
-	Options    []ChoiceOption `json:"options,omitempty"`
-	AnswerID   *string        `json:"answerID,omitempty"`
+	Kind       string             `json:"kind"`
+	Text       *string            `json:"text,omitempty"`
+	Attachment *Attachment        `json:"attachment,omitempty"`
+	Name       *string            `json:"name,omitempty"`
+	Args       *string            `json:"args,omitempty"`
+	Question   *string            `json:"question,omitempty"`
+	Options    []ChoiceOption     `json:"options,omitempty"`
+	AnswerID   *string            `json:"answerID,omitempty"`
+	AnswerText *string            `json:"answerText,omitempty"`
+	AllowText  *bool              `json:"allowText,omitempty"`
+	Credential *CredentialRequest `json:"credential,omitempty"`
 }
 
 type ReplyContext struct {
@@ -151,46 +156,26 @@ type Error struct {
 	Message string `json:"message"`
 }
 
-type Activity struct {
-	MessageIDs    []string `json:"messageIDs,omitempty"`
-	Kind          string   `json:"kind"`
-	Verb          string   `json:"verb"`
-	ObjectID      string   `json:"objectID"`
-	ObjectLabel   string   `json:"objectLabel"`
-	IconOrAgentID string   `json:"iconOrAgentID"`
-	At            string   `json:"at"`
-	AgentIDs      []string `json:"agentIDs,omitempty"`
-}
-
 type Event struct {
-	Payload        *Activity        `json:"payload,omitempty"`
-	Seq            int64            `json:"seq"`
-	ConversationID string           `json:"conversationID"`
-	Type           string           `json:"type"`
-	MessageID      *string          `json:"messageID,omitempty"`
-	AgentID        *string          `json:"agentID,omitempty"`
-	Text           *string          `json:"text,omitempty"`
-	Message        *Message         `json:"message,omitempty"`
-	Attachment     *Attachment      `json:"attachment,omitempty"`
-	Active         *bool            `json:"active,omitempty"`
-	Error          *Error           `json:"error,omitempty"`
-	CreatedAt      string           `json:"createdAt"`
-	RunID          *string          `json:"runID,omitempty"`
-	Run            *Run             `json:"run,omitempty"`
-	Tool           *ToolActivity    `json:"tool,omitempty"`
-	Delivery       *PeerDelivery    `json:"delivery,omitempty"`
-	RoutineID      *string          `json:"routineID,omitempty"`
-	Summary        *string          `json:"summary,omitempty"`
-	Usage          *Usage           `json:"usage,omitempty"`
-	Approval       *ApprovalRequest `json:"approval,omitempty"`
-}
-
-type ApprovalRequest struct {
-	ID        string `json:"id"`
-	RunID     string `json:"runID"`
-	Tool      string `json:"tool"`
-	Args      string `json:"args"`
-	ExpiresAt string `json:"expiresAt"`
+	Seq            int64         `json:"seq"`
+	ConversationID string        `json:"conversationID"`
+	Type           string        `json:"type"`
+	MessageID      *string       `json:"messageID,omitempty"`
+	AgentID        *string       `json:"agentID,omitempty"`
+	Text           *string       `json:"text,omitempty"`
+	Message        *Message      `json:"message,omitempty"`
+	Attachment     *Attachment   `json:"attachment,omitempty"`
+	Active         *bool         `json:"active,omitempty"`
+	Error          *Error        `json:"error,omitempty"`
+	CreatedAt      string        `json:"createdAt"`
+	RunID          *string       `json:"runID,omitempty"`
+	Run            *Run          `json:"run,omitempty"`
+	Tool           *ToolActivity `json:"tool,omitempty"`
+	Delivery       *PeerDelivery `json:"delivery,omitempty"`
+	RoutineID      *string       `json:"routineID,omitempty"`
+	Summary        *string       `json:"summary,omitempty"`
+	Usage          *Usage        `json:"usage,omitempty"`
+	Payload        *Activity     `json:"payload,omitempty"`
 }
 
 type Usage struct {
@@ -219,23 +204,36 @@ type SearchHit struct {
 }
 
 type Routine struct {
-	At              string  `json:"at"`
-	NextAt          *string `json:"nextAt,omitempty"`
-	IntervalSeconds int64   `json:"intervalSeconds"`
-	Status          string  `json:"status"`
-	CreatedAt       string  `json:"createdAt"`
-	ID              string  `json:"id"`
-	AgentID         string  `json:"agentID"`
-	Trigger         string  `json:"trigger"`
-	Prompt          string  `json:"prompt"`
-	Timezone        *string `json:"timezone,omitempty"`
+	At              string        `json:"at"`
+	NextAt          *string       `json:"nextAt,omitempty"`
+	IntervalSeconds int64         `json:"intervalSeconds"`
+	Status          string        `json:"status"`
+	CreatedAt       string        `json:"createdAt"`
+	ID              string        `json:"id"`
+	AgentID         string        `json:"agentID"`
+	Trigger         string        `json:"trigger"`
+	Prompt          string        `json:"prompt"`
+	Timezone        *string       `json:"timezone,omitempty"`
+	Crons           []string      `json:"crons,omitempty"`
+	Watch           *RoutineWatch `json:"watch,omitempty"`
+}
+
+type RoutineRun struct {
+	ID         string  `json:"id"`
+	Status     string  `json:"status"`
+	Summary    string  `json:"summary"`
+	CreatedAt  string  `json:"createdAt"`
+	FinishedAt *string `json:"finishedAt,omitempty"`
+	Error      *Error  `json:"error,omitempty"`
 }
 
 type RoutineRequest struct {
-	Prompt          string  `json:"prompt"`
-	At              string  `json:"at"`
-	IntervalSeconds int64   `json:"intervalSeconds"`
-	Timezone        *string `json:"timezone,omitempty"`
+	Prompt          string        `json:"prompt"`
+	At              string        `json:"at"`
+	IntervalSeconds int64         `json:"intervalSeconds"`
+	Timezone        *string       `json:"timezone,omitempty"`
+	Crons           []string      `json:"crons,omitempty"`
+	Watch           *RoutineWatch `json:"watch,omitempty"`
 }
 
 type Proactivity struct {
@@ -289,6 +287,7 @@ type PeerDelivery struct {
 	Intent         string  `json:"intent"`
 	Status         string  `json:"status"`
 	CreatedAt      string  `json:"createdAt"`
+	Hops           *int64  `json:"hops,omitempty"`
 }
 
 type ChoiceOption struct {
@@ -419,4 +418,52 @@ type SidebarEvent struct {
 	ChangedThreadIDs []string           `json:"changedThreadIDs"`
 	Placements       []SidebarPlacement `json:"placements"`
 	CreatedAt        string             `json:"createdAt"`
+}
+
+type SearchResult struct {
+	ID         string      `json:"id"`
+	Kind       string      `json:"kind"`
+	Title      string      `json:"title"`
+	Snippet    string      `json:"snippet"`
+	ThreadID   string      `json:"threadID"`
+	Score      float64     `json:"score"`
+	MessageID  *string     `json:"messageID,omitempty"`
+	AgentID    *string     `json:"agentID,omitempty"`
+	Attachment *Attachment `json:"attachment,omitempty"`
+	Message    *Message    `json:"message,omitempty"`
+}
+
+type Activity struct {
+	Kind          string   `json:"kind"`
+	Verb          string   `json:"verb"`
+	ObjectID      string   `json:"objectID"`
+	ObjectLabel   string   `json:"objectLabel"`
+	IconOrAgentID string   `json:"iconOrAgentID"`
+	At            string   `json:"at"`
+	AgentIDs      []string `json:"agentIDs,omitempty"`
+	MessageIDs    []string `json:"messageIDs,omitempty"`
+}
+
+type ChoiceAnswer struct {
+	OptionID string  `json:"optionID"`
+	Text     *string `json:"text,omitempty"`
+}
+
+type CredentialRequest struct {
+	Name   string `json:"name"`
+	Label  string `json:"label"`
+	Origin string `json:"origin"`
+	Header string `json:"header"`
+	Scheme string `json:"scheme"`
+	Status string `json:"status"`
+}
+
+type CredentialAnswer struct {
+	Value *string `json:"value,omitempty"`
+	Skip  bool    `json:"skip"`
+}
+
+type RoutineWatch struct {
+	URL          string   `json:"url"`
+	JsonPointers []string `json:"jsonPointers,omitempty"`
 }

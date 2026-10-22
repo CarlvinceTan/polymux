@@ -14,7 +14,6 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/server"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -659,6 +658,9 @@ func TestB2BackgroundNotify(t *testing.T) {
 	}
 	h := Start(t, Options{
 		ID: "B2",
+		Summary: func(*ChatRequest) Response {
+			return TextReply("The user asked peer B to help with a bounded task. Preserve the delegation and use its delivered result to provide the next response.")
+		},
 		Agents: []agentruntime.Definition{
 			{Agent: contract.Agent{ID: "a", Name: "A", Model: evalModel}, Tools: []string{}},
 			{Agent: contract.Agent{ID: "b", Name: "B", Model: evalModel}, Tools: []string{}},
@@ -749,6 +751,33 @@ func TestB4StopChildren(t *testing.T) {
 			hold := func(id string) Response {
 				return HoldReply("working", release, func() { close(opened[id]) }, func() { close(closed[id]) })
 			}
+			received := func(req *ChatRequest, id string) bool {
+				text := requestText(req)
+				if hasToolResult(req, "b4-"+id, "delivery:") || strings.Contains(text, "B4 accepted delivery "+id+".") {
+					return true
+				}
+				for _, line := range strings.Split(text, "\n") {
+					raw, ok := strings.CutPrefix(line, "[Tool result]: ")
+					if !ok {
+						continue
+					}
+					var delivery contract.PeerDelivery
+					if json.Unmarshal([]byte(raw), &delivery) == nil && delivery.SourceAgentID == "a" &&
+						delivery.TargetAgentID == id && strings.HasSuffix(delivery.ID, ":b4-"+id) {
+						return true
+					}
+				}
+				return false
+			}
+			summary := func(req *ChatRequest) Response {
+				text := "The parent is delegating three tasks."
+				for _, id := range []string{"b", "c", "d"} {
+					if received(req, id) {
+						text += " B4 accepted delivery " + id + "."
+					}
+				}
+				return TextReply(text)
+			}
 			reply := func(req *ChatRequest) Response {
 				text := requestText(req)
 				switch {
@@ -762,7 +791,7 @@ func TestB4StopChildren(t *testing.T) {
 					return TextReply("queued child should never execute")
 				default:
 					for _, id := range []string{"b", "c", "d"} {
-						if !hasToolResult(req, "b4-"+id, "delivery:") {
+						if !received(req, id) {
 							return ToolReply("b4-"+id, "message_agent", map[string]any{
 								"agent_id": id, "message": "B4 child " + id, "intent": "request",
 							})
@@ -782,7 +811,7 @@ func TestB4StopChildren(t *testing.T) {
 			for _, id := range []string{"a", "b", "c", "d"} {
 				agents = append(agents, agentruntime.Definition{Agent: contract.Agent{ID: id, Name: id, Model: evalModel}, Tools: []string{}})
 			}
-			h := Start(t, Options{ID: "B4", Agents: agents, Steps: steps})
+			h := Start(t, Options{ID: "B4", Agents: agents, Steps: steps, Summary: summary})
 			if code := h.Send("d", "b4-unrelated", "B4 unrelated"); code != http.StatusAccepted {
 				h.die(fmt.Sprintf("unrelated send status %d", code))
 			}
@@ -856,6 +885,9 @@ func TestB5StuckBackground(t *testing.T) {
 	}
 	h := Start(t, Options{
 		ID: "B5", BackgroundTimeout: time.Second,
+		Summary: func(*ChatRequest) Response {
+			return TextReply("The user requested background help from B. A child task was delegated; inspect the latest peer result and explain any failure without repeating the work.")
+		},
 		Agents: []agentruntime.Definition{
 			{Agent: contract.Agent{ID: "a", Name: "A", Model: evalModel}},
 			{Agent: contract.Agent{ID: "b", Name: "B", Model: evalModel}},
@@ -1020,151 +1052,39 @@ func TestSTLateSteer(t *testing.T) {
 	pass(t, "ST-late", "late steer answered by one follow-up run")
 }
 
-func TestC5ApprovalGate(t *testing.T) {
+func TestC5UnrestrictedTool(t *testing.T) {
 	ran := &atomic.Int32{}
 	h := Start(t, Options{
 		ID:     "C5",
 		Extras: map[string][]agent.AgentTool{agentID: {&consequentialTool{ran: ran}}},
 		Steps: []Step{
-			Fixed(nil, ToolReply("c5-call", "consequential_delete", map[string]any{"target": "everything"})),
-			Fixed(nil, ToolReply("c5-retry", "consequential_delete", map[string]any{"target": "everything"})),
-			Fixed(nil, TextReply("deleted after approval")),
+			Fixed(nil, ToolReply("c5-call", "consequential_delete", map[string]any{"target": "fixture"})),
+			Fixed(nil, TextReply("done")),
 		},
 	})
-	if code := h.Send(agentID, "c5-user", "delete everything"); code != 202 && code != 200 {
-		fail(t, "C5", fmt.Sprintf("send status %d", code))
-		return
+	if code := h.Send(agentID, "c5-user", "run the fixture tool"); code != 202 && code != 200 {
+		t.Fatalf("send status %d", code)
 	}
-	run := h.WaitStatus(RunID("c5-user", agentID), deadline, "waiting_input", "completed", "failed", "cancelled", "interrupted")
-	if run.Status != "waiting_input" {
-		fail(t, "C5", "expected waiting_input, got "+run.Status)
-		return
-	}
-	if ran.Load() != 0 {
-		fail(t, "C5", "tool executed before approval")
-		return
-	}
-	pending, err := h.Store.PendingApprovals(context.Background(), run.ID)
-	if err != nil || len(pending) != 1 {
-		fail(t, "C5", fmt.Sprintf("pending approvals: %v %v", pending, err))
-		return
-	}
-	events, err := h.Store.Events(context.Background(), agentID, 0, 500)
-	if err != nil {
-		fail(t, "C5", err.Error())
-		return
-	}
-	requested := false
-	for _, e := range events {
-		if e.Type == "approval_requested" && e.Approval != nil && e.Approval.ID == pending[0].ID {
-			requested = true
-			break
-		}
-	}
-	if !requested {
-		fail(t, "C5", "missing approval_requested event")
-		return
-	}
-	resp, err := approvalPost(h.HTTP.URL + "/approvals/" + pending[0].ID + "/approve")
-	if err != nil {
-		fail(t, "C5", err.Error())
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		fail(t, "C5", fmt.Sprintf("approve status %d", resp.StatusCode))
-		return
-	}
-	run = h.WaitRunID(run.ID, deadline)
+	run := h.WaitRunID(RunID("c5-user", agentID), deadline)
 	if err := h.Emulator.Done(); err != nil {
-		fail(t, "C5", err.Error())
-		return
+		t.Fatal(err)
 	}
-	if ran.Load() != 1 {
-		fail(t, "C5", fmt.Sprintf("tool ran %d times, want 1", ran.Load()))
-		return
+	if ran.Load() != 1 || run.Status != "completed" {
+		t.Fatalf("tool executions=%d status=%s", ran.Load(), run.Status)
 	}
-	if run.Status != "completed" {
-		fail(t, "C5", "run status "+run.Status)
-		return
-	}
-
-	denyRan := &atomic.Int32{}
-	h2 := Start(t, Options{
-		ID:     "C5",
-		Extras: map[string][]agent.AgentTool{agentID: {&consequentialTool{ran: denyRan}}},
-		Steps: []Step{
-			Fixed(nil, ToolReply("c5-deny", "consequential_delete", map[string]any{"target": "secrets"})),
-			Fixed(nil, ToolReply("c5-deny2", "consequential_delete", map[string]any{"target": "secrets"})),
-			Fixed(func(req *ChatRequest) error {
-				for _, m := range req.Messages {
-					if m.Role == "tool" && strings.Contains(strings.ToLower(contentText(m.Content)), "denied") {
-						return nil
-					}
-				}
-				return fmt.Errorf("expected denial in tool results")
-			}, TextReply("acknowledged denial")),
-		},
-	})
-	if code := h2.Send(agentID, "c5-deny-user", "delete secrets"); code != 202 && code != 200 {
-		fail(t, "C5", fmt.Sprintf("deny send status %d", code))
-		return
-	}
-	denyRun := h2.WaitStatus(RunID("c5-deny-user", agentID), deadline, "waiting_input", "completed", "failed")
-	if denyRun.Status != "waiting_input" {
-		fail(t, "C5", "deny path expected waiting_input, got "+denyRun.Status)
-		return
-	}
-	denyPending, err := h2.Store.PendingApprovals(context.Background(), denyRun.ID)
-	if err != nil || len(denyPending) != 1 {
-		fail(t, "C5", fmt.Sprintf("deny pending: %v %v", denyPending, err))
-		return
-	}
-	resp, err = approvalPost(h2.HTTP.URL + "/approvals/" + denyPending[0].ID + "/deny")
-	if err != nil {
-		fail(t, "C5", err.Error())
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		fail(t, "C5", fmt.Sprintf("deny status %d", resp.StatusCode))
-		return
-	}
-	denyRun = h2.WaitRunID(denyRun.ID, deadline)
-	if err := h2.Emulator.Done(); err != nil {
-		fail(t, "C5", err.Error())
-		return
-	}
-	if denyRan.Load() != 0 {
-		fail(t, "C5", fmt.Sprintf("denied tool ran %d times", denyRan.Load()))
-		return
-	}
-	if denyRun.Status != "completed" {
-		fail(t, "C5", "deny run status "+denyRun.Status)
-		return
-	}
-	pass(t, "C5", "approval gate parks, approve executes once, deny blocks with message")
+	pass(t, "C5", "ordinary tools execute without an application approval gate")
 }
 
 type consequentialTool struct{ ran *atomic.Int32 }
 
 func (*consequentialTool) Name() string                           { return "consequential_delete" }
 func (*consequentialTool) Label() string                          { return "Consequential delete" }
-func (*consequentialTool) Description() string                    { return "Destructive delete requiring approval" }
+func (*consequentialTool) Description() string                    { return "Fixture mutation" }
 func (*consequentialTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
-func (*consequentialTool) ToolClass() string                      { return string(server.ToolConsequential) }
+func (*consequentialTool) ToolClass() string                      { return "external" }
 
-func approvalPost(url string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Polymux-Client", "evals")
-	return http.DefaultClient.Do(req)
-}
 func (*consequentialTool) Schema() ai.ToolSchema {
-	return ai.ToolSchema{Name: "consequential_delete", Description: "Destructive delete requiring approval", Parameters: map[string]any{
+	return ai.ToolSchema{Name: "consequential_delete", Description: "Fixture mutation", Parameters: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"target": map[string]any{"type": "string"}},
 		"required":   []string{"target"},

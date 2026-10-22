@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/durable"
@@ -112,5 +113,103 @@ func TestDurableToolWithoutTurnStateIsRefused(t *testing.T) {
 	}
 	if err := ErrTurnState; !strings.Contains(err.Error(), "review this stage") {
 		t.Fatalf("unhelpful refusal: %v", err)
+	}
+}
+
+type resultTool struct {
+	stateTool
+	result agent.AgentToolResult
+}
+
+func (t *resultTool) Execute(context.Context, string, json.RawMessage, agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+	return t.result, nil
+}
+
+func TestDurableToolResults(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		failed    bool
+		thrown    bool
+		terminate bool
+	}{
+		{name: "failure", failed: true},
+		{name: "thrown", thrown: true},
+		{name: "terminate", terminate: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var hits atomic.Int32
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if hits.Add(1) == 1 {
+					sse(w, "", []map[string]any{{"index": 0, "id": "call", "type": "function", "function": map[string]string{"name": "state_probe", "arguments": "{}"}}})
+					return
+				}
+				sse(w, "RECOVERED", nil)
+			}))
+			defer provider.Close()
+			runtime := openDurable(t, provider)
+			tool := &resultTool{result: agent.AgentToolResult{
+				Content:   []ai.ToolResultMessageContent{ai.TextContent{Text: "tool result"}},
+				IsError:   scenario.failed,
+				Thrown:    scenario.thrown,
+				Terminate: scenario.terminate,
+				Details:   map[string]any{"reference": "persisted"},
+				Usage:     &ai.Usage{Input: 3, Output: 5},
+			}}
+			session, err := runtime.Open(t.Context(), Definition{
+				Agent:      contract.Agent{ID: "result", Name: "Result"},
+				ExtraTools: []agent.AgentTool{tool},
+				BeforeTool: func(context.Context, string, string, json.RawMessage) agent.ToolCallHookResult {
+					return agent.ToolCallHookResult{}
+				},
+			}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var done atomic.Bool
+			var failed atomic.Bool
+			result, err := session.Send(t.Context(), turn("run the tool"), func(delta Delta) error {
+				if delta.Kind == "tool.done" {
+					done.Store(true)
+					failed.Store(delta.Failed)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantFailure := scenario.failed || scenario.thrown
+			if !done.Load() || failed.Load() != wantFailure {
+				t.Fatalf("reported completion=%v failure=%v, want failure=%v", done.Load(), failed.Load(), wantFailure)
+			}
+			if scenario.terminate {
+				if hits.Load() != 1 {
+					t.Fatalf("terminating tool made %d model requests, want 1", hits.Load())
+				}
+			} else if result.Text != "RECOVERED" {
+				t.Fatalf("agent did not recover from the tool failure: %+v", result)
+			}
+			view, err := session.(*durableSession).conversation.Context(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, message := range view.Messages {
+				stored, ok := message.(ai.ToolResultMessage)
+				if !ok || stored.ToolCallID != "call" {
+					continue
+				}
+				if stored.IsError != wantFailure || toolExcerpt(stored.Content) != "tool result" {
+					t.Fatalf("stored result: %+v", stored)
+				}
+				details, err := json.Marshal(stored.Details)
+				if err != nil || string(details) != `{"reference":"persisted"}` {
+					t.Fatalf("stored details: %s, %v", details, err)
+				}
+				if stored.Usage == nil || stored.Usage.Input != 3 || stored.Usage.Output != 5 {
+					t.Fatalf("stored tool usage: %+v", stored.Usage)
+				}
+				return
+			}
+			t.Fatal("tool result was not persisted")
+		})
 	}
 }

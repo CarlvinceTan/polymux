@@ -523,31 +523,167 @@ func TestR4NoDuplicateOnRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := NewRun("morning", "a", "a", "routine")
-	run.RoutineID, run.Status = &routine.ID, "running"
-	if err := s.RunEvent(t.Context(), "run.start", &run, nil); err != nil {
+	for _, id := range []string{"morning", "morning-suppressed"} {
+		run := NewRun(id, "a", "a", "routine")
+		run.RoutineID, run.Status = &routine.ID, "running"
+		if err := s.RunEvent(t.Context(), "run.start", &run, nil); err != nil {
+			t.Fatal(err)
+		}
+		run.Status, run.Error = "failed", &contract.Error{Code: "provider", Message: "500 internal server error"}
+		for range 2 {
+			if err := s.routineNotice(t.Context(), &run); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if open, err := s.Run(t.Context(), run.ID); err != nil || open.Status != "running" {
+			t.Fatal("notice commit sealed the run", open.Status, err)
+		}
+		for range 2 {
+			if err := s.Recover(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.routineNotice(t.Context(), &run); err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := s.Run(t.Context(), run.ID)
+		messages, msgErr := s.Messages(t.Context(), "a", 0, 100)
+		notices := 0
+		for _, message := range messages {
+			for _, part := range message.Parts {
+				if part.Kind == "routine_failed" {
+					notices++
+				}
+			}
+		}
+		var pushes int
+		if err := s.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM notices`).Scan(&pushes); err != nil {
+			t.Fatal(err)
+		}
+		if err != nil || msgErr != nil || sealed.Status != "failed" || sealed.Error == nil || sealed.Error.Code != "provider" || notices != 1 || pushes != 1 {
+			t.Fatalf("recovered %+v notices %d pushes %d %v", sealed, notices, pushes, err)
+		}
+	}
+}
+
+func TestMemoryUpkeepOncePerDay(t *testing.T) {
+	s := runStore(t)
+	now := time.Now()
+	ask := func(at time.Time) bool {
+		t.Helper()
+		tx, err := s.DB.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		text, err := consolidation(t.Context(), tx, "a", at, "Review.")
+		if err != nil || tx.Commit() != nil {
+			t.Fatal(err)
+		}
+		return strings.Contains(text, "tidy your memory")
+	}
+	if !ask(now) || ask(now.Add(time.Hour)) || !ask(now.Add(MemoryUpkeep)) {
+		t.Fatal("memory upkeep not requested exactly once per interval")
+	}
+}
+
+func TestRoutineFailureFatigue(t *testing.T) {
+	s := runStore(t)
+	routine, err := s.CreateRoutine(t.Context(), contract.Routine{ID: "brief", AgentID: "a", Prompt: "Morning brief", Status: "active", At: futureTime().Format(time.RFC3339)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	run.Status, run.Error = "failed", &contract.Error{Code: "provider", Message: "500 internal server error"}
-	for range 2 {
+	fail := func(i int) {
+		t.Helper()
+		run := NewRun(fmt.Sprintf("brief-%d", i), "a", "a", "routine")
+		run.RoutineID, run.Status = &routine.ID, "running"
+		if err := s.RunEvent(t.Context(), "run.start", &run, nil); err != nil {
+			t.Fatal(err)
+		}
+		run.Status, run.Error = "failed", &contract.Error{Code: "provider", Message: "500 internal server error"}
 		if err := s.routineNotice(t.Context(), &run); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if open, err := s.Run(t.Context(), run.ID); err != nil || open.Status != "running" {
-		t.Fatal("notice commit sealed the run", open.Status, err)
+	for i := range RoutineFailureLimit {
+		fail(i)
 	}
-	for range 2 {
-		if err := s.Recover(t.Context()); err != nil {
+	messages, err := s.Messages(t.Context(), "a", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notices := []string{}
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			if part.Kind == "routine_failed" {
+				notices = append(notices, *part.Text)
+			}
+		}
+	}
+	if len(notices) != 2 || !strings.Contains(notices[1], "paused") {
+		t.Fatalf("expected one failure notice and one pause notice, got %q", notices)
+	}
+	if r, err := s.Routine(t.Context(), "a", routine.ID); err != nil || r.Status != "paused" || r.NextAt != nil {
+		t.Fatal("routine not paused after repeated failures", r.Status, err)
+	}
+	enabled := true
+	if _, err := s.PatchRoutine(t.Context(), "a", routine.ID, RoutinePatch{Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	fail(RoutineFailureLimit)
+	ok := NewRun("brief-ok", "a", "a", "routine")
+	ok.RoutineID, ok.Status = &routine.ID, "running"
+	if err := s.RunEvent(t.Context(), "run.start", &ok, nil); err != nil {
+		t.Fatal(err)
+	}
+	ok.Status = "completed"
+	if err := s.Finalize(t.Context(), contract.Event{ConversationID: "a", Type: "run.done", RunID: &ok.ID}, nil, &ok, nil); err != nil {
+		t.Fatal(err)
+	}
+	var streak int
+	if err := s.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM routine_failures`).Scan(&streak); err != nil || streak != 0 {
+		t.Fatal("success did not reset the failure streak", streak, err)
+	}
+	runs, err := s.RoutineRuns(t.Context(), "a", routine.ID)
+	if err != nil || len(runs) != RoutineFailureLimit+2 {
+		t.Fatal("routine history incomplete", len(runs), err)
+	}
+	if others, _ := s.RoutineRuns(t.Context(), "b", routine.ID); len(others) != 0 {
+		t.Fatal("another bot read the routine history", others)
+	}
+}
+
+func TestRoutineResumeFatigue(t *testing.T) {
+	s := runStore(t)
+	routine, err := s.CreateRoutine(t.Context(), contract.Routine{ID: "retry", AgentID: "a", Prompt: "Retry the brief", Status: "active", At: futureTime().Format(time.RFC3339)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for cycle := range 2 {
+		for i := range RoutineFailureLimit {
+			run := NewRun(fmt.Sprintf("retry-%d-%d", cycle, i), "a", "a", "routine")
+			run.RoutineID, run.Status = &routine.ID, "running"
+			if err := s.RunEvent(t.Context(), "run.start", &run, nil); err != nil {
+				t.Fatal(err)
+			}
+			run.Status, run.Error = "failed", &contract.Error{Code: "provider", Message: "Provider unavailable"}
+			if err := s.Finalize(t.Context(), contract.Event{ConversationID: "a", Type: "run.done", RunID: &run.ID}, nil, &run, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if r, err := s.Routine(t.Context(), "a", routine.ID); err != nil || r.Status != "paused" || r.NextAt != nil {
+			t.Fatalf("failure cycle %d did not pause: %s %v", cycle+1, r.Status, err)
+		}
+		enabled := true
+		if _, err := s.PatchRoutine(t.Context(), "a", routine.ID, RoutinePatch{Enabled: &enabled}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.routineNotice(t.Context(), &run); err != nil {
+	messages, err := s.Messages(t.Context(), "a", 0, 100)
+	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := s.Run(t.Context(), run.ID)
-	messages, msgErr := s.Messages(t.Context(), "a", 0, 100)
-	notices := 0
+	var notices int
 	for _, message := range messages {
 		for _, part := range message.Parts {
 			if part.Kind == "routine_failed" {
@@ -555,11 +691,7 @@ func TestR4NoDuplicateOnRecover(t *testing.T) {
 			}
 		}
 	}
-	var pushes int
-	if err := s.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM notices`).Scan(&pushes); err != nil {
-		t.Fatal(err)
-	}
-	if err != nil || msgErr != nil || sealed.Status != "failed" || sealed.Error == nil || sealed.Error.Code != "provider" || notices != 1 || pushes != 1 {
-		t.Fatalf("recovered %+v notices %d pushes %d %v", sealed, notices, pushes, err)
+	if notices != 4 {
+		t.Fatalf("expected first-failure and pause notices for both cycles, got %d", notices)
 	}
 }

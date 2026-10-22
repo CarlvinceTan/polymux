@@ -53,13 +53,14 @@ struct ProfileView: View {
                         Button { showAvatar = true } label: {
                             AvatarView(options: session.avatars.options(for: agent.id))
                                 .frame(width: 100, height: 100)
+                                .colorMultiply(showsEdit ? Color(white: 0.55) : .white)
                                 .overlay {
-                                    Circle().fill(.black.opacity(0.45))
-                                        .overlay { Image(systemName: "pencil").font(.title2.weight(.semibold)).foregroundStyle(.white) }
+                                    Image(systemName: "pencil")
+                                        .font(.title2.weight(.semibold))
+                                        .foregroundStyle(.white)
                                         .opacity(showsEdit ? 1 : 0)
                                         .allowsHitTesting(false)
                                 }
-                                .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Edit avatar")
@@ -68,10 +69,8 @@ struct ProfileView: View {
                             .autocorrectionDisabled()
                         InlineText(text: $role, prompt: "Role", font: .body, tint: .secondary)
                         if threadID != nil {
-                            Picker("Section", selection: $tab) {
-                                ForEach(ProfileTab.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                            .pickerStyle(.segmented).labelsHidden()
+                            PillPicker("Section", selection: $tab,
+                                       options: ProfileTab.allCases.map { ($0.rawValue, $0) })
                             .padding(.top, 8)
                         }
                     }
@@ -305,38 +304,31 @@ enum ProfileTab: String, CaseIterable, Identifiable {
 }
 
 /// Centred text that highlights on hover and edits in place when clicked.
-private struct InlineText: View {
+struct InlineText: View {
     @Binding var text: String
     let prompt: String
     let font: Font
     var tint: HierarchicalShapeStyle = .primary
-    @State private var editing = false
     @State private var hovered = false
     @FocusState private var focused: Bool
 
     var body: some View {
-        Group {
-            if editing {
-                TextField(prompt, text: $text)
+        Text(text.isEmpty ? prompt : text)
+            .lineLimit(1)
+            .hidden()
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .overlay {
+                TextField("", text: $text, prompt: Text(prompt))
+                    .labelsHidden()
                     .textFieldStyle(.plain)
+                    .foregroundStyle(tint)
                     .focused($focused)
-                    .onSubmit { editing = false }
-                    .onChange(of: focused) { _, now in if !now { editing = false } }
-                    .onAppear { focused = true }
-            } else {
-                Button { editing = true } label: {
-                    Text(text.isEmpty ? prompt : text).foregroundStyle(text.isEmpty ? HierarchicalShapeStyle.tertiary : tint)
-                }
-                .buttonStyle(.plain)
+                    .onSubmit { focused = false }
+                    .accessibilityLabel(prompt)
+                    .multilineTextAlignment(.center)
             }
-        }
-        .font(font)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 10).padding(.vertical, 4)
-        .background(.quaternary.opacity(hovered && !editing ? 1 : 0), in: RoundedRectangle(cornerRadius: 8))
-        .fixedSize(horizontal: editing ? false : true, vertical: true)
-        .frame(maxWidth: 280)
-        .onHover { hovered = $0 }
-        .accessibilityLabel(prompt)
+            .font(font)
+            .background(.quaternary.opacity(hovered && !focused ? 1 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .onHover { hovered = $0 }
     }
 }

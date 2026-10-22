@@ -193,6 +193,9 @@ func closePeers(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]s
 	ids := []string{}
 	for _, peer := range items {
 		run := NewRun(peer.work.Message.ID, peer.work.Message.ThreadID, peer.delivery.TargetAgentID, peer.work.Trigger)
+		if peer.delivery.RunID != nil {
+			run.ID = *peer.delivery.RunID
+		}
 		var data string
 		err := tx.QueryRowContext(ctx, `SELECT data FROM runs WHERE id=?`, run.ID).Scan(&data)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -212,7 +215,7 @@ func closePeers(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]s
 		}
 		ids = append(ids, run.ID)
 		if peer.delivery.Intent != "handoff" {
-			if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=?`, peer.work.Message.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=?`, run.JobID); err != nil {
 				return nil, err
 			}
 		}
@@ -229,12 +232,22 @@ func (s *Store) StopRuns(ctx context.Context, thread string) ([]string, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
+	ids, err := stopTree(ctx, tx, "thread_id", thread)
+	if err != nil {
+		return nil, err
+	}
+	return ids, tx.Commit()
+}
+
+// stopTree cancels the active runs whose column matches value, with their descendants, and
+// returns the stopped run IDs. Column is a fixed literal, never tool or user input.
+func stopTree(ctx context.Context, tx *sql.Tx, column, value string) ([]string, error) {
 	// Deepest runs first, so an ancestor's cleanup cannot overwrite an explicit stop.
 	rows, err := tx.QueryContext(ctx, `WITH RECURSIVE stopped(id, depth) AS (
-SELECT id, 0 FROM runs WHERE thread_id=? AND status IN('running','waiting_peer','waiting_input')
+SELECT id, 0 FROM runs WHERE `+column+`=? AND status IN('running','waiting_peer','waiting_input')
 UNION
 SELECT child.id, stopped.depth+1 FROM runs child JOIN stopped ON json_extract(child.data,'$.parentRunID')=stopped.id
-) SELECT r.data FROM runs r JOIN (SELECT id, max(depth) depth FROM stopped GROUP BY id) s ON r.id=s.id ORDER BY s.depth DESC`, thread)
+) SELECT r.data FROM runs r JOIN (SELECT id, max(depth) depth FROM stopped GROUP BY id) s ON r.id=s.id ORDER BY s.depth DESC`, value)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +289,7 @@ SELECT child.id, stopped.depth+1 FROM runs child JOIN stopped ON json_extract(ch
 			return nil, err
 		}
 	}
-	return ids, tx.Commit()
+	return ids, nil
 }
 
 func (s *Store) StopWaiting(ctx context.Context, thread string) ([]string, error) {

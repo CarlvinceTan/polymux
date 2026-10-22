@@ -333,6 +333,9 @@ public final class ChatStore {
             let message = try cache.apply(event, touchThreads: touchThreads)
             return try message.flatMap { try cache.isHidden($0.id, threadID: threadID) ? nil : $0 }
         }) { update(message) }
+        if event.message?.status == "silent", let id = event.messageID ?? event.message?.id {
+            messages.removeAll { $0.id == id }
+        }
         if event.type == "activity" {
             let hidden = Set(event.payload?.messageIDs ?? [])
             messages.removeAll { hidden.contains($0.id) }
@@ -347,12 +350,12 @@ public final class ChatStore {
             messages[index] = message
         } else {
             messages.append(message)
-            messages.sort {
-                if $0.seq == 0 && $1.seq == 0 { return $0.createdAt < $1.createdAt }
-                if $0.seq == 0 { return false }
-                if $1.seq == 0 { return true }
-                return $0.seq < $1.seq
-            }
+        }
+        messages.sort {
+            if $0.seq == 0 && $1.seq == 0 { return $0.createdAt < $1.createdAt }
+            if $0.seq == 0 { return false }
+            if $1.seq == 0 { return true }
+            return $0.seq < $1.seq
         }
     }
 

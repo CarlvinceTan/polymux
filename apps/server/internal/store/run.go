@@ -29,6 +29,8 @@ type Work struct {
 	RoutineID   *string          `json:"routineID,omitempty"`
 	TaskID      string           `json:"taskID,omitempty"`
 	Generation  int              `json:"generation,omitempty"`
+	Hops        int              `json:"hops,omitempty"`
+	FromAgentID string           `json:"fromAgentID,omitempty"`
 }
 
 type SendInput struct {
@@ -206,6 +208,17 @@ func (s *Store) FinalizeTask(ctx context.Context, event contract.Event, message 
 	if err := sealTask(ctx, tx, run, checkpoint, tools, output); err != nil {
 		return err
 	}
+	if run.Trigger == "routine" && run.Status == "completed" && run.RoutineID != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM routine_failures WHERE routine_id=?`, *run.RoutineID); err != nil {
+			return err
+		}
+	}
+	if message != nil && message.Status != "silent" {
+		// Progress posts precede the final reply, even when its placeholder was opened first.
+		if _, err := tx.ExecContext(ctx, `UPDATE messages SET seq=(SELECT last_seq+1 FROM threads WHERE id=?) WHERE id=? AND EXISTS(SELECT 1 FROM messages later WHERE later.thread_id=? AND later.seq>messages.seq AND json_extract(later.data,'$.runID')=?)`, message.ThreadID, message.ID, message.ThreadID, run.ID); err != nil {
+			return err
+		}
+	}
 	if _, err := appendTx(ctx, tx, event, message); err != nil {
 		return err
 	}
@@ -226,7 +239,7 @@ func resolvePeers(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
 		run.Status, run.Summary = "failed", "Peer work did not complete"
 		run.Error = &contract.Error{Code: "peer_failed", Message: "A delegated request did not complete. Review the peer result before retrying."}
 	}
-	if total > 0 && pending == 0 && run.Trigger == "message" {
+	if total > 0 && pending == 0 && run.Trigger != "handoff" {
 		return followupTx(ctx, tx, *run)
 	}
 	return nil
@@ -240,7 +253,7 @@ func finishRuns(ctx context.Context, tx *sql.Tx, job string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET status='needs_review',next_at=NULL WHERE json_extract(data,'$.jobID')=? AND status IN('running','ready')`, job); err != nil {
 		return err
 	}
-	// waiting_input survives Finish while an approval is pending (same idea as waiting_peer).
+	// Waiting runs survive finishing the job that produced them.
 	rows, err := tx.QueryContext(ctx, `SELECT data FROM runs WHERE status IN('queued','running') AND job_id=?`, job)
 	if err != nil {
 		return err
@@ -386,17 +399,6 @@ func (s *Store) recoverRuns(ctx context.Context) error {
 				continue
 			}
 		}
-		if run.Status == "waiting_input" {
-			var pending int
-			if err := s.DB.QueryRowContext(ctx,
-				`SELECT count(*) FROM approvals WHERE run_id=? AND status IN('pending','approved')`, run.ID,
-			).Scan(&pending); err != nil {
-				return err
-			}
-			if pending > 0 {
-				continue
-			}
-		}
 		if run.Status == "running" && resumeReady(ctx, s.DB, run) {
 			run.Status, run.Activity, run.Summary = "resuming", "", "Resuming from the saved tool result"
 			run.Attempt++
@@ -516,14 +518,11 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 		if exists != 1 {
 			return delivery, ErrMembers
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM deliveries WHERE target_agent=? AND json_extract(input,'$.message.id')=? AND json_extract(data,'$.intent')='handoff'`, delivery.TargetAgentID, work.Message.ID).Scan(&exists); err != nil {
-			return delivery, err
-		}
-		if exists != 0 {
-			return delivery, ErrConflict
-		}
 		run := NewRun(work.Message.ID, work.Message.ThreadID, delivery.TargetAgentID, "handoff")
 		run.ParentRunID, run.SourceMessageID = work.ParentRunID, &work.Message.ID
+		if work.Message.ReplyToID != nil {
+			run.JobID, run.SourceMessageID = *work.Message.ReplyToID, work.Message.ReplyToID
+		}
 		var previous string
 		err := tx.QueryRowContext(ctx, `SELECT data FROM runs WHERE id=?`, run.ID).Scan(&previous)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -557,6 +556,11 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: incoming.ThreadID, Type: "message.start", MessageID: &incoming.ID, AgentID: incoming.AgentID}, &incoming); err != nil {
 			return delivery, err
 		}
+		outgoing := incoming
+		outgoing.ID, outgoing.ThreadID = "sent:"+delivery.ID, delivery.ConversationID
+		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: outgoing.ThreadID, Type: "message.start", MessageID: &outgoing.ID, AgentID: outgoing.AgentID}, &outgoing); err != nil {
+			return delivery, err
+		}
 	}
 	if wake {
 		if err := queueTx(ctx, tx, work, delivery.TargetAgentID); err != nil {
@@ -585,10 +589,6 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 		return delivery, err
 	}
 	payload.AgentIDs = []string{delivery.SourceAgentID, delivery.TargetAgentID}
-	payload.MessageIDs = []string{work.Message.ID, "receipt:" + delivery.ID}
-	if delivery.RunID != nil {
-		payload.MessageIDs = append(payload.MessageIDs, "reply:"+*delivery.RunID)
-	}
 	payload.IconOrAgentID = delivery.TargetAgentID
 	if err := activityTx(ctx, tx, delivery.ConversationID, delivery.SourceAgentID, payload); err != nil {
 		return delivery, err
@@ -639,6 +639,18 @@ func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, res
 	}
 	run = stored
 	delivery.Status, delivery.RunID = run.Status, &run.ID
+	var input sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT input FROM jobs WHERE id=?`, run.JobID).Scan(&input); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if input.Valid {
+		var work Work
+		if err := json.Unmarshal([]byte(input.String), &work); err != nil {
+			return err
+		}
+		hops := max(valueHop(delivery.Hops), int64(work.Hops))
+		delivery.Hops = &hops
+	}
 	// 1:1 timeouts stay off the thread; the parent follow-up explains them.
 	timedOut := run.Error != nil && run.Error.Code == "timeout"
 	if delivery.Intent != "handoff" && !timedOut {
@@ -668,7 +680,6 @@ func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, res
 			return err
 		}
 		payload.AgentIDs = []string{delivery.SourceAgentID, delivery.TargetAgentID}
-		payload.MessageIDs = []string{m.ID, "reply:" + run.ID}
 		payload.IconOrAgentID = delivery.TargetAgentID
 		if err := activityTx(ctx, tx, delivery.ConversationID, delivery.TargetAgentID, payload); err != nil {
 			return err
@@ -752,7 +763,7 @@ func finishPeer(ctx context.Context, tx *sql.Tx, job string) error {
 	if err := json.Unmarshal([]byte(input.String), &work); err != nil {
 		return err
 	}
-	if work.Trigger != "peer" || work.DeliveryID == "" {
+	if (work.Trigger != "peer" && work.Trigger != "follow_up") || work.DeliveryID == "" {
 		return nil
 	}
 	var exists int
@@ -769,6 +780,9 @@ func finishPeer(ctx context.Context, tx *sql.Tx, job string) error {
 	var run contract.Run
 	if err := json.Unmarshal([]byte(data), &run); err != nil {
 		return err
+	}
+	if !Terminal(run.Status) {
+		return nil
 	}
 	var result contract.Message
 	if run.MessageID != nil {
@@ -830,6 +844,9 @@ func (s *Store) reconcilePeers(ctx context.Context) error {
 	}
 	for _, peer := range peers {
 		run := NewRun(peer.work.Message.ID, peer.work.Message.ThreadID, peer.delivery.TargetAgentID, peer.work.Trigger)
+		if peer.delivery.RunID != nil {
+			run.ID = *peer.delivery.RunID
+		}
 		stored, err := s.Run(ctx, run.ID)
 		if err == nil && !Terminal(stored.Status) {
 			continue
@@ -861,7 +878,7 @@ func (s *Store) reconcilePeers(ctx context.Context) error {
 }
 
 func finishHandoffs(ctx context.Context, tx *sql.Tx, job string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.intent')='handoff' AND json_extract(data,'$.status')='queued' AND json_extract(input,'$.message.id')=?`, job)
+	rows, err := tx.QueryContext(ctx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.intent')='handoff' AND json_extract(data,'$.status')='queued' AND (json_extract(input,'$.message.replyToID')=? OR json_extract(input,'$.message.id')=?)`, job, job)
 	if err != nil {
 		return err
 	}
@@ -1018,4 +1035,30 @@ func (s *Store) Submission(ctx context.Context, runID string) (int64, bool) {
 func (s *Store) ensureSubmissions(ctx context.Context) error {
 	_, err := s.DB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS run_submissions(run_id TEXT PRIMARY KEY, submission_id INTEGER NOT NULL)`)
 	return err
+}
+
+// PutPrivateRun saves a voice run without publishing chat events.
+func (s *Store) PutPrivateRun(ctx context.Context, run contract.Run) error {
+	if run.ID == "" || run.JobID == "" || run.ConversationID == "" {
+		return ErrConflict
+	}
+	data, err := json.Marshal(run)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,thread_id,request,state,input) VALUES(?,?,'{}','done','{}')
+ON CONFLICT(id) DO UPDATE SET state='done'`, run.JobID, run.ConversationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runs(id,job_id,thread_id,agent_id,status,data) VALUES(?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET status=excluded.status,data=excluded.data`,
+		run.ID, run.JobID, run.ConversationID, run.AgentID, run.Status, string(data)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

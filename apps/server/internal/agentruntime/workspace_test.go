@@ -136,7 +136,7 @@ func TestWorkspaceFirstReply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := Definition{Agent: contract.Agent{ID: "coding", Name: "Coding"}, Workspace: filepath.Join(home, "code", "Polymux"), Scope: "chat", Intro: true}
+	d := Definition{Agent: contract.Agent{ID: "coding", Name: "Coding"}, Workspace: filepath.Join(home, "code", "Polymux"), Worktree: t.TempDir(), Scope: "chat", Intro: true}
 	prompt, err := buildPrompt(d, nil, false)
 	if err != nil {
 		t.Fatal(err)

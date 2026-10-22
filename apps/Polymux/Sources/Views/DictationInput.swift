@@ -7,11 +7,10 @@ final class DictationInput {
     private(set) var active = false
     private(set) var stopping = false
     private(set) var level: Float = 0
-    private let permission: @MainActor () -> Bool
-    var denied: Bool { permission() }
-    var microphoneDenied: Bool { AVAudioApplication.shared.recordPermission == .denied }
+    private(set) var denied = false
+    private let permission: @Sendable () -> Bool
 
-    private static func isDenied() -> Bool {
+    private nonisolated static func isDenied() -> Bool {
         AVAudioApplication.shared.recordPermission == .denied
             || [.denied, .restricted].contains(SFSpeechRecognizer.authorizationStatus())
     }
@@ -27,15 +26,20 @@ final class DictationInput {
     init() {
         permission = Self.isDenied
         makeInput = {
-            let audio = VoiceAudio()
+            let audio = VoiceAudio(duplex: false)
             return (AppleInput(audio: audio), { audio.stop() })
         }
     }
 
     init(makeInput: @escaping () -> any SpeechInput, pause: @escaping () -> Void = {},
-         denied: @escaping @MainActor () -> Bool = DictationInput.isDenied) {
+         denied: @escaping @Sendable () -> Bool = DictationInput.isDenied) {
         self.makeInput = { (makeInput(), pause) }
         permission = denied
+    }
+
+    func refresh() async {
+        let check = permission
+        denied = await Task.detached { check() }.value
     }
 
     func start(transcript: @escaping (VoiceTranscript) -> Void, failure: @escaping (Error) -> Void) {
@@ -54,6 +58,7 @@ final class DictationInput {
                 try Task.checkCancellation()
                 guard session == current else { return }
                 ready = true
+                denied = false
                 for try await event in stream {
                     guard !Task.isCancelled, session == current else { break }
                     switch event {
@@ -65,7 +70,10 @@ final class DictationInput {
                     }
                 }
             } catch {
-                if !Task.isCancelled, session == current { failure(error) }
+                if !Task.isCancelled, session == current {
+                    await refresh()
+                    if !Task.isCancelled, session == current { failure(error) }
+                }
             }
             await input.stop()
             guard session == current else { return }

@@ -276,6 +276,9 @@ type Index struct {
 	Log         *slog.Logger
 	extractOnce sync.Once
 	extractGate chan struct{}
+	modelMu     sync.Mutex
+	model       string
+	retryAt     time.Time
 	// unavailableOnce keeps a missing FTS5 build from logging once per message.
 	unavailableOnce sync.Once
 }
@@ -320,10 +323,44 @@ func (i *Index) Prepare(ctx context.Context, m contract.Message) (contract.Messa
 	return m, nil
 }
 
-// Reindex queues messages whose vectors were made at another size.
-func (i *Index) Reindex(ctx context.Context, dims int) error {
-	_, err := i.Store.DB.ExecContext(ctx, `UPDATE messages SET indexing_state='pending' WHERE id IN (SELECT message_id FROM media_vectors WHERE model NOT LIKE ?)`, fmt.Sprintf("%%@%d", dims))
-	return err
+// Reindex queues vectors that differ from the endpoint's actual model and size.
+func (i *Index) Reindex(ctx context.Context) error {
+	return i.reindex(ctx, true)
+}
+
+func (i *Index) reindex(ctx context.Context, force bool) error {
+	i.modelMu.Lock()
+	defer i.modelMu.Unlock()
+	if !force && i.model != "" {
+		return nil
+	}
+	i.model = ""
+	if i.Embedder == nil {
+		return fmt.Errorf("semantic provider unavailable")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, model, err := i.Embedder.Embed(ctx, Input{Text: "Polymux search index"})
+	if err != nil {
+		return fmt.Errorf("identify embedding model: %w", err)
+	}
+	tx, err := i.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM search_entities WHERE model<>?`, model); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE messages SET indexing_state='pending'
+		WHERE id IN (SELECT message_id FROM media_vectors WHERE model<>?)`, model); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	i.model = model
+	return nil
 }
 
 func (i *Index) Run(ctx context.Context) {
@@ -342,6 +379,11 @@ func (i *Index) Run(ctx context.Context) {
 }
 
 func (i *Index) Batch(ctx context.Context) error {
+	if i.Embedder != nil {
+		if err := i.retry(ctx); err != nil {
+			return err
+		}
+	}
 	rows, err := i.Store.DB.QueryContext(ctx, `SELECT data FROM messages WHERE indexing_state='pending' AND status IN ('done','error') ORDER BY rowid LIMIT 8`)
 	if err != nil {
 		return err
@@ -377,6 +419,26 @@ func (i *Index) Batch(ctx context.Context) error {
 			}
 		}
 	}
+	if i.Embedder != nil {
+		if err := i.reindex(ctx, false); err != nil {
+			return err
+		}
+	}
+	return i.indexEntities(ctx)
+}
+
+func (i *Index) retry(ctx context.Context) error {
+	i.modelMu.Lock()
+	defer i.modelMu.Unlock()
+	if time.Now().Before(i.retryAt) {
+		return nil
+	}
+	if _, err := i.Store.DB.ExecContext(ctx, `UPDATE messages SET indexing_state='pending'
+		WHERE indexing_state='error' AND NOT EXISTS (
+			SELECT 1 FROM messages WHERE indexing_state='pending' AND status IN ('done','error'))`); err != nil {
+		return err
+	}
+	i.retryAt = time.Now().Add(time.Minute)
 	return nil
 }
 
@@ -487,20 +549,24 @@ func Query(text string) string {
 	}
 	for n := range words {
 		words[n] = "\"" + strings.ReplaceAll(words[n], "\"", "\"\"") + "\""
+		if n == len(words)-1 {
+			words[n] += "*"
+		}
 	}
 	return strings.Join(words, " OR ")
 }
 
 type ranked struct {
-	ID      string
-	Snippet string
+	ID       string
+	Snippet  string
+	distance float64
 }
 
-func (i *Index) lexical(ctx context.Context, thread, query string) ([]ranked, error) {
+func (i *Index) lexical(ctx context.Context, scope searchScope, query string) ([]ranked, error) {
 	if query == "" {
 		return []ranked{}, nil
 	}
-	rows, err := i.Store.DB.QueryContext(ctx, `SELECT message_id,snippet(messages_fts,2,'','','…',28) FROM messages_fts WHERE messages_fts MATCH ? AND thread_id=? ORDER BY bm25(messages_fts) LIMIT 80`, query, thread)
+	rows, err := i.Store.DB.QueryContext(ctx, `SELECT message_id,snippet(messages_fts,2,'','','…',28) FROM messages_fts JOIN messages m ON m.id=message_id WHERE messages_fts MATCH ? AND `+scope.predicate()+` ORDER BY bm25(messages_fts) LIMIT 80`, query, scope.thread, scope.thread)
 	if err != nil {
 		return nil, err
 	}
@@ -516,7 +582,7 @@ func (i *Index) lexical(ctx context.Context, thread, query string) ([]ranked, er
 	return out, rows.Err()
 }
 
-func (i *Index) semantic(ctx context.Context, thread, query string) ([]ranked, error) {
+func (i *Index) semantic(ctx context.Context, scope searchScope, query string) ([]ranked, error) {
 	if i.Embedder == nil {
 		return nil, fmt.Errorf("semantic provider unavailable")
 	}
@@ -528,34 +594,61 @@ func (i *Index) semantic(ctx context.Context, thread, query string) ([]ranked, e
 	if err != nil {
 		return nil, err
 	}
-	rows, err := i.Store.DB.QueryContext(ctx, `SELECT message_id FROM media_vectors WHERE thread_id=? AND model=? ORDER BY vec_distance_cosine(embedding,?) LIMIT 80`, thread, model, blob)
+	rows, err := i.Store.DB.QueryContext(ctx, `SELECT message_id,vec_distance_cosine(embedding,?) FROM media_vectors JOIN messages m ON m.id=message_id WHERE `+scope.predicate()+` AND model=? ORDER BY vec_distance_cosine(embedding,?) LIMIT 80`, blob, scope.thread, scope.thread, model, blob)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []ranked{}
 	for rows.Next() {
 		var r ranked
-		if err := rows.Scan(&r.ID); err != nil {
+		if err := rows.Scan(&r.ID, &r.distance); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(scope.entities) > 0 {
+		metadata, err := i.entityRanks(ctx, scope.entities, model, blob)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, metadata...)
+		sort.SliceStable(out, func(a, b int) bool { return out[a].distance < out[b].distance })
+	}
+	return out, nil
 }
 
 func (i *Index) Search(ctx context.Context, thread, query string) ([]contract.SearchHit, bool, error) {
+	scope := searchScope{thread: thread}
+	scores, snippets, semantic, err := i.ranks(ctx, scope, query)
+	if err != nil {
+		return nil, false, err
+	}
+	return i.hits(ctx, scores, snippets, semantic)
+}
+
+func (i *Index) ranks(ctx context.Context, scope searchScope, query string) (map[string]float64, map[string]string, bool, error) {
 	type found struct {
 		rows []ranked
 		err  error
 	}
 	lexCh := make(chan found, 1)
 	semCh := make(chan found, 1)
-	go func() { rows, err := i.lexical(ctx, thread, Query(query)); lexCh <- found{rows, err} }()
-	go func() { rows, err := i.semantic(ctx, thread, query); semCh <- found{rows, err} }()
+	go func() { rows, err := i.lexical(ctx, scope, Query(query)); lexCh <- found{rows, err} }()
+	go func() { rows, err := i.semantic(ctx, scope, query); semCh <- found{rows, err} }()
 	lex, sem := <-lexCh, <-semCh
 	if lex.err != nil {
-		return nil, false, lex.err
+		return nil, nil, false, lex.err
+	}
+	for _, e := range scope.entities {
+		if strings.Contains(strings.ToLower(e.body), strings.ToLower(query)) {
+			lex.rows = append([]ranked{{ID: e.result.ID}}, lex.rows...)
+		}
 	}
 	scores := map[string]float64{}
 	snippets := map[string]string{}
@@ -567,6 +660,10 @@ func (i *Index) Search(ctx context.Context, thread, query string) ([]contract.Se
 			}
 		}
 	}
+	return scores, snippets, sem.err == nil, nil
+}
+
+func rankedIDs(scores map[string]float64) []string {
 	ids := make([]string, 0, len(scores))
 	for id := range scores {
 		ids = append(ids, id)
@@ -580,8 +677,12 @@ func (i *Index) Search(ctx context.Context, thread, query string) ([]contract.Se
 	if len(ids) > 40 {
 		ids = ids[:40]
 	}
+	return ids
+}
+
+func (i *Index) hits(ctx context.Context, scores map[string]float64, snippets map[string]string, semantic bool) ([]contract.SearchHit, bool, error) {
 	out := []contract.SearchHit{}
-	for _, id := range ids {
+	for _, id := range rankedIDs(scores) {
 		m, err := i.Store.Message(ctx, id)
 		if err != nil {
 			return nil, false, err
@@ -600,5 +701,5 @@ func (i *Index) Search(ctx context.Context, thread, query string) ([]contract.Se
 		}
 		out = append(out, contract.SearchHit{Message: m, Score: scores[id], Snippet: snippet, IndexingState: &state})
 	}
-	return out, sem.err == nil, nil
+	return out, semantic, nil
 }

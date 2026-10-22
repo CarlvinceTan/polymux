@@ -151,6 +151,8 @@ public final class LocalCache: @unchecked Sendable {
     }
 
     public func agents() throws -> [Agent] { try metadata("agents") ?? [] }
+    public func sidebar() throws -> SidebarSnapshot? { try metadata("sidebar") }
+    public func saveSidebar(_ snapshot: SidebarSnapshot) throws { try setMetadata("sidebar", value: snapshot) }
     public func threads() throws -> [Thread] {
         lock.lock()
         threadReads += 1
@@ -231,7 +233,7 @@ public final class LocalCache: @unchecked Sendable {
     }
 
     public func messages(threadID: String, before: Int64? = nil, limit: Int? = nil) throws -> [Message] {
-        var sql = "SELECT json FROM messages WHERE thread_id=? AND NOT EXISTS (SELECT 1 FROM activity_messages WHERE activity_messages.thread_id=messages.thread_id AND activity_messages.id=messages.id)"
+        var sql = "SELECT json FROM messages WHERE thread_id=? AND json_extract(json,'$.status')!='silent' AND NOT EXISTS (SELECT 1 FROM activity_messages WHERE activity_messages.thread_id=messages.thread_id AND activity_messages.id=messages.id)"
         var values: [Value] = [.text(threadID)]
         if let before {
             sql += " AND seq>0 AND seq<?"
@@ -260,6 +262,7 @@ public final class LocalCache: @unchecked Sendable {
         try transaction {
             try execute("INSERT INTO events(thread_id,seq,json) VALUES(?,?,?)", [.text(event.conversationID), .int(event.seq), .text(try encode(event))])
             if let run = event.run, run.conversationID == event.conversationID { try write(run) }
+            let wasSilent = try event.messageID.flatMap { try message(id: $0)?.status } == "silent"
             if let full = event.message {
                 var message = full
                 if message.seq == 0 { message.seq = event.seq }
@@ -300,8 +303,15 @@ public final class LocalCache: @unchecked Sendable {
                 if let index = threads.firstIndex(where: { $0.id == event.conversationID }) {
                     let isNew = event.seq > threads[index].lastSeq
                     threads[index].lastSeq = max(threads[index].lastSeq, event.seq)
-                    if let message = changed,
-                       message.seq >= (threads[index].lastMessage?.seq ?? 0) { threads[index].lastMessage = message }
+                    if let message = changed, message.status == "silent" {
+                        if threads[index].lastMessage?.id == message.id {
+                            threads[index].lastMessage = try messages(threadID: event.conversationID).last
+                        }
+                        if isNew, event.seq > threads[index].lastReadSeq, !wasSilent {
+                            threads[index].unreadCount = max(0, threads[index].unreadCount - 1)
+                        }
+                    } else if let message = changed,
+                              message.seq >= (threads[index].lastMessage?.seq ?? 0) { threads[index].lastMessage = message }
                     if isNew, event.seq > threads[index].lastReadSeq {
                         if event.type == "message.start", let changed, changed.role == "assistant",
                            try !isHidden(changed.id, threadID: event.conversationID) {
@@ -332,7 +342,7 @@ public final class LocalCache: @unchecked Sendable {
     }
 
     func isHidden(_ id: String, threadID: String) throws -> Bool {
-        try !rows("SELECT 1 FROM activity_messages WHERE thread_id=? AND id=?", [.text(threadID), .text(id)]).isEmpty
+        try !rows("SELECT 1 FROM activity_messages WHERE thread_id=? AND id=? UNION SELECT 1 FROM messages WHERE thread_id=? AND id=? AND json_extract(json,'$.status')='silent'", [.text(threadID), .text(id), .text(threadID), .text(id)]).isEmpty
     }
 
     public func activityEvents(threadID: String) throws -> [Event] {
@@ -391,11 +401,67 @@ public final class LocalCache: @unchecked Sendable {
         try setMetadata("threads", value: threads)
     }
 
-    public func search(threadID: String, query: String) throws -> [SearchHit] {
-        let tokens = query.split(whereSeparator: { $0.isWhitespace }).map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+    public func search(threadID: String? = nil, query: String, kind: String = "all") throws -> [SearchHit] {
+        var tokens = query.split(whereSeparator: { $0.isWhitespace }).map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
         guard !tokens.isEmpty else { return [] }
-        let matches = try rows("SELECT m.json, snippet(messages_fts,2,'','','…',24), bm25(messages_fts) FROM messages_fts JOIN messages m ON m.id=messages_fts.id WHERE messages_fts MATCH ? AND messages_fts.thread_id=? ORDER BY bm25(messages_fts) LIMIT 50", [.text(tokens.joined(separator: " OR ")), .text(threadID)])
+        tokens[tokens.count - 1] += "*"
+        var predicate = "(?='' OR messages_fts.thread_id=?)"
+        if kind == "media" || kind == "files" {
+            let media = "substr(json_extract(p.value,'$.attachment.mimeType'),1,6) IN ('image/','video/','audio/')"
+            predicate += " AND EXISTS(SELECT 1 FROM json_each(m.json,'$.parts') p WHERE json_type(p.value,'$.attachment')='object' AND \(kind == "files" ? "NOT (" + media + ")" : media))"
+        }
+        let scope = Value.text(threadID ?? "")
+        let matches = try rows("SELECT m.json, snippet(messages_fts,2,'','','…',24), bm25(messages_fts) FROM messages_fts JOIN messages m ON m.id=messages_fts.id WHERE messages_fts MATCH ? AND " + predicate + " ORDER BY bm25(messages_fts) LIMIT 50", [.text(tokens.joined(separator: " OR ")), scope, scope])
         return try matches.map { SearchHit(message: try decode(Message.self, $0[0]), score: -(Double($0[2]) ?? 0), snippet: $0[1], indexingState: "ready") }
+    }
+
+    public func cacheSearch(_ results: [SearchResult], query: String, kind: String) throws {
+        try merge(results.compactMap(\.message))
+        try setMetadata("search/\(kind)/\(query)", value: results)
+    }
+
+    public func globalSearch(query: String, kind: String) throws -> [SearchResult] {
+        let threads = try threads()
+        let agents = try agents()
+        let live = Set(threads.map(\.id))
+        let cached: [SearchResult] = try metadata("search/\(kind)/\(query)") ?? []
+        var results = cached.filter { live.contains($0.threadID) }
+        func distinct() -> [SearchResult] {
+            var ids = Set<String>()
+            return results.filter { ids.insert($0.id).inserted }
+        }
+        for thread in threads {
+            if (kind == "conversations" || kind == "all" && thread.id != thread.agentID) && (query.isEmpty || thread.title.localizedStandardContains(query)) {
+                results.append(SearchResult(id: "conversation/" + thread.id, kind: "conversations", title: thread.title,
+                                            threadID: thread.id, agentID: thread.agentID))
+            }
+            if thread.id == thread.agentID, let agent = agents.first(where: { $0.id == thread.agentID }),
+               (kind == "all" || kind == "bots"),
+               query.isEmpty || (agent.name + " " + agent.role).localizedStandardContains(query) {
+                results.append(SearchResult(id: "bot/" + agent.id, kind: "bots", title: agent.name, snippet: agent.role,
+                                            threadID: thread.id, agentID: agent.id))
+            }
+        }
+        guard !query.isEmpty, kind != "bots", kind != "conversations" else { return distinct() }
+        var seen = Set<String>()
+        for hit in try search(query: query, kind: kind) {
+            let message = hit.message
+            guard live.contains(message.threadID) else { continue }
+            let title = threads.first { $0.id == message.threadID }?.title ?? "Conversation"
+            if kind == "all" || kind == "messages" {
+                results.append(SearchResult(id: "message/" + message.id, kind: "messages", title: title,
+                                            snippet: hit.snippet, threadID: message.threadID, messageID: message.id))
+            }
+            for attachment in message.attachments {
+                let media = ["image/", "video/", "audio/"].contains { attachment.mimeType.hasPrefix($0) }
+                let category = media ? "media" : "files"
+                guard (kind == "all" || kind == category), seen.insert(attachment.id).inserted else { continue }
+                results.append(SearchResult(id: "attachment/" + attachment.id, kind: category, title: attachment.name,
+                                            snippet: hit.snippet, threadID: message.threadID, messageID: message.id,
+                                            attachment: attachment))
+            }
+        }
+        return distinct()
     }
 
     private func message(id: String) throws -> Message? {
@@ -406,7 +472,7 @@ public final class LocalCache: @unchecked Sendable {
     private func write(_ message: Message) throws {
         try execute("INSERT INTO messages(id,thread_id,seq,created,json) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seq=excluded.seq,created=excluded.created,json=excluded.json", [.text(message.id), .text(message.threadID), .int(message.seq), .text(message.createdAt), .text(try encode(message))])
         try execute("DELETE FROM messages_fts WHERE id=?", [.text(message.id)])
-        let text = message.text + " " + message.attachments.compactMap(\.extractedText).joined(separator: " ")
+        let text = message.text + " " + message.attachments.map { $0.name + " " + ($0.extractedText ?? "") }.joined(separator: " ")
         try execute("INSERT INTO messages_fts(id,thread_id,text) VALUES(?,?,?)", [.text(message.id), .text(message.threadID), .text(text)])
     }
 

@@ -141,7 +141,7 @@ public func unionOfCirclesProfile(_ circles: [CircleSpec]) -> [Double] {
     }
 }
 
-private func roundedPolygon(_ verts: [Point], _ rc: Double, _ arcSteps: Int = 10) -> [Point] {
+func roundedPolygon(_ verts: [Point], _ rc: Double, _ arcSteps: Int = 10) -> [Point] {
     let n = verts.count
     func normal(_ a: Point, _ b: Point) -> Double {
         let dx = b.x - a.x, dy = b.y - a.y

@@ -52,7 +52,8 @@ type Options struct {
 	// Effects maps agent ID to a shared side-effect counter installed as side_effect.
 	Effects map[string]*atomic.Int32
 	// Extras maps agent ID to additional ExtraTools (typed_tool, error_tool, …).
-	Extras map[string][]agent.AgentTool
+	Extras  map[string][]agent.AgentTool
+	Summary func(*ChatRequest) Response
 }
 
 // Start opens temp data, durable runtime, and HTTP server pointed at the emulator.
@@ -92,7 +93,7 @@ func Start(t *testing.T, opts Options) *Harness {
 	if h.extras == nil {
 		h.extras = map[string][]agent.AgentTool{}
 	}
-	h.Emulator = StartEmulator(opts.Steps)
+	h.Emulator = StartEmulator(opts.Steps, opts.Summary)
 	t.Cleanup(h.Close)
 	t.Cleanup(h.ensureEmulatorEval)
 	h.open()

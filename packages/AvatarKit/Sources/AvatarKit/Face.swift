@@ -37,7 +37,7 @@ public struct EyeCfg: Hashable, Sendable {
     }
 }
 
-private struct Vec3 {
+struct Vec3 {
     var x: Double
     var y: Double
     var z: Double
@@ -49,16 +49,30 @@ private func spin(_ u: Vec3, _ v: Vec3, _ angle: Double) -> (Vec3, Vec3) {
             Vec3(x: v.x * c - u.x * s, y: v.y * c - u.y * s, z: v.z * c - u.z * s))
 }
 
-public func eyePoses(_ gaze: HeadGaze, _ scale: Double, _ split: Double = EYE_SPLIT) -> [EyePose] {
+/// The head's right, down and forward directions when facing `gaze`.
+func headFrame(_ gaze: HeadGaze) -> (right: Vec3, down: Vec3, f: Vec3) {
     var f = Vec3(x: 0, y: 0, z: 1)
     var right = Vec3(x: 1, y: 0, z: 0)
     var down = Vec3(x: 0, y: 1, z: 0)
     (f, right) = spin(f, right, gaze.yaw * .pi / 180)
     (down, f) = spin(down, f, gaze.pitch * .pi / 180)
     (right, down) = spin(right, down, gaze.roll * .pi / 180)
+    return (right, down, f)
+}
+
+/// Each eye's forward and right directions on a head facing `gaze`.
+func eyeFrames(_ gaze: HeadGaze, _ split: Double) -> [(f: Vec3, right: Vec3, down: Vec3)] {
+    let head = headFrame(gaze)
     return [-1.0, 1.0].map { side in
-        let (ef, er) = spin(f, right, split * side * .pi / 180)
-        return EyePose(x: ef.x * scale, y: ef.y * scale, a: er.x, b: er.y, c: down.x, d: down.y, depth: ef.z)
+        let (ef, er) = spin(head.f, head.right, split * side * .pi / 180)
+        return (ef, er, head.down)
+    }
+}
+
+public func eyePoses(_ gaze: HeadGaze, _ scale: Double, _ split: Double = EYE_SPLIT) -> [EyePose] {
+    eyeFrames(gaze, split).map { eye in
+        EyePose(x: eye.f.x * scale, y: eye.f.y * scale, a: eye.right.x, b: eye.right.y,
+                c: eye.down.x, d: eye.down.y, depth: eye.f.z)
     }
 }
 

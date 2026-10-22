@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/durable"
@@ -14,8 +15,8 @@ import (
 // context; failing is safer than running without the run, scope and effect records.
 var ErrTurnState = errors.New("turn state is unavailable; review this stage before retrying")
 
-// toolReplay derives durable replay safety from the tool's approval class.
-// Consequential (and undeclared ExtraTools) are unsafe so crash recovery does not re-execute them.
+// toolReplay prevents crash recovery from repeating unsafe effects.
+// Unknown tools are unsafe by default.
 func toolReplay(tool agent.AgentTool) durable.ToolReplay {
 	type classed interface{ ToolClass() string }
 	if c, ok := tool.(classed); ok {
@@ -70,7 +71,17 @@ func ToolRegistration(d Definition, tool agent.AgentTool, conversation durable.C
 			if err != nil {
 				return durable.ToolExecutionResult{}, err
 			}
-			return durable.ToolExecutionResult{Content: result.Content}, nil
+			out := durable.ToolExecutionResult{
+				Output:     result.Content,
+				IsError:    new(result.IsError || result.Thrown),
+				Details:    result.Details,
+				HasDetails: slices.Contains(result.MemberNames(), "details"),
+				Usage:      result.Usage,
+			}
+			if result.Terminate {
+				out.Control = &durable.ToolControl{Terminate: true}
+			}
+			return out, nil
 		},
 	}
 }

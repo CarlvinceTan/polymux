@@ -32,6 +32,8 @@ struct PanelView<Content: View, Actions: View>: View {
     let onClose: () -> Void
     let onBack: (() -> Void)?
     let header: AnyView?
+    let width: CGFloat?
+    let height: CGFloat?
     let content: Content
     let actions: Actions
     @Environment(\.panelContext) private var panel
@@ -41,13 +43,15 @@ struct PanelView<Content: View, Actions: View>: View {
     @State private var contentHeight: CGFloat?
 
     init(_ title: String, enabled: Bool = true, onClose: @escaping () -> Void, onBack: (() -> Void)? = nil,
-         header: AnyView? = nil,
+         header: AnyView? = nil, width: CGFloat? = nil, height: CGFloat? = nil,
          @ViewBuilder content: () -> Content, @ViewBuilder actions: () -> Actions) {
         self.title = title
         self.enabled = enabled
         self.onClose = onClose
         self.onBack = onBack
         self.header = header
+        self.width = width
+        self.height = height
         self.content = content()
         self.actions = actions()
     }
@@ -80,7 +84,8 @@ struct PanelView<Content: View, Actions: View>: View {
             } action: { _, height in
                 if height > 0 && height.isFinite { contentHeight = height }
             }
-            .preference(key: PanelHeight.self, value: contentHeight)
+            .preference(key: PanelHeight.self, value: height ?? contentHeight)
+            .preference(key: PanelWidth.self, value: width)
             .background(background)
             .overlay(alignment: .top) {
                 LinearGradient(colors: [fade, fade.opacity(0.85), .clear],

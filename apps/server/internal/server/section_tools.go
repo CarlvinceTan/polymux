@@ -35,9 +35,9 @@ func (*sectionTool) Label() string                          { return "Organize s
 func (*sectionTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (t *sectionTool) ToolClass() string {
 	if t.name == "list_sections" {
-		return string(ToolRead)
+		return "read"
 	}
-	return string(ToolReversible)
+	return "reversible"
 }
 func (*sectionTool) Description() string {
 	return "Manage this user's saved sidebar sections, chat pins, and placement. List sections first to reuse stable IDs. Pinning removes a chat from its section; unpin a chat before moving it. Deleting a section returns its chats to the main list and keeps every conversation. Repeating an existing state is a no-op. Ordering uses a before/after ID in the same list, never a raw order number. Changes sync across devices and are limited to thirty actual mutations per minute per agent."

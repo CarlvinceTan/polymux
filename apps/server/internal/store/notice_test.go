@@ -213,8 +213,7 @@ func TestNoticeOncePerTurn(t *testing.T) {
 	}
 }
 
-func TestNoticeOnFailure(t *testing.T)      { noticeOutcome(t, "failed", "Failed: Tool crashed") }
-func TestNoticeOnApprovalWait(t *testing.T) { noticeOutcome(t, "waiting_input", "Needs your approval") }
+func TestNoticeOnFailure(t *testing.T) { noticeOutcome(t, "failed", "Failed: Tool crashed") }
 
 func noticeOutcome(t *testing.T, status, body string) {
 	t.Helper()
@@ -224,23 +223,6 @@ func noticeOutcome(t *testing.T, status, body string) {
 		t.Fatal(err)
 	}
 	run.Status = status
-	if status == "waiting_input" {
-		if _, _, err := s.CreateApproval(t.Context(), Approval{ID: "gate", RunID: run.ID, AgentID: "a", ThreadID: "a", Tool: "exec", Key: "gate"}); err != nil {
-			t.Fatal(err)
-		}
-		for range 2 {
-			if err := s.RunEvent(t.Context(), "run.done", &run, nil); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if _, err := s.DecideApproval(t.Context(), "gate", ApprovalApproved); err != nil {
-			t.Fatal(err)
-		}
-		if _, claimed, err := s.ClaimApproval(t.Context(), "gate"); err != nil || !claimed {
-			t.Fatalf("claim approval: %v %v", claimed, err)
-		}
-		run.Status = "completed"
-	}
 	run.Error = &contract.Error{Message: "Tool crashed\nDetails"}
 	for range 2 {
 		if err := s.RunEvent(t.Context(), "run.done", &run, nil); err != nil {
@@ -250,9 +232,6 @@ func noticeOutcome(t *testing.T, status, body string) {
 	zero := int64(0)
 	page, err := s.Notices(t.Context(), &zero)
 	want := 1
-	if status == "waiting_input" {
-		want = 2
-	}
 	if err != nil || len(page.Notices) != want {
 		t.Fatalf("notices: %+v %v", page, err)
 	}

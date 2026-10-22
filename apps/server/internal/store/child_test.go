@@ -87,3 +87,61 @@ func TestSpawn(t *testing.T) {
 		t.Fatalf("child input: %+v %v", work, err)
 	}
 }
+
+func TestSpawnTriggers(t *testing.T) {
+	for _, trigger := range []string{"message", "peer", "routine", "review", "follow_up", "task", "created", "child"} {
+		t.Run(trigger, func(t *testing.T) {
+			s := runStore(t)
+			parent := NewRun("parent", "a", "a", trigger)
+			parent.Status = "running"
+			if err := s.RunEvent(t.Context(), "run.start", &parent, nil); err != nil {
+				t.Fatal(err)
+			}
+			_, err := s.Spawn(t.Context(), parent.ID, "spawn", "b", "Complete a subtask")
+			allowed := trigger != "created" && trigger != "child"
+			if (err == nil) != allowed {
+				t.Fatalf("spawn allowed=%t: %v", allowed, err)
+			}
+		})
+	}
+}
+
+func TestStopChild(t *testing.T) {
+	s := runStore(t)
+	text := "Parent"
+	if _, _, err := s.Send(t.Context(), "a", contract.SendRequest{ID: "parent", Text: text}, []contract.Part{{Kind: "text", Text: &text}}, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Job(t.Context(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	parent := NewRun("parent", "a", "a", "message")
+	parent.Status = "running"
+	if err := s.RunEvent(t.Context(), "run.start", &parent, nil); err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	children, err := s.Children(t.Context(), "a")
+	if err != nil || len(children) != 1 || children[0].ID != child.ID {
+		t.Fatal("spawned child not listed", children, err)
+	}
+	if others, _ := s.Children(t.Context(), "b"); len(others) != 0 {
+		t.Fatal("another bot sees the child", others)
+	}
+	if _, err := s.StopChild(t.Context(), "b", child.ID); !errors.Is(err, ErrChild) {
+		t.Fatal("another bot stopped the child", err)
+	}
+	if _, err := s.StopChild(t.Context(), "a", child.ID); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Run(t.Context(), child.ID)
+	if err != nil || run.Status != "cancelled" {
+		t.Fatal("queued child not withdrawn", run.Status, err)
+	}
+	if _, err := s.Job(t.Context(), "b"); err == nil {
+		t.Fatal("withdrawn child still runnable")
+	}
+}

@@ -50,7 +50,7 @@ struct DraftPreview: View {
         #if os(macOS)
         .onHover { hovered = $0 }
         #endif
-        .contextMenu {
+        .appMenu {
             Button("Remove attachment", systemImage: "trash", action: remove)
         }
         .quickLookPreview($preview)

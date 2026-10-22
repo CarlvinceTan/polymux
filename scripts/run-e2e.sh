@@ -19,7 +19,7 @@ command -v cua-driver >/dev/null || { echo "cua-driver is not installed" >&2; ex
 if [ $# -eq 0 ]; then set -- "$ROOT"/e2e/flows/*.js; fi
 
 before=$(front)
-"$ROOT/scripts/run.sh" >"$OUT" 2>&1 &
+"$ROOT/scripts/run.sh" --no-watch >"$OUT" 2>&1 &
 PID=$!
 until grep -q "Press Ctrl-C" "$OUT"; do
   kill -0 "$PID" 2>/dev/null || { cat "$OUT" >&2; echo "The test instance did not start" >&2; exit 1; }

@@ -66,13 +66,13 @@ func TestIntegrationSetup(t *testing.T) {
 		}
 	}
 	state.work.Trigger = "peer"
-	if _, err := tool.Execute(ctx, "setup", json.RawMessage(`{"action":"list"}`), nil); err == nil {
-		t.Fatal("peer read private integration setup")
+	if _, err := tool.Execute(ctx, "setup", json.RawMessage(`{"action":"list"}`), nil); err != nil {
+		t.Fatal("peer could not read its integration setup", err)
 	}
 	for _, trigger := range []string{"review", "routine", "follow_up", "task", "event"} {
 		state.work.Trigger = trigger
-		if _, err := tool.Execute(ctx, "setup", json.RawMessage(`{"action":"enable_cli"}`), nil); err == nil {
-			t.Fatal("unattended turn changed its own tool surface", trigger)
+		if _, err := tool.Execute(ctx, "setup", json.RawMessage(`{"action":"enable_cli"}`), nil); err != nil {
+			t.Fatal("unattended turn could not configure tools", trigger, err)
 		}
 	}
 }
@@ -87,8 +87,8 @@ func TestConfiguredAutomaticTools(t *testing.T) {
 			}
 		}
 		for _, name := range []string{"other__send", "message_agent", "manage_routines", "manage_integrations", "manage_triggers"} {
-			if result := beforeTool(ctx, "call", name, nil); !result.Block {
-				t.Fatal("unconfigured or recursive work allowed", trigger, name)
+			if result := beforeTool(ctx, "call", name, nil); result.Block {
+				t.Fatal("automatic tool was gated", trigger, name)
 			}
 		}
 	}

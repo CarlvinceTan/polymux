@@ -3,7 +3,6 @@ package evals
 import (
 	"encoding/json"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +87,7 @@ func TestU15(t *testing.T) {
 		t.Fatal("duplicate delivery emitted another activity")
 	}
 	peerReply(t, db)
-	pass(t, "U15", "routine and peer activities persist without bubbles or duplicate delivery rows")
+	pass(t, "U15", "routine and peer activities persist alongside messages without duplicate delivery rows")
 }
 
 func peerReply(t *testing.T, db *store.Store) {
@@ -128,8 +127,8 @@ func peerReply(t *testing.T, db *store.Store) {
 				activities = append(activities, event)
 			}
 		}
-		if len(activities) != 2 || !slices.Contains(activities[0].Payload.MessageIDs, result.ID) || !slices.Contains(activities[1].Payload.MessageIDs, "receipt:"+saved.ID) {
-			t.Fatalf("request and reply must emit exactly once and hide peer bubbles in %s: %+v", thread, activities)
+		if len(activities) != 2 || len(activities[0].Payload.MessageIDs) != 0 || len(activities[1].Payload.MessageIDs) != 0 {
+			t.Fatalf("request and reply must emit exactly once and preserve peer bubbles in %s: %+v", thread, activities)
 		}
 	}
 	history, err := db.PeerHistory(t.Context(), "chief", "aria", 0)
@@ -194,7 +193,7 @@ func TestU16(t *testing.T) {
 	if err := db.RunEvent(t.Context(), "run.start", &parent, nil); err != nil {
 		t.Fatal(err)
 	}
-	child := store.NewRun("child", "aria", "aria", "peer")
+	child := store.NewRun("child", "aria", "aria", "child")
 	child.ParentRunID = &parent.ID
 	for range 2 {
 		if err := db.RunEvent(t.Context(), "run.start", &child, nil); err != nil {

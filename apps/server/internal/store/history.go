@@ -13,19 +13,29 @@ func (s *Store) Member(ctx context.Context, agent, thread string) (bool, error) 
 	return count > 0, err
 }
 
-func (s *Store) History(ctx context.Context, agent, thread, query string, before int64, limit int) ([]contract.Message, error) {
+type HistoryMessage struct {
+	contract.Message
+	Snippet string
+}
+
+func (s *Store) History(ctx context.Context, agent, thread, query string, before int64, limit int) ([]HistoryMessage, error) {
 	if before <= 0 {
 		before = 1 << 62
 	}
 	if limit <= 0 || limit > 24 {
 		limit = 24
 	}
-	statement := `SELECT m.data FROM messages m WHERE m.thread_id=? AND m.seq<?
+	statement := `SELECT m.data,'' FROM messages m`
+	if query != "" {
+		statement = `SELECT m.data,snippet(messages_fts,2,char(1),char(2),'…',64)
+FROM messages m JOIN messages_fts ON m.id=messages_fts.message_id`
+	}
+	statement += ` WHERE m.thread_id=? AND m.seq<?
 AND m.status='done' AND m.role IN('user','assistant')
 AND EXISTS(SELECT 1 FROM thread_members tm WHERE tm.thread_id=m.thread_id AND tm.agent_id=?)`
 	args := []any{thread, before, agent}
 	if query != "" {
-		statement += ` AND m.id IN(SELECT message_id FROM messages_fts WHERE messages_fts MATCH ? AND thread_id=?)`
+		statement += ` AND messages_fts MATCH ? AND messages_fts.thread_id=?`
 		args = append(args, query, thread)
 	}
 	statement += ` ORDER BY m.seq DESC LIMIT ?`
@@ -35,17 +45,17 @@ AND EXISTS(SELECT 1 FROM thread_members tm WHERE tm.thread_id=m.thread_id AND tm
 		return nil, err
 	}
 	defer rows.Close()
-	items := []contract.Message{}
+	items := []HistoryMessage{}
 	for rows.Next() {
 		var data string
-		var m contract.Message
-		if err := rows.Scan(&data); err != nil {
+		var item HistoryMessage
+		if err := rows.Scan(&data, &item.Snippet); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(data), &m); err != nil {
+		if err := json.Unmarshal([]byte(data), &item.Message); err != nil {
 			return nil, err
 		}
-		items = append(items, m)
+		items = append(items, item)
 	}
 	return items, rows.Err()
 }
