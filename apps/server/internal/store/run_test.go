@@ -89,35 +89,36 @@ func TestCreationQueue(t *testing.T) {
 	s := runStore(t)
 	a := contract.Agent{ID: "new", Name: "New"}
 	data := json.RawMessage(`{"agent":{"id":"new"},"prompt":"Help"}`)
-	task := "Do this only after introducing yourself"
-	if err := s.CreateDefinition(t.Context(), a, data, &task, nil); err != nil {
+	task := "Start on this"
+	if err := s.CreateDefinition(t.Context(), a, data, &task, nil, contract.Agent{ID: "chief", Name: "Chief"}); err != nil {
 		t.Fatal(err)
 	}
 	job, err := s.Job(t.Context(), a.ID)
-	if err != nil || job != "created:new" {
-		t.Fatalf("intro order %s %v", job, err)
-	}
-	work, err := s.Work(t.Context(), job)
-	if err != nil || work.Trigger != "created" || work.Message.ThreadID != a.ID {
-		t.Fatalf("work %+v %v", work, err)
-	}
-	if err := s.Finish(t.Context(), job); err != nil {
-		t.Fatal(err)
-	}
-	job, err = s.Job(t.Context(), a.ID)
 	if err != nil || job != "initial:new" {
-		t.Fatalf("initial task order %s %v", job, err)
+		t.Fatalf("a task should replace the introduction, got %s %v", job, err)
 	}
 	history, err := s.Messages(t.Context(), a.ID, 0, 20)
-	if err != nil || len(history) != 1 || Text(history[0]) != task {
-		t.Fatalf("synthetic intro leaked %+v %v", history, err)
+	if err != nil || len(history) != 1 || Text(history[0]) != task || history[0].AgentID == nil || *history[0].AgentID != "chief" {
+		t.Fatalf("the task should be the creator's message: %+v %v", history, err)
+	}
+	b := contract.Agent{ID: "other", Name: "Other"}
+	if err := s.CreateDefinition(t.Context(), b, json.RawMessage(`{"agent":{"id":"other"}}`), nil, nil, contract.Agent{ID: "chief", Name: "Chief"}); err != nil {
+		t.Fatal(err)
+	}
+	job, err = s.Job(t.Context(), b.ID)
+	if err != nil || job != "created:other" {
+		t.Fatalf("intro %s %v", job, err)
+	}
+	work, err := s.Work(t.Context(), job)
+	if err != nil || work.Trigger != "created" || !strings.Contains(Text(work.Message), `"Chief"`) {
+		t.Fatalf("the introduction should name its creator: %+v %v", work, err)
 	}
 }
 
 func TestCreationMessage(t *testing.T) {
 	s := runStore(t)
 	a := contract.Agent{ID: "new", Name: "New Bot"}
-	if err := s.CreateDefinition(t.Context(), a, json.RawMessage(`{"agent":{"id":"new"}}`), nil, nil); err != nil {
+	if err := s.CreateDefinition(t.Context(), a, json.RawMessage(`{"agent":{"id":"new"}}`), nil, nil, contract.Agent{}); err != nil {
 		t.Fatal(err)
 	}
 	id, err := s.Job(t.Context(), a.ID)
@@ -200,31 +201,6 @@ func TestPeerReceipts(t *testing.T) {
 	messages, err := s.Messages(t.Context(), "a", 0, 100)
 	if err != nil || len(messages) != 2 || messages[0].ID != "sent:delivery" || Text(messages[1]) != answer || *messages[1].AgentID != "b" {
 		t.Fatalf("receipt %+v %v", messages, err)
-	}
-}
-
-func TestLeadPersists(t *testing.T) {
-	s := runStore(t)
-	group, err := s.CreateThread(t.Context(), "group", contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}, LeadAgentID: ptr("b")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.UpdateThread(t.Context(), group.ID, contract.UpdateThreadRequest{Title: new("Changed"), AgentIDs: []string{"a", "b"}}); err != nil {
-		t.Fatal(err)
-	}
-	group, err = s.Thread(t.Context(), group.ID)
-	if err != nil || group.LeadAgentID == nil || *group.LeadAgentID != "b" {
-		t.Fatalf("lead changed %+v %v", group, err)
-	}
-	if err := s.UpdateThread(t.Context(), group.ID, contract.UpdateThreadRequest{Title: new("Bad"), LeadAgentID: ptr("missing")}); !errors.Is(err, ErrMembers) {
-		t.Fatal("invalid lead accepted", err)
-	}
-	if err := s.UpdateThread(t.Context(), group.ID, contract.UpdateThreadRequest{Title: new("Solo"), AgentIDs: []string{"a"}}); err != nil {
-		t.Fatal(err)
-	}
-	group, _ = s.Thread(t.Context(), group.ID)
-	if *group.LeadAgentID != "a" {
-		t.Fatal("removed lead retained")
 	}
 }
 

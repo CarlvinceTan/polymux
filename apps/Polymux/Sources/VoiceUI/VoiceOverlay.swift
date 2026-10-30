@@ -5,6 +5,7 @@ struct VoiceOverlay: View {
     @State private var store: any VoiceSession
     @State private var closing = false
     @State private var retrying = false
+    @State private var retries = 0
     @State private var retryTask: Task<Void, Never>?
     @State private var lifetime: VoiceLifetime?
     @State private var owner = UUID()
@@ -25,17 +26,14 @@ struct VoiceOverlay: View {
                     .accessibilityValue(caption ?? "")
                 if let caption {
                     Text(caption)
-                        .font(.body).foregroundStyle(.secondary)
+                        .font(.body).foregroundStyle(.muted)
                         .multilineTextAlignment(.center).lineLimit(4)
                 }
                 if let issue = store.issue {
                     Text(issue)
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.muted)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Try again", action: retry)
-                        .buttonStyle(.glass)
-                        .disabled(retrying || closing)
                 }
             }
             .frame(maxWidth: 400).padding(.horizontal, 24)
@@ -63,6 +61,10 @@ struct VoiceOverlay: View {
             lifetime?.stop(owner)
         }
         .onKeyPress(.escape) { close(); return .handled }
+        // A failed session retries on its own a few times, so there's no retry button.
+        .onChange(of: store.phase) { _, phase in
+            if phase == .failed { retry() } else if phase == .listening { retries = 0 }
+        }
     }
 
     private func control(_ icon: String, _ label: String, fill: Color? = nil, ink: Color = .primary,
@@ -80,7 +82,7 @@ struct VoiceOverlay: View {
             .glassEffect(fill == nil ? .regular.interactive() : .identity, in: Circle())
             .disabled(closing)
             .accessibilityLabel(label)
-            Text(label).font(.footnote).foregroundStyle(.secondary)
+            Text(label).font(.footnote).foregroundStyle(.muted)
         }
     }
 
@@ -107,10 +109,12 @@ struct VoiceOverlay: View {
     private func mute() { store.toggleMute() }
 
     private func retry() {
-        guard !retrying, !closing else { return }
+        guard !retrying, !closing, retries < 3 else { return }
         retrying = true
+        retries += 1
         retryTask = Task {
-            await store.retry()
+            try? await Task.sleep(for: .seconds(2 * retries))
+            if !Task.isCancelled, !closing { await store.retry() }
             retrying = false
         }
     }

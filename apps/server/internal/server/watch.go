@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -22,12 +25,7 @@ const watchLimit = 1 << 20
 
 func (s *Server) runWatches(ctx context.Context) {
 	defer s.workers.Done()
-	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
-		if len(via) >= 5 || r.URL.User != nil || r.URL.Scheme != "http" && r.URL.Scheme != "https" {
-			return errors.New("unsupported watch redirect")
-		}
-		return nil
-	}}
+	client := watchClient()
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -40,7 +38,72 @@ func (s *Server) runWatches(ctx context.Context) {
 	}
 }
 
+type publicOnly struct{}
+
+// watchClient follows redirects only where the watched URL itself could reach: a public
+// URL never reaches a loopback, private or link-local address, even through DNS.
+func watchClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if ctx.Value(publicOnly{}) == nil {
+			return dialer.DialContext(ctx, network, addr)
+		}
+		guarded := *dialer
+		guarded.Control = func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if ip := net.ParseIP(host); err != nil || ip == nil || !publicIP(ip) {
+				return errors.New("watch redirect reached a local address")
+			}
+			return nil
+		}
+		return guarded.DialContext(ctx, network, addr)
+	}
+	return &http.Client{Timeout: 10 * time.Second, Transport: transport, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 5 || r.URL.User != nil || r.URL.Scheme != "http" && r.URL.Scheme != "https" {
+			return errors.New("unsupported watch redirect")
+		}
+		// A watch the user pointed at a local service may only redirect within that host.
+		if r.Context().Value(publicOnly{}) == nil && r.URL.Hostname() != via[0].URL.Hostname() {
+			return errors.New("unsupported watch redirect")
+		}
+		return nil
+	}}
+}
+
+// carrierNAT is 100.64.0.0/10, which Tailscale uses for tailnet peers.
+var carrierNAT = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+func publicIP(ip net.IP) bool {
+	return !carrierNAT.Contains(ip) && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified() && !ip.IsMulticast()
+}
+
+// localWatch reports whether a watched URL names a local service, by address or DNS.
+func localWatch(ctx context.Context, raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if ip := net.ParseIP(u.Hostname()); ip != nil {
+		return !publicIP(ip)
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, u.Hostname())
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		if !publicIP(addr.IP) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) checkWatches(ctx context.Context, client *http.Client, now time.Time) {
+	if !s.admission.start() {
+		return
+	}
+	defer s.admission.done()
 	items, err := s.Store.DueWatches(ctx, now)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -74,6 +137,9 @@ func (s *Server) checkWatches(ctx context.Context, client *http.Client, now time
 }
 
 func readWatch(ctx context.Context, client *http.Client, watch *contract.RoutineWatch) (string, error) {
+	if !localWatch(ctx, watch.URL) {
+		ctx = context.WithValue(ctx, publicOnly{}, true)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, watch.URL, nil)
 	if err != nil {
 		return "", errors.New("invalid watch URL")

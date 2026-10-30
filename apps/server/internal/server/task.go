@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -28,7 +29,7 @@ func (t *taskTool) Schema() ai.ToolSchema {
 }
 func (t *taskTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
-	if state == nil || state.work.Trigger == "created" {
+	if state == nil || state.work.Trigger == contract.RunTriggerCreated {
 		return agent.AgentToolResult{}, errors.New("no task scope")
 	}
 	var input struct {

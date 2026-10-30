@@ -21,7 +21,7 @@ func (s *Store) PublishAttachment(ctx context.Context, attachment contract.Attac
 	if _, err := tx.ExecContext(ctx, `INSERT INTO attachments(id,data,path) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING`, attachment.ID, string(data), path); err != nil {
 		return event, fmt.Errorf("save attachment: %w", err)
 	}
-	event, err = appendTx(ctx, tx, event, message)
+	event, err = s.appendTx(ctx, tx, event, message)
 	if err != nil {
 		return event, fmt.Errorf("publish attachment: %w", err)
 	}

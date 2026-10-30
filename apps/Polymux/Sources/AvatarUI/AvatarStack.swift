@@ -2,28 +2,51 @@ import SwiftUI
 import PolymuxKit
 
 struct AvatarStack: View {
+    @Environment(AvatarStore.self) private var avatars
     let members: [Agent]
+    var isGroup = false
     var size: CGFloat = 52
     var height: CGFloat? = nil
     var conversationID = ""
     var runs: [Run] = []
     var activity: ActivityStore?
     var connected = true
+    var unread = false
+    var showsMarker = true
     var speakingID: String?
+    @State private var groupID = UUID()
 
     var body: some View {
         ZStack {
             ForEach(Array(members.prefix(4).enumerated()), id: \.element.id) { index, member in
-                AgentAvatar(agentID: member.id, conversationID: conversationID, runs: runs,
-                           activity: activity, connected: connected, speaking: speakingID == member.id,
-                           overlapGap: index == count - 1 ? 0 : faceSize * 200 / 316 * 2 / 46)
+                let gap = index == count - 1 ? 0 : faceSize * 200 / 316 * 2 / 46
+                Group {
+                    if isGroup {
+                        AvatarView(options: avatars.options(for: member.id), playing: false,
+                                   frozenAt: 0, overlapGap: gap)
+                    } else {
+                        AgentAvatar(agentID: member.id, conversationID: conversationID, runs: runs,
+                                     activity: activity, connected: connected, showsMarker: false, speaking: speakingID == member.id,
+                                    overlapGap: gap)
+                    }
+                }
+                    .environment(\.avatarGroup, AvatarGroup(id: groupID, order: index))
                     .frame(width: faceSize, height: faceSize)
                     .offset(offset(index))
                     .zIndex(Double(count - index))
             }
         }
-        .compositingGroup().frame(width: size, height: height ?? size)
+        .frame(width: size, height: height ?? size)
+        .avatarPlane()
+        .activityBadge(showsMarker ? marker : nil)
         .accessibilityHidden(true)
+    }
+
+    private var marker: ActivityMarker? {
+        if let activity {
+            return activity.marker(conversationID: conversationID, agentIDs: members.map(\.id), unread: unread)
+        }
+        return ActivityStore.marker(runs: runs, conversationID: conversationID, agentIDs: members.map(\.id), unread: unread)
     }
 
     private var count: Int { min(4, members.count) }
@@ -38,7 +61,9 @@ struct AvatarStack: View {
             }
             return height / span * 316 / 200
         }
-        return size - CGFloat(max(0, min(3, count) - 1)) * gap
+        // Groups fill the same footprint as a pair: three span the same width, four a wider grid.
+        guard count > 1 else { return size }
+        return (size - gap) * (count == 4 ? 1.6 / 1.8 : 1)
     }
 
     private func offset(_ index: Int) -> CGSize {

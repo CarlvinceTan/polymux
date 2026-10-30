@@ -20,6 +20,7 @@ public struct Notice: Codable, Hashable, Sendable {
     public var seq: Int64
     public var conversationID: String
     public var messageID: String
+    public var agentID: String?
     public var title: String
     public var createdAt: String
 
@@ -29,6 +30,7 @@ public struct Notice: Codable, Hashable, Sendable {
         seq: Int64 = 0,
         conversationID: String = "",
         messageID: String = "",
+        agentID: String? = nil,
         title: String = "",
         createdAt: String = ""
     ) {
@@ -37,6 +39,7 @@ public struct Notice: Codable, Hashable, Sendable {
         self.seq = seq
         self.conversationID = conversationID
         self.messageID = messageID
+        self.agentID = agentID
         self.title = title
         self.createdAt = createdAt
     }
@@ -61,19 +64,72 @@ public struct PushDevice: Codable, Hashable, Sendable {
     public var environment: String
     public var server: String
     public var enabled: Bool
+    public var muted: [String]
 
     public init(
         id: String = "",
         token: String = "",
         environment: String = "",
         server: String = "",
-        enabled: Bool = false
+        enabled: Bool = false,
+        muted: [String] = []
     ) {
         self.id = id
         self.token = token
         self.environment = environment
         self.server = server
         self.enabled = enabled
+        self.muted = muted
+    }
+}
+
+public struct ClientState: Codable, Hashable, Sendable {
+    public var platform: String
+    public var timezone: String
+    public var capabilities: [String]
+
+    public init(
+        platform: String = "",
+        timezone: String = "",
+        capabilities: [String] = []
+    ) {
+        self.platform = platform
+        self.timezone = timezone
+        self.capabilities = capabilities
+    }
+}
+
+public enum ClientStatePlatform {
+    public static let ios = "ios"
+    public static let macos = "macos"
+}
+
+public struct ClientRequest: Codable, Hashable, Sendable {
+    public var id: String
+    public var capability: String
+    public var input: String
+
+    public init(
+        id: String = "",
+        capability: String = "",
+        input: String = ""
+    ) {
+        self.id = id
+        self.capability = capability
+        self.input = input
+    }
+}
+
+public struct ClientResult: Codable, Hashable, Sendable {
+    public var output: String?
+    public var error: String?
+
+    public init(
+        output: String? = nil,
+        error: String? = nil
+    ) {
+        self.output = output
+        self.error = error
     }
 }
 
@@ -114,11 +170,12 @@ public struct Settings: Codable, Hashable, Sendable {
     public var liveProvider: String
     public var liveModel: String
     public var liveVoice: String
-    public var textProvider: String
-    public var textModel: String
     public var voicePrompt: String
     public var voiceLanguage: String
     public var speechKeys: [String]
+    public var defaultProvider: String
+    public var defaultModel: String
+    public var defaultReasoning: String
 
     public init(
         revision: Int64 = 0,
@@ -128,11 +185,12 @@ public struct Settings: Codable, Hashable, Sendable {
         liveProvider: String = "",
         liveModel: String = "",
         liveVoice: String = "",
-        textProvider: String = "",
-        textModel: String = "",
         voicePrompt: String = "",
         voiceLanguage: String = "",
-        speechKeys: [String] = []
+        speechKeys: [String] = [],
+        defaultProvider: String = "",
+        defaultModel: String = "",
+        defaultReasoning: String = ""
     ) {
         self.revision = revision
         self.appearance = appearance
@@ -141,12 +199,23 @@ public struct Settings: Codable, Hashable, Sendable {
         self.liveProvider = liveProvider
         self.liveModel = liveModel
         self.liveVoice = liveVoice
-        self.textProvider = textProvider
-        self.textModel = textModel
         self.voicePrompt = voicePrompt
         self.voiceLanguage = voiceLanguage
         self.speechKeys = speechKeys
+        self.defaultProvider = defaultProvider
+        self.defaultModel = defaultModel
+        self.defaultReasoning = defaultReasoning
     }
+}
+
+public enum SettingsDefaultReasoning {
+    public static let off = "off"
+    public static let minimal = "minimal"
+    public static let low = "low"
+    public static let medium = "medium"
+    public static let high = "high"
+    public static let xhigh = "xhigh"
+    public static let max = "max"
 }
 
 public struct SettingsPatch: Codable, Hashable, Sendable {
@@ -156,10 +225,11 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
     public var liveProvider: String?
     public var liveModel: String?
     public var liveVoice: String?
-    public var textProvider: String?
-    public var textModel: String?
     public var voicePrompt: String?
     public var voiceLanguage: String?
+    public var defaultProvider: String?
+    public var defaultModel: String?
+    public var defaultReasoning: String?
 
     public init(
         appearance: String? = nil,
@@ -168,10 +238,11 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         liveProvider: String? = nil,
         liveModel: String? = nil,
         liveVoice: String? = nil,
-        textProvider: String? = nil,
-        textModel: String? = nil,
         voicePrompt: String? = nil,
-        voiceLanguage: String? = nil
+        voiceLanguage: String? = nil,
+        defaultProvider: String? = nil,
+        defaultModel: String? = nil,
+        defaultReasoning: String? = nil
     ) {
         self.appearance = appearance
         self.sidebarWidth = sidebarWidth
@@ -179,21 +250,22 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         self.liveProvider = liveProvider
         self.liveModel = liveModel
         self.liveVoice = liveVoice
-        self.textProvider = textProvider
-        self.textModel = textModel
         self.voicePrompt = voicePrompt
         self.voiceLanguage = voiceLanguage
+        self.defaultProvider = defaultProvider
+        self.defaultModel = defaultModel
+        self.defaultReasoning = defaultReasoning
     }
 }
 
-public struct SpeechKey: Codable, Hashable, Sendable {
-    public var key: String
-
-    public init(
-        key: String = ""
-    ) {
-        self.key = key
-    }
+public enum SettingsPatchDefaultReasoning {
+    public static let off = "off"
+    public static let minimal = "minimal"
+    public static let low = "low"
+    public static let medium = "medium"
+    public static let high = "high"
+    public static let xhigh = "xhigh"
+    public static let max = "max"
 }
 
 public struct Agent: Codable, Hashable, Sendable {
@@ -203,6 +275,9 @@ public struct Agent: Codable, Hashable, Sendable {
     public var model: String
     public var active: Bool
     public var avatar: AvatarDesign?
+    public var provider: String?
+    public var reasoning: String?
+    public var createdBy: String?
 
     public init(
         id: String = "",
@@ -210,7 +285,10 @@ public struct Agent: Codable, Hashable, Sendable {
         role: String = "",
         model: String = "",
         active: Bool = false,
-        avatar: AvatarDesign? = nil
+        avatar: AvatarDesign? = nil,
+        provider: String? = nil,
+        reasoning: String? = nil,
+        createdBy: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -218,11 +296,23 @@ public struct Agent: Codable, Hashable, Sendable {
         self.model = model
         self.active = active
         self.avatar = avatar
+        self.provider = provider
+        self.reasoning = reasoning
+        self.createdBy = createdBy
     }
 }
 
+public enum AgentReasoning {
+    public static let off = "off"
+    public static let minimal = "minimal"
+    public static let low = "low"
+    public static let medium = "medium"
+    public static let high = "high"
+    public static let xhigh = "xhigh"
+    public static let max = "max"
+}
+
 public struct Thread: Codable, Hashable, Sendable {
-    public var leadAgentID: String?
     public var runs: [Run]
     public var id: String
     public var agentID: String
@@ -238,7 +328,6 @@ public struct Thread: Codable, Hashable, Sendable {
     public var sectionOrder: Double?
 
     public init(
-        leadAgentID: String? = nil,
         runs: [Run] = [],
         id: String = "",
         agentID: String = "",
@@ -253,7 +342,6 @@ public struct Thread: Codable, Hashable, Sendable {
         sectionID: String? = nil,
         sectionOrder: Double? = nil
     ) {
-        self.leadAgentID = leadAgentID
         self.runs = runs
         self.id = id
         self.agentID = agentID
@@ -310,6 +398,20 @@ public struct Attachment: Codable, Hashable, Sendable {
     }
 }
 
+public enum AttachmentKind {
+    public static let image = "image"
+    public static let video = "video"
+    public static let audio = "audio"
+    public static let html = "html"
+    public static let file = "file"
+}
+
+public enum AttachmentIndexingState {
+    public static let pending = "pending"
+    public static let ready = "ready"
+    public static let error = "error"
+}
+
 public struct Part: Codable, Hashable, Sendable {
     public var kind: String
     public var text: String?
@@ -322,6 +424,7 @@ public struct Part: Codable, Hashable, Sendable {
     public var answerText: String?
     public var allowText: Bool?
     public var credential: CredentialRequest?
+    public var vault: VaultCard?
 
     public init(
         kind: String = "",
@@ -334,7 +437,8 @@ public struct Part: Codable, Hashable, Sendable {
         answerID: String? = nil,
         answerText: String? = nil,
         allowText: Bool? = nil,
-        credential: CredentialRequest? = nil
+        credential: CredentialRequest? = nil,
+        vault: VaultCard? = nil
     ) {
         self.kind = kind
         self.text = text
@@ -347,7 +451,17 @@ public struct Part: Codable, Hashable, Sendable {
         self.answerText = answerText
         self.allowText = allowText
         self.credential = credential
+        self.vault = vault
     }
+}
+
+public enum PartKind {
+    public static let text = "text"
+    public static let attachment = "attachment"
+    public static let tool = "tool"
+    public static let choice = "choice"
+    public static let credential = "credential"
+    public static let vault = "vault"
 }
 
 public struct ReplyContext: Codable, Hashable, Sendable {
@@ -375,8 +489,41 @@ public struct ReplyContext: Codable, Hashable, Sendable {
     }
 }
 
+public enum ReplyContextRole {
+    public static let user = "user"
+    public static let assistant = "assistant"
+    public static let system = "system"
+}
+
+public struct Reaction: Codable, Hashable, Sendable {
+    public var emoji: String
+    public var agentID: String?
+
+    public init(
+        emoji: String = "",
+        agentID: String? = nil
+    ) {
+        self.emoji = emoji
+        self.agentID = agentID
+    }
+}
+
+public struct ReactionRequest: Codable, Hashable, Sendable {
+    public var emoji: String
+    public var remove: Bool
+
+    public init(
+        emoji: String = "",
+        remove: Bool = false
+    ) {
+        self.emoji = emoji
+        self.remove = remove
+    }
+}
+
 public struct Message: Codable, Hashable, Sendable {
     public var runID: String?
+    public var error: WireError?
     public var id: String
     public var threadID: String
     public var role: String
@@ -388,9 +535,11 @@ public struct Message: Codable, Hashable, Sendable {
     public var reply: ReplyContext?
     public var agentID: String?
     public var mentions: [String]?
+    public var reactions: [Reaction]?
 
     public init(
         runID: String? = nil,
+        error: WireError? = nil,
         id: String = "",
         threadID: String = "",
         role: String = "",
@@ -401,9 +550,11 @@ public struct Message: Codable, Hashable, Sendable {
         replyToID: String? = nil,
         reply: ReplyContext? = nil,
         agentID: String? = nil,
-        mentions: [String]? = nil
+        mentions: [String]? = nil,
+        reactions: [Reaction]? = nil
     ) {
         self.runID = runID
+        self.error = error
         self.id = id
         self.threadID = threadID
         self.role = role
@@ -415,7 +566,22 @@ public struct Message: Codable, Hashable, Sendable {
         self.reply = reply
         self.agentID = agentID
         self.mentions = mentions
+        self.reactions = reactions
     }
+}
+
+public enum MessageRole {
+    public static let user = "user"
+    public static let assistant = "assistant"
+    public static let system = "system"
+}
+
+public enum MessageStatus {
+    public static let pending = "pending"
+    public static let streaming = "streaming"
+    public static let done = "done"
+    public static let error = "error"
+    public static let silent = "silent"
 }
 
 public struct WireError: Codable, Hashable, Sendable {
@@ -498,6 +664,30 @@ public struct Event: Codable, Hashable, Sendable {
     }
 }
 
+public enum EventType {
+    public static let messageStart = "message.start"
+    public static let messageDelta = "message.delta"
+    public static let messageToolCall = "message.tool_call"
+    public static let messageAttachment = "message.attachment"
+    public static let messageError = "message.error"
+    public static let messageDone = "message.done"
+    public static let messageReactions = "message.reactions"
+    public static let agentPresence = "agent.presence"
+    public static let runStart = "run.start"
+    public static let runUpdate = "run.update"
+    public static let runDone = "run.done"
+    public static let toolStart = "tool.start"
+    public static let toolUpdate = "tool.update"
+    public static let toolDone = "tool.done"
+    public static let peerDelivery = "peer.delivery"
+    public static let groupHandoff = "group.handoff"
+    public static let activity = "activity"
+    public static let messageRead = "message.read"
+    public static let messageEnd = "message.end"
+    public static let contextCompacted = "context.compacted"
+    public static let runRetrying = "run.retrying"
+}
+
 public struct Usage: Codable, Hashable, Sendable {
     public var inputTokens: Int64
     public var outputTokens: Int64
@@ -565,6 +755,12 @@ public struct SearchHit: Codable, Hashable, Sendable {
     }
 }
 
+public enum SearchHitIndexingState {
+    public static let pending = "pending"
+    public static let ready = "ready"
+    public static let error = "error"
+}
+
 public struct Routine: Codable, Hashable, Sendable {
     public var at: String
     public var nextAt: String?
@@ -606,6 +802,21 @@ public struct Routine: Codable, Hashable, Sendable {
         self.crons = crons
         self.watch = watch
     }
+}
+
+public enum RoutineStatus {
+    public static let pending = "pending"
+    public static let active = "active"
+    public static let cancelled = "cancelled"
+    public static let finished = "finished"
+    public static let paused = "paused"
+}
+
+public enum RoutineTrigger {
+    public static let once = "once"
+    public static let interval = "interval"
+    public static let cron = "cron"
+    public static let watch = "watch"
 }
 
 public struct RoutineRun: Codable, Hashable, Sendable {
@@ -698,6 +909,7 @@ public struct Run: Codable, Hashable, Sendable {
     public var status: String
     public var startedAt: String?
     public var summary: String
+    public var statusText: String?
 
     public init(
         jobID: String = "",
@@ -722,7 +934,8 @@ public struct Run: Codable, Hashable, Sendable {
         agentID: String = "",
         status: String = "",
         startedAt: String? = nil,
-        summary: String = ""
+        summary: String = "",
+        statusText: String? = nil
     ) {
         self.jobID = jobID
         self.id = id
@@ -747,7 +960,41 @@ public struct Run: Codable, Hashable, Sendable {
         self.status = status
         self.startedAt = startedAt
         self.summary = summary
+        self.statusText = statusText
     }
+}
+
+public enum RunTrigger {
+    public static let message = "message"
+    public static let created = "created"
+    public static let peer = "peer"
+    public static let handoff = "handoff"
+    public static let routine = "routine"
+    public static let review = "review"
+    public static let followUp = "follow_up"
+    public static let task = "task"
+    public static let event = "event"
+    public static let child = "child"
+}
+
+public enum RunActivity {
+    public static let preparing = "preparing"
+    public static let generating = "generating"
+    public static let tool = "tool"
+    public static let rendering = "rendering"
+    public static let handoff = "handoff"
+}
+
+public enum RunStatus {
+    public static let queued = "queued"
+    public static let running = "running"
+    public static let waitingInput = "waiting_input"
+    public static let waitingPeer = "waiting_peer"
+    public static let resuming = "resuming"
+    public static let completed = "completed"
+    public static let failed = "failed"
+    public static let cancelled = "cancelled"
+    public static let interrupted = "interrupted"
 }
 
 public struct ToolActivity: Codable, Hashable, Sendable {
@@ -773,6 +1020,14 @@ public struct ToolActivity: Codable, Hashable, Sendable {
         self.summary = summary
         self.output = output
     }
+}
+
+public enum ToolActivityStatus {
+    public static let running = "running"
+    public static let completed = "completed"
+    public static let failed = "failed"
+    public static let cancelled = "cancelled"
+    public static let interrupted = "interrupted"
 }
 
 public struct PeerDelivery: Codable, Hashable, Sendable {
@@ -812,6 +1067,24 @@ public struct PeerDelivery: Codable, Hashable, Sendable {
     }
 }
 
+public enum PeerDeliveryIntent {
+    public static let request = "request"
+    public static let question = "question"
+    public static let result = "result"
+    public static let status = "status"
+    public static let handoff = "handoff"
+    public static let fyi = "fyi"
+}
+
+public enum PeerDeliveryStatus {
+    public static let queued = "queued"
+    public static let delivered = "delivered"
+    public static let completed = "completed"
+    public static let failed = "failed"
+    public static let cancelled = "cancelled"
+    public static let interrupted = "interrupted"
+}
+
 public struct ChoiceOption: Codable, Hashable, Sendable {
     public var id: String
     public var label: String
@@ -825,32 +1098,13 @@ public struct ChoiceOption: Codable, Hashable, Sendable {
     }
 }
 
-public struct FocusAnswer: Codable, Hashable, Sendable {
-    public var optionID: String
-
-    public init(
-        optionID: String = ""
-    ) {
-        self.optionID = optionID
-    }
-}
-
-public struct FocusStatus: Codable, Hashable, Sendable {
-    public var posted: Bool
-
-    public init(
-        posted: Bool = false
-    ) {
-        self.posted = posted
-    }
-}
-
 public struct CreateAgentRequest: Codable, Hashable, Sendable {
     public var initialTask: String?
     public var name: String
     public var role: String
     public var prompt: String
     public var model: String?
+    public var provider: String?
     public var avatar: AvatarDesign?
     public var sectionID: String?
 
@@ -860,6 +1114,7 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         role: String = "",
         prompt: String = "",
         model: String? = nil,
+        provider: String? = nil,
         avatar: AvatarDesign? = nil,
         sectionID: String? = nil
     ) {
@@ -868,6 +1123,7 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         self.role = role
         self.prompt = prompt
         self.model = model
+        self.provider = provider
         self.avatar = avatar
         self.sectionID = sectionID
     }
@@ -887,19 +1143,38 @@ public struct AgentProfile: Codable, Hashable, Sendable {
 }
 
 public struct UpdateAgentRequest: Codable, Hashable, Sendable {
-    public var name: String
-    public var role: String
-    public var prompt: String
+    public var name: String?
+    public var role: String?
+    public var prompt: String?
+    public var provider: String?
+    public var model: String?
+    public var reasoning: String?
 
     public init(
-        name: String = "",
-        role: String = "",
-        prompt: String = ""
+        name: String? = nil,
+        role: String? = nil,
+        prompt: String? = nil,
+        provider: String? = nil,
+        model: String? = nil,
+        reasoning: String? = nil
     ) {
         self.name = name
         self.role = role
         self.prompt = prompt
+        self.provider = provider
+        self.model = model
+        self.reasoning = reasoning
     }
+}
+
+public enum UpdateAgentRequestReasoning {
+    public static let off = "off"
+    public static let minimal = "minimal"
+    public static let low = "low"
+    public static let medium = "medium"
+    public static let high = "high"
+    public static let xhigh = "xhigh"
+    public static let max = "max"
 }
 
 public struct AnimationBlock: Codable, Hashable, Sendable {
@@ -916,6 +1191,24 @@ public struct AnimationBlock: Codable, Hashable, Sendable {
         self.state = state
         self.duration = duration
     }
+}
+
+public enum AnimationBlockState {
+    public static let idle = "idle"
+    public static let thinking = "thinking"
+    public static let wink = "wink"
+    public static let wide = "wide"
+    public static let alert = "alert"
+    public static let notify = "notify"
+    public static let exclaim = "exclaim"
+    public static let sleep = "sleep"
+    public static let egg = "egg"
+    public static let hexagon = "hexagon"
+    public static let play = "play"
+    public static let orbit = "orbit"
+    public static let burst = "burst"
+    public static let comet = "comet"
+    public static let swirl = "swirl"
 }
 
 public struct AvatarDesign: Codable, Hashable, Sendable {
@@ -946,6 +1239,166 @@ public struct AvatarDesign: Codable, Hashable, Sendable {
     }
 }
 
+public enum AvatarDesignShape {
+    public static let cercle = "cercle"
+    public static let galet = "galet"
+    public static let squircle = "squircle"
+    public static let capsule = "capsule"
+    public static let triangle = "triangle"
+    public static let hexagone = "hexagone"
+    public static let nuage = "nuage"
+    public static let goutte = "goutte"
+    public static let star = "star"
+    public static let clover = "clover"
+    public static let flower = "flower"
+    public static let burst = "burst"
+    public static let pentagon = "pentagon"
+    public static let square = "square"
+    public static let sparkle = "sparkle"
+    public static let heart = "heart"
+    public static let tablet = "tablet"
+    public static let wedge = "wedge"
+    public static let house = "house"
+    public static let pumpkin = "pumpkin"
+    public static let apple = "apple"
+    public static let pear = "pear"
+    public static let strawberry = "strawberry"
+    public static let bun = "bun"
+    public static let toast = "toast"
+    public static let cupcake = "cupcake"
+    public static let cat = "cat"
+    public static let dog = "dog"
+    public static let bear = "bear"
+    public static let rabbit = "rabbit"
+    public static let fox = "fox"
+    public static let hamster = "hamster"
+    public static let capybara = "capybara"
+    public static let otter = "otter"
+    public static let pig = "pig"
+    public static let deer = "deer"
+    public static let sheep = "sheep"
+    public static let alpaca = "alpaca"
+    public static let cow = "cow"
+    public static let squirrel = "squirrel"
+    public static let tiger = "tiger"
+    public static let lion = "lion"
+    public static let hedgehog = "hedgehog"
+    public static let seal = "seal"
+    public static let beaver = "beaver"
+    public static let guineaPig = "guinea_pig"
+    public static let chinchilla = "chinchilla"
+    public static let ferret = "ferret"
+    public static let monkey = "monkey"
+    public static let chick = "chick"
+    public static let duck = "duck"
+    public static let penguin = "penguin"
+    public static let owl = "owl"
+    public static let parrot = "parrot"
+    public static let goose = "goose"
+    public static let whale = "whale"
+    public static let bull = "bull"
+    public static let moon = "moon"
+    public static let wave = "wave"
+    public static let blossom = "blossom"
+    public static let gumdrop = "gumdrop"
+    public static let peanut = "peanut"
+    public static let saucer = "saucer"
+    public static let beacon = "beacon"
+    public static let plus = "plus"
+    public static let magnet = "magnet"
+    public static let acorn = "acorn"
+    public static let pebbles = "pebbles"
+    public static let cushion = "cushion"
+    public static let ring = "ring"
+    public static let gem = "gem"
+    public static let banana = "banana"
+    public static let carrot = "carrot"
+    public static let pizza = "pizza"
+    public static let sushi = "sushi"
+    public static let iceCream = "ice_cream"
+    public static let sun = "sun"
+    public static let leaf = "leaf"
+    public static let tree = "tree"
+    public static let cactus = "cactus"
+    public static let mushroom = "mushroom"
+    public static let mountain = "mountain"
+    public static let volcano = "volcano"
+    public static let rainbow = "rainbow"
+    public static let snowflake = "snowflake"
+    public static let rocket = "rocket"
+    public static let robot = "robot"
+    public static let camera = "camera"
+    public static let clock = "clock"
+    public static let key = "key"
+    public static let bell = "bell"
+    public static let book = "book"
+    public static let teapot = "teapot"
+    public static let lemon = "lemon"
+    public static let orangeFruit = "orange_fruit"
+    public static let watermelon = "watermelon"
+    public static let avocado = "avocado"
+    public static let cherry = "cherry"
+    public static let cookie = "cookie"
+    public static let cheese = "cheese"
+    public static let egg = "egg"
+    public static let candy = "candy"
+    public static let donut = "donut"
+    public static let tulip = "tulip"
+    public static let rose = "rose"
+    public static let sprout = "sprout"
+    public static let fern = "fern"
+    public static let pinecone = "pinecone"
+    public static let shell = "shell"
+    public static let coral = "coral"
+    public static let crystal = "crystal"
+    public static let comet = "comet"
+    public static let planet = "planet"
+    public static let mug = "mug"
+    public static let lantern = "lantern"
+    public static let gift = "gift"
+    public static let pencil = "pencil"
+    public static let paintbrush = "paintbrush"
+    public static let umbrella = "umbrella"
+    public static let backpack = "backpack"
+    public static let headphones = "headphones"
+    public static let guitar = "guitar"
+    public static let telescope = "telescope"
+}
+
+public enum AvatarDesignColor {
+    public static let encre = "encre"
+    public static let brun = "brun"
+    public static let rouge = "rouge"
+    public static let orange = "orange"
+    public static let ambre = "ambre"
+    public static let vert = "vert"
+    public static let turquoise = "turquoise"
+    public static let bleu = "bleu"
+    public static let violet = "violet"
+    public static let rose = "rose"
+    public static let gris = "gris"
+    public static let creme = "creme"
+}
+
+public enum AvatarDesignExpression {
+    public static let neutre = "neutre"
+    public static let attentif = "attentif"
+    public static let surpris = "surpris"
+    public static let excite = "excite"
+    public static let heureux = "heureux"
+    public static let hilare = "hilare"
+    public static let colere = "colere"
+    public static let triste = "triste"
+    public static let effraye = "effraye"
+    public static let mefiant = "mefiant"
+    public static let confus = "confus"
+    public static let curieux = "curieux"
+    public static let fier = "fier"
+    public static let timide = "timide"
+    public static let blase = "blase"
+    public static let somnolent = "somnolent"
+}
+
 public struct DeleteResponse: Codable, Hashable, Sendable {
     public var deleted: Bool
 
@@ -957,18 +1410,15 @@ public struct DeleteResponse: Codable, Hashable, Sendable {
 }
 
 public struct CreateThreadRequest: Codable, Hashable, Sendable {
-    public var leadAgentID: String?
     public var agentIDs: [String]
     public var title: String?
     public var sectionID: String?
 
     public init(
-        leadAgentID: String? = nil,
         agentIDs: [String] = [],
         title: String? = nil,
         sectionID: String? = nil
     ) {
-        self.leadAgentID = leadAgentID
         self.agentIDs = agentIDs
         self.title = title
         self.sectionID = sectionID
@@ -999,20 +1449,17 @@ public struct VoiceResponse: Codable, Hashable, Sendable {
 }
 
 public struct UpdateThreadRequest: Codable, Hashable, Sendable {
-    public var leadAgentID: String?
     public var agentIDs: [String]?
     public var title: String?
     public var pinned: Bool?
     public var pinOrder: Double?
 
     public init(
-        leadAgentID: String? = nil,
         agentIDs: [String]? = nil,
         title: String? = nil,
         pinned: Bool? = nil,
         pinOrder: Double? = nil
     ) {
-        self.leadAgentID = leadAgentID
         self.agentIDs = agentIDs
         self.title = title
         self.pinned = pinned
@@ -1052,15 +1499,18 @@ public struct AgentConfiguration: Codable, Hashable, Sendable {
     public var workspace: String
     public var tools: [String]
     public var skills: [String]
+    public var bundledSkills: [String]?
 
     public init(
         workspace: String = "",
         tools: [String] = [],
-        skills: [String] = []
+        skills: [String] = [],
+        bundledSkills: [String]? = nil
     ) {
         self.workspace = workspace
         self.tools = tools
         self.skills = skills
+        self.bundledSkills = bundledSkills
     }
 }
 
@@ -1207,7 +1657,6 @@ public struct Activity: Codable, Hashable, Sendable {
     public var iconOrAgentID: String
     public var at: String
     public var agentIDs: [String]?
-    public var messageIDs: [String]?
 
     public init(
         kind: String = "",
@@ -1216,8 +1665,7 @@ public struct Activity: Codable, Hashable, Sendable {
         objectLabel: String = "",
         iconOrAgentID: String = "",
         at: String = WireDate.string(),
-        agentIDs: [String]? = nil,
-        messageIDs: [String]? = nil
+        agentIDs: [String]? = nil
     ) {
         self.kind = kind
         self.verb = verb
@@ -1226,7 +1674,6 @@ public struct Activity: Codable, Hashable, Sendable {
         self.iconOrAgentID = iconOrAgentID
         self.at = at
         self.agentIDs = agentIDs
-        self.messageIDs = messageIDs
     }
 }
 
@@ -1246,26 +1693,49 @@ public struct ChoiceAnswer: Codable, Hashable, Sendable {
 public struct CredentialRequest: Codable, Hashable, Sendable {
     public var name: String
     public var label: String
+    public var kind: String
     public var origin: String
+    public var origins: [String]?
     public var header: String
     public var scheme: String
+    public var expiresAt: Int64?
+    public var ephemeral: Bool?
     public var status: String
 
     public init(
         name: String = "",
         label: String = "",
+        kind: String = "",
         origin: String = "",
+        origins: [String]? = nil,
         header: String = "",
         scheme: String = "",
+        expiresAt: Int64? = nil,
+        ephemeral: Bool? = nil,
         status: String = ""
     ) {
         self.name = name
         self.label = label
+        self.kind = kind
         self.origin = origin
+        self.origins = origins
         self.header = header
         self.scheme = scheme
+        self.expiresAt = expiresAt
+        self.ephemeral = ephemeral
         self.status = status
     }
+}
+
+public enum CredentialRequestKind {
+    public static let api = "api"
+    public static let ssh = "ssh"
+}
+
+public enum CredentialRequestStatus {
+    public static let pending = "pending"
+    public static let saved = "saved"
+    public static let skipped = "skipped"
 }
 
 public struct CredentialAnswer: Codable, Hashable, Sendable {
@@ -1281,6 +1751,169 @@ public struct CredentialAnswer: Codable, Hashable, Sendable {
     }
 }
 
+public struct VaultCard: Codable, Hashable, Sendable {
+    public var action: String
+    public var itemID: String
+    public var title: String
+    public var kind: String
+    public var url: String
+    public var path: String?
+    public var keyPath: String?
+    public var status: String
+
+    public init(
+        action: String = "",
+        itemID: String = "",
+        title: String = "",
+        kind: String = "",
+        url: String = "",
+        path: String? = nil,
+        keyPath: String? = nil,
+        status: String = ""
+    ) {
+        self.action = action
+        self.itemID = itemID
+        self.title = title
+        self.kind = kind
+        self.url = url
+        self.path = path
+        self.keyPath = keyPath
+        self.status = status
+    }
+}
+
+public enum VaultCardAction {
+    public static let edit = "edit"
+    public static let `import` = "import"
+}
+
+public enum VaultCardStatus {
+    public static let pending = "pending"
+    public static let done = "done"
+}
+
+public struct VaultImport: Codable, Hashable, Sendable {
+    public var added: Int64
+    public var skipped: Int64
+
+    public init(
+        added: Int64 = 0,
+        skipped: Int64 = 0
+    ) {
+        self.added = added
+        self.skipped = skipped
+    }
+}
+
+public struct VaultStatus: Codable, Hashable, Sendable {
+    public var created: Bool
+    public var available: Bool
+    public var protection: String
+
+    public init(
+        created: Bool = false,
+        available: Bool = false,
+        protection: String = ""
+    ) {
+        self.created = created
+        self.available = available
+        self.protection = protection
+    }
+}
+
+public struct VaultCode: Codable, Hashable, Sendable {
+    public var id: String
+    public var value: String
+    public var used: Bool
+
+    public init(
+        id: String = "",
+        value: String = "",
+        used: Bool = false
+    ) {
+        self.id = id
+        self.value = value
+        self.used = used
+    }
+}
+
+public struct VaultItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var kind: String
+    public var title: String
+    public var url: String
+    public var fields: [String: String]
+    public var codes: [VaultCode]
+    public var revision: Int64
+    public var removed: [String]
+
+    public init(
+        id: String = "",
+        kind: String = "",
+        title: String = "",
+        url: String = "",
+        fields: [String: String] = [:],
+        codes: [VaultCode] = [],
+        revision: Int64 = 0,
+        removed: [String] = []
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.url = url
+        self.fields = fields
+        self.codes = codes
+        self.revision = revision
+        self.removed = removed
+    }
+}
+
+public enum VaultItemKind {
+    public static let login = "login"
+    public static let api = "api"
+    public static let card = "card"
+    public static let totp = "totp"
+    public static let note = "note"
+    public static let recovery = "recovery"
+    public static let wifi = "wifi"
+    public static let passkey = "passkey"
+}
+
+public struct VaultSummary: Codable, Hashable, Sendable {
+    public var id: String
+    public var kind: String
+    public var title: String
+    public var origin: String
+    public var fields: [String]
+    public var revision: Int64
+
+    public init(
+        id: String = "",
+        kind: String = "",
+        title: String = "",
+        origin: String = "",
+        fields: [String] = [],
+        revision: Int64 = 0
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.origin = origin
+        self.fields = fields
+        self.revision = revision
+    }
+}
+
+public struct VaultBrowser: Codable, Hashable, Sendable {
+    public var endpoint: String
+
+    public init(
+        endpoint: String = ""
+    ) {
+        self.endpoint = endpoint
+    }
+}
+
 public struct RoutineWatch: Codable, Hashable, Sendable {
     public var url: String
     public var jsonPointers: [String]?
@@ -1291,5 +1924,212 @@ public struct RoutineWatch: Codable, Hashable, Sendable {
     ) {
         self.url = url
         self.jsonPointers = jsonPointers
+    }
+}
+
+public struct ProviderModel: Codable, Hashable, Sendable {
+    public var id: String
+    public var tags: [String]
+    public var enabled: Bool
+    public var contextWindow: Int64?
+
+    public init(
+        id: String = "",
+        tags: [String] = [],
+        enabled: Bool = false,
+        contextWindow: Int64? = nil
+    ) {
+        self.id = id
+        self.tags = tags
+        self.enabled = enabled
+        self.contextWindow = contextWindow
+    }
+}
+
+public struct Provider: Codable, Hashable, Sendable {
+    public var id: String
+    public var type: String
+    public var name: String
+    public var baseURL: String
+    public var headers: [String: String]?
+    public var sessionHeader: String?
+    public var status: String?
+    public var keyHint: String?
+    public var enabled: Bool
+    public var order: Int64
+    public var models: [ProviderModel]
+
+    public init(
+        id: String = "",
+        type: String = "",
+        name: String = "",
+        baseURL: String = "",
+        headers: [String: String]? = nil,
+        sessionHeader: String? = nil,
+        status: String? = nil,
+        keyHint: String? = nil,
+        enabled: Bool = false,
+        order: Int64 = 0,
+        models: [ProviderModel] = []
+    ) {
+        self.id = id
+        self.type = type
+        self.name = name
+        self.baseURL = baseURL
+        self.headers = headers
+        self.sessionHeader = sessionHeader
+        self.status = status
+        self.keyHint = keyHint
+        self.enabled = enabled
+        self.order = order
+        self.models = models
+    }
+}
+
+public struct ProviderOption: Codable, Hashable, Sendable {
+    public var type: String
+    public var name: String
+    public var auth: String
+    public var label: String
+    public var subscription: Bool
+
+    public init(
+        type: String = "",
+        name: String = "",
+        auth: String = "",
+        label: String = "",
+        subscription: Bool = false
+    ) {
+        self.type = type
+        self.name = name
+        self.auth = auth
+        self.label = label
+        self.subscription = subscription
+    }
+}
+
+public enum ProviderOptionAuth {
+    public static let oauth = "oauth"
+    public static let apiKey = "api_key"
+}
+
+public struct LoginChoice: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    public var description: String?
+
+    public init(
+        id: String = "",
+        label: String = "",
+        description: String? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.description = description
+    }
+}
+
+public struct LoginPrompt: Codable, Hashable, Sendable {
+    public var id: Int64
+    public var type: String
+    public var message: String
+    public var placeholder: String?
+    public var options: [LoginChoice]?
+
+    public init(
+        id: Int64 = 0,
+        type: String = "",
+        message: String = "",
+        placeholder: String? = nil,
+        options: [LoginChoice]? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.message = message
+        self.placeholder = placeholder
+        self.options = options
+    }
+}
+
+public enum LoginPromptType {
+    public static let text = "text"
+    public static let secret = "secret"
+    public static let manualCode = "manual_code"
+    public static let select = "select"
+}
+
+public struct LoginEvent: Codable, Hashable, Sendable {
+    public var type: String
+    public var message: String?
+    public var url: String?
+    public var instructions: String?
+    public var userCode: String?
+    public var verificationUri: String?
+
+    public init(
+        type: String = "",
+        message: String? = nil,
+        url: String? = nil,
+        instructions: String? = nil,
+        userCode: String? = nil,
+        verificationUri: String? = nil
+    ) {
+        self.type = type
+        self.message = message
+        self.url = url
+        self.instructions = instructions
+        self.userCode = userCode
+        self.verificationUri = verificationUri
+    }
+}
+
+public enum LoginEventType {
+    public static let info = "info"
+    public static let authURL = "auth_url"
+    public static let deviceCode = "device_code"
+    public static let progress = "progress"
+}
+
+public struct ProviderLogin: Codable, Hashable, Sendable {
+    public var id: String
+    public var revision: Int64
+    public var events: [LoginEvent]
+    public var prompt: LoginPrompt?
+    public var done: Bool
+    public var error: String?
+    public var provider: Provider?
+
+    public init(
+        id: String = "",
+        revision: Int64 = 0,
+        events: [LoginEvent] = [],
+        prompt: LoginPrompt? = nil,
+        done: Bool = false,
+        error: String? = nil,
+        provider: Provider? = nil
+    ) {
+        self.id = id
+        self.revision = revision
+        self.events = events
+        self.prompt = prompt
+        self.done = done
+        self.error = error
+        self.provider = provider
+    }
+}
+
+public struct MCPStatus: Codable, Hashable, Sendable {
+    public var name: String
+    public var connected: Bool
+    public var tools: [String]
+
+    public init(
+        name: String = "",
+        connected: Bool = false,
+        tools: [String] = []
+    ) {
+        self.name = name
+        self.connected = connected
+        self.tools = tools
     }
 }

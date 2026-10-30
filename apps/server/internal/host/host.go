@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -110,8 +111,6 @@ func (c *Controller) Run(ctx context.Context) {
 	var process *exec.Cmd
 	var exited chan error
 	var next time.Time
-	tick := time.NewTicker(250 * time.Millisecond)
-	defer tick.Stop()
 	stop := func() {
 		if process == nil {
 			return
@@ -154,11 +153,16 @@ func (c *Controller) Run(ctx context.Context) {
 			}
 			c.mu.Unlock()
 		}
+		// Only a failed or exited server waits on a timer: its restart backoff.
+		var retry <-chan time.Time
+		if state.Enabled && process == nil {
+			retry = time.After(time.Until(next))
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.wake:
-		case <-tick.C:
+		case <-retry:
 		case <-exited:
 			process, exited = nil, nil
 			c.mu.Lock()
@@ -180,7 +184,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPatch {
-		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
+		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || !loopback(r.RemoteAddr) {
 			w.WriteHeader(403)
 			return
 		}
@@ -205,6 +209,16 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(c.Snapshot())
+}
+
+// loopback reports whether a request came from this machine.
+func loopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 const Label = "com.flarehq.polymux.app.host"

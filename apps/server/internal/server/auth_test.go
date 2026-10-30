@@ -31,8 +31,7 @@ func TestServerAuthentication(t *testing.T) {
 	broker := device.New(pairs)
 	s := settingsAPI(t)
 	s.config.Devices = broker
-	_, err = s.settings.SetKey("test-only-secret")
-	checkErr(err)
+	connectGemini(t, s, "test-only-secret")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 		if err != nil {
@@ -42,7 +41,7 @@ func TestServerAuthentication(t *testing.T) {
 		_, _, _ = conn.ReadMessage()
 	}))
 	defer upstream.Close()
-	s.speechDial = func(ctx context.Context, _ string) (*websocket.Conn, error) {
+	s.speechDial = func(ctx context.Context, _, _, _ string) (*websocket.Conn, error) {
 		conn, _, err := websocket.DefaultDialer.DialContext(ctx, "ws"+strings.TrimPrefix(upstream.URL, "http"), nil)
 		return conn, err
 	}

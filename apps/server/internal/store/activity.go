@@ -33,8 +33,8 @@ func NewActivity(kind, id, label string) (contract.Activity, error) {
 		ObjectLabel: boundedText(strings.Join(strings.Fields(label), " "), 160), IconOrAgentID: style[1], At: Now()}, nil
 }
 
-func activityTx(ctx context.Context, tx *sql.Tx, thread, actor string, payload contract.Activity) error {
-	_, err := appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: "activity", AgentID: &actor, Payload: &payload, CreatedAt: payload.At}, nil)
+func (s *Store) activityTx(ctx context.Context, tx *sql.Tx, thread, actor string, payload contract.Activity) error {
+	_, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeActivity, AgentID: &actor, Payload: &payload, CreatedAt: payload.At}, nil)
 	return err
 }
 
@@ -45,22 +45,22 @@ func (s *Store) Activity(ctx context.Context, thread, actor string, payload cont
 	if payload.At == "" {
 		payload.At = Now()
 	}
-	_, err := s.Append(ctx, contract.Event{ConversationID: thread, Type: "activity", AgentID: &actor, Payload: &payload, CreatedAt: payload.At}, nil)
+	_, err := s.Append(ctx, contract.Event{ConversationID: thread, Type: contract.EventTypeActivity, AgentID: &actor, Payload: &payload, CreatedAt: payload.At}, nil)
 	return err
 }
 
-func routineActivity(ctx context.Context, tx *sql.Tx, r contract.Routine, kind string) error {
+func (s *Store) routineActivity(ctx context.Context, tx *sql.Tx, r contract.Routine, kind string) error {
 	payload, err := NewActivity(kind, r.ID, r.Prompt)
 	if err != nil {
 		return err
 	}
-	return activityTx(ctx, tx, r.AgentID, r.AgentID, payload)
+	return s.activityTx(ctx, tx, r.AgentID, r.AgentID, payload)
 }
 
-func childActivity(ctx context.Context, tx *sql.Tx, event contract.Event) error {
+func (s *Store) childActivity(ctx context.Context, tx *sql.Tx, event contract.Event) error {
 	run := event.Run
 	kind := "subagent.started"
-	if event.Type == "run.done" {
+	if event.Type == contract.EventTypeRunDone {
 		kind = "subagent.finished"
 	}
 	label := run.AgentID
@@ -71,7 +71,7 @@ func childActivity(ctx context.Context, tx *sql.Tx, event contract.Event) error 
 	if err != nil {
 		return err
 	}
-	if err := activityTx(ctx, tx, run.ConversationID, run.AgentID, payload); err != nil {
+	if err := s.activityTx(ctx, tx, run.ConversationID, run.AgentID, payload); err != nil {
 		return err
 	}
 	var thread string
@@ -83,7 +83,7 @@ func childActivity(ctx context.Context, tx *sql.Tx, event contract.Event) error 
 		return err
 	}
 	if thread != run.ConversationID {
-		return activityTx(ctx, tx, thread, run.AgentID, payload)
+		return s.activityTx(ctx, tx, thread, run.AgentID, payload)
 	}
 	return nil
 }
@@ -128,7 +128,7 @@ func (s *Store) PeerHistory(ctx context.Context, first, second string, before in
 	messages := []contract.Message{}
 	for _, e := range exchanges {
 		// Group handoffs carry conversation context rather than a private peer message.
-		if e.delivery.Intent == "handoff" {
+		if e.delivery.Intent == contract.PeerDeliveryIntentHandoff {
 			continue
 		}
 		var data string
@@ -145,7 +145,7 @@ func (s *Store) PeerHistory(ctx context.Context, first, second string, before in
 		}
 		request := e.work.Message
 		request.ID = "peer:" + e.delivery.ID
-		request.Role, request.AgentID, request.Status, request.Seq = "assistant", &e.delivery.SourceAgentID, "done", e.seq
+		request.Role, request.AgentID, request.Status, request.Seq = contract.MessageRoleAssistant, &e.delivery.SourceAgentID, contract.MessageStatusDone, e.seq
 		messages = append(messages, request)
 	}
 	return messages, nil
@@ -177,7 +177,7 @@ func (s *Store) PatchRoutine(ctx context.Context, owner, id string, patch Routin
 	if err != nil {
 		return r, err
 	}
-	if r.Status != "active" && r.Status != "paused" {
+	if r.Status != contract.RoutineStatusActive && r.Status != contract.RoutineStatusPaused {
 		return r, ErrSchedule
 	}
 	kinds := []string{}
@@ -204,7 +204,7 @@ func (s *Store) PatchRoutine(ctx context.Context, owner, id string, patch Routin
 		}
 	}
 	var next any
-	if r.Status == "active" {
+	if r.Status == contract.RoutineStatusActive {
 		date := r.At
 		if r.NextAt != nil {
 			date = *r.NextAt
@@ -232,7 +232,7 @@ func (s *Store) PatchRoutine(ctx context.Context, owner, id string, patch Routin
 		return r, err
 	}
 	for _, kind := range kinds {
-		if err := routineActivity(ctx, tx, r, kind); err != nil {
+		if err := s.routineActivity(ctx, tx, r, kind); err != nil {
 			return r, err
 		}
 	}

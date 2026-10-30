@@ -1,0 +1,68 @@
+.feature-page, .product-overview { width: min(var(--wide), calc(100% - 40px)); margin-inline: auto; }
+.feature-hero { padding: 96px 0 108px; }
+.feature-hero-copy { max-width: 850px; margin-inline: auto; text-align: center; }
+.feature-group-link { display: inline-flex; gap: var(--space-2); margin-bottom: var(--space-8); color: var(--muted); font-size: 12px; }
+.feature-title-icon { width: 54px; height: 54px; margin: 0 auto var(--space); display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.feature-hero-copy > p, .product-intro > p:last-child { max-width: 690px; margin: var(--space) auto 0; color: var(--muted); font-size: 19px; line-height: 1.65; }
+.feature-actions { margin-top: var(--space-8); display: flex; align-items: center; justify-content: center; gap: var(--space); }
+.feature-primary { min-height: 44px; padding: 0 var(--space-5); display: inline-flex; align-items: center; border-radius: var(--radius-small); color: var(--on-accent); background: var(--accent); font-size: 13px; font-weight: 650; }
+.feature-primary:hover { background: var(--accent-hover); }
+.feature-secondary { color: var(--muted); font-size: 13px; font-weight: 600; }
+.feature-demo { max-width: 920px; margin: 76px auto 0; padding: var(--space-8); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.feature-demo > p, .feature-eyebrow { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.feature-demo > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.feature-demo article { min-width: 0; min-height: 178px; padding: var(--space); display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-small); }
+.feature-demo article > span { width: max-content; padding: var(--space-1) var(--space-2); border-radius: var(--space-1); color: var(--muted); background: var(--soft); font-size: 10px; }
+.feature-demo strong { margin-top: auto; padding-top: var(--space); font-size: 17px; }
+.feature-demo small { margin-top: var(--space-2); color: var(--muted); font-size: 12px; line-height: 1.5; }
+.feature-benefits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line); }
+.feature-benefits article { min-width: 0; padding: var(--space-8); }
+.feature-benefits article + article { border-left: 1px solid var(--line); }
+.feature-benefits article > span, .feature-catalogue > header > span { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.feature-benefits h2 { margin-top: var(--space-16); font-size: 23px; letter-spacing: -.035em; }
+.feature-benefits p { color: var(--muted); font-size: 14px; line-height: 1.65; }
+.feature-how { padding: 116px 80px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 90px; border-bottom: 1px solid var(--line); }
+.feature-how h2, .feature-example h2, .feature-catalogue h2, .product-cta h2 { margin: 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.1; font-weight: 620; letter-spacing: -.045em; }
+.feature-how ol { margin: 0; padding: 0; list-style: none; }
+.feature-how li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--space-4); padding-block: var(--space-5); }
+.feature-how li + li { border-top: 1px solid var(--line); }
+.feature-how li > span { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); font-size: 10px; }
+.feature-how li p { margin: 0; color: var(--text); font-size: 15px; line-height: 1.65; }
+.feature-example { max-width: 860px; margin-inline: auto; padding: 128px var(--space-5); text-align: center; }
+.feature-example > p:last-child { max-width: 660px; margin: var(--space) auto 0; color: var(--muted); font-size: 17px; line-height: 1.7; }
+.related-features { padding: var(--space-12) 0 110px; }
+.related-features > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.related-features a { min-width: 0; padding: var(--space) var(--space-5); display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: var(--space-3); border-bottom: 1px solid var(--line); }
+.related-features a + a { border-left: 1px solid var(--line); }
+.related-features span { display: flex; min-width: 0; flex-direction: column; gap: var(--space-2); }
+.related-features strong { font-size: 14px; }
+.related-features small { color: var(--muted); font-size: 11px; }
+.related-features em { font-style: normal; }
+.product-intro { max-width: 900px; padding: 130px 0; }
+.product-intro > p:last-child { margin-left: 0; }
+.feature-catalogue { padding: 70px 0 110px; border-top: 1px solid var(--line); }
+.feature-catalogue > header { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: var(--space-5); margin-bottom: var(--space-12); }
+.feature-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.feature-card-grid > a { min-width: 0; min-height: 220px; padding: var(--space-8); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.feature-card-grid > a:hover { background: var(--soft); }
+.feature-card-grid h3 { margin: var(--space-12) 0 var(--space-2); font-size: 25px; letter-spacing: -.035em; }
+.feature-card-grid p { color: var(--muted); font-size: 14px; }
+.product-cta { padding: 90px 0; display: flex; align-items: end; justify-content: space-between; gap: var(--space-8); border-top: 1px solid var(--line); }
+
+@media (max-width: 760px) {
+  .feature-page, .product-overview { width: calc(100% - 28px); }
+  .feature-hero, .product-intro { padding: 72px 0 80px; }
+  .feature-hero-copy > p, .product-intro > p:last-child { font-size: 16px; }
+  .feature-actions, .product-cta { align-items: center; flex-direction: column; }
+  .feature-demo { margin-top: var(--space-12); padding: var(--space-4); }
+  .feature-demo > div, .feature-benefits, .feature-how, .related-features > div, .feature-card-grid { grid-template-columns: minmax(0, 1fr); }
+  .feature-demo article { min-height: 130px; }
+  .feature-benefits article { padding: var(--space-8) 0; }
+  .feature-benefits article + article, .related-features a + a { border-left: 0; }
+  .feature-benefits article + article { border-top: 1px solid var(--line); }
+  .feature-benefits h2 { margin-top: var(--space-8); }
+  .feature-how { padding: 84px 0; gap: var(--space-12); }
+  .feature-example { padding: 94px var(--space-2); }
+  .feature-catalogue > header { grid-template-columns: 34px minmax(0, 1fr); }
+  .product-cta { align-items: flex-start; }
+}

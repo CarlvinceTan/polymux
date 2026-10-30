@@ -23,7 +23,7 @@ func TestChildWorkspace(t *testing.T) {
 	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, message contract.Message) (agentruntime.Result, error) {
 		state := ctx.Value(turnKey{}).(*turnState)
 		if state.work.Trigger != "child" {
-			receipt, err := botCall(ctx, d, "spawn_task", `{"task":"Create the native child report"}`)
+			receipt, err := botCall(ctx, d, "task", `{"action":"run","prompt":"Create the native child report"}`)
 			if err == nil {
 				err = json.Unmarshal([]byte(receipt.Text()), &child)
 			}
@@ -35,7 +35,7 @@ func TestChildWorkspace(t *testing.T) {
 		if strings.Contains(store.Text(message), "PRIVATE_PARENT_CONTEXT") {
 			return agentruntime.Result{}, errors.New("child inherited private parent history")
 		}
-		for _, name := range []string{"spawn_task", "message_agent", "handoff_agent", "manage_tasks"} {
+		for _, name := range []string{"task", "message_agent", "handoff_agent", "manage_tasks"} {
 			for _, tool := range d.ExtraTools {
 				if tool.Name() == name {
 					return agentruntime.Result{}, fmt.Errorf("child exposes forbidden delegation tool %s", name)
@@ -51,7 +51,7 @@ func TestChildWorkspace(t *testing.T) {
 	api, _ = startTest(t, factory)
 	patchWorkspace(t, api, "assistant", repo)
 	text := "Create a bounded report. PRIVATE_PARENT_CONTEXT"
-	parent := api.execute(t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
+	parent := api.execute(t.Context(), t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
 		ID: "native-child-parent", ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}},
 	}})
 	if parent.Status != "done" || child.ID == "" {
@@ -113,7 +113,7 @@ func TestTaskWorkspace(t *testing.T) {
 	api, _ = startTest(t, factory)
 	patchWorkspace(t, api, "assistant", repo)
 	text := "Prepare this report in two stages"
-	first := api.execute(t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
+	first := api.execute(t.Context(), t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
 		ID: "native-task-parent", ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}},
 	}})
 	if first.Status != "done" {

@@ -19,6 +19,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	engine "github.com/CarlvinceTan/polymux/packages/search"
 )
 
 func awaitRun(t *testing.T, s *store.Store, id, status string) contract.Run {
@@ -44,7 +45,7 @@ func TestStopPreparation(t *testing.T) {
 	}
 	defer db.Close()
 	started := make(chan struct{}, 1)
-	index := &search.Index{Store: db, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Extractor: search.ExtractorFunc(func(ctx context.Context, _ search.Asset) (string, error) {
+	index := &search.Index{Store: db, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Extractor: engine.ExtractorFunc(func(ctx context.Context, _ engine.Asset) (string, error) {
 		select {
 		case started <- struct{}{}:
 		default:
@@ -145,7 +146,7 @@ func (*introSession) Abort(context.Context) error { return nil }
 func (*introSession) Close() error                { return nil }
 func (*introSession) Path() string                { return "intro.jsonl" }
 
-func TestIntroQueuesUserTask(t *testing.T) {
+func TestIntroQueuesUserMessage(t *testing.T) {
 	dir := t.TempDir()
 	db, err := store.Open(t.Context(), filepath.Join(dir, "db"))
 	if err != nil {
@@ -159,15 +160,15 @@ func TestIntroQueuesUserTask(t *testing.T) {
 	}
 	defer api.Close()
 	r := httptest.NewRecorder()
-	api.ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(`{"name":"Coach","role":"Guide","prompt":"Teach","initialTask":"First task"}`)))
+	api.ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(`{"name":"Coach","role":"Guide","prompt":"Teach"}`)))
 	var a contract.Agent
 	if err := json.Unmarshal(r.Body.Bytes(), &a); err != nil || r.Code != 201 {
 		t.Fatal(r.Code, err)
 	}
 	select {
 	case d := <-f.started:
-		if !d.Intro || len(d.ExtraTools) != 0 || len(d.Tools) != 0 || len(d.MCP) != 0 {
-			t.Fatal("intro has tools")
+		if !d.Intro || len(d.ExtraTools) != 1 || d.ExtraTools[0].Name() != "ask_user" || len(d.Tools) != 0 || len(d.MCP) != 0 {
+			t.Fatal("an introduction may only ask the user")
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("intro not started")
@@ -183,7 +184,7 @@ func TestIntroQueuesUserTask(t *testing.T) {
 	default:
 	}
 	close(f.release)
-	for _, want := range []string{"created:" + a.ID, "initial:" + a.ID, "during"} {
+	for _, want := range []string{"created:" + a.ID, "during"} {
 		select {
 		case got := <-f.sent:
 			if got != want {
@@ -233,6 +234,10 @@ func TestToolsAreRedacted(t *testing.T) {
 		if event.Tool != nil {
 			kinds = append(kinds, event.Type)
 			rows[event.Type] = *event.Tool
+			// Clients read the running tool from the run, so each event's run lists it as it stands.
+			if event.Run == nil || len(event.Run.Tools) != 1 || event.Run.Tools[0].Status != event.Tool.Status {
+				t.Fatalf("%s run tools %+v", event.Type, event.Run)
+			}
 			if event.Tool.ID != "call" || event.Tool.RunID != runID {
 				t.Fatal("tool correlation lost")
 			}
@@ -600,6 +605,7 @@ func TestToolHistoryRetainsEveryCall(t *testing.T) {
 	a := api.actors["assistant"]
 	a.session = &cycleSession{calls: 40}
 	a.sessionMCP = sha256.Sum256([]byte("[]"))
+	a.sessionModel = "/" + api.config.Model
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/threads/assistant/messages", strings.NewReader(`{"id":"history","text":"Run"}`)))
 	if w.Code != http.StatusAccepted {

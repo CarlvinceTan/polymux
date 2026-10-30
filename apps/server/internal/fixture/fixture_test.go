@@ -49,7 +49,7 @@ func TestSeedMatchesManifest(t *testing.T) {
 		{`SELECT count(*) FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.thread_id='t-nova' AND m.role='assistant' AND m.seq>t.last_read_seq`, 12},
 		{`SELECT count(*) FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.thread_id='t-chief' AND m.role='assistant' AND m.seq>t.last_read_seq`, 0},
 		{`SELECT count(*) FROM messages WHERE status='streaming'`, 1},
-		{`SELECT count(*) FROM messages WHERE id='focus:t-approval' AND json_extract(data,'$.parts[0].kind')='choice' AND json_type(data,'$.parts[0].answerID') IS NULL`, 1},
+		{`SELECT count(*) FROM messages WHERE id='choice:t-approval' AND json_extract(data,'$.parts[0].kind')='choice' AND json_type(data,'$.parts[0].answerID') IS NULL`, 1},
 		{`SELECT count(DISTINCT json_extract(data,'$.agentID')) FROM messages WHERE thread_id='grp-trip'`, 3},
 		{`SELECT count(*) FROM messages WHERE thread_id='grp-trip' AND json_extract(data,'$.replyToID') IS NOT NULL`, 2},
 		{`SELECT count(*) FROM messages WHERE instr(data,'polymux verify lighthouse')>0`, 1},

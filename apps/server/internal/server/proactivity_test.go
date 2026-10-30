@@ -98,7 +98,7 @@ func TestBackgroundReviews(t *testing.T) {
 				t.Fatal(err)
 			}
 			work := store.Work{Trigger: "review", Message: contract.Message{ID: "review", ThreadID: "assistant", Role: "system"}}
-			api.execute(t.Context(), api.actors["assistant"], work)
+			api.execute(t.Context(), t.Context(), api.actors["assistant"], work)
 			run, err := api.Store.Run(t.Context(), store.NewRun("review", "assistant", "assistant", "review").ID)
 			if err != nil {
 				t.Fatal(err)
@@ -124,7 +124,7 @@ func TestBackgroundReviews(t *testing.T) {
 				}
 			}
 			for _, tool := range d.ExtraTools {
-				if sidebarToolName(tool.Name()) {
+				if tool.Name() == "organize_chats" {
 					t.Fatal("review exposed unavailable sidebar tool", tool.Name())
 				}
 			}
@@ -331,7 +331,7 @@ func TestWaitingDoesNotPauseAgent(t *testing.T) {
 	for _, id := range []string{"question", "independent"} {
 		text := "User goal"
 		work := store.Work{Trigger: "message", Message: contract.Message{ID: id, ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}}}}
-		m := api.execute(t.Context(), api.actors["assistant"], work)
+		m := api.execute(t.Context(), t.Context(), api.actors["assistant"], work)
 		run, err := api.Store.Run(t.Context(), value(m.RunID))
 		if err != nil || run.Status != "completed" || m.Status != "done" {
 			t.Fatal("execution remained frozen", run, err)
@@ -404,7 +404,7 @@ func TestR4(t *testing.T) {
 	}
 	work := morningWork(t, api.Store, "morning", "morning-job")
 	for range attempts {
-		api.execute(t.Context(), api.actors["assistant"], work)
+		api.execute(t.Context(), t.Context(), api.actors["assistant"], work)
 	}
 	if hits.Load() < 1 {
 		t.Fatal("model did not return 500")
@@ -428,7 +428,7 @@ func TestR4(t *testing.T) {
 	}
 	okAPI, _ := startTest(t, &testFactory{})
 	okWork := morningWork(t, okAPI.Store, "morning-ok", "morning-ok")
-	okAPI.execute(t.Context(), okAPI.actors["assistant"], okWork)
+	okAPI.execute(t.Context(), t.Context(), okAPI.actors["assistant"], okWork)
 	okRun, err := okAPI.Store.Run(t.Context(), store.NewRun(okWork.Message.ID, "assistant", "assistant", "routine").ID)
 	if err != nil || okRun.Status != "completed" || len(failureNotices(t, okAPI.Store)) != 0 {
 		t.Fatalf("successful routine %+v notices %d %v", okRun, len(failureNotices(t, okAPI.Store)), err)
@@ -458,7 +458,7 @@ func TestR4CancelIsNotFailure(t *testing.T) {
 	if _, err := api.Store.CancelRoutine(t.Context(), "assistant", value(work.RoutineID)); err != nil {
 		t.Fatal(err)
 	}
-	api.execute(t.Context(), api.actors["assistant"], work)
+	api.execute(t.Context(), t.Context(), api.actors["assistant"], work)
 	run, err := api.Store.Run(t.Context(), store.NewRun(work.Message.ID, "assistant", "assistant", "routine").ID)
 	notes := failureNotices(t, api.Store)
 	if err != nil || run.Status != "cancelled" || len(notes) != 0 || model.calls.Load() != 0 {

@@ -3,10 +3,11 @@ package store
 import (
 	"database/sql"
 	"errors"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
 func beginStage(t *testing.T, s *Store, job string) contract.Run {

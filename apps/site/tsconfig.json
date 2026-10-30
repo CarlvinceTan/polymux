@@ -7,11 +7,15 @@
     "isolatedModules": true,
     "moduleResolution": "bundler",
     "noEmit": true,
-    "target": "ESNext"
+    "target": "ESNext",
+    "erasableSyntaxOnly": true
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.svelte",
+    "lib/**/*.ts",
+    "api/**/*.ts",
+    "scripts/**/*.ts",
     "vite.config.ts"
   ]
 }

@@ -57,6 +57,19 @@ func failedReply(t *testing.T, cause error, code, message string) (string, strin
 			if run.Error == nil || run.Error.Code != code || run.Error.Message != message {
 				t.Fatalf("run error: %+v", run.Error)
 			}
+			messages, readErr := api.Store.Messages(t.Context(), "assistant", 0, 100)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			found := false
+			for _, reply := range messages {
+				if reply.RunID != nil && *reply.RunID == id && reply.Role == "assistant" {
+					found = reply.Error != nil && reply.Error.Code == code && reply.Error.Message == message && reply.Error.Detail == ""
+				}
+			}
+			if !found {
+				t.Fatal("persisted reply lost its public failure or exposed private detail")
+			}
 			if err := api.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -155,6 +168,7 @@ func TestReplyFailureCodes(t *testing.T) {
 	}{
 		{"stopped", context.Canceled, "Reply stopped."},
 		{"timeout", context.DeadlineExceeded, "The model took too long to reply."},
+		{"provider_missing", agentruntime.ErrProviderMissing, "This bot’s provider is no longer configured. Choose a model in its profile."},
 	} {
 		t.Run(tc.name, func(t *testing.T) { failedReply(t, tc.err, tc.name, tc.message) })
 	}

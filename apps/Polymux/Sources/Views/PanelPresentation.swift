@@ -81,9 +81,9 @@ extension View {
 
     func panelHost() -> some View {
         #if os(macOS)
-        modifier(PanelHost())
+        modifier(PanelHost()).dropdownHost()
         #else
-        self
+        dropdownHost()
         #endif
     }
 }
@@ -123,6 +123,7 @@ private struct PanelSheet<Content: View>: View {
 
     var body: some View {
         content
+            .dropdownHost()
             .presentationSizing(PanelFit())
             .presentationDetents([.height(PanelSize.maximumHeight)])
             .transformPreference(PanelHeight.self) { $0 = nil }
@@ -205,7 +206,7 @@ private struct PanelHost: ViewModifier {
 }
 
 @MainActor
-private final class FocusMemory {
+final class FocusMemory {
     weak var window: NSWindow?
     private weak var responder: NSResponder?
     private var active = false
@@ -233,14 +234,14 @@ private final class FocusMemory {
     }
 }
 
-private struct FocusWindow: NSViewRepresentable {
+struct FocusWindow: NSViewRepresentable {
     let memory: FocusMemory
 
     func makeNSView(context: Context) -> WindowAnchor { WindowAnchor(memory: memory) }
     func updateNSView(_ view: WindowAnchor, context: Context) { memory.window = view.window }
 }
 
-private final class WindowAnchor: NSView {
+final class WindowAnchor: NSView {
     let memory: FocusMemory
 
     init(memory: FocusMemory) {
@@ -312,11 +313,12 @@ private struct PanelLayer: View {
 private struct PanelFocus: NSViewRepresentable {
     let close: () -> Void
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.dropdownOpen) private var menuOpen
 
     func makeNSView(context: Context) -> FocusAnchor { FocusAnchor() }
 
     func updateNSView(_ view: FocusAnchor, context: Context) {
-        view.enabled = enabled
+        view.enabled = enabled && !menuOpen
         view.close = close
     }
 
@@ -344,11 +346,17 @@ private final class FocusAnchor: NSView {
         }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.enabled, let window = self.window,
-                  event.window === window, window.attachedSheet == nil, event.keyCode == 53,
+                  event.window === window, window.attachedSheet == nil, !Self.popoverShowing(from: window),
+                  event.keyCode == 53,
                   event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
             self.close()
             return nil
         }
+    }
+
+    // Escape belongs to an open popover (a child window) first; the panel closes only when none shows.
+    private static func popoverShowing(from window: NSWindow) -> Bool {
+        !(window.childWindows ?? []).isEmpty
     }
 
     func stop() {

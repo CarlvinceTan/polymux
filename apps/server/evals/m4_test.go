@@ -44,7 +44,7 @@ func TestM4(t *testing.T) {
 	for i := range steps {
 		steps[i] = Step{Response: summaryKeepingFacts}
 	}
-	h := Start(t, Options{ID: "M4", Steps: steps})
+	h := Start(t, Options{ID: "M4", Steps: steps, Window: compactWindow})
 	seq := 0
 	if !m4Send(t, h, &seq, m4Plant()) || !m4Until(t, h, &seq, 1) || !m4Kept(t, h) {
 		return

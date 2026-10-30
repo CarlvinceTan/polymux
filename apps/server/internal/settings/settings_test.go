@@ -26,9 +26,6 @@ func TestSettingsPersistAndHideKey(t *testing.T) {
 	if _, err := s.Update(contract.SettingsPatch{VoiceMode: &mode, LiveModel: &model}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetKey("test-only-secret"); err != nil {
-		t.Fatal(err)
-	}
 	before := s.Snapshot()
 	v, err := s.Update(contract.SettingsPatch{Appearance: &theme})
 	if err != nil {
@@ -38,8 +35,8 @@ func TestSettingsPersistAndHideKey(t *testing.T) {
 		t.Fatal("partial update lost other settings")
 	}
 	wire, err := json.Marshal(v)
-	if err != nil || strings.Contains(string(wire), "test-only-secret") || !reflect.DeepEqual(v.SpeechKeys, []string{"gemini"}) {
-		t.Fatal("public settings exposed credentials or lost key presence")
+	if err != nil || !strings.Contains(string(wire), `"speechKeys":[]`) {
+		t.Fatal("speechKeys must be a list, which clients require")
 	}
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -52,19 +49,37 @@ func TestSettingsPersistAndHideKey(t *testing.T) {
 	if !reflect.DeepEqual(reopened.Snapshot(), v) {
 		t.Fatal("settings did not survive reopening")
 	}
-	_, key := reopened.Speech()
-	if key != "test-only-secret" {
-		t.Fatal("server key did not persist")
-	}
-	if _, err := reopened.SetKey(""); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err = Open(path)
+}
+
+func TestOldVoiceKeyIsRemoved(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reopened.Snapshot().SpeechKeys) != 0 {
-		t.Fatal("key removal did not persist")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["geminiKey"] = "plaintext-secret"
+	data, _ = json.Marshal(raw)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); strings.Contains(string(data), "plaintext-secret") {
+		t.Fatal("the old plaintext voice key is still on disk")
+	}
+	if !reflect.DeepEqual(reopened.Snapshot(), s.Snapshot()) {
+		t.Fatal("removing the key changed the settings")
 	}
 }
 
@@ -81,7 +96,7 @@ func TestInvalidAndFailedWritesPreserveState(t *testing.T) {
 		patch contract.SettingsPatch
 	}{
 		{"provider", contract.SettingsPatch{LiveProvider: ptr("unknown")}},
-		{"path model", contract.SettingsPatch{TextModel: ptr("../../secret")}},
+		{"path model", contract.SettingsPatch{LiveModel: ptr("../../secret")}},
 		{"empty model", contract.SettingsPatch{LiveModel: ptr("")}},
 		{"voice", contract.SettingsPatch{LiveVoice: ptr("unknown")}},
 		{"theme", contract.SettingsPatch{Appearance: ptr("unknown")}},
@@ -98,9 +113,6 @@ func TestInvalidAndFailedWritesPreserveState(t *testing.T) {
 				t.Fatal("invalid write changed state")
 			}
 		})
-	}
-	if _, err := s.SetKey("header\ninjection"); !errors.Is(err, ErrInvalid) {
-		t.Fatal("multiline key accepted")
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
@@ -124,7 +136,7 @@ func TestConcurrentPatchesMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	var group sync.WaitGroup
-	for _, patch := range []contract.SettingsPatch{{Appearance: ptr("dark")}, {LiveModel: ptr("new-live")}, {TextModel: ptr("new-text")}} {
+	for _, patch := range []contract.SettingsPatch{{Appearance: ptr("dark")}, {LiveModel: ptr("new-live")}, {VoiceLanguage: ptr("fr")}} {
 		group.Go(func() {
 			if _, err := s.Update(patch); err != nil {
 				t.Error(err)
@@ -133,7 +145,7 @@ func TestConcurrentPatchesMerge(t *testing.T) {
 	}
 	group.Wait()
 	v := s.Snapshot()
-	if v.Appearance != "dark" || v.LiveModel != "new-live" || v.TextModel != "new-text" || v.Revision != 4 {
+	if v.Appearance != "dark" || v.LiveModel != "new-live" || v.VoiceLanguage != "fr" || v.Revision != 4 {
 		t.Fatal("concurrent field updates overwrote each other")
 	}
 }

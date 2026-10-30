@@ -205,6 +205,11 @@ func download(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	return install(archive, want, path)
+}
+
+// install extracts the archive only when it matches the pinned checksum.
+func install(archive []byte, want, path string) error {
 	if sum := sha256.Sum256(archive); hex.EncodeToString(sum[:]) != want {
 		return errors.New("tunnel download failed its checksum")
 	}

@@ -20,7 +20,7 @@ struct DeviceView: View {
         PanelView("Rename device", onClose: { close() }, onBack: onBack) {
             Form {
                 Section {
-                    TextField("Name", text: $name, prompt: Text(device.name))
+                    SettingsField(title: "Name", text: $name, prompt: device.name)
                         .accessibilityIdentifier("device.name")
                         .autocorrectionDisabled()
                         .onSubmit(done)

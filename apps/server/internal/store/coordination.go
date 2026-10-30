@@ -9,14 +9,14 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
-func endRun(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
+func (s *Store) endRun(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
 	for i := range run.Tools {
 		tool := &run.Tools[i]
-		if tool.Status != "running" {
+		if tool.Status != contract.ToolActivityStatusRunning {
 			continue
 		}
 		tool.Status = run.Status
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: "tool.done", RunID: &run.ID, AgentID: &run.AgentID, Tool: tool}, nil); err != nil {
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeToolDone, RunID: &run.ID, AgentID: &run.AgentID, Tool: tool}, nil); err != nil {
 			return err
 		}
 	}
@@ -34,13 +34,13 @@ func endRun(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
 			if err := json.Unmarshal([]byte(data), &message); err != nil {
 				return err
 			}
-			message.Status = "error"
-			if _, err := appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: "message.error", RunID: &run.ID, MessageID: run.MessageID, AgentID: &run.AgentID, Error: run.Error}, &message); err != nil {
+			message.Status = contract.MessageStatusError
+			if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeMessageError, RunID: &run.ID, MessageID: run.MessageID, AgentID: &run.AgentID, Error: run.Error}, &message); err != nil {
 				return err
 			}
 		}
 	}
-	_, err := appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: "run.done", RunID: &run.ID, AgentID: &run.AgentID, Run: run}, nil)
+	_, err := s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeRunDone, RunID: &run.ID, AgentID: &run.AgentID, Run: run}, nil)
 	return err
 }
 
@@ -49,16 +49,16 @@ func endsChildren(status string) bool {
 	return status == "failed" || status == "cancelled" || status == "interrupted"
 }
 
-func closeWork(ctx context.Context, tx *sql.Tx, run contract.Run) error {
+func (s *Store) closeWork(ctx context.Context, tx *sql.Tx, run contract.Run) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=? AND NOT EXISTS(SELECT 1 FROM runs WHERE job_id=? AND status IN('queued','running','waiting_peer','waiting_input'))`, run.JobID, run.JobID); err != nil {
 		return err
 	}
-	_, err := closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`, run.ID)
+	_, err := s.closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`, run.ID)
 	return err
 }
 
 // cancelDescendants seals non-terminal descendant runs and closes their queued deliveries and jobs.
-func cancelDescendants(ctx context.Context, tx *sql.Tx, parentID string) error {
+func (s *Store) cancelDescendants(ctx context.Context, tx *sql.Tx, parentID string) error {
 	rows, err := tx.QueryContext(ctx, `WITH RECURSIVE kids(id) AS (
 SELECT id FROM runs WHERE json_extract(data,'$.parentRunID')=?
 UNION
@@ -89,23 +89,23 @@ SELECT child.id FROM runs child JOIN kids ON json_extract(child.data,'$.parentRu
 	for i := range runs {
 		run := &runs[i]
 		// A follow-up is the source continuation after peer results, including failures.
-		if Terminal(run.Status) || run.Trigger == "follow_up" {
+		if Terminal(run.Status) || run.Trigger == contract.RunTriggerFollowUp {
 			continue
 		}
-		run.Status, run.Summary = "cancelled", "Parent run ended"
+		run.Status, run.Summary = contract.RunStatusCancelled, "Parent run ended"
 		run.Error = &contract.Error{Code: "stopped", Message: "The parent run ended before this work finished."}
-		if err := endRun(ctx, tx, run); err != nil {
+		if err := s.endRun(ctx, tx, run); err != nil {
 			return err
 		}
 	}
-	if _, err := closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`, parentID); err != nil {
+	if _, err := s.closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`, parentID); err != nil {
 		return err
 	}
 	for _, run := range runs {
-		if run.Trigger == "follow_up" {
+		if run.Trigger == contract.RunTriggerFollowUp {
 			continue
 		}
-		if err := closeWork(ctx, tx, run); err != nil {
+		if err := s.closeWork(ctx, tx, run); err != nil {
 			return err
 		}
 	}
@@ -158,7 +158,7 @@ func (s *Store) PendingPeers(ctx context.Context, agentID string) ([]string, err
 	return ids, rows.Err()
 }
 
-func closePeers(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+func (s *Store) closePeers(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -207,19 +207,19 @@ func closePeers(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]s
 			}
 		}
 		if !Terminal(run.Status) {
-			run.Status, run.Summary = "cancelled", "Peer request cancelled"
+			run.Status, run.Summary = contract.RunStatusCancelled, "Peer request cancelled"
 			run.Error = &contract.Error{Code: "stopped", Message: "This peer request was cancelled or a participant was removed."}
-			if err := endRun(ctx, tx, &run); err != nil {
+			if err := s.endRun(ctx, tx, &run); err != nil {
 				return nil, err
 			}
 		}
 		ids = append(ids, run.ID)
-		if peer.delivery.Intent != "handoff" {
+		if peer.delivery.Intent != contract.PeerDeliveryIntentHandoff {
 			if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=?`, run.JobID); err != nil {
 				return nil, err
 			}
 		}
-		if err := receiptTx(ctx, tx, peer.delivery.ID, run, contract.Message{}); err != nil {
+		if err := s.receiptTx(ctx, tx, peer.delivery.ID, run, contract.Message{}); err != nil {
 			return nil, err
 		}
 	}
@@ -232,7 +232,7 @@ func (s *Store) StopRuns(ctx context.Context, thread string) ([]string, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	ids, err := stopTree(ctx, tx, "thread_id", thread)
+	ids, err := s.stopTree(ctx, tx, "thread_id", thread)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (s *Store) StopRuns(ctx context.Context, thread string) ([]string, error) {
 
 // stopTree cancels the active runs whose column matches value, with their descendants, and
 // returns the stopped run IDs. Column is a fixed literal, never tool or user input.
-func stopTree(ctx context.Context, tx *sql.Tx, column, value string) ([]string, error) {
+func (s *Store) stopTree(ctx context.Context, tx *sql.Tx, column, value string) ([]string, error) {
 	// Deepest runs first, so an ancestor's cleanup cannot overwrite an explicit stop.
 	rows, err := tx.QueryContext(ctx, `WITH RECURSIVE stopped(id, depth) AS (
 SELECT id, 0 FROM runs WHERE `+column+`=? AND status IN('running','waiting_peer','waiting_input')
@@ -277,15 +277,15 @@ SELECT child.id, stopped.depth+1 FROM runs child JOIN stopped ON json_extract(ch
 		if Terminal(run.Status) {
 			continue
 		}
-		run.Status, run.Summary = "cancelled", "Reply stopped"
+		run.Status, run.Summary = contract.RunStatusCancelled, "Reply stopped"
 		run.Error = &contract.Error{Code: "stopped", Message: "Reply stopped."}
-		if err := endRun(ctx, tx, run); err != nil {
+		if err := s.endRun(ctx, tx, run); err != nil {
 			return nil, err
 		}
 		ids = append(ids, run.ID)
 	}
 	for _, run := range runs {
-		if err := closeWork(ctx, tx, run); err != nil {
+		if err := s.closeWork(ctx, tx, run); err != nil {
 			return nil, err
 		}
 	}
@@ -310,12 +310,12 @@ func (s *Store) StopWaiting(ctx context.Context, thread string) ([]string, error
 	if err := json.Unmarshal([]byte(data), &run); err != nil {
 		return nil, err
 	}
-	run.Status, run.Summary = "cancelled", "Reply stopped"
+	run.Status, run.Summary = contract.RunStatusCancelled, "Reply stopped"
 	run.Error = &contract.Error{Code: "stopped", Message: "Reply stopped."}
-	if err := endRun(ctx, tx, &run); err != nil {
+	if err := s.endRun(ctx, tx, &run); err != nil {
 		return nil, err
 	}
-	ids, err := closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`, run.ID)
+	ids, err := s.closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.status')='queued'`, run.ID)
 	if err != nil {
 		return nil, err
 	}

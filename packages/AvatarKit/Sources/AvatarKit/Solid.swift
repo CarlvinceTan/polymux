@@ -11,6 +11,7 @@ public enum Solid: Hashable, Sendable {
     /// The profile revolved around its vertical axis.
     case revolved
     case pill
+    case pumpkin
 
     /// How far in front of the middle the surface sits at `fraction` of the way out to the edge.
     func front(_ fraction: Double) -> Double {
@@ -20,6 +21,7 @@ public enum Solid: Hashable, Sendable {
         case .slab(let depth, _): depth
         case .revolved: sqrt(max(0, 1 - fraction * fraction))
         case .pill: sqrt(max(0, 1 - fraction * fraction))
+        case .pumpkin: Pumpkin.front(fraction, 0)
         }
     }
 }
@@ -49,6 +51,15 @@ public enum Poke: Hashable, Sendable {
 extension ShapeID {
     public var solid: Solid {
         switch self {
+        case .lemon, .orangeFruit, .watermelon, .avocado, .cherry, .cookie, .cheese, .egg, .candy, .donut,
+             .tulip, .sunflower, .sprout, .fern, .balloon, .shell, .palm, .snowman, .lightning, .planet,
+             .mug, .lantern, .gift, .pencil, .hammer, .umbrella, .wateringCan, .gamepad, .guitar, .telescope,
+             .whale, .bull, .moon, .wave, .blossom, .popcorn, .peanut, .saucer, .beacon,
+             .plus, .magnet, .acorn, .pebbles, .bulb, .trophy, .gem,
+             .hamburger, .carrot, .pizza, .sushi, .iceCream, .sun, .leaf, .tree, .cactus,
+             .mushroom, .mountain, .volcano, .rainbow, .snowflake, .rocket, .robot, .camera,
+             .clock, .key, .bell, .book, .teapot:
+            character!.solid
         case .circle: .inflated(depth: 1)
         case .pebble: .inflated(depth: 0.88)
         case .droplet, .wedge: .revolved
@@ -62,6 +73,12 @@ extension ShapeID {
         case .star: .slab(depth: 0.3, bevel: 0.18)
         case .burst: .slab(depth: 0.32, bevel: 0.16)
         case .heart: .loft(depth: 0.62)
+        case .pumpkin, .apple, .pear, .strawberry, .bun, .toast, .cupcake, .cat, .dog, .panda, .rabbit:
+            character!.solid
+        case .fox, .crab, .elephant, .octopus, .pig, .deer, .koala, .giraffe, .cow, .turtle,
+             .tiger, .frog, .mouse, .walrus, .beaver, .guineaPig, .chinchilla, .ferret, .monkey,
+             .chick, .duck, .penguin, .bat, .axolotl, .goose:
+            character!.solid
         }
     }
 }
@@ -93,6 +110,14 @@ public struct Rotation: Hashable, Sendable {
     }
 
     init(m: [Double]) { self.m = m }
+
+    /// Grok Bot's x, y, z turn in degrees, made in its y-up space.
+    init(turn: [Double]) { self.init(yaw: turn[1], pitch: turn[0], roll: -turn[2]) }
+
+    /// The Grok Bot turn that makes this rotation.
+    var turn: [Double] {
+        [-atan2(m[7], m[8]), asin(max(-1, min(1, -m[6]))), -atan2(m[3], m[0])].map { $0 * 180 / .pi }
+    }
 
     /// Carries a head facing `from` round to face `to`.
     init(from: HeadGaze, to: HeadGaze) {
@@ -160,6 +185,11 @@ private func section(_ outline: [Point], _ y: Double) -> Double {
 
 func surface(_ solid: Solid, _ x: Double, _ y: Double, _ radii: [Double]) -> (z: Double, normal: Vec3) {
     switch solid {
+    case .pumpkin:
+        let z = Pumpkin.front(x, y)
+        let dx = (Pumpkin.front(x + 0.002, y) - Pumpkin.front(x - 0.002, y)) / 0.004
+        let dy = (Pumpkin.front(x, y + 0.002) - Pumpkin.front(x, y - 0.002)) / 0.004
+        return (z, Vec3(x: -dx, y: -dy, z: 1))
     case .slab(let depth, _): return (depth, Vec3(x: 0, y: 0, z: 1))
     case .inflated(let depth):
         let edge = max(0.01, radiusAtAngle(radii, atan2(y, x)))
@@ -189,40 +219,42 @@ func surface(_ solid: Solid, _ x: Double, _ y: Double, _ radii: [Double]) -> (z:
 }
 
 /// Outline of `sil` as a rotated solid, seen from the front.
-private func projectedRings(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotation) -> [[Point]] {
+private func projectedRings(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotation, smooth: Bool = false) -> [[Point]] {
     let outline = toPoints(sil, 1)
     let center = Point(x: sil.cx, y: sil.cy)
     let base = outline.map { Point(x: $0.x - center.x, y: $0.y - center.y) }
 
-    // Each ring is the outline shrunk towards the centre and set at a depth.
-    var rings: [(shrink: (Point) -> Point, z: Double)] = []
+    // Each ring is the outline scaled towards the centre and set at a depth. A value type keeps the
+    // per-point work a multiply rather than a closure call, which this loop cannot afford.
+    var rings: [(k: Double, z: Double)] = []
     switch solid {
+    case .pumpkin:
+        return [Pumpkin.outline(rotation).map { Point(x: $0.x * sil.sx + sil.cx, y: $0.y * sil.sy + sil.cy) }]
     case .inflated(let depth):
-        for phi in INFLATED_RINGS {
-            let k = cos(phi)
-            rings.append(({ Point(x: $0.x * k, y: $0.y * k) }, depth * sin(phi)))
-        }
+        let steps = 24
+        let angles = smooth ? (0...steps).map { -.pi / 2 + Double($0) * .pi / Double(steps) } : INFLATED_RINGS
+        for phi in angles { rings.append((cos(phi), depth * sin(phi))) }
     case .loft(let depth):
         for i in 0...16 {
             let phi = -.pi / 2 + Double(i) * .pi / 16
-            let k = pow(max(0, cos(phi)), 0.72)
-            rings.append(({ Point(x: $0.x * k, y: $0.y * k) }, depth * sin(phi)))
+            rings.append((pow(max(0, cos(phi)), 0.72), depth * sin(phi)))
         }
     case .slab(let depth, let bevel):
         let core = max(0, depth - bevel)
-        let width = (base.map(\.x).max()! - base.map(\.x).min()!) / 2
-        let height = (base.map(\.y).max()! - base.map(\.y).min()!) / 2
-        let radius = max(0.01, min(width, height))
+        var lowest = base[0].x, highest = base[0].x, top = base[0].y, bottom = base[0].y
+        for p in base {
+            lowest = min(lowest, p.x); highest = max(highest, p.x)
+            top = min(top, p.y); bottom = max(bottom, p.y)
+        }
+        let radius = max(0.01, min((highest - lowest) / 2, (bottom - top) / 2))
         for (side, phis) in [(-1.0, BEVEL_RINGS.reversed()), (1.0, BEVEL_RINGS)] {
             for phi in phis {
-                let k = max(0, 1 - bevel / radius * (1 - cos(phi)))
-                rings.append(({ p in
-                    return Point(x: p.x * k, y: p.y * k)
-                }, side * (core + bevel * sin(phi))))
+                rings.append((max(0, 1 - bevel / radius * (1 - cos(phi))), side * (core + bevel * sin(phi))))
             }
         }
     case .revolved:
-        let top = base.map(\.y).min()!, bottom = base.map(\.y).max()!
+        var top = base[0].y, bottom = base[0].y
+        for p in base { top = min(top, p.y); bottom = max(bottom, p.y) }
         return (0...40).map { row in
             let y = lerp(top + 1e-6, bottom - 1e-6, Double(row) / 40)
             let radius = section(base, y)
@@ -233,13 +265,13 @@ private func projectedRings(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotat
             }
         }
     case .pill:
-        let radius = base.map { abs($0.y) }.max()!
-        let extent = base.map { abs($0.x) }.max()!
+        var radius = 0.0, extent = 0.0
+        for p in base { radius = max(radius, abs(p.y)); extent = max(extent, abs(p.x)) }
         let reach = max(0, extent - radius)
         return (0...40).map { row in
             let x = lerp(-extent, extent, Double(row) / 40)
             let dx = x - min(reach, max(-reach, x))
-            let r = sqrt(max(0, radius * radius - dx * dx))
+            let r = (max(0, radius * radius - dx * dx)).squareRoot()
             return (0..<64).map { i in
                 let angle = Double(i) / 64 * TAU
                 let p = rotation.apply(Vec3(x: x, y: r * cos(angle), z: r * sin(angle)))
@@ -247,13 +279,16 @@ private func projectedRings(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotat
             }
         }
     }
-    return rings.map { ring in
-        base.map { p -> Point in
-            let q = ring.shrink(p)
-            let v = rotation.apply(Vec3(x: q.x, y: q.y, z: ring.z))
-            return Point(x: v.x + center.x, y: v.y + center.y)
+    var mesh = [[Point]](repeating: [], count: rings.count)
+    for (index, ring) in rings.enumerated() {
+        var projected = [Point](repeating: Point(), count: base.count)
+        for (i, p) in base.enumerated() {
+            let v = rotation.apply(Vec3(x: p.x * ring.k, y: p.y * ring.k, z: ring.z))
+            projected[i] = Point(x: v.x + center.x, y: v.y + center.y)
         }
+        mesh[index] = projected
     }
+    return mesh
 }
 
 /// Projected faces retain concave gaps when an extrusion turns edge-on.
@@ -281,48 +316,67 @@ public func solidPath(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotation, s
     return path
 }
 
-public func solidOutline(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotation, scale: Double) -> [Point] {
+public func solidOutline(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotation, scale: Double,
+                         smooth: Bool = false) -> [Point] {
+    if solid == .pumpkin {
+        let outline = Pumpkin.outline(rotation)
+        return stride(from: 0, to: outline.count, by: 2).map {
+            Point(x: (outline[$0].x * sil.sx + sil.cx) * scale,
+                  y: (outline[$0].y * sil.sy + sil.cy) * scale)
+        }
+    }
     let center = Point(x: sil.cx, y: sil.cy)
-    let mesh = projectedRings(sil, solid, rotation).map { ring in
+    let mesh = projectedRings(sil, solid, rotation, smooth: smooth).map { ring in
         ring.map { Point(x: $0.x - center.x, y: $0.y - center.y) }
     }
 
-    // The silhouette of the mesh's union is its farthest edge along each ray from the centre.
-    // Edges are binned by the angles they span, so each ray only tests nearby ones.
-    var bins = [[(Point, Point)]](repeating: [], count: RAYS)
-    func file(_ a: Point, _ b: Point) {
-        func angle(_ p: Point) -> Double { atan2(p.y, p.x) }
-        let near = 1e-6
-        let ra = hypot(a.x, a.y), rb = hypot(b.x, b.y)
+    let rayCount = RAYS
+    // One pass per edge straight into the ray maxima, so there are no per-ray edge lists to build.
+    var cosines = [Double](repeating: 0, count: rayCount)
+    var sines = [Double](repeating: 0, count: rayCount)
+    for i in 0..<rayCount {
+        let angle = Double(i) / Double(rayCount) * TAU
+        cosines[i] = cos(angle)
+        sines[i] = sin(angle)
+    }
+    var best = [Double](repeating: 0, count: rayCount)
+    let near = 1e-6
+    // Each vertex is shared by four edges, so its angle and radius are worked out once per frame.
+    let angles = mesh.map { ring in ring.map { atan2($0.y, $0.x) } }
+    let radii = mesh.map { ring in ring.map { ($0.x * $0.x + $0.y * $0.y).squareRoot() } }
+    let n = mesh[0].count
+    func cast(_ p: Point, _ q: Point, _ angleA: Double, _ ra: Double, _ angleB: Double, _ rb: Double) {
         if ra < near && rb < near { return }
-        let start = ra < near ? angle(b) : angle(a)
-        var span = (rb < near ? angle(a) : angle(b)) - start
+        let start = ra < near ? angleB : angleA
+        var span = (rb < near ? angleA : angleB) - start
         while span > .pi { span -= TAU }
         while span < -.pi { span += TAU }
         let from = start + min(0, span), to = start + max(0, span)
-        let first = Int(floor(from / TAU * Double(RAYS))) - 1
-        let last = Int(floor(to / TAU * Double(RAYS))) + 1
-        for i in first...last { bins[((i % RAYS) + RAYS) % RAYS].append((a, b)) }
-    }
-    let n = mesh[0].count
-    for (k, ring) in mesh.enumerated() {
-        for i in 0..<n {
-            file(ring[i], ring[(i + 1) % n])
-            if k > 0 { file(mesh[k - 1][i], ring[i]) }
-        }
-    }
-    return (0..<RAYS).map { s in
-        let angle = Double(s) / Double(RAYS) * TAU
-        let dx = cos(angle), dy = sin(angle)
-        var best = 0.0
-        for (a, b) in bins[s] {
-            let ex = b.x - a.x, ey = b.y - a.y
+        let first = Int(floor(from / TAU * Double(rayCount))) - 1
+        let last = Int(floor(to / TAU * Double(rayCount))) + 1
+        let ex = q.x - p.x, ey = q.y - p.y
+        for i in first...last {
+            let s = ((i % rayCount) + rayCount) % rayCount
+            let dx = cosines[s], dy = sines[s]
             let den = dx * ey - dy * ex
             if abs(den) < 1e-12 { continue }
-            let t = (a.x * ey - a.y * ex) / den
-            let u = (a.x * dy - a.y * dx) / den
-            if t > best && u >= 0 && u <= 1 { best = t }
+            let t = (p.x * ey - p.y * ex) / den
+            let u = (p.x * dy - p.y * dx) / den
+            if t > best[s] && u >= -1e-9 && u <= 1 + 1e-9 { best[s] = t }
         }
-        return Point(x: (center.x + dx * best) * scale, y: (center.y + dy * best) * scale)
+    }
+    for (k, ring) in mesh.enumerated() {
+        let ringAngles = angles[k], ringRadii = radii[k]
+        for i in 0..<n {
+            let next = (i + 1) % n
+            cast(ring[i], ring[next], ringAngles[i], ringRadii[i], ringAngles[next], ringRadii[next])
+            if k > 0 {
+                cast(mesh[k - 1][i], ring[i], angles[k - 1][i], radii[k - 1][i], ringAngles[i], ringRadii[i])
+            }
+        }
+    }
+    return (0..<rayCount).map { s in
+        let dx = cosines[s], dy = sines[s]
+        return Point(x: (center.x + dx * best[s]) * scale, y: (center.y + dy * best[s]) * scale)
     }
 }

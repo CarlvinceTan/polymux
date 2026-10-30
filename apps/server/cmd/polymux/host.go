@@ -159,7 +159,8 @@ func hostListeners(listen, control string, tailscale bool) (string, string, erro
 		if err != nil || port >= 65535 {
 			return "", "", errors.New("backend port must allow an adjacent controller port")
 		}
-		control = net.JoinHostPort(defaultIP, strconv.Itoa(port+1))
+		// The controller is unauthenticated, so it stays on loopback whatever the backend listens on.
+		control = net.JoinHostPort("127.0.0.1", strconv.Itoa(port+1))
 	}
 	return listen, control, nil
 }

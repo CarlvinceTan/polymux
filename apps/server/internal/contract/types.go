@@ -12,6 +12,7 @@ type Notice struct {
 	Seq            int64  `json:"seq"`
 	ConversationID string `json:"conversationID"`
 	MessageID      string `json:"messageID"`
+	AgentID        string `json:"agentID"`
 	Title          string `json:"title"`
 	CreatedAt      string `json:"createdAt"`
 }
@@ -22,11 +23,34 @@ type NoticePage struct {
 }
 
 type PushDevice struct {
-	ID          string `json:"id"`
-	Token       string `json:"token"`
-	Environment string `json:"environment"`
-	Server      string `json:"server"`
-	Enabled     bool   `json:"enabled"`
+	ID          string   `json:"id"`
+	Token       string   `json:"token"`
+	Environment string   `json:"environment"`
+	Server      string   `json:"server"`
+	Enabled     bool     `json:"enabled"`
+	Muted       []string `json:"muted"`
+}
+
+type ClientState struct {
+	Platform     string   `json:"platform"`
+	Timezone     string   `json:"timezone"`
+	Capabilities []string `json:"capabilities"`
+}
+
+const (
+	ClientStatePlatformIos   = "ios"
+	ClientStatePlatformMacos = "macos"
+)
+
+type ClientRequest struct {
+	ID         string `json:"id"`
+	Capability string `json:"capability"`
+	Input      string `json:"input"`
+}
+
+type ClientResult struct {
+	Output *string `json:"output,omitempty"`
+	Error  *string `json:"error,omitempty"`
 }
 
 type HostState struct {
@@ -41,48 +65,78 @@ type HostPatch struct {
 }
 
 type Settings struct {
-	Revision      int64    `json:"revision"`
-	Appearance    string   `json:"appearance"`
-	SidebarWidth  float64  `json:"sidebarWidth"`
-	VoiceMode     string   `json:"voiceMode"`
-	LiveProvider  string   `json:"liveProvider"`
-	LiveModel     string   `json:"liveModel"`
-	LiveVoice     string   `json:"liveVoice"`
-	TextProvider  string   `json:"textProvider"`
-	TextModel     string   `json:"textModel"`
-	VoicePrompt   string   `json:"voicePrompt"`
-	VoiceLanguage string   `json:"voiceLanguage"`
-	SpeechKeys    []string `json:"speechKeys"`
+	Revision         int64    `json:"revision"`
+	Appearance       string   `json:"appearance"`
+	SidebarWidth     float64  `json:"sidebarWidth"`
+	VoiceMode        string   `json:"voiceMode"`
+	LiveProvider     string   `json:"liveProvider"`
+	LiveModel        string   `json:"liveModel"`
+	LiveVoice        string   `json:"liveVoice"`
+	VoicePrompt      string   `json:"voicePrompt"`
+	VoiceLanguage    string   `json:"voiceLanguage"`
+	SpeechKeys       []string `json:"speechKeys"`
+	DefaultProvider  string   `json:"defaultProvider"`
+	DefaultModel     string   `json:"defaultModel"`
+	DefaultReasoning string   `json:"defaultReasoning"`
 }
+
+const (
+	SettingsDefaultReasoningOff     = "off"
+	SettingsDefaultReasoningMinimal = "minimal"
+	SettingsDefaultReasoningLow     = "low"
+	SettingsDefaultReasoningMedium  = "medium"
+	SettingsDefaultReasoningHigh    = "high"
+	SettingsDefaultReasoningXhigh   = "xhigh"
+	SettingsDefaultReasoningMax     = "max"
+)
 
 type SettingsPatch struct {
-	Appearance    *string  `json:"appearance,omitempty"`
-	SidebarWidth  *float64 `json:"sidebarWidth,omitempty"`
-	VoiceMode     *string  `json:"voiceMode,omitempty"`
-	LiveProvider  *string  `json:"liveProvider,omitempty"`
-	LiveModel     *string  `json:"liveModel,omitempty"`
-	LiveVoice     *string  `json:"liveVoice,omitempty"`
-	TextProvider  *string  `json:"textProvider,omitempty"`
-	TextModel     *string  `json:"textModel,omitempty"`
-	VoicePrompt   *string  `json:"voicePrompt,omitempty"`
-	VoiceLanguage *string  `json:"voiceLanguage,omitempty"`
+	Appearance       *string  `json:"appearance,omitempty"`
+	SidebarWidth     *float64 `json:"sidebarWidth,omitempty"`
+	VoiceMode        *string  `json:"voiceMode,omitempty"`
+	LiveProvider     *string  `json:"liveProvider,omitempty"`
+	LiveModel        *string  `json:"liveModel,omitempty"`
+	LiveVoice        *string  `json:"liveVoice,omitempty"`
+	VoicePrompt      *string  `json:"voicePrompt,omitempty"`
+	VoiceLanguage    *string  `json:"voiceLanguage,omitempty"`
+	DefaultProvider  *string  `json:"defaultProvider,omitempty"`
+	DefaultModel     *string  `json:"defaultModel,omitempty"`
+	DefaultReasoning *string  `json:"defaultReasoning,omitempty"`
 }
 
-type SpeechKey struct {
-	Key string `json:"key"`
-}
+const (
+	SettingsPatchDefaultReasoningOff     = "off"
+	SettingsPatchDefaultReasoningMinimal = "minimal"
+	SettingsPatchDefaultReasoningLow     = "low"
+	SettingsPatchDefaultReasoningMedium  = "medium"
+	SettingsPatchDefaultReasoningHigh    = "high"
+	SettingsPatchDefaultReasoningXhigh   = "xhigh"
+	SettingsPatchDefaultReasoningMax     = "max"
+)
 
 type Agent struct {
-	ID     string        `json:"id"`
-	Name   string        `json:"name"`
-	Role   string        `json:"role"`
-	Model  string        `json:"model"`
-	Active bool          `json:"active"`
-	Avatar *AvatarDesign `json:"avatar,omitempty"`
+	ID        string        `json:"id"`
+	Name      string        `json:"name"`
+	Role      string        `json:"role"`
+	Model     string        `json:"model"`
+	Active    bool          `json:"active"`
+	Avatar    *AvatarDesign `json:"avatar,omitempty"`
+	Provider  string        `json:"provider,omitempty"`
+	Reasoning string        `json:"reasoning,omitempty"`
+	CreatedBy string        `json:"createdBy,omitempty"`
 }
 
+const (
+	AgentReasoningOff     = "off"
+	AgentReasoningMinimal = "minimal"
+	AgentReasoningLow     = "low"
+	AgentReasoningMedium  = "medium"
+	AgentReasoningHigh    = "high"
+	AgentReasoningXhigh   = "xhigh"
+	AgentReasoningMax     = "max"
+)
+
 type Thread struct {
-	LeadAgentID  *string  `json:"leadAgentID,omitempty"`
 	Runs         []Run    `json:"runs"`
 	ID           string   `json:"id"`
 	AgentID      string   `json:"agentID"`
@@ -112,6 +166,17 @@ type Attachment struct {
 	Height        *float64 `json:"height,omitempty"`
 }
 
+const (
+	AttachmentKindImage            = "image"
+	AttachmentKindVideo            = "video"
+	AttachmentKindAudio            = "audio"
+	AttachmentKindHTML             = "html"
+	AttachmentKindFile             = "file"
+	AttachmentIndexingStatePending = "pending"
+	AttachmentIndexingStateReady   = "ready"
+	AttachmentIndexingStateError   = "error"
+)
+
 type Part struct {
 	Kind       string             `json:"kind"`
 	Text       *string            `json:"text,omitempty"`
@@ -124,7 +189,17 @@ type Part struct {
 	AnswerText *string            `json:"answerText,omitempty"`
 	AllowText  *bool              `json:"allowText,omitempty"`
 	Credential *CredentialRequest `json:"credential,omitempty"`
+	Vault      *VaultCard         `json:"vault,omitempty"`
 }
+
+const (
+	PartKindText       = "text"
+	PartKindAttachment = "attachment"
+	PartKindTool       = "tool"
+	PartKindChoice     = "choice"
+	PartKindCredential = "credential"
+	PartKindVault      = "vault"
+)
 
 type ReplyContext struct {
 	MessageID  string      `json:"messageID"`
@@ -135,8 +210,25 @@ type ReplyContext struct {
 	PartIndex  *int64      `json:"partIndex,omitempty"`
 }
 
+const (
+	ReplyContextRoleUser      = "user"
+	ReplyContextRoleAssistant = "assistant"
+	ReplyContextRoleSystem    = "system"
+)
+
+type Reaction struct {
+	Emoji   string  `json:"emoji"`
+	AgentID *string `json:"agentID,omitempty"`
+}
+
+type ReactionRequest struct {
+	Emoji  string `json:"emoji"`
+	Remove bool   `json:"remove"`
+}
+
 type Message struct {
 	RunID     *string       `json:"runID,omitempty"`
+	Error     *Error        `json:"error,omitempty"`
 	ID        string        `json:"id"`
 	ThreadID  string        `json:"threadID"`
 	Role      string        `json:"role"`
@@ -148,7 +240,19 @@ type Message struct {
 	Reply     *ReplyContext `json:"reply,omitempty"`
 	AgentID   *string       `json:"agentID,omitempty"`
 	Mentions  []string      `json:"mentions,omitempty"`
+	Reactions []Reaction    `json:"reactions,omitempty"`
 }
+
+const (
+	MessageRoleUser        = "user"
+	MessageRoleAssistant   = "assistant"
+	MessageRoleSystem      = "system"
+	MessageStatusPending   = "pending"
+	MessageStatusStreaming = "streaming"
+	MessageStatusDone      = "done"
+	MessageStatusError     = "error"
+	MessageStatusSilent    = "silent"
+)
 
 type Error struct {
 	Detail  string `json:"detail,omitempty"`
@@ -178,6 +282,30 @@ type Event struct {
 	Payload        *Activity     `json:"payload,omitempty"`
 }
 
+const (
+	EventTypeMessageStart      = "message.start"
+	EventTypeMessageDelta      = "message.delta"
+	EventTypeMessageToolCall   = "message.tool_call"
+	EventTypeMessageAttachment = "message.attachment"
+	EventTypeMessageError      = "message.error"
+	EventTypeMessageDone       = "message.done"
+	EventTypeMessageReactions  = "message.reactions"
+	EventTypeAgentPresence     = "agent.presence"
+	EventTypeRunStart          = "run.start"
+	EventTypeRunUpdate         = "run.update"
+	EventTypeRunDone           = "run.done"
+	EventTypeToolStart         = "tool.start"
+	EventTypeToolUpdate        = "tool.update"
+	EventTypeToolDone          = "tool.done"
+	EventTypePeerDelivery      = "peer.delivery"
+	EventTypeGroupHandoff      = "group.handoff"
+	EventTypeActivity          = "activity"
+	EventTypeMessageRead       = "message.read"
+	EventTypeMessageEnd        = "message.end"
+	EventTypeContextCompacted  = "context.compacted"
+	EventTypeRunRetrying       = "run.retrying"
+)
+
 type Usage struct {
 	InputTokens  int64 `json:"inputTokens"`
 	OutputTokens int64 `json:"outputTokens"`
@@ -203,6 +331,12 @@ type SearchHit struct {
 	IndexingState *string `json:"indexingState,omitempty"`
 }
 
+const (
+	SearchHitIndexingStatePending = "pending"
+	SearchHitIndexingStateReady   = "ready"
+	SearchHitIndexingStateError   = "error"
+)
+
 type Routine struct {
 	At              string        `json:"at"`
 	NextAt          *string       `json:"nextAt,omitempty"`
@@ -217,6 +351,18 @@ type Routine struct {
 	Crons           []string      `json:"crons,omitempty"`
 	Watch           *RoutineWatch `json:"watch,omitempty"`
 }
+
+const (
+	RoutineStatusPending   = "pending"
+	RoutineStatusActive    = "active"
+	RoutineStatusCancelled = "cancelled"
+	RoutineStatusFinished  = "finished"
+	RoutineStatusPaused    = "paused"
+	RoutineTriggerOnce     = "once"
+	RoutineTriggerInterval = "interval"
+	RoutineTriggerCron     = "cron"
+	RoutineTriggerWatch    = "watch"
+)
 
 type RoutineRun struct {
 	ID         string  `json:"id"`
@@ -266,7 +412,35 @@ type Run struct {
 	Status          string         `json:"status"`
 	StartedAt       *string        `json:"startedAt,omitempty"`
 	Summary         string         `json:"summary"`
+	StatusText      *string        `json:"statusText,omitempty"`
 }
+
+const (
+	RunTriggerMessage     = "message"
+	RunTriggerCreated     = "created"
+	RunTriggerPeer        = "peer"
+	RunTriggerHandoff     = "handoff"
+	RunTriggerRoutine     = "routine"
+	RunTriggerReview      = "review"
+	RunTriggerFollowUp    = "follow_up"
+	RunTriggerTask        = "task"
+	RunTriggerEvent       = "event"
+	RunTriggerChild       = "child"
+	RunActivityPreparing  = "preparing"
+	RunActivityGenerating = "generating"
+	RunActivityTool       = "tool"
+	RunActivityRendering  = "rendering"
+	RunActivityHandoff    = "handoff"
+	RunStatusQueued       = "queued"
+	RunStatusRunning      = "running"
+	RunStatusWaitingInput = "waiting_input"
+	RunStatusWaitingPeer  = "waiting_peer"
+	RunStatusResuming     = "resuming"
+	RunStatusCompleted    = "completed"
+	RunStatusFailed       = "failed"
+	RunStatusCancelled    = "cancelled"
+	RunStatusInterrupted  = "interrupted"
+)
 
 type ToolActivity struct {
 	ID      string  `json:"id"`
@@ -276,6 +450,14 @@ type ToolActivity struct {
 	Summary *string `json:"summary,omitempty"`
 	Output  *string `json:"output,omitempty"`
 }
+
+const (
+	ToolActivityStatusRunning     = "running"
+	ToolActivityStatusCompleted   = "completed"
+	ToolActivityStatusFailed      = "failed"
+	ToolActivityStatusCancelled   = "cancelled"
+	ToolActivityStatusInterrupted = "interrupted"
+)
 
 type PeerDelivery struct {
 	ID             string  `json:"id"`
@@ -290,17 +472,24 @@ type PeerDelivery struct {
 	Hops           *int64  `json:"hops,omitempty"`
 }
 
+const (
+	PeerDeliveryIntentRequest     = "request"
+	PeerDeliveryIntentQuestion    = "question"
+	PeerDeliveryIntentResult      = "result"
+	PeerDeliveryIntentStatus      = "status"
+	PeerDeliveryIntentHandoff     = "handoff"
+	PeerDeliveryIntentFyi         = "fyi"
+	PeerDeliveryStatusQueued      = "queued"
+	PeerDeliveryStatusDelivered   = "delivered"
+	PeerDeliveryStatusCompleted   = "completed"
+	PeerDeliveryStatusFailed      = "failed"
+	PeerDeliveryStatusCancelled   = "cancelled"
+	PeerDeliveryStatusInterrupted = "interrupted"
+)
+
 type ChoiceOption struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
-}
-
-type FocusAnswer struct {
-	OptionID string `json:"optionID"`
-}
-
-type FocusStatus struct {
-	Posted bool `json:"posted"`
 }
 
 type CreateAgentRequest struct {
@@ -309,6 +498,7 @@ type CreateAgentRequest struct {
 	Role        string        `json:"role"`
 	Prompt      string        `json:"prompt"`
 	Model       *string       `json:"model,omitempty"`
+	Provider    *string       `json:"provider,omitempty"`
 	Avatar      *AvatarDesign `json:"avatar,omitempty"`
 	SectionID   *string       `json:"sectionID,omitempty"`
 }
@@ -319,16 +509,47 @@ type AgentProfile struct {
 }
 
 type UpdateAgentRequest struct {
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Prompt string `json:"prompt"`
+	Name      *string `json:"name,omitempty"`
+	Role      *string `json:"role,omitempty"`
+	Prompt    *string `json:"prompt,omitempty"`
+	Provider  *string `json:"provider,omitempty"`
+	Model     *string `json:"model,omitempty"`
+	Reasoning *string `json:"reasoning,omitempty"`
 }
+
+const (
+	UpdateAgentRequestReasoningOff     = "off"
+	UpdateAgentRequestReasoningMinimal = "minimal"
+	UpdateAgentRequestReasoningLow     = "low"
+	UpdateAgentRequestReasoningMedium  = "medium"
+	UpdateAgentRequestReasoningHigh    = "high"
+	UpdateAgentRequestReasoningXhigh   = "xhigh"
+	UpdateAgentRequestReasoningMax     = "max"
+)
 
 type AnimationBlock struct {
 	ID       string  `json:"id"`
 	State    string  `json:"state"`
 	Duration float64 `json:"duration"`
 }
+
+const (
+	AnimationBlockStateIdle     = "idle"
+	AnimationBlockStateThinking = "thinking"
+	AnimationBlockStateWink     = "wink"
+	AnimationBlockStateWide     = "wide"
+	AnimationBlockStateAlert    = "alert"
+	AnimationBlockStateNotify   = "notify"
+	AnimationBlockStateExclaim  = "exclaim"
+	AnimationBlockStateSleep    = "sleep"
+	AnimationBlockStateEgg      = "egg"
+	AnimationBlockStateHexagon  = "hexagon"
+	AnimationBlockStatePlay     = "play"
+	AnimationBlockStateOrbit    = "orbit"
+	AnimationBlockStateBurst    = "burst"
+	AnimationBlockStateComet    = "comet"
+	AnimationBlockStateSwirl    = "swirl"
+)
 
 type AvatarDesign struct {
 	Shape        string           `json:"shape"`
@@ -340,15 +561,168 @@ type AvatarDesign struct {
 	Blocks       []AnimationBlock `json:"blocks"`
 }
 
+const (
+	AvatarDesignShapeCercle         = "cercle"
+	AvatarDesignShapeGalet          = "galet"
+	AvatarDesignShapeSquircle       = "squircle"
+	AvatarDesignShapeCapsule        = "capsule"
+	AvatarDesignShapeTriangle       = "triangle"
+	AvatarDesignShapeHexagone       = "hexagone"
+	AvatarDesignShapeNuage          = "nuage"
+	AvatarDesignShapeGoutte         = "goutte"
+	AvatarDesignShapeStar           = "star"
+	AvatarDesignShapeClover         = "clover"
+	AvatarDesignShapeFlower         = "flower"
+	AvatarDesignShapeBurst          = "burst"
+	AvatarDesignShapePentagon       = "pentagon"
+	AvatarDesignShapeSquare         = "square"
+	AvatarDesignShapeSparkle        = "sparkle"
+	AvatarDesignShapeHeart          = "heart"
+	AvatarDesignShapeTablet         = "tablet"
+	AvatarDesignShapeWedge          = "wedge"
+	AvatarDesignShapeHouse          = "house"
+	AvatarDesignShapePumpkin        = "pumpkin"
+	AvatarDesignShapeApple          = "apple"
+	AvatarDesignShapePear           = "pear"
+	AvatarDesignShapeStrawberry     = "strawberry"
+	AvatarDesignShapeBun            = "bun"
+	AvatarDesignShapeToast          = "toast"
+	AvatarDesignShapeCupcake        = "cupcake"
+	AvatarDesignShapeCat            = "cat"
+	AvatarDesignShapeDog            = "dog"
+	AvatarDesignShapeBear           = "bear"
+	AvatarDesignShapeRabbit         = "rabbit"
+	AvatarDesignShapeFox            = "fox"
+	AvatarDesignShapeHamster        = "hamster"
+	AvatarDesignShapeCapybara       = "capybara"
+	AvatarDesignShapeOtter          = "otter"
+	AvatarDesignShapePig            = "pig"
+	AvatarDesignShapeDeer           = "deer"
+	AvatarDesignShapeSheep          = "sheep"
+	AvatarDesignShapeAlpaca         = "alpaca"
+	AvatarDesignShapeCow            = "cow"
+	AvatarDesignShapeSquirrel       = "squirrel"
+	AvatarDesignShapeTiger          = "tiger"
+	AvatarDesignShapeLion           = "lion"
+	AvatarDesignShapeHedgehog       = "hedgehog"
+	AvatarDesignShapeSeal           = "seal"
+	AvatarDesignShapeBeaver         = "beaver"
+	AvatarDesignShapeGuineaPig      = "guinea_pig"
+	AvatarDesignShapeChinchilla     = "chinchilla"
+	AvatarDesignShapeFerret         = "ferret"
+	AvatarDesignShapeMonkey         = "monkey"
+	AvatarDesignShapeChick          = "chick"
+	AvatarDesignShapeDuck           = "duck"
+	AvatarDesignShapePenguin        = "penguin"
+	AvatarDesignShapeOwl            = "owl"
+	AvatarDesignShapeParrot         = "parrot"
+	AvatarDesignShapeGoose          = "goose"
+	AvatarDesignShapeWhale          = "whale"
+	AvatarDesignShapeBull           = "bull"
+	AvatarDesignShapeMoon           = "moon"
+	AvatarDesignShapeWave           = "wave"
+	AvatarDesignShapeBlossom        = "blossom"
+	AvatarDesignShapeGumdrop        = "gumdrop"
+	AvatarDesignShapePeanut         = "peanut"
+	AvatarDesignShapeSaucer         = "saucer"
+	AvatarDesignShapeBeacon         = "beacon"
+	AvatarDesignShapePlus           = "plus"
+	AvatarDesignShapeMagnet         = "magnet"
+	AvatarDesignShapeAcorn          = "acorn"
+	AvatarDesignShapePebbles        = "pebbles"
+	AvatarDesignShapeCushion        = "cushion"
+	AvatarDesignShapeRing           = "ring"
+	AvatarDesignShapeGem            = "gem"
+	AvatarDesignShapeBanana         = "banana"
+	AvatarDesignShapeCarrot         = "carrot"
+	AvatarDesignShapePizza          = "pizza"
+	AvatarDesignShapeSushi          = "sushi"
+	AvatarDesignShapeIceCream       = "ice_cream"
+	AvatarDesignShapeSun            = "sun"
+	AvatarDesignShapeLeaf           = "leaf"
+	AvatarDesignShapeTree           = "tree"
+	AvatarDesignShapeCactus         = "cactus"
+	AvatarDesignShapeMushroom       = "mushroom"
+	AvatarDesignShapeMountain       = "mountain"
+	AvatarDesignShapeVolcano        = "volcano"
+	AvatarDesignShapeRainbow        = "rainbow"
+	AvatarDesignShapeSnowflake      = "snowflake"
+	AvatarDesignShapeRocket         = "rocket"
+	AvatarDesignShapeRobot          = "robot"
+	AvatarDesignShapeCamera         = "camera"
+	AvatarDesignShapeClock          = "clock"
+	AvatarDesignShapeKey            = "key"
+	AvatarDesignShapeBell           = "bell"
+	AvatarDesignShapeBook           = "book"
+	AvatarDesignShapeTeapot         = "teapot"
+	AvatarDesignShapeLemon          = "lemon"
+	AvatarDesignShapeOrangeFruit    = "orange_fruit"
+	AvatarDesignShapeWatermelon     = "watermelon"
+	AvatarDesignShapeAvocado        = "avocado"
+	AvatarDesignShapeCherry         = "cherry"
+	AvatarDesignShapeCookie         = "cookie"
+	AvatarDesignShapeCheese         = "cheese"
+	AvatarDesignShapeEgg            = "egg"
+	AvatarDesignShapeCandy          = "candy"
+	AvatarDesignShapeDonut          = "donut"
+	AvatarDesignShapeTulip          = "tulip"
+	AvatarDesignShapeRose           = "rose"
+	AvatarDesignShapeSprout         = "sprout"
+	AvatarDesignShapeFern           = "fern"
+	AvatarDesignShapePinecone       = "pinecone"
+	AvatarDesignShapeShell          = "shell"
+	AvatarDesignShapeCoral          = "coral"
+	AvatarDesignShapeCrystal        = "crystal"
+	AvatarDesignShapeComet          = "comet"
+	AvatarDesignShapePlanet         = "planet"
+	AvatarDesignShapeMug            = "mug"
+	AvatarDesignShapeLantern        = "lantern"
+	AvatarDesignShapeGift           = "gift"
+	AvatarDesignShapePencil         = "pencil"
+	AvatarDesignShapePaintbrush     = "paintbrush"
+	AvatarDesignShapeUmbrella       = "umbrella"
+	AvatarDesignShapeBackpack       = "backpack"
+	AvatarDesignShapeHeadphones     = "headphones"
+	AvatarDesignShapeGuitar         = "guitar"
+	AvatarDesignShapeTelescope      = "telescope"
+	AvatarDesignColorEncre          = "encre"
+	AvatarDesignColorBrun           = "brun"
+	AvatarDesignColorRouge          = "rouge"
+	AvatarDesignColorOrange         = "orange"
+	AvatarDesignColorAmbre          = "ambre"
+	AvatarDesignColorVert           = "vert"
+	AvatarDesignColorTurquoise      = "turquoise"
+	AvatarDesignColorBleu           = "bleu"
+	AvatarDesignColorViolet         = "violet"
+	AvatarDesignColorRose           = "rose"
+	AvatarDesignColorGris           = "gris"
+	AvatarDesignColorCreme          = "creme"
+	AvatarDesignExpressionNeutre    = "neutre"
+	AvatarDesignExpressionAttentif  = "attentif"
+	AvatarDesignExpressionSurpris   = "surpris"
+	AvatarDesignExpressionExcite    = "excite"
+	AvatarDesignExpressionHeureux   = "heureux"
+	AvatarDesignExpressionHilare    = "hilare"
+	AvatarDesignExpressionColere    = "colere"
+	AvatarDesignExpressionTriste    = "triste"
+	AvatarDesignExpressionEffraye   = "effraye"
+	AvatarDesignExpressionMefiant   = "mefiant"
+	AvatarDesignExpressionConfus    = "confus"
+	AvatarDesignExpressionCurieux   = "curieux"
+	AvatarDesignExpressionFier      = "fier"
+	AvatarDesignExpressionTimide    = "timide"
+	AvatarDesignExpressionBlase     = "blase"
+	AvatarDesignExpressionSomnolent = "somnolent"
+)
+
 type DeleteResponse struct {
 	Deleted bool `json:"deleted"`
 }
 
 type CreateThreadRequest struct {
-	LeadAgentID *string  `json:"leadAgentID,omitempty"`
-	AgentIDs    []string `json:"agentIDs"`
-	Title       *string  `json:"title,omitempty"`
-	SectionID   *string  `json:"sectionID,omitempty"`
+	AgentIDs  []string `json:"agentIDs"`
+	Title     *string  `json:"title,omitempty"`
+	SectionID *string  `json:"sectionID,omitempty"`
 }
 
 type VoiceRequest struct {
@@ -361,11 +735,10 @@ type VoiceResponse struct {
 }
 
 type UpdateThreadRequest struct {
-	LeadAgentID *string  `json:"leadAgentID,omitempty"`
-	AgentIDs    []string `json:"agentIDs,omitempty"`
-	Title       *string  `json:"title,omitempty"`
-	Pinned      *bool    `json:"pinned,omitempty"`
-	PinOrder    *float64 `json:"pinOrder,omitempty"`
+	AgentIDs []string `json:"agentIDs,omitempty"`
+	Title    *string  `json:"title,omitempty"`
+	Pinned   *bool    `json:"pinned,omitempty"`
+	PinOrder *float64 `json:"pinOrder,omitempty"`
 }
 
 type Section struct {
@@ -379,9 +752,10 @@ type Section struct {
 }
 
 type AgentConfiguration struct {
-	Workspace string   `json:"workspace"`
-	Tools     []string `json:"tools"`
-	Skills    []string `json:"skills"`
+	Workspace     string   `json:"workspace"`
+	Tools         []string `json:"tools"`
+	Skills        []string `json:"skills"`
+	BundledSkills []string `json:"bundledSkills,omitempty"`
 }
 
 type ConfigurationPatch struct {
@@ -441,7 +815,6 @@ type Activity struct {
 	IconOrAgentID string   `json:"iconOrAgentID"`
 	At            string   `json:"at"`
 	AgentIDs      []string `json:"agentIDs,omitempty"`
-	MessageIDs    []string `json:"messageIDs,omitempty"`
 }
 
 type ChoiceAnswer struct {
@@ -450,20 +823,189 @@ type ChoiceAnswer struct {
 }
 
 type CredentialRequest struct {
-	Name   string `json:"name"`
-	Label  string `json:"label"`
-	Origin string `json:"origin"`
-	Header string `json:"header"`
-	Scheme string `json:"scheme"`
-	Status string `json:"status"`
+	Name      string   `json:"name"`
+	Label     string   `json:"label"`
+	Kind      string   `json:"kind"`
+	Origin    string   `json:"origin"`
+	Origins   []string `json:"origins,omitempty"`
+	Header    string   `json:"header"`
+	Scheme    string   `json:"scheme"`
+	ExpiresAt *int64   `json:"expiresAt,omitempty"`
+	Ephemeral *bool    `json:"ephemeral,omitempty"`
+	Status    string   `json:"status"`
 }
+
+const (
+	CredentialRequestKindApi       = "api"
+	CredentialRequestKindSsh       = "ssh"
+	CredentialRequestStatusPending = "pending"
+	CredentialRequestStatusSaved   = "saved"
+	CredentialRequestStatusSkipped = "skipped"
+)
 
 type CredentialAnswer struct {
 	Value *string `json:"value,omitempty"`
 	Skip  bool    `json:"skip"`
 }
 
+type VaultCard struct {
+	Action  string  `json:"action"`
+	ItemID  string  `json:"itemID"`
+	Title   string  `json:"title"`
+	Kind    string  `json:"kind"`
+	URL     string  `json:"url"`
+	Path    *string `json:"path,omitempty"`
+	KeyPath *string `json:"keyPath,omitempty"`
+	Status  string  `json:"status"`
+}
+
+const (
+	VaultCardActionEdit    = "edit"
+	VaultCardActionImport  = "import"
+	VaultCardStatusPending = "pending"
+	VaultCardStatusDone    = "done"
+)
+
+type VaultImport struct {
+	Added   int64 `json:"added"`
+	Skipped int64 `json:"skipped"`
+}
+
+type VaultStatus struct {
+	Created    bool   `json:"created"`
+	Available  bool   `json:"available"`
+	Protection string `json:"protection"`
+}
+
+type VaultCode struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+	Used  bool   `json:"used"`
+}
+
+type VaultItem struct {
+	ID       string            `json:"id"`
+	Kind     string            `json:"kind"`
+	Title    string            `json:"title"`
+	URL      string            `json:"url"`
+	Fields   map[string]string `json:"fields"`
+	Codes    []VaultCode       `json:"codes"`
+	Revision int64             `json:"revision"`
+	Removed  []string          `json:"removed"`
+}
+
+const (
+	VaultItemKindLogin    = "login"
+	VaultItemKindApi      = "api"
+	VaultItemKindCard     = "card"
+	VaultItemKindTotp     = "totp"
+	VaultItemKindNote     = "note"
+	VaultItemKindRecovery = "recovery"
+	VaultItemKindWifi     = "wifi"
+	VaultItemKindPasskey  = "passkey"
+)
+
+type VaultSummary struct {
+	ID       string   `json:"id"`
+	Kind     string   `json:"kind"`
+	Title    string   `json:"title"`
+	Origin   string   `json:"origin"`
+	Fields   []string `json:"fields"`
+	Revision int64    `json:"revision"`
+}
+
+type VaultBrowser struct {
+	Endpoint string `json:"endpoint"`
+}
+
 type RoutineWatch struct {
 	URL          string   `json:"url"`
 	JsonPointers []string `json:"jsonPointers,omitempty"`
+}
+
+type ProviderModel struct {
+	ID            string   `json:"id"`
+	Tags          []string `json:"tags"`
+	Enabled       bool     `json:"enabled"`
+	ContextWindow int64    `json:"contextWindow,omitempty"`
+}
+
+type Provider struct {
+	ID            string            `json:"id"`
+	Type          string            `json:"type"`
+	Name          string            `json:"name"`
+	BaseURL       string            `json:"baseURL"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	SessionHeader string            `json:"sessionHeader,omitempty"`
+	Status        string            `json:"status,omitempty"`
+	KeyHint       string            `json:"keyHint,omitempty"`
+	Enabled       bool              `json:"enabled"`
+	Order         int               `json:"order"`
+	Models        []ProviderModel   `json:"models"`
+}
+
+type ProviderOption struct {
+	Type         string `json:"type"`
+	Name         string `json:"name"`
+	Auth         string `json:"auth"`
+	Label        string `json:"label"`
+	Subscription bool   `json:"subscription"`
+}
+
+const (
+	ProviderOptionAuthOauth  = "oauth"
+	ProviderOptionAuthApiKey = "api_key"
+)
+
+type LoginChoice struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type LoginPrompt struct {
+	ID          int           `json:"id"`
+	Type        string        `json:"type"`
+	Message     string        `json:"message"`
+	Placeholder string        `json:"placeholder,omitempty"`
+	Options     []LoginChoice `json:"options,omitempty"`
+}
+
+const (
+	LoginPromptTypeText       = "text"
+	LoginPromptTypeSecret     = "secret"
+	LoginPromptTypeManualCode = "manual_code"
+	LoginPromptTypeSelect     = "select"
+)
+
+type LoginEvent struct {
+	Type            string `json:"type"`
+	Message         string `json:"message,omitempty"`
+	URL             string `json:"url,omitempty"`
+	Instructions    string `json:"instructions,omitempty"`
+	UserCode        string `json:"userCode,omitempty"`
+	VerificationUri string `json:"verificationUri,omitempty"`
+}
+
+const (
+	LoginEventTypeInfo       = "info"
+	LoginEventTypeAuthURL    = "auth_url"
+	LoginEventTypeDeviceCode = "device_code"
+	LoginEventTypeProgress   = "progress"
+)
+
+type ProviderLogin struct {
+	ID       string       `json:"id"`
+	Revision int          `json:"revision"`
+	Events   []LoginEvent `json:"events"`
+	Prompt   *LoginPrompt `json:"prompt,omitempty"`
+	Done     bool         `json:"done"`
+	Error    string       `json:"error,omitempty"`
+	Provider *Provider    `json:"provider,omitempty"`
+}
+
+type MCPStatus struct {
+	Name      string   `json:"name"`
+	Connected bool     `json:"connected"`
+	Tools     []string `json:"tools"`
 }

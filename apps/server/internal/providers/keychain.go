@@ -25,6 +25,15 @@ func NewKeychain(dir string) *Keychain {
 	return &Keychain{Dir: dir}
 }
 
+// account scopes a provider's Keychain item to this server's data directory.
+func (k *Keychain) account(id string) string {
+	dir, err := filepath.Abs(k.Dir)
+	if err != nil {
+		dir = k.Dir
+	}
+	return fmt.Sprintf("%x/%s", sha256.Sum256([]byte(dir)), id)
+}
+
 func (k *Keychain) file(id string) string {
 	return filepath.Join(k.Dir, fmt.Sprintf("%x", sha256.Sum256([]byte(Service+"/"+id))))
 }
@@ -47,7 +56,7 @@ func (k *Keychain) Set(id, key string) error {
 		if strings.ContainsAny(id, "\"\\\r\n") {
 			return fmt.Errorf("invalid keychain account")
 		}
-		_, err := security(fmt.Sprintf("add-generic-password -U -s %s -a \"%s\" -w \"%s\"\n", Service, id, hex.EncodeToString([]byte(key))), "-i")
+		_, err := security(fmt.Sprintf("add-generic-password -U -s %s -a \"%s\" -w \"%s\"\n", Service, k.account(id), hex.EncodeToString([]byte(key))), "-i")
 		return err
 	}
 	// Off-macOS hosts have no Keychain; the owner-only file is the documented fallback.
@@ -59,9 +68,9 @@ func (k *Keychain) Set(id, key string) error {
 
 func (k *Keychain) Get(id string) (string, error) {
 	if runtime.GOOS == "darwin" {
-		value, err := security("", "find-generic-password", "-s", Service, "-a", id, "-w")
+		value, err := security("", "find-generic-password", "-s", Service, "-a", k.account(id), "-w")
 		if err != nil {
-			return "", err
+			return k.migrate(id)
 		}
 		data, err := hex.DecodeString(value)
 		return string(data), err
@@ -72,8 +81,27 @@ func (k *Keychain) Get(id string) (string, error) {
 
 func (k *Keychain) Delete(id string) error {
 	if runtime.GOOS == "darwin" {
-		_, err := security("", "delete-generic-password", "-s", Service, "-a", id)
+		_, err := security("", "delete-generic-password", "-s", Service, "-a", k.account(id))
+		// Also remove a legacy unscoped item so a deleted key can't come back through migrate.
+		security("", "delete-generic-password", "-s", Service, "-a", id)
 		return err
 	}
 	return os.Remove(k.file(id))
+}
+
+// migrate moves a secret saved before items were scoped by data directory.
+func (k *Keychain) migrate(id string) (string, error) {
+	value, err := security("", "find-generic-password", "-s", Service, "-a", id, "-w")
+	if err != nil {
+		return "", err
+	}
+	data, err := hex.DecodeString(value)
+	if err != nil {
+		return "", err
+	}
+	if err := k.Set(id, string(data)); err != nil {
+		return "", err
+	}
+	security("", "delete-generic-password", "-s", Service, "-a", id)
+	return string(data), nil
 }

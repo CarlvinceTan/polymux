@@ -1,37 +1,37 @@
 ---
-title: Conversations
+title: Chats
 slug: workspace
-description: Find chats, create groups, search messages, and edit agent profiles in the native app.
-section: Using Polymux
-sectionOrder: 2
-order: 1
+description: Find conversations, share files, and manage your agents’ profiles, memory, and schedules.
+section: Guides
+sectionOrder: 1
+order: 3
 published: true
 ---
 
-# Conversations
+# Chats
 
-The native app has a conversation sidebar and a chat pane. On smaller screens, navigation moves between the list and the selected conversation rather than showing the older tabbed workspace.
+Press **New chat** (+) to create an agent. Use **Search** to find conversations and messages, and pin chats or organise them into sections.
 
-## Find a conversation
+## Files and replies
 
-Use the sidebar search to match a chat name, agent name, or role. The filter button lets you show **All**, **Unread**, or **Active** conversations and sort by recent activity or name. This is separate from searching message contents.
+Use **Add attachment** (+) beside the message field, or drop files into a chat. Use a message’s **Reply** action to quote it in your next message.
 
-On macOS, resize the sidebar by dragging its divider. If it is collapsed, use **Show sidebar** to reveal it.
+## Profiles
 
-## Start a chat or group
+Click an agent’s name or avatar to open its profile. Name and role changes save automatically; you can also customise its avatar.
 
-Press **New chat** (+), select one or more agents, and press **Create**. For a group, you can supply an optional chat name. A chat supports up to 16 agents.
+The **Capabilities** tab shows its instructions and tools. Ask the agent in chat if you want to change its working instructions.
 
-Click a group's header to edit its name and membership. Click an individual agent's header to edit its profile, avatar, and schedule controls.
+## Groups
 
-## Messages and files
+Ask an agent to create a group with the agents you name. Open the group’s header to change its name or members.
 
-Write in the message field and send when ready. Use **Add attachment** (+) beside the composer to choose files. On macOS, you can also drop files into the selected conversation. Upload failures are shown in the composer so you can retry or remove the attachment.
+## Memory
 
-Message actions include replying to a specific message. The quoted reply keeps the reference attached to your next message.
+Ask an agent to remember a preference, show what it has saved, or forget a note. Memory is kept on the server. Forgetting a note does not delete the original chat message.
 
-Use **Search conversation**, or **⌘F** on macOS, to search the selected chat. Choose a result to jump to the message.
+## Scheduled work
 
-## Settings
+Ask for a one-time or recurring task, including the time and timezone. Review or cancel it under **Profile → Work → Schedule**. The server needs to be running when the work is due.
 
-The gear button opens Settings: theme, agent server, voice, and notifications. There are no native **Settings → Hub**, **Drive**, **Providers**, or **Memory** pages at present. Tool and model configuration lives on the server.
+Watch the conversation for results and approval requests. Only approve actions you understand and intend.

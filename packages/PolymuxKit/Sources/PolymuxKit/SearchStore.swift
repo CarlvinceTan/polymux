@@ -23,22 +23,28 @@ public final class SearchStore {
         generation += 1
         let current = generation
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { results = []; isSearching = false; return }
+        error = nil
+        guard !query.isEmpty else { results = []; isSearching = false; isOffline = false; return }
         isSearching = true
         defer { if current == generation { isSearching = false } }
+        let key = "chat-search/" + threadID + "/" + query
+        let threadID = threadID
+        let saved: [SearchHit] = await cacheActor.snapshot(key) ?? []
+        let local = (try? await cacheActor.call { try $0.search(threadID: threadID, query: query) }) ?? []
+        guard current == generation, !Task.isCancelled else { return }
+        let ids = Set(saved.map(\.message.id))
+        results = saved + local.filter { !ids.contains($0.message.id) }
         do {
+            try await Task.sleep(for: .milliseconds(250))
             let results = try await client.search(threadID: threadID, query: query)
-            guard current == generation else { return }
+            guard current == generation, !Task.isCancelled else { return }
             self.results = results
             isOffline = false
-            error = nil
+            try? await cacheActor.call { try $0.merge(results.map(\.message)) }
+            await cacheActor.saveSnapshot(key, results)
         } catch {
-            guard current == generation else { return }
-            do {
-                results = try await cacheActor.call { try $0.search(threadID: threadID, query: query) }
-                isOffline = true
-                self.error = nil
-            } catch { self.error = error.localizedDescription }
+            guard current == generation, !Task.isCancelled else { return }
+            isOffline = error.isOffline
         }
     }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {loadProductFeatures} from '../scripts/product-content.mjs';
+import {loadProductFeatures} from '../scripts/content.ts';
 
 test('product features are grouped, unique, and written for people', () => {
   const features = loadProductFeatures();
@@ -14,6 +14,6 @@ test('product features are grouped, unique, and written for people', () => {
     assert.ok(feature.intro.length >= 120);
     assert.equal(feature.benefits.length, 3);
     assert.equal(feature.steps.length, 3);
-    assert.match(feature.docsPath, /^\/docs\/.+\/$/);
+    assert.match(feature.docsPath, /^\/docs\/[a-z0-9-]+\/(?:#[a-z0-9-]+)?$/);
   }
 });

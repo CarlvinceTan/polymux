@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -27,32 +28,11 @@ import (
 const htmlLimit = 1 << 20
 
 // htmlPrompt is the model-facing contract for card markup.
-const htmlPrompt = `Display one self-contained interactive HTML card inside the message bubble. Polymux owns the outer bubble, its rounded corners, and clipping; write edge-to-edge inner content only.
+const htmlPrompt = `Display one self-contained HTML card inside the message bubble: a visualisation, a small tool, a simulation, a game, or an interactive answer. Cards are sandboxed mini-apps: canvas, WebGL, SVG, animation, Web Audio, Web Workers and WebAssembly all work; network and browser storage don't. Write edge-to-edge inner content only (no outer wrapper, margins, radius or shadow); pad your own content, 16px is typical. Inline CSS and JS only; images are data: URLs; external URLs, links, forms, popups and CDNs are blocked. A styled kit and Chart.js 4 are preloaded: read the html-cards skill for its classes, colour tokens and chart rules before building anything beyond plain text.
 
-Canvas
-- No outer card wrapper, body margins, outer radius, or outer drop shadow. html/body background, padding, and gradients are fine.
-- Inline CSS and JS only; images are data: URLs. External URLs, links, form submissions, popups, imports, and CDNs are blocked.
-- Put one inline <style> and one inline <script> last. LiquidGlass loads after your markup, so run setup that reads component properties inside a DOMContentLoaded listener.
-- To let the user answer you, call polymuxSend('Week') from a click or change handler: Polymux sends that text to you as the user's next message, so make it self-contained, such as 'Focus: week'.
-- Keep ids unique; write text with textContent; never replace a component's innerHTML.
+polymuxSend(textOrJSON) from a click or change handler sends the user's reply to this card (one per gesture, under 16 KB; sends without a real gesture are ignored). polymuxSave(value) keeps up to 64 KB of JSON state; restore from polymuxState when the card is shown again.
 
-Components (preloaded, theme-aware; not native SwiftUI views)
-- <lg-button>Save</lg-button> action; tone="clear|tinted|light", disabled; native click. To change a label, update a nested <span id> or set the button's textContent.
-- <lg-switch checked>Notify</lg-switch> boolean; .checked; native change.
-- <lg-slider value="40" min="0" max="100" step="1" label="Volume"></lg-slider> number; .value; native input and change.
-- <lg-segmented value="week" label="Range"><button value="day">Day</button><button value="week">Week</button></lg-segmented> picker with two to four direct <button value> options; .value; change with detail.value.
-- <lg-panel> insets a frosted group; never the card's outer wrapper; on an image, pass style="--lg-surface:transparent" so controls stay glassy.
-- Page-level only, do not use: lg-navbar, lg-menubar, lg-menu, lg-dock, lg-lens, toasts, createGlass. Other fields use plain input, select, or textarea.
-
-Layout
-- Controls in .row (12px gap, wraps) or .stack (12px vertical gap); .muted dims secondary text; headings and lists are styled.
-- Glass copies the surface behind it: the card canvas already provides the window colour, so controls read as glass without setup. If you paint your own background or art, mark that element with data-lg-backdrop (data-lg-backdrop="img" refracts an image inside) and keep the controls inside it.
-- Theme tokens (--lg-accent, --lg-surface, --lg-tint, --lg-track) can be overridden inline; prefer the defaults.
-
-Size
-- width 44-550 and height 44-400 CSS px. Omit width to size the card to its content up to 550; declare a width only when the layout needs a fixed viewport. Omit height to measure up to 400, then the card scrolls internally. Phones can narrow a requested width, so avoid fixed vh/vw and keep layouts responsive.
-
-Example: <style>#card{display:grid;gap:12px;padding:16px}</style><div id="card"><h3>Weekly focus</h3><p class="muted"><span id="out">4</span> h planned</p><lg-slider label="Hours" value="4" min="0" max="12"></lg-slider><div class="row"><lg-button>Save</lg-button></div></div><script>const s=document.querySelector('lg-slider'),o=document.getElementById('out');s.addEventListener('input',()=>{o.textContent=s.value;});document.querySelector('lg-button').addEventListener('click',()=>polymuxSend('Hours: '+s.value));</script>
+Size: width 44-550, height 44-400 CSS px; omit either to measure the content. Keep layouts responsive; phones may narrow the width.
 
 The tool returns a receipt only; never repeat the HTML as message text.`
 
@@ -184,7 +164,7 @@ func (t *htmlTool) Execute(ctx context.Context, callID string, params json.RawMe
 		return empty, fmt.Errorf("write visual card: %w", err)
 	}
 	text := htmlText(args.HTML)
-	a = contract.Attachment{ID: id, Kind: "html", Name: name, MimeType: "text/html", Size: int64(len(args.HTML)), URL: "/attachments/" + id + "/content", IndexingState: "ready", ExtractedText: &text, Width: width, Height: height}
+	a = contract.Attachment{ID: id, Kind: contract.AttachmentKindHTML, Name: name, MimeType: "text/html", Size: int64(len(args.HTML)), URL: "/attachments/" + id + "/content", IndexingState: contract.AttachmentIndexingStateReady, ExtractedText: &text, Width: width, Height: height}
 	if err := ctx.Err(); err != nil {
 		os.Remove(path)
 		return empty, err
@@ -214,23 +194,11 @@ func sameDimension(a, b *float64) bool {
 	return *a == *b
 }
 
-// cardControls are the Liquid Glass components a card may use.
-var cardControls = map[string]bool{
-	"lg-button": true, "lg-switch": true, "lg-slider": true, "lg-segmented": true, "lg-panel": true,
-}
-
-// cardPage components only work on full pages, not in a card frame.
-var cardPage = map[string]bool{
-	"lg-navbar": true, "lg-menubar": true, "lg-menu": true, "lg-dock": true, "lg-lens": true, "lg-toast": true,
-}
-
 // cardBanned elements cannot load or navigate inside a card.
 var cardBanned = map[string]bool{
 	"link": true, "base": true, "iframe": true, "frame": true, "frameset": true,
 	"object": true, "embed": true, "applet": true, "portal": true,
 }
-
-const cardList = "<lg-button>, <lg-switch>, <lg-slider>, <lg-segmented>, or <lg-panel>"
 
 // cardIssues reports card markup that would fail silently at render time.
 func cardIssues(source string) []string {
@@ -251,12 +219,8 @@ func cardIssues(source string) []string {
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
 			tag := n.Data
-			switch {
-			case cardControls[tag]:
-			case cardPage[tag]:
-				report("<" + tag + "> is page-level; use " + cardList)
-			case strings.HasPrefix(tag, "lg-"):
-				report("unknown <" + tag + ">; use " + cardList)
+			if strings.HasPrefix(tag, "lg-") {
+				report("<" + tag + "> does not exist; use plain HTML controls from the kit")
 			}
 			if cardBanned[tag] {
 				report("<" + tag + "> is blocked in cards")
@@ -319,20 +283,21 @@ func cardIssues(source string) []string {
 						report("style has an external url(); inline data: URLs only")
 					}
 				}
-			case "lg-segmented":
+			}
+			if hasClass(n, "segmented") {
 				options := 0
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
 					if c.Type != html.ElementNode {
 						continue
 					}
 					if c.Data != "button" {
-						report("<lg-segmented> options must be direct <button> children")
+						report(".segmented options must be direct <button> children")
 						continue
 					}
 					options++
 				}
 				if options < 2 {
-					report("<lg-segmented> needs two or more <button value> options")
+					report(".segmented needs two or more <button value> options")
 				}
 			}
 		}
@@ -342,6 +307,15 @@ func cardIssues(source string) []string {
 	}
 	walk(root)
 	return issues
+}
+
+func hasClass(n *html.Node, name string) bool {
+	for _, a := range n.Attr {
+		if a.Key == "class" && slices.Contains(strings.Fields(a.Val), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // cssExternal reports an external resource in CSS, which the card sandbox blocks.

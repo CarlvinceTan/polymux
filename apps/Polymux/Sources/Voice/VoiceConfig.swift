@@ -17,11 +17,11 @@ struct VoiceConfig: Equatable {
 
     init(settings: Settings) {
         mode = VoiceMode(rawValue: settings.voiceMode) ?? .pipeline
-        provider = mode == .live ? settings.liveProvider : settings.textProvider
-        model = mode == .live ? settings.liveModel : settings.textModel
-        voice = settings.liveVoice
-        prompt = settings.voicePrompt + "\nAlways speak \(Self.language(settings.voiceLanguage))."
-        hasKey = settings.speechKeys.contains(provider)
+        provider = mode == .live ? settings.liveProvider : ""
+        model = mode == .live ? settings.liveModel : ""
+        voice = mode == .live ? settings.liveVoice : ""
+        prompt = mode == .live ? settings.voicePrompt + "\nAlways speak \(Self.language(settings.voiceLanguage))." : ""
+        hasKey = mode == .live && settings.speechKeys.contains(provider)
     }
 
     // An empty code follows the system language.
@@ -31,6 +31,7 @@ struct VoiceConfig: Equatable {
     }
 
     func session(client: APIClient, reply: any VoiceReply, agent: String) -> any VoiceSession {
+        if mode == .pipeline { return VoiceStore(reply: reply) }
         let providerID = provider
         let hasKey = hasKey
         let key: () throws -> String = {
@@ -38,15 +39,12 @@ struct VoiceConfig: Equatable {
             return ""
         }
         let options = LiveOptions(model: model, voice: voice, instructions: prompt.replacingOccurrences(of: "{target}", with: agent))
-        if mode == .pipeline {
-            return VoiceStore(reply: Spokesperson(options: options, delegate: reply, makeProvider: {
-                guard providerID == "gemini" else { throw LiveFailure.configuration }
-                return GeminiText(client: client)
-            }, key: key))
-        }
         return LiveStore(options: options, reply: reply, makeProvider: {
-            guard providerID == "gemini" else { throw LiveFailure.configuration }
-            return GeminiLive(client: client)
+            switch providerID {
+            case "gemini": return GeminiLive(client: client)
+            case "openai": return OpenAIRealtime(client: client)
+            default: throw LiveFailure.configuration
+            }
         }, key: key)
     }
 }

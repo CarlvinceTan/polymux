@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,40 +12,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type speechTransport func(*http.Request) (*http.Response, error)
-
-func (f speechTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestSpeechTextUsesServerKeyAndModel(t *testing.T) {
-	t.Parallel()
-	s := settingsAPI(t)
-	settingsRequest(t, s, "PUT", "/settings/keys/gemini", `{"key":"test-only-secret"}`, 200)
-	settingsRequest(t, s, "PATCH", "/settings", `{"textModel":"models/server-text"}`, 200)
-	answer := `{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}`
-	s.speechHTTP = &http.Client{Transport: speechTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != geminiHost || r.URL.Scheme != "https" || r.URL.Path != "/v1beta/models/server-text:generateContent" || r.URL.RawQuery != "" {
-			t.Error("speech did not use the fixed provider and server model")
-		}
-		if r.Header.Get("x-goog-api-key") != "test-only-secret" {
-			t.Error("server key missing")
-		}
-		data, _ := io.ReadAll(r.Body)
-		if string(data) != `{"contents":[]}` {
-			t.Error("speech body changed")
-		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(answer))}, nil
-	})}
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest("POST", "/speech/text", strings.NewReader(`{"contents":[]}`)))
-	if w.Code != 200 || w.Body.String() != answer || w.Header().Get("Cache-Control") != "no-store" {
-		t.Fatal("speech relay failed")
-	}
-}
-
 func TestSpeechFailuresDoNotExposeCredentials(t *testing.T) {
 	t.Parallel()
 	s := settingsAPI(t)
-	for _, path := range []string{"/speech/text", "/speech/live"} {
+	for _, path := range []string{"/speech/live"} {
 		method := "POST"
 		if path == "/speech/live" {
 			method = "GET"
@@ -58,68 +26,12 @@ func TestSpeechFailuresDoNotExposeCredentials(t *testing.T) {
 			t.Fatal("missing key not actionable")
 		}
 	}
-	settingsRequest(t, s, "PUT", "/settings/keys/gemini", `{"key":"test-only-secret"}`, 200)
-	for _, test := range []struct {
-		name   string
-		status int
-		body   string
-		err    error
-	}{
-		{"upstream error", 0, "", fmt.Errorf("authenticated URL test-only-secret")},
-		{"provider error", 401, `{"error":"test-only-secret"}`, nil},
-		{"depleted credits", 429, `{"error":"credits depleted for test-only-secret"}`, nil},
-		{"invalid JSON", 200, "broken", nil},
-		{"oversized", 200, strings.Repeat(" ", (8<<20)+1), nil},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			s.speechHTTP = &http.Client{Transport: speechTransport(func(*http.Request) (*http.Response, error) {
-				if test.err != nil {
-					return nil, test.err
-				}
-				return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(test.body))}, nil
-			})}
-			w := httptest.NewRecorder()
-			s.ServeHTTP(w, httptest.NewRequest("POST", "/speech/text", strings.NewReader(`{}`)))
-			if w.Code != 502 || strings.Contains(w.Body.String(), "test-only-secret") {
-				t.Fatal("provider error leaked credentials or succeeded")
-			}
-			if test.name == "depleted credits" && !strings.Contains(w.Body.String(), "speech_credits") {
-				t.Fatal("billing failure lost its safe error category")
-			}
-		})
-	}
-}
-
-func TestSpeechTextRejectsInvalidBodiesBeforeCallingProvider(t *testing.T) {
-	t.Parallel()
-	s := settingsAPI(t)
-	if _, err := s.settings.SetKey("test-only-secret"); err != nil {
-		t.Fatal(err)
-	}
-	s.speechHTTP = &http.Client{Transport: speechTransport(func(*http.Request) (*http.Response, error) {
-		t.Error("invalid speech body reached provider")
-		return nil, fmt.Errorf("unexpected provider call")
-	})}
-	for _, test := range []struct{ name, body string }{
-		{"empty", ""}, {"null", "null"}, {"array", "[]"}, {"broken", "{"},
-		{"oversized", `{"contents":"` + strings.Repeat("x", 1<<20) + `"}`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			s.ServeHTTP(w, httptest.NewRequest("POST", "/speech/text", strings.NewReader(test.body)))
-			if w.Code != http.StatusBadRequest {
-				t.Fatalf("invalid body returned %d", w.Code)
-			}
-		})
-	}
 }
 
 func TestSpeechLiveSanitizesBillingCloseReason(t *testing.T) {
 	t.Parallel()
 	s := settingsAPI(t)
-	if _, err := s.settings.SetKey("test-only-secret"); err != nil {
-		t.Fatal(err)
-	}
+	connectGemini(t, s, "test-only-secret")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 		if err != nil {
@@ -138,7 +50,7 @@ func TestSpeechLiveSanitizesBillingCloseReason(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	s.speechDial = func(ctx context.Context, _ string) (*websocket.Conn, error) {
+	s.speechDial = func(ctx context.Context, _, _, _ string) (*websocket.Conn, error) {
 		conn, _, err := websocket.DefaultDialer.DialContext(ctx, "ws"+strings.TrimPrefix(upstream.URL, "http"), nil)
 		return conn, err
 	}
@@ -163,9 +75,7 @@ func TestSpeechLiveSanitizesBillingCloseReason(t *testing.T) {
 func TestSpeechLiveRelaysAndClosesOnShutdown(t *testing.T) {
 	t.Parallel()
 	s := settingsAPI(t)
-	if _, err := s.settings.SetKey("test-only-secret"); err != nil {
-		t.Fatal(err)
-	}
+	connectGemini(t, s, "test-only-secret")
 	model, voice := "server-live", "Kore"
 	if _, err := s.settings.Update(contract.SettingsPatch{LiveModel: &model, LiveVoice: &voice}); err != nil {
 		t.Fatal(err)
@@ -203,7 +113,7 @@ func TestSpeechLiveRelaysAndClosesOnShutdown(t *testing.T) {
 		_, _, _ = conn.ReadMessage()
 	}))
 	defer upstream.Close()
-	s.speechDial = func(ctx context.Context, key string) (*websocket.Conn, error) {
+	s.speechDial = func(ctx context.Context, _, _, key string) (*websocket.Conn, error) {
 		if key != "test-only-secret" {
 			t.Error("server key was not used")
 		}

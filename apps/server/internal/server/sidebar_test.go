@@ -39,6 +39,11 @@ func TestSidebarAPI(t *testing.T) {
 	if err := json.Unmarshal(call("POST", "/sections", `{"name":"Projects"}`, 201), &section); err != nil {
 		t.Fatal(err)
 	}
+	call("PATCH", "/sections/"+store.UnassignedID, `{"name":"Changed"}`, 400)
+	call("DELETE", "/sections/"+store.UnassignedID, "", 400)
+	call("DELETE", "/sections/"+store.UnassignedID+"?chats=1", "", 400)
+	call("PATCH", "/sections/"+store.UnassignedID, `{"collapsed":true}`, 200)
+	call("POST", "/sidebar/reorder", `{"kind":"sections","id":"`+store.UnassignedID+`","afterID":"`+section.ID+`"}`, 200)
 	call("POST", "/sections", `{"name":"projects"}`, 200)
 	call("PATCH", "/sections/"+section.ID, `{"collapsed":true}`, 200)
 	call("PATCH", "/threads/a/placement", `{"sectionID":"`+section.ID+`"}`, 200)
@@ -69,7 +74,58 @@ func TestSidebarAPI(t *testing.T) {
 		t.Fatal("source evidence missing", err)
 	}
 	var sections []contract.Section
-	if err := json.Unmarshal(call("GET", "/sections", "", 200), &sections); err != nil || len(sections) != 1 || sections[0].ChatCount != 1 {
+	if err := json.Unmarshal(call("GET", "/sections", "", 200), &sections); err != nil || len(sections) != 2 || sections[0].ChatCount != 1 || sections[1].ID != store.UnassignedID || sections[1].ChatCount != 0 {
 		t.Fatal(sections, err)
 	}
+}
+
+func TestDeleteSectionWithChats(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(t.Context(), filepath.Join(dir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	definitions := []agentruntime.Definition{{Agent: contract.Agent{ID: "a", Name: "A"}}, {Agent: contract.Agent{ID: "b", Name: "B"}}, {Agent: contract.Agent{ID: "c", Name: "C"}}}
+	api, err := New(t.Context(), db, Config{DataDir: dir, Factory: &testFactory{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Definitions: definitions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	call := func(method, path, body string, status int) []byte {
+		t.Helper()
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest(method, path, strings.NewReader(body)))
+		if response.Code != status {
+			t.Fatal(method, path, response.Code, response.Body.String())
+		}
+		return response.Body.Bytes()
+	}
+	var group contract.Thread
+	if err := json.Unmarshal(call("POST", "/threads", `{"agentIDs":["a","b"]}`, 201), &group); err != nil {
+		t.Fatal(err)
+	}
+	var section contract.Section
+	if err := json.Unmarshal(call("POST", "/sections", `{"name":"Work"}`, 201), &section); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", group.ID} {
+		call("PATCH", "/threads/"+id+"/placement", `{"sectionID":"`+section.ID+`"}`, 200)
+	}
+	call("DELETE", "/sections/missing?chats=1", "", 404)
+	call("DELETE", "/sections/"+section.ID+"?chats=1", "", 200)
+	var threads []contract.Thread
+	if err := json.Unmarshal(call("GET", "/threads", "", 200), &threads); err != nil {
+		t.Fatal(err)
+	}
+	left := []string{}
+	for _, thread := range threads {
+		left = append(left, thread.ID)
+	}
+	// A's own chat deletes A; the group goes; B and C, outside the section, stay.
+	if strings.Join(left, ",") != "b,c" {
+		t.Fatalf("threads after delete = %v", left)
+	}
+	call("GET", "/agents/a", "", 404)
+	call("DELETE", "/sections/"+section.ID, "", 404)
 }

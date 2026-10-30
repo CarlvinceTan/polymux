@@ -7,10 +7,12 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
@@ -18,6 +20,7 @@ import (
 )
 
 var mcpName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 
 func validateMCP(config agentruntime.MCPServer) bool {
 	if !mcpName.MatchString(config.Name) || (config.URL == "") == (config.Command == "") || len(config.Command) > 2048 || strings.ContainsAny(config.Command, "\x00\r\n") || len(config.Args) > 32 {
@@ -31,6 +34,19 @@ func validateMCP(config agentruntime.MCPServer) bool {
 	if config.URL != "" {
 		u, err := url.Parse(config.URL)
 		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || len(config.URL) > 2048 || u.Scheme != "http" && u.Scheme != "https" {
+			return false
+		}
+	}
+	if len(config.Headers) > 16 || len(config.Headers) > 0 && config.URL == "" || len(config.Env) > 32 || len(config.Env) > 0 && config.Command == "" {
+		return false
+	}
+	for name, value := range config.Env {
+		if !envName.MatchString(name) || len(value) > 4096 || strings.ContainsRune(value, '\x00') {
+			return false
+		}
+	}
+	for name, value := range config.Headers {
+		if !validHeader(name) || len(value) > 4096 || strings.ContainsAny(value, "\r\n\x00") {
 			return false
 		}
 	}
@@ -76,7 +92,21 @@ func (s *Server) effectiveMCP(ctx context.Context, id string, local []agentrunti
 	sort.Strings(names)
 	result := make([]agentruntime.MCPServer, 0, len(names))
 	for _, name := range names {
-		result = append(result, selected[name])
+		config := selected[name]
+		if len(config.Headers) > 0 {
+			config.Auth = map[string]string{}
+			f := newFiller(ctx, s, id, config.URL)
+			for header, value := range config.Headers {
+				filled, err := f.fill(value, nil)
+				if err != nil {
+					// The connection fails its own auth and the run continues degraded.
+					s.config.Log.Warn("MCP header unavailable", "connection", name, "error", err)
+					continue
+				}
+				config.Auth[header] = filled
+			}
+		}
+		result = append(result, config)
 	}
 	return result, nil
 }
@@ -136,6 +166,9 @@ func (s *Server) registerMCP(ctx context.Context, config agentruntime.MCPServer,
 			if config.Command != "" && config.Command == old.Command && config.Env == nil {
 				config.Env = old.Env
 			}
+			if config.URL != "" && config.URL == old.URL && config.Headers == nil {
+				config.Headers = old.Headers
+			}
 			if nativeOnly == nil {
 				config.NativeOnly = old.NativeOnly
 			}
@@ -178,6 +211,7 @@ func (s *Server) mcpRoutes() {
 	})
 	s.mux.HandleFunc("POST /mcp/servers", s.setupMCP)
 	s.mux.HandleFunc("GET /agents/{id}/mcp", s.agentMCP)
+	s.mux.HandleFunc("GET /agents/{id}/mcp/status", s.agentMCPStatus)
 	s.mux.HandleFunc("PATCH /agents/{id}/mcp/{name}", s.bindMCP)
 }
 
@@ -223,6 +257,118 @@ func (s *Server) agentMCP(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	inventory, err := s.mcpInventory(r.Context(), a.id, a.definition.MCP, true)
 	s.respond(w, inventory, err)
+}
+
+func (s *Server) agentMCPStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	s.actorsMu.RLock()
+	a := s.actors[r.PathValue("id")]
+	if a == nil {
+		s.actorsMu.RUnlock()
+		fail(w, 404, "not_found", "Agent not found.")
+		return
+	}
+	a.mu.Lock()
+	local, workdir := a.definition.MCP, a.sessionDir
+	a.mu.Unlock()
+	s.actorsMu.RUnlock()
+	// Probes run unlocked; one slow connection must not stall the actor.
+	if workdir == "" {
+		workdir = filepath.Join(s.config.DataDir, a.id)
+	}
+	items, err := s.mcpStatus(r.Context(), a.id, local, workdir)
+	s.respond(w, items, err)
+}
+
+// mcpStatus resolves each active connection the way a turn would and probes it with
+// the session handshake, in parallel.
+func (s *Server) mcpStatus(
+	ctx context.Context,
+	id string,
+	local []agentruntime.MCPServer,
+	cwd string,
+) ([]*contract.MCPStatus, error) {
+	inventory, err := s.mcpInventory(ctx, id, local, false)
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := s.Store.MCPBindings(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.Store.MCPServers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	shared := map[string]agentruntime.MCPServer{}
+	for _, record := range records {
+		var config agentruntime.MCPServer
+		if err := json.Unmarshal(record.Data, &config); err != nil {
+			return nil, err
+		}
+		shared[record.Name] = config
+	}
+	definitions := map[string]agentruntime.MCPServer{}
+	for _, config := range local {
+		definitions[config.Name] = config
+	}
+	shell := func(string) map[string]string { return nil }
+	if s.proxy != nil || s.ssh != nil {
+		shell = s.shellEnv
+	}
+	items := []*contract.MCPStatus{}
+	var wait sync.WaitGroup
+	for _, connection := range inventory {
+		if !connection.Enabled {
+			continue
+		}
+		// An enabled binding carries the shared setup; without one, the agent's own definition runs.
+		config, resolvable := shared[connection.Name]
+		if !slices.ContainsFunc(bindings, func(binding store.MCPBinding) bool {
+			return binding.Name == connection.Name && binding.Enabled && !binding.Hidden
+		}) {
+			config, resolvable = definitions[connection.Name]
+		}
+		status := &contract.MCPStatus{Name: connection.Name, Tools: []string{}}
+		items = append(items, status)
+		if !resolvable {
+			continue
+		}
+		if len(config.Headers) > 0 {
+			config.Auth = map[string]string{}
+			f := newFiller(ctx, s, id, config.URL)
+			for header, value := range config.Headers {
+				filled, err := f.fill(value, nil)
+				if err != nil {
+					// The connection fails its own auth and the run continues degraded.
+					s.config.Log.Warn("MCP header unavailable", "connection", connection.Name, "error", err)
+					resolvable = false
+					break
+				}
+				config.Auth[header] = filled
+			}
+		}
+		if !resolvable {
+			continue
+		}
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			tools, err := agentruntime.ProbeMCP(
+				ctx,
+				config,
+				cwd,
+				shell(id),
+			)
+			if err != nil {
+				return
+			}
+			status.Tools = tools
+			status.Connected = true
+		}()
+	}
+	wait.Wait()
+	return items, nil
 }
 
 func (s *Server) bindMCP(w http.ResponseWriter, r *http.Request) {

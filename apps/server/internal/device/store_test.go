@@ -263,4 +263,3 @@ func codeOf(t *testing.T, uri string) string {
 	}
 	return u.Query().Get("c")
 }
-

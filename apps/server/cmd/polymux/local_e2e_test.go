@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,18 +42,29 @@ func TestLocalStartup(t *testing.T) {
 			}
 		}
 		cmd.Env = append(cmd.Env, "HOME="+home, "POLYMUX_TEST_SERVER=1", "POLYMUX_TEST_DATA="+dir)
-		stderr, err := cmd.StderrPipe()
+		// One pipe carries the server log and the child test's own failure output.
+		output, writer, err := os.Pipe()
 		if err != nil {
 			t.Fatal(err)
 		}
+		cmd.Stdout, cmd.Stderr = writer, writer
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
+		writer.Close()
 		ready := make(chan string, 1)
+		var logMu sync.Mutex
+		var logs []string
+		scanned := make(chan struct{})
 		go func() {
-			scanner := bufio.NewScanner(stderr)
+			defer close(scanned)
+			defer output.Close()
+			scanner := bufio.NewScanner(output)
 			for scanner.Scan() {
 				line := scanner.Text()
+				logMu.Lock()
+				logs = append(logs, line)
+				logMu.Unlock()
 				if strings.Contains(line, "Polymux is listening") {
 					for _, field := range strings.Fields(line) {
 						if address, ok := strings.CutPrefix(field, "address="); ok {
@@ -62,7 +75,8 @@ func TestLocalStartup(t *testing.T) {
 			}
 		}()
 		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
+		// The log is complete once the pipe reaches EOF.
+		go func() { err := cmd.Wait(); <-scanned; done <- err }()
 		stopped := false
 		stop := func() {
 			t.Helper()
@@ -74,7 +88,9 @@ func TestLocalStartup(t *testing.T) {
 			select {
 			case err := <-done:
 				if err != nil {
-					t.Errorf("server shutdown: %v", err)
+					logMu.Lock()
+					t.Errorf("server shutdown: %v\n%s", err, strings.Join(logs, "\n"))
+					logMu.Unlock()
 				}
 			case <-time.After(10 * time.Second):
 				_ = cmd.Process.Kill()
@@ -142,6 +158,12 @@ func TestLocalStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(url, token, 401)
+	// A connection that never sends a request must not fail shutdown.
+	idle, err := net.Dial("tcp", strings.TrimPrefix(url, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idle.Close()
 	stop()
 	url, _ = start()
 	replacement := readToken()

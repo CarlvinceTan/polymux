@@ -70,9 +70,7 @@ private func triangle(_ rot: Double) -> Silhouette {
 
 public let STATES: [StateDef] = [
     StateDef(id: .idle, duration: 2.4, morph: 0.45, blinkIn: false, baseBody: true, baseFace: true) { _ in Pose() },
-    StateDef(id: .thinking, duration: 2.6, morph: 0.4, blinkIn: true, baseBody: true, baseFace: true) { t in
-        Pose(dots: thinkingMarks(t))
-    },
+    StateDef(id: .thinking, duration: 2.6, morph: 0.4, blinkIn: true, baseBody: true, baseFace: true) { _ in Pose() },
     StateDef(id: .wink, duration: 1.6, morph: 0.3, blinkIn: true, baseBody: true, baseFace: false) { _ in
         Pose(gaze: HeadGaze(yaw: -5.37, pitch: 4.55, roll: 6.7), split: 16.25,
              eyes: [EyeCfg(w: 0.236, h: 0.464), EyeCfg(w: 0.447, h: 0.089)])

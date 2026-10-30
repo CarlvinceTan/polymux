@@ -19,15 +19,19 @@ private final class Connection: @unchecked Sendable {
 }
 
 public final class LocalCache: @unchecked Sendable {
+    /// The folder holding this cache, which also keeps copies of files waiting to upload.
+    public let folder: URL
     private let connection: Connection
     private var db: OpaquePointer { connection.db }
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let lock = NSRecursiveLock()
+    private var reads = 0
     /// Counts `threads()` calls, including the one inside `save`.
-    public private(set) var threadReads = 0
+    public var threadReads: Int { lock.withLock { reads } }
 
     public init(url: URL) throws {
+        folder = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         connection = try Connection(url: url)
         try execute("PRAGMA journal_mode=WAL")
@@ -40,22 +44,12 @@ public final class LocalCache: @unchecked Sendable {
         try execute("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created TEXT NOT NULL, json TEXT NOT NULL)")
         try execute("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(id UNINDEXED, thread_id UNINDEXED, text)")
         try execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, seq INTEGER NOT NULL, json TEXT NOT NULL)")
-        try execute("CREATE INDEX IF NOT EXISTS activity_order ON events(thread_id,seq) WHERE json_extract(json,'$.type')='activity'")
-        try execute("CREATE INDEX IF NOT EXISTS recent_events ON events(thread_id,seq) WHERE json_extract(json,'$.type')!='activity'")
-        try execute("CREATE TABLE IF NOT EXISTS activity_messages (thread_id TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(thread_id, id))")
-        try migrateActivities()
+        // Events are no longer kept; only `migrateSequences` reads what older versions saved.
+        try execute("DROP INDEX IF EXISTS activity_order")
+        try execute("DROP INDEX IF EXISTS recent_events")
         try migrateGroups()
         try migrateActivity()
         try migrateSequences()
-    }
-
-    private func migrateActivities() throws {
-        let version: Int = try metadata("activityMessagesVersion") ?? 0
-        guard version < 1 else { return }
-        try transaction {
-            try execute("INSERT OR IGNORE INTO activity_messages SELECT events.thread_id, refs.value FROM events, json_each(events.json,'$.payload.messageIDs') refs WHERE json_extract(events.json,'$.type')='activity'")
-            try setMetadata("activityMessagesVersion", value: 1)
-        }
     }
 
     private func migrateGroups() throws {
@@ -84,7 +78,7 @@ public final class LocalCache: @unchecked Sendable {
         try transaction {
             let messages = try rows("SELECT json FROM messages WHERE seq>0").map { try decode(Message.self, $0[0]) }
             var pending = Set(messages.map(\.id))
-            var threads = try threads()
+            var threads = try storedThreads()
             let starts = try rows("SELECT json FROM events WHERE json_extract(json,'$.type')='message.start' ORDER BY seq LIMIT 10000")
             for row in starts {
                 let event = try decode(Event.self, row[0])
@@ -129,7 +123,7 @@ public final class LocalCache: @unchecked Sendable {
         var pending: Set<String> = Set(try metadata("seqRepair") as [String]? ?? [])
         guard !pending.isEmpty else { return }
         try transaction {
-            var threads = try threads()
+            var threads = try storedThreads()
             for snapshot in snapshots where pending.contains(snapshot.id) && snapshot.seq > 0 {
                 guard var message = try message(id: snapshot.id) else { continue }
                 message.seq = snapshot.seq
@@ -150,32 +144,44 @@ public final class LocalCache: @unchecked Sendable {
         try setMetadata("seqRepair", value: Array(pending.subtracting(unresolved)))
     }
 
+    /// Non-secret server state kept so screens open offline, such as settings, providers and profiles.
+    public func snapshot<T: Decodable>(_ key: String) throws -> T? { try metadata("snapshot/" + key) }
+    public func saveSnapshot<T: Encodable>(_ key: String, _ value: T) throws { try setMetadata("snapshot/" + key, value: value) }
+
     public func agents() throws -> [Agent] { try metadata("agents") ?? [] }
     public func sidebar() throws -> SidebarSnapshot? { try metadata("sidebar") }
     public func saveSidebar(_ snapshot: SidebarSnapshot) throws { try setMetadata("sidebar", value: snapshot) }
     public func threads() throws -> [Thread] {
-        lock.lock()
-        threadReads += 1
-        lock.unlock()
-        var threads: [Thread] = try metadata("threads") ?? []
-        for index in threads.indices { threads[index].runs = try runs(threadID: threads[index].id) }
+        lock.withLock { reads += 1 }
+        var threads = try storedThreads()
+        let runs = try latestRuns(threadID: nil)
+        for index in threads.indices { threads[index].runs = runs[threads[index].id] ?? [] }
         return threads
     }
 
+    /// The saved rows without their runs, for changes that write the rows back.
+    private func storedThreads() throws -> [Thread] { try metadata("threads") ?? [] }
+
     public func runs(threadID: String) throws -> [Run] {
+        try latestRuns(threadID: threadID)[threadID] ?? []
+    }
+
+    /// Active runs and each agent's latest run, per chat: one chat, or all when `threadID` is nil.
+    private func latestRuns(threadID: String?) throws -> [String: [Run]] {
         let query = """
-        SELECT r.json FROM runs r WHERE r.thread_id=? AND
-        (json_extract(r.json,'$.status') IN('queued','running','waiting_input','waiting_peer') OR NOT EXISTS(
-        SELECT 1 FROM runs newer WHERE newer.thread_id=r.thread_id AND
-        json_extract(newer.json,'$.agentID')=json_extract(r.json,'$.agentID') AND
-        (julianday(json_extract(newer.json,'$.createdAt'))>julianday(json_extract(r.json,'$.createdAt')) OR
-        (julianday(json_extract(newer.json,'$.createdAt'))=julianday(json_extract(r.json,'$.createdAt')) AND
-        (json_extract(newer.json,'$.createdAt')>json_extract(r.json,'$.createdAt') OR
-        (json_extract(newer.json,'$.createdAt')=json_extract(r.json,'$.createdAt') AND newer.seq>r.seq))))))
-        ORDER BY CASE json_extract(r.json,'$.status') WHEN 'running' THEN 0 WHEN 'waiting_input' THEN 0
+        SELECT thread_id,json FROM (SELECT thread_id,json,seq,json_extract(json,'$.status') status,
+        row_number() OVER(PARTITION BY thread_id,json_extract(json,'$.agentID') ORDER BY
+        julianday(json_extract(json,'$.createdAt')) DESC,json_extract(json,'$.createdAt') DESC,seq DESC) latest
+        FROM runs\(threadID == nil ? "" : " WHERE thread_id=?"))
+        WHERE latest=1 OR status IN('queued','running','resuming','waiting_input','waiting_peer')
+        ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'resuming' THEN 0 WHEN 'waiting_input' THEN 0
         WHEN 'waiting_peer' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,seq DESC
         """
-        return try rows(query, [.text(threadID)]).map { try decode(Run.self, $0[0]) }
+        var out: [String: [Run]] = [:]
+        for row in try rows(query, threadID.map { [.text($0)] } ?? []) {
+            out[row[0], default: []].append(try decode(Run.self, row[1]))
+        }
+        return out
     }
 
     private func write(_ run: Run) throws {
@@ -192,19 +198,12 @@ public final class LocalCache: @unchecked Sendable {
         }
     }
     public func threadEdits() throws -> [Thread] { try metadata("threadEdits") ?? [] }
-    public func dirtyPins() throws -> [String] { try metadata("dirtyPins") ?? [] }
-    public func pinEdits() throws -> [String] { try metadata("pinEdits") ?? [] }
-    public func saveEdits(_ threads: [Thread], pins: [String]? = nil, dirtyPins: [String]? = nil) throws {
-        try transaction {
-            try setMetadata("threadEdits", value: threads)
-            if let pins { try setMetadata("pinEdits", value: pins) }
-            if let dirtyPins { try setMetadata("dirtyPins", value: dirtyPins) }
-        }
-    }
+    public func saveEdits(_ threads: [Thread]) throws { try setMetadata("threadEdits", value: threads) }
 
     public func save(agents: [Agent], threads: [Thread]) throws {
         try transaction {
-            let deleted = Set(try self.threads().map(\.id)).subtracting(threads.map(\.id))
+            let saved = try rows("SELECT json_extract(value,'$.id') FROM json_each((SELECT json FROM metadata WHERE key='threads'))")
+            let deleted = Set(saved.map { $0[0] }).subtracting(threads.map(\.id))
             try prune(deleted)
             for thread in threads { for run in thread.runs { try write(run) } }
             try setMetadata("agents", value: agents)
@@ -233,7 +232,7 @@ public final class LocalCache: @unchecked Sendable {
     }
 
     public func messages(threadID: String, before: Int64? = nil, limit: Int? = nil) throws -> [Message] {
-        var sql = "SELECT json FROM messages WHERE thread_id=? AND json_extract(json,'$.status')!='silent' AND NOT EXISTS (SELECT 1 FROM activity_messages WHERE activity_messages.thread_id=messages.thread_id AND activity_messages.id=messages.id)"
+        var sql = "SELECT json FROM messages WHERE thread_id=? AND json_extract(json,'$.status')!='silent'"
         var values: [Value] = [.text(threadID)]
         if let before {
             sql += " AND seq>0 AND seq<?"
@@ -247,10 +246,23 @@ public final class LocalCache: @unchecked Sendable {
         return try rows(sql, values).reversed().map { try decode(Message.self, $0[0]) }
     }
 
+    /// Messages still waiting on this device, oldest first.
+    func unsent(threadID: String) throws -> [Message] {
+        try rows("SELECT json FROM messages WHERE thread_id=? AND seq=0 ORDER BY created", [.text(threadID)]).map { try decode(Message.self, $0[0]) }
+    }
+
     public func merge(_ messages: [Message]) throws {
         try transaction {
             for message in messages where try self.message(id: message.id) == nil { try write(message) }
         }
+    }
+
+    func setReactions(id: String, previous: [Reaction]?, reactions: [Reaction]?) throws -> Message? {
+        guard var message = try message(id: id) else { return nil }
+        guard message.reactions == previous else { return message }
+        message.reactions = reactions
+        try execute("UPDATE messages SET json=? WHERE id=?", [.text(try encode(message)), .text(id)])
+        return message
     }
 
     @discardableResult
@@ -260,38 +272,38 @@ public final class LocalCache: @unchecked Sendable {
         guard event.seq == cursor + 1 else { throw ClientError.gap(expected: cursor + 1, actual: event.seq) }
         var changed: Message?
         try transaction {
-            try execute("INSERT INTO events(thread_id,seq,json) VALUES(?,?,?)", [.text(event.conversationID), .int(event.seq), .text(try encode(event))])
             if let run = event.run, run.conversationID == event.conversationID { try write(run) }
-            let wasSilent = try event.messageID.flatMap { try message(id: $0)?.status } == "silent"
+            let stored = try event.messageID.flatMap { try message(id: $0) }
+            let wasSilent = stored?.status == MessageStatus.silent
             if let full = event.message {
                 var message = full
                 if message.seq == 0 { message.seq = event.seq }
                 try write(message)
                 changed = message
-            } else if let id = event.messageID, var message = try message(id: id) {
+            } else if var message = stored {
                 switch event.type {
-                case "message.delta":
+                case EventType.messageDelta:
                     let text = event.text ?? ""
-                    if let index = message.parts.firstIndex(where: { $0.kind == "text" }) {
+                    if let index = message.parts.firstIndex(where: { $0.kind == PartKind.text }) {
                         message.parts[index].text = (message.parts[index].text ?? "") + text
-                    } else { message.parts.append(Part(kind: "text", text: text)) }
-                    message.status = "streaming"
-                case "message.attachment":
+                    } else { message.parts.append(Part(kind: PartKind.text, text: text)) }
+                    message.status = MessageStatus.streaming
+                case EventType.messageAttachment:
                     if let attachment = event.attachment,
                        !message.attachments.contains(where: { $0.id == attachment.id }) {
-                        message.parts.append(Part(kind: "attachment", attachment: attachment))
+                        message.parts.append(Part(kind: PartKind.attachment, attachment: attachment))
                     }
-                case "message.done": message.status = "done"
-                case "message.error": message.status = "error"
+                case EventType.messageDone: message.status = MessageStatus.done
+                case EventType.messageError: message.status = MessageStatus.error
                 default: break
                 }
                 try write(message)
                 changed = message
             }
-            if let message = changed, message.role == "user" {
+            if let message = changed, message.role == MessageRole.user {
                 try execute("DELETE FROM outbox WHERE id=?", [.text(message.id)])
             }
-            if event.type == "agent.presence", let agentID = event.agentID, let active = event.active {
+            if event.type == EventType.agentPresence, let agentID = event.agentID, let active = event.active {
                 var agents = try agents()
                 if let index = agents.firstIndex(where: { $0.id == agentID }) {
                     agents[index].active = active
@@ -299,11 +311,11 @@ public final class LocalCache: @unchecked Sendable {
                 }
             }
             if touchThreads {
-                var threads = try threads()
+                var threads = try storedThreads()
                 if let index = threads.firstIndex(where: { $0.id == event.conversationID }) {
                     let isNew = event.seq > threads[index].lastSeq
                     threads[index].lastSeq = max(threads[index].lastSeq, event.seq)
-                    if let message = changed, message.status == "silent" {
+                    if let message = changed, message.status == MessageStatus.silent {
                         if threads[index].lastMessage?.id == message.id {
                             threads[index].lastMessage = try messages(threadID: event.conversationID).last
                         }
@@ -313,48 +325,27 @@ public final class LocalCache: @unchecked Sendable {
                     } else if let message = changed,
                               message.seq >= (threads[index].lastMessage?.seq ?? 0) { threads[index].lastMessage = message }
                     if isNew, event.seq > threads[index].lastReadSeq {
-                        if event.type == "message.start", let changed, changed.role == "assistant",
-                           try !isHidden(changed.id, threadID: event.conversationID) {
+                        if event.type == EventType.messageStart, let changed, changed.role == MessageRole.assistant,
+                           changed.status != MessageStatus.silent {
                             threads[index].unreadCount += 1
                         }
-                        if event.type == "activity", let payload = event.payload {
-                            var removed = 0
-                            for id in Set(payload.messageIDs ?? []) where try !isHidden(id, threadID: event.conversationID) {
-                                if let message = try message(id: id), message.role == "assistant", message.seq > threads[index].lastReadSeq { removed += 1 }
-                            }
-                            threads[index].unreadCount = max(0, threads[index].unreadCount - Int64(removed))
-                            if payload.countsUnread { threads[index].unreadCount += 1 }
+                        if event.type == EventType.activity, event.payload?.countsUnread == true {
+                            threads[index].unreadCount += 1
                         }
                     }
                     try setMetadata("threads", value: threads)
                 }
             }
-            if event.type == "activity" {
-                for id in Set(event.payload?.messageIDs ?? []) {
-                    try execute("INSERT OR IGNORE INTO activity_messages(thread_id,id) VALUES(?,?)", [.text(event.conversationID), .text(id)])
-                }
-                try execute("DELETE FROM events WHERE thread_id=? AND seq IN (SELECT seq FROM events WHERE thread_id=? AND json_extract(json,'$.type')='activity' ORDER BY seq DESC LIMIT -1 OFFSET 1000)", [.text(event.conversationID), .text(event.conversationID)])
-            }
             try execute("INSERT INTO cursors(thread_id,seq) VALUES(?,?) ON CONFLICT(thread_id) DO UPDATE SET seq=excluded.seq", [.text(event.conversationID), .int(event.seq)])
-            try execute("DELETE FROM events WHERE thread_id=? AND seq<? AND json_extract(json,'$.type')!='activity'", [.text(event.conversationID), .int(event.seq - 1000)])
         }
         return changed
     }
 
-    func isHidden(_ id: String, threadID: String) throws -> Bool {
-        try !rows("SELECT 1 FROM activity_messages WHERE thread_id=? AND id=? UNION SELECT 1 FROM messages WHERE thread_id=? AND id=? AND json_extract(json,'$.status')='silent'", [.text(threadID), .text(id), .text(threadID), .text(id)]).isEmpty
-    }
-
-    public func activityEvents(threadID: String) throws -> [Event] {
-        try rows("SELECT json FROM events WHERE thread_id=? AND json_extract(json,'$.type')='activity' ORDER BY seq",
-                 [.text(threadID)]).map { try decoder.decode(Event.self, from: Data($0[0].utf8)) }
-    }
-
     public func enqueue(threadID: String, request: SendRequest, attachments: [Attachment], reply: ReplyContext? = nil) throws -> Message {
-        if let existing = try message(id: request.id), existing.status != "error" { return existing }
-        let parts = (request.text.isEmpty ? [] : [Part(kind: "text", text: request.text)])
-            + attachments.map { Part(kind: "attachment", attachment: $0) }
-        let message = Message(id: request.id, threadID: threadID, role: "user", parts: parts, createdAt: WireDate.string(), status: "pending", seq: 0, reply: reply, mentions: request.mentions)
+        if let existing = try message(id: request.id), existing.status != MessageStatus.error { return existing }
+        let parts = (request.text.isEmpty ? [] : [Part(kind: PartKind.text, text: request.text)])
+            + attachments.map { Part(kind: PartKind.attachment, attachment: $0) }
+        let message = Message(id: request.id, threadID: threadID, role: MessageRole.user, parts: parts, createdAt: WireDate.string(), status: MessageStatus.pending, seq: 0, reply: reply, mentions: request.mentions)
         try transaction {
             try execute("INSERT OR IGNORE INTO outbox(id,thread_id,created,json) VALUES(?,?,?,?)", [.text(request.id), .text(threadID), .text(message.createdAt), .text(try encode(request))])
             try write(message)
@@ -374,17 +365,74 @@ public final class LocalCache: @unchecked Sendable {
 
     public func accepted(id: String) throws -> Bool {
         guard let message = try message(id: id) else { return false }
-        return message.seq > 0 && message.role == "user"
+        return message.seq > 0 && message.role == MessageRole.user
+    }
+
+    /// Drops a message that never reached the server, so it is not sent later.
+    public func discard(id: String) throws {
+        try transaction {
+            try execute("DELETE FROM outbox WHERE id=?", [.text(id)])
+            try execute("DELETE FROM messages WHERE id=? AND seq=0", [.text(id)])
+            try execute("DELETE FROM messages_fts WHERE id=?", [.text(id)])
+        }
     }
 
     public func acknowledge(id: String) throws {
         try transaction {
             try execute("DELETE FROM outbox WHERE id=?", [.text(id)])
             if var message = try message(id: id), message.seq == 0 {
-                message.status = "done"
+                message.status = MessageStatus.done
                 try write(message)
             }
         }
+    }
+
+    /// Changes the current row, never a stale view's copy or a deleted/accepted message.
+    func updateUnsent(id: String, _ update: (inout Message) -> Void) throws -> Message? {
+        var result: Message?
+        try transaction {
+            guard var message = try message(id: id), message.seq == 0, message.status != MessageStatus.done else { return }
+            update(&message)
+            try write(message)
+            result = message
+        }
+        return result
+    }
+
+    func pendingUpload(id: String) throws -> Message? {
+        guard let message = try message(id: id), message.seq == 0, message.role == MessageRole.user,
+              [MessageStatus.pending, MessageStatus.failed].contains(message.status),
+              try !queued(id: id) else { return nil }
+        return message
+    }
+
+    /// Atomically queues a finished upload, including one interrupted just before enqueueing.
+    func enqueueUpload(id: String) throws -> Message? {
+        var result: Message?
+        try transaction {
+            guard var message = try message(id: id), message.seq == 0, message.role == MessageRole.user,
+                  [MessageStatus.pending, MessageStatus.failed].contains(message.status),
+                  !message.attachments.contains(where: { $0.localURL != nil }) else { return }
+            let request = SendRequest(id: id, text: message.text, attachmentIDs: message.attachments.map(\.id),
+                                      replyToID: message.reply?.messageID, replyPart: message.reply?.partIndex,
+                                      mentions: message.mentions)
+            try execute("INSERT OR IGNORE INTO outbox(id,thread_id,created,json) VALUES(?,?,?,?)",
+                        [.text(id), .text(message.threadID), .text(message.createdAt), .text(try encode(request))])
+            message.status = MessageStatus.pending
+            try write(message)
+            result = message
+        }
+        return result
+    }
+
+    /// Whether a message is still waiting on this device, not yet accepted by the server.
+    public func unsent(id: String) throws -> Bool {
+        try message(id: id)?.seq == 0
+    }
+
+    /// Whether a send is already queued, so its files finished uploading.
+    public func queued(id: String) throws -> Bool {
+        !(try rows("SELECT 1 FROM outbox WHERE id=?", [.text(id)])).isEmpty
     }
 
     public func setStatus(id: String, status: String) throws {
@@ -394,7 +442,7 @@ public final class LocalCache: @unchecked Sendable {
     }
 
     public func markRead(threadID: String, seq: Int64) throws {
-        var threads = try threads()
+        var threads = try storedThreads()
         guard let index = threads.firstIndex(where: { $0.id == threadID }) else { return }
         threads[index].lastReadSeq = max(threads[index].lastReadSeq, seq)
         threads[index].unreadCount = 0
@@ -412,25 +460,31 @@ public final class LocalCache: @unchecked Sendable {
         }
         let scope = Value.text(threadID ?? "")
         let matches = try rows("SELECT m.json, snippet(messages_fts,2,'','','…',24), bm25(messages_fts) FROM messages_fts JOIN messages m ON m.id=messages_fts.id WHERE messages_fts MATCH ? AND " + predicate + " ORDER BY bm25(messages_fts) LIMIT 50", [.text(tokens.joined(separator: " OR ")), scope, scope])
-        return try matches.map { SearchHit(message: try decode(Message.self, $0[0]), score: -(Double($0[2]) ?? 0), snippet: $0[1], indexingState: "ready") }
+        return try matches.map { SearchHit(message: try decode(Message.self, $0[0]), score: -(Double($0[2]) ?? 0), snippet: $0[1], indexingState: SearchHitIndexingState.ready) }
     }
 
-    public func cacheSearch(_ results: [SearchResult], query: String, kind: String) throws {
+    public func cacheSearch(_ results: [SearchResult], query: String, kind: String, scope: String? = nil) throws {
         try merge(results.compactMap(\.message))
-        try setMetadata("search/\(kind)/\(query)", value: results)
+        try setMetadata(Self.searchKey(query: query, kind: kind, scope: scope), value: results)
     }
 
-    public func globalSearch(query: String, kind: String) throws -> [SearchResult] {
+    private static func searchKey(query: String, kind: String, scope: String?) -> String {
+        scope.map { "search/\(kind)@\($0)/\(query)" } ?? "search/\(kind)/\(query)"
+    }
+
+    /// Searches downloaded content; `scope` limits it to one chat's messages and attachments.
+    public func globalSearch(query: String, kind: String, scope: String? = nil) throws -> [SearchResult] {
         let threads = try threads()
         let agents = try agents()
-        let live = Set(threads.map(\.id))
-        let cached: [SearchResult] = try metadata("search/\(kind)/\(query)") ?? []
+        let live = Set(threads.map(\.id)).filter { scope == nil || $0 == scope }
+        let cached: [SearchResult] = try metadata(Self.searchKey(query: query, kind: kind, scope: scope)) ?? []
         var results = cached.filter { live.contains($0.threadID) }
         func distinct() -> [SearchResult] {
             var ids = Set<String>()
             return results.filter { ids.insert($0.id).inserted }
         }
-        for thread in threads {
+        // A chat-scoped search lists no chats or bots, only what was said and shared.
+        for thread in threads where scope == nil {
             if (kind == "conversations" || kind == "all" && thread.id != thread.agentID) && (query.isEmpty || thread.title.localizedStandardContains(query)) {
                 results.append(SearchResult(id: "conversation/" + thread.id, kind: "conversations", title: thread.title,
                                             threadID: thread.id, agentID: thread.agentID))
@@ -444,7 +498,7 @@ public final class LocalCache: @unchecked Sendable {
         }
         guard !query.isEmpty, kind != "bots", kind != "conversations" else { return distinct() }
         var seen = Set<String>()
-        for hit in try search(query: query, kind: kind) {
+        for hit in try search(threadID: scope, query: query, kind: kind) {
             let message = hit.message
             guard live.contains(message.threadID) else { continue }
             let title = threads.first { $0.id == message.threadID }?.title ?? "Conversation"
@@ -464,13 +518,15 @@ public final class LocalCache: @unchecked Sendable {
         return distinct()
     }
 
-    private func message(id: String) throws -> Message? {
+    func message(id: String) throws -> Message? {
         guard let value = try rows("SELECT json FROM messages WHERE id=?", [.text(id)]).first?.first else { return nil }
         return try decode(Message.self, value)
     }
 
     private func write(_ message: Message) throws {
         try execute("INSERT INTO messages(id,thread_id,seq,created,json) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seq=excluded.seq,created=excluded.created,json=excluded.json", [.text(message.id), .text(message.threadID), .int(message.seq), .text(message.createdAt), .text(try encode(message))])
+        // Search indexes the finished text, not every streamed delta.
+        guard message.status != MessageStatus.streaming else { return }
         try execute("DELETE FROM messages_fts WHERE id=?", [.text(message.id)])
         let text = message.text + " " + message.attachments.map { $0.name + " " + ($0.extractedText ?? "") }.joined(separator: " ")
         try execute("INSERT INTO messages_fts(id,thread_id,text) VALUES(?,?,?)", [.text(message.id), .text(message.threadID), .text(text)])

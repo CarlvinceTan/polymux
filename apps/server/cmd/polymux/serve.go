@@ -32,6 +32,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/server"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/tunnel"
+	engine "github.com/CarlvinceTan/polymux/packages/search"
 )
 
 const (
@@ -59,6 +60,8 @@ func runServer(args []string) error {
 	noMDNS := flagSet.Bool("no-mdns", os.Getenv("POLYMUX_NO_MDNS") == "1", "disable Bonjour LAN advertisement")
 	tailscale := flagSet.Bool("tailscale", os.Getenv("POLYMUX_TAILSCALE") == "1", "use Tailscale listeners (requires Tailscale)")
 	noTunnel := flagSet.Bool("no-tunnel", os.Getenv("POLYMUX_TUNNEL") == "0", "disable pairing from other networks over iroh")
+	publicURL := flagSet.String("public-url", os.Getenv("POLYMUX_PUBLIC_URL"), "HTTPS origin advertised for remote pairing")
+	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341)")
 	verify := fixture.Register(flagSet)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -69,6 +72,18 @@ func runServer(args []string) error {
 	if *version {
 		fmt.Println(buildSHA)
 		return nil
+	}
+	origin, err := remoteURL(*publicURL)
+	if err != nil {
+		return err
+	}
+	*publicURL = origin
+	if *publicListen != "" && *publicURL == "" {
+		return errors.New("-public-listen requires -public-url")
+	}
+	groups, err := loadGroups()
+	if err != nil {
+		return err
 	}
 	if *verify {
 		dataDir, addr, err := fixture.Apply(*dir)
@@ -146,7 +161,8 @@ func runServer(args []string) error {
 		return err
 	}
 	defer pairings.Close()
-	if _, err := localCredential(ctx, pairings, *dir); err != nil {
+	owner, err := localCredential(ctx, pairings, *dir)
+	if err != nil {
 		return err
 	}
 	devices := device.New(pairings)
@@ -171,7 +187,7 @@ func runServer(args []string) error {
 		return err
 	}
 	defer closeStorage()
-	runtime, err := agentruntime.NewDurable(ctx, *dir, baseURL, model, key, agentruntime.Client{Headers: config.Headers, Session: config.Session}, storage, config.Models...)
+	runtime, err := agentruntime.NewDurable(ctx, *dir, baseURL, model, key, agentruntime.Client{Headers: config.Headers, Session: config.Session, Window: config.Window}, storage, config.Models...)
 	if err != nil {
 		return err
 	}
@@ -198,9 +214,9 @@ func runServer(args []string) error {
 	client := &http.Client{Timeout: 2 * time.Minute}
 	index := &search.Index{Store: s, Log: log}
 	if bin := os.Getenv("POLYMUX_EXTRACTOR"); bin != "" {
-		index.Extractor = &search.SubprocessExtractor{Bin: bin, Timeout: extractTimeout}
+		index.Extractor = &engine.SubprocessExtractor{Bin: bin, Timeout: extractTimeout}
 	}
-	var embedder *search.HTTPEmbedder
+	var embedder *engine.HTTPEmbedder
 	if bin := os.Getenv("POLYMUX_LLAMA"); bin != "" {
 		process, err := embedproc.Start(ctx, embedproc.Config{Bin: bin, Model: os.Getenv("POLYMUX_EMBED_MODEL"),
 			Mmproj: os.Getenv("POLYMUX_EMBED_MMPROJ"), Log: log})
@@ -208,11 +224,11 @@ func runServer(args []string) error {
 			return err
 		}
 		defer process.Close()
-		embedder = &search.HTTPEmbedder{URL: process.URL(), Model: embedModel, Dims: embedDims, Client: client,
+		embedder = &engine.HTTPEmbedder{URL: process.URL(), Model: embedModel, Dims: embedDims, Client: client,
 			Media: os.Getenv("POLYMUX_EMBED_MMPROJ") != ""}
 	} else if url := os.Getenv("POLYMUX_EMBED_URL"); url != "" {
 		// An external endpoint's capabilities are unknown here, so it embeds text only.
-		embedder = &search.HTTPEmbedder{URL: url, Model: embedModel, Dims: embedDims, Client: client}
+		embedder = &engine.HTTPEmbedder{URL: url, Model: embedModel, Dims: embedDims, Client: client}
 	}
 	if embedder != nil {
 		index.Embedder = embedder
@@ -250,6 +266,7 @@ func runServer(args []string) error {
 		ticket = nil
 	}
 	api, err := server.New(ctx, s, server.Config{
+		GroupCaps:   &groups,
 		BuildSHA:    buildSHA,
 		DataDir:     *dir,
 		Model:       model,
@@ -260,6 +277,7 @@ func runServer(args []string) error {
 		Push:        sender,
 		Devices:     devices,
 		Ticket:      ticket,
+		PublicURL:   *publicURL,
 	})
 	if err != nil {
 		return err
@@ -273,23 +291,50 @@ func runServer(args []string) error {
 	apiHandler := api.Handler()
 	httpServer := &http.Server{Addr: *listen, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		ip := net.ParseIP(host)
-		addr, ok := netip.AddrFromSlice(ip)
-		if !ok || !(ip.IsLoopback() || privateIP(addr)) {
+		addr, err := netip.ParseAddr(host)
+		if err != nil || !trustedPeer(addr, lanInterfaces()) {
 			device.Reject(w)
+			return
+		}
+		if r.URL.Path == "/local/proof" {
+			serveProof(w, r, owner)
 			return
 		}
 		apiHandler.ServeHTTP(w, r)
 	}), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	defer httpServer.Close()
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return err
 	}
+	defer listener.Close()
 	log.Info("Polymux is listening", "address", listener.Addr(), "data", *dir, "model", model)
-	if !*noTunnel {
-		relay = tunnel.New(ctx, *dir, net.JoinHostPort("127.0.0.1", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)), log)
+	done := make(chan error, 4)
+	if *publicURL != "" {
+		local, err := remoteListener(*publicListen)
+		if err != nil {
+			return err
+		}
+		defer local.Close()
+		remote := &http.Server{
+			Handler: remoteHandler(apiHandler), ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
+		}
+		defer remote.Close()
+		go func() { done <- remote.Serve(local) }()
+		log.Info("HTTPS tunnel listener ready", "address", local.Addr())
 	}
-	done := make(chan error, 2)
+	if !*noTunnel {
+		local, err := tunnelListener(listener)
+		if err != nil {
+			return fmt.Errorf("tunnel listener: %w", err)
+		}
+		if local != listener {
+			defer local.Close()
+			go func() { done <- httpServer.Serve(local) }()
+		}
+		relay = tunnel.New(ctx, *dir, local.Addr().String(), log)
+	}
 	go func() { done <- httpServer.Serve(listener) }()
 	go func() { done <- deviceServer.Serve(tls.NewListener(deviceSocket, pairings.TLSConfig())) }()
 	if address := deviceSocket.Addr().(*net.TCPAddr); shouldAdvertise(address.IP, *noMDNS) {
@@ -313,11 +358,21 @@ func runServer(args []string) error {
 	case <-ctx.Done():
 		end, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		// Streams and unused client connections can outlast the grace period; close them.
 		if err := httpServer.Shutdown(end); err != nil {
-			return err
+			log.Warn("closing connections still open at shutdown", "error", err)
+			return httpServer.Close()
 		}
 	}
 	return nil
+}
+
+func tunnelListener(listener net.Listener) (net.Listener, error) {
+	if address, ok := listener.Addr().(*net.TCPAddr); ok && address.IP.IsLoopback() {
+		return listener, nil
+	}
+	// The encrypted tunnel's final hop stays on this host, regardless of the public bind.
+	return net.Listen("tcp4", "127.0.0.1:0")
 }
 
 func advertise(ctx context.Context, dir string, port int, ips []string) (func(), error) {

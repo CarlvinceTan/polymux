@@ -72,12 +72,17 @@ func TestRestrictedPolicy(t *testing.T) {
 			}
 			message := string(body["messages"])
 			wantHelp := !test.intro
-			for _, marker := range []string{"name: polymux", "name: report"} {
-				if strings.Contains(message, marker) != wantHelp {
-					t.Fatalf("prompt contains %s = %v, want %v", marker, strings.Contains(message, marker), wantHelp)
+			// With read, skills are listed for loading on demand; without it, their text is inline.
+			inline := wantHelp && !slices.Contains(test.tools, "read")
+			for _, name := range []string{"polymux", "report"} {
+				if strings.Contains(message, "name: "+name) != inline {
+					t.Fatalf("prompt inlines %s = %v, want %v", name, !inline, inline)
+				}
+				if strings.Contains(message, `<skill name=\"`+name+`\"`) != (wantHelp && !inline) {
+					t.Fatalf("prompt lists %s wrongly", name)
 				}
 			}
-			if wantHelp {
+			if inline {
 				for _, marker := range []string{skills.IssueRepo, "explicit confirmation in chat", "[REDACTED]"} {
 					if !strings.Contains(message, marker) {
 						t.Fatalf("bundled report skill omitted %q", marker)
@@ -105,13 +110,13 @@ func TestPromptToolAvailability(t *testing.T) {
 	}{
 		{name: "intro", definition: Definition{Intro: true}, tools: []string{"update_agent", "recall_memory"}},
 		{name: "child", tools: []string{"bash", "show_html"}},
-		{name: "voice", definition: Definition{Ephemeral: true}, tools: []string{"recall_history", "recall_memory", "save_memory", "track_work", "manage_routines"}, want: "Use recall_history to retrieve older evidence"},
+		{name: "voice", definition: Definition{Ephemeral: true}, tools: []string{"recall_history", "recall_memory", "save_memory", "track_work", "manage_routines"}, want: "park that task with track_work"},
 		{name: "automatic", definition: Definition{Automatic: true}, tools: []string{"read"}, want: "Advance established goals with the available tools."},
 		{name: "review", definition: Definition{Automatic: true}, tools: []string{"finish_review"}, want: "For a review, use finish_review"},
 		{name: "integration-repair", tools: []string{"manage_integrations"}, want: "Use available CLI tools or manage_integrations to repair"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			prompt, err := buildPrompt(test.definition, test.tools, true)
+			prompt, err := buildPrompt(test.definition, test.tools, true, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,42 +126,20 @@ func TestPromptToolAvailability(t *testing.T) {
 			}
 			policy := strings.ReplaceAll(prompt, bundled, "")
 			for _, name := range []string{"update_agent", "create_agent", "create_group_chat", "update_group_chat", "track_work", "send_to_user", "ask_user", "save_memory", "recall_memory", "forget_memory", "recall_history", "manage_routines", "manage_integrations", "manage_tasks", "manage_triggers", "run_device", "finish_review"} {
+				// Guidance may only name a tool the turn offers; most tools describe themselves.
 				available := !test.definition.Intro && slices.Contains(test.tools, name)
-				if strings.Contains(policy, name) != available {
-					t.Errorf("guidance for %s present=%v, offered=%v", name, strings.Contains(policy, name), available)
+				if strings.Contains(policy, name) && !available {
+					t.Errorf("guidance names %s, which this turn doesn't offer", name)
 				}
 			}
 			if test.want != "" && !strings.Contains(policy, test.want) {
 				t.Fatalf("offered capability omitted guidance %q", test.want)
 			}
-			for _, preserved := range []string{"Polymux policy", "Identity and available tools", "NO_RESPONSE", "Configured MCP connections are unavailable"} {
+			for _, preserved := range []string{"Polymux policy", "Identity", "NO_RESPONSE", "Configured MCP connections are unavailable"} {
 				if !strings.Contains(policy, preserved) {
 					t.Errorf("policy omitted %q", preserved)
 				}
 			}
 		})
-	}
-}
-
-func TestUnavailableMCPReturnsNonReusableFallback(t *testing.T) {
-	testenv.PiG(t)
-	runtime := openDurable(t, &httptest.Server{URL: "http://127.0.0.1:1"})
-	definition := Definition{Agent: contract.Agent{ID: "a"}, Tools: []string{"read"}, MCP: []MCPServer{{Name: "unavailable"}}}
-	session, err := runtime.Open(t.Context(), definition, "")
-	if err != nil {
-		t.Fatal("CLI fallback failed", err)
-	}
-	defer session.Close()
-	if session.(*durableSession).Reusable() {
-		t.Fatal("missing MCP will never be retried")
-	}
-	definition.MCP = nil
-	healthy, err := runtime.Open(t.Context(), definition, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer healthy.Close()
-	if !healthy.(*durableSession).Reusable() {
-		t.Fatal("healthy session not reusable")
 	}
 }

@@ -49,7 +49,7 @@ func TestGlobalSearch(t *testing.T) {
 	index := globalIndex(t)
 	indexMessage(t, index, "one", "a", "orange balloon", nil)
 	indexMessage(t, index, "two", "b", "orange juice", nil)
-	hits, semantic, err := index.Global(t.Context(), "fruit", "messages")
+	hits, semantic, err := index.Global(t.Context(), "fruit", "messages", "")
 	if err != nil || !semantic || len(hits) != 2 {
 		t.Fatalf("results=%+v semantic=%v err=%v", hits, semantic, err)
 	}
@@ -64,9 +64,20 @@ func TestGlobalSearch(t *testing.T) {
 		t.Fatalf("did not cross conversations: %+v", hits)
 	}
 	index.Embedder = nil
-	hits, semantic, err = index.Global(t.Context(), "juice", "all")
+	hits, semantic, err = index.Global(t.Context(), "juice", "all", "")
 	if err != nil || semantic || len(hits) != 1 || hits[0].ThreadID != "b" {
 		t.Fatalf("fallback=%+v semantic=%v err=%v", hits, semantic, err)
+	}
+}
+
+// A search from one chat's profile only finds what was said and shared there.
+func TestGlobalSearchScopedToChat(t *testing.T) {
+	index := globalIndex(t)
+	indexMessage(t, index, "one", "a", "orange balloon", nil)
+	indexMessage(t, index, "two", "b", "orange juice", nil)
+	hits, _, err := index.Global(t.Context(), "orange", "all", "a")
+	if err != nil || len(hits) != 1 || hits[0].ThreadID != "a" || hits[0].Kind != "messages" {
+		t.Fatalf("scoped results=%+v err=%v", hits, err)
 	}
 }
 
@@ -113,7 +124,7 @@ func TestGlobalPrefixes(t *testing.T) {
 		{name: "media filename", kind: "media", query: "sun", id: "attachment/image"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			hits, semantic, err := index.Global(t.Context(), tt.query, tt.kind)
+			hits, semantic, err := index.Global(t.Context(), tt.query, tt.kind, "")
 			if err != nil || semantic || len(hits) != 1 || hits[0].ID != tt.id {
 				t.Fatalf("results=%+v semantic=%v err=%v", hits, semantic, err)
 			}
@@ -136,14 +147,14 @@ func TestGlobalTypesBeforeLimit(t *testing.T) {
 	indexMessage(t, index, "zz-file", "b", "orange", &file)
 	for _, tt := range []struct{ name, id string }{{name: "media", id: "image"}, {name: "files", id: "file"}} {
 		t.Run(tt.name, func(t *testing.T) {
-			hits, _, err := index.Global(t.Context(), "orange", tt.name)
+			hits, _, err := index.Global(t.Context(), "orange", tt.name, "")
 			if err != nil || len(hits) != 1 || hits[0].Attachment == nil || hits[0].Attachment.ID != tt.id {
 				t.Fatalf("filtered=%+v err=%v", hits, err)
 			}
 		})
 	}
 	index.Embedder = nil
-	hits, _, err := index.Global(t.Context(), "orange.pdf", "files")
+	hits, _, err := index.Global(t.Context(), "orange.pdf", "files", "")
 	if err != nil || len(hits) != 1 || hits[0].Title != "orange.pdf" {
 		t.Fatalf("filename=%+v err=%v", hits, err)
 	}
@@ -155,7 +166,7 @@ func TestGlobalMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"bots", "conversations"} {
-		hits, semantic, err := index.Global(t.Context(), "fruit", kind)
+		hits, semantic, err := index.Global(t.Context(), "fruit", kind, "")
 		if err != nil || !semantic || len(hits) != 2 || hits[0].ThreadID != "a" || hits[0].Kind != kind {
 			t.Fatalf("%s=%+v semantic=%v err=%v", kind, hits, semantic, err)
 		}
@@ -164,14 +175,14 @@ func TestGlobalMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	index.Embedder = nil
-	hits, _, err := index.Global(t.Context(), "Renamed", "bots")
+	hits, _, err := index.Global(t.Context(), "Renamed", "bots", "")
 	if err != nil || len(hits) != 1 || hits[0].Title != "Renamed" {
 		t.Fatalf("renamed=%+v err=%v", hits, err)
 	}
 	if _, _, err := index.Store.DeleteAgent(t.Context(), "a"); err != nil {
 		t.Fatal(err)
 	}
-	hits, _, err = index.Global(t.Context(), "Renamed", "all")
+	hits, _, err = index.Global(t.Context(), "Renamed", "all", "")
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("deleted=%+v err=%v", hits, err)
 	}
@@ -197,7 +208,7 @@ func TestModelReplacement(t *testing.T) {
 		kind string
 		want int
 	}{{kind: "messages", want: 1}, {kind: "bots", want: 2}, {kind: "conversations", want: 2}} {
-		hits, semantic, err := index.Global(t.Context(), "transport reservation", tt.kind)
+		hits, semantic, err := index.Global(t.Context(), "transport reservation", tt.kind, "")
 		if err != nil || !semantic || len(hits) != tt.want {
 			t.Fatalf("%s results=%+v semantic=%v err=%v", tt.kind, hits, semantic, err)
 		}
@@ -233,7 +244,7 @@ func TestReindexRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	hits, semantic, err := index.Global(t.Context(), "transport reservation", "messages")
+	hits, semantic, err := index.Global(t.Context(), "transport reservation", "messages", "")
 	if err != nil || !semantic || len(hits) != 1 {
 		t.Fatalf("recovered results=%+v semantic=%v err=%v", hits, semantic, err)
 	}
@@ -265,7 +276,7 @@ func TestIngestRecovery(t *testing.T) {
 	if err := index.Batch(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	hits, semantic, err := index.Global(t.Context(), "flight", "messages")
+	hits, semantic, err := index.Global(t.Context(), "flight", "messages", "")
 	if err != nil || semantic || len(hits) != 1 {
 		t.Fatalf("outage lost lexical history=%+v semantic=%v err=%v", hits, semantic, err)
 	}
@@ -281,7 +292,7 @@ func TestIngestRecovery(t *testing.T) {
 	if err := index.Batch(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	hits, semantic, err = index.Global(t.Context(), "transport reservation", "messages")
+	hits, semantic, err = index.Global(t.Context(), "transport reservation", "messages", "")
 	if err != nil || !semantic || len(hits) != 1 {
 		t.Fatalf("recovered results=%+v semantic=%v err=%v", hits, semantic, err)
 	}

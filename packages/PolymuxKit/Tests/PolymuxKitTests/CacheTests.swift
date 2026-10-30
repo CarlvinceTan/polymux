@@ -145,8 +145,9 @@ struct CacheTests {
         old.status = "done"
         try cache.merge([old])
         #expect(try cache.messages(threadID: "one").first?.text == "First and second")
+        try cache.apply(Event(seq: 3, conversationID: "one", type: "message.done", messageID: "reply", createdAt: old.createdAt))
         #expect(try cache.search(threadID: "one", query: "second").count == 1)
-        #expect(try cache.cursor(threadID: "one") == 2)
+        #expect(try cache.cursor(threadID: "one") == 3)
     }
 
     @Test func lateHttpAcknowledgementKeepsServerSnapshot() throws {

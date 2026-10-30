@@ -25,7 +25,7 @@ func (s *Server) globalSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	hits, semantic, err := s.config.Index.Global(ctx, query, kind)
+	hits, semantic, err := s.config.Index.Global(ctx, query, kind, r.URL.Query().Get("thread"))
 	mode := "lexical"
 	if semantic {
 		mode = "hybrid"

@@ -10,7 +10,25 @@ struct ClientPathsTests {
         let root = ClientPaths.root(home: home, support: support, environment: [:], desktop: true)
         #expect(root.path == "/Users/example/.polymux")
         #expect(ClientPaths.cache("http://localhost:7337", root: root).path ==
-                "/Users/example/.polymux/app-349688521712662452/cache.sqlite")
+                "/Users/example/.polymux/server-c38ac81a739036b41a5657bf8cdad6ea/cache.sqlite")
+    }
+
+    @Test func collidingAddressesStayApart() throws {
+        // These two collide under the old folder hash: 97×33+114 = 99×33+48.
+        let root = FileManager.default.temporaryDirectory.appending(path: "paths-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(ClientPaths.token("http://ar.test:7337", root: root) != ClientPaths.token("http://c0.test:7337", root: root))
+    }
+
+    @Test func legacyFolderMoves() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "paths-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let legacy = root.appending(path: "app-349688521712662452")
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try Data("saved".utf8).write(to: legacy.appending(path: "token"))
+        let token = ClientPaths.token("http://localhost:7337", root: root)
+        #expect(try String(contentsOf: token, encoding: .utf8) == "saved")
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
     }
 
     @Test func dataOverride() {

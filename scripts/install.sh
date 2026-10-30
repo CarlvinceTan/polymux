@@ -3,6 +3,9 @@
 # Without a target it asks.
 set -eu
 . "$(dirname -- "$0")/lib/local.sh"
+. "$ROOT/scripts/lib/drain.sh"
+trap 'cancel_drain; rm -f "$LOG"' EXIT
+trap 'exit 130' INT TERM HUP
 pick_target install "${1:-}"
 
 # Listen on Tailscale when it is up so other devices can reach this Mac; loopback otherwise.
@@ -68,14 +71,22 @@ open_app() {
 }
 
 echo "Installing Polymux ($target)"
-[ "$server" = 0 ] || step "Build server" "$ROOT/scripts/build.sh" server
-[ "$app" = 0 ] || step "Build app" "$ROOT/scripts/build.sh" macos
-[ "$server" = 0 ] || step "Stop previous server" stop_server
+[ "$server" = 0 ] || (step "Build server" "$ROOT/scripts/build.sh" server) || exit 75
+[ "$app" = 0 ] || (step "Build app" "$ROOT/scripts/build.sh" macos) || exit 75
+if [ "$server" = 1 ]; then
+  drain_server "$ROOT/dist/server/polymux" "$ADDRESS" || exit 75
+  if [ -n "$DRAIN_ID" ]; then
+    step "Stop previous server" launchctl bootout "$DOMAIN/$LABEL"
+  fi
+  DRAIN_STOPPED=1
+fi
 [ "$app" = 0 ] || step "Stop previous app" stop_app
 [ "$server" = 0 ] || step "Back up data" backup
 [ "$server" = 0 ] || step "Install server" install_server
 [ "$app" = 0 ] || step "Install app" install_app
 [ "$server" = 0 ] || step "Start server" start_server
+[ "$server" = 0 ] || step "Verify server" verify_server
+[ "$server" = 0 ] || step "Resume queued work" resume_drain
 [ "$app" = 0 ] || step "Open Polymux" open_app
 echo
 if [ "$server" = 1 ]; then

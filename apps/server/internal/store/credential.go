@@ -22,7 +22,7 @@ func (s *Store) CompleteCredential(ctx context.Context, thread, id string, skip 
 	if err := json.Unmarshal([]byte(data), &card); err != nil {
 		return card, err
 	}
-	if card.AgentID == nil || len(card.Parts) != 1 || card.Parts[0].Kind != "credential" || card.Parts[0].Credential == nil {
+	if card.AgentID == nil || len(card.Parts) != 1 || card.Parts[0].Kind != contract.PartKindCredential || card.Parts[0].Credential == nil {
 		return card, ErrChoice
 	}
 	request := card.Parts[0].Credential
@@ -30,7 +30,7 @@ func (s *Store) CompleteCredential(ctx context.Context, thread, id string, skip 
 	if skip {
 		status = "skipped"
 	}
-	if request.Status != "pending" {
+	if request.Status != contract.CredentialRequestStatusPending {
 		if request.Status == status {
 			return card, nil
 		}
@@ -43,7 +43,7 @@ func (s *Store) CompleteCredential(ctx context.Context, thread, id string, skip 
 	if member != 1 {
 		return card, ErrChoice
 	}
-	if !skip {
+	if !skip && (request.Ephemeral == nil || !*request.Ephemeral) {
 		if len(sealed) == 0 {
 			return card, ErrChoice
 		}
@@ -52,16 +52,16 @@ func (s *Store) CompleteCredential(ctx context.Context, thread, id string, skip 
 		}
 	}
 	request.Status = status
-	if _, err := appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: "message.done", AgentID: card.AgentID}, &card); err != nil {
+	if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeMessageDone, AgentID: card.AgentID}, &card); err != nil {
 		return card, err
 	}
 	if !skip {
 		text := "Credential " + request.Name + " was saved for " + request.Origin + ". Continue the task using its named reference; never expose the value."
-		message := contract.Message{ID: "credential-answer:" + id, ThreadID: thread, Role: "user", Status: "done", CreatedAt: Now(), Parts: []contract.Part{{Kind: "text", Text: &text}}, ReplyToID: &card.ID}
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: "message.start"}, &message); err != nil {
+		message := contract.Message{ID: "credential-answer:" + id, ThreadID: thread, Role: contract.MessageRoleUser, Status: contract.MessageStatusDone, CreatedAt: Now(), Parts: []contract.Part{{Kind: contract.PartKindText, Text: &text}}, ReplyToID: &card.ID}
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeMessageStart}, &message); err != nil {
 			return card, err
 		}
-		if err := queueTx(ctx, tx, Work{Trigger: "message", Message: message, Routing: "mentions", Targets: []string{*card.AgentID}}, *card.AgentID); err != nil {
+		if err := s.queueTx(ctx, tx, Work{Trigger: contract.RunTriggerMessage, Message: message, Routing: "explicit", Targets: []string{*card.AgentID}}, *card.AgentID); err != nil {
 			return card, err
 		}
 	}
@@ -70,7 +70,7 @@ func (s *Store) CompleteCredential(ctx context.Context, thread, id string, skip 
 
 func (s *Store) CredentialCard(ctx context.Context, thread, id string) (contract.Message, error) {
 	card, err := s.Message(ctx, id)
-	if err != nil || card.ThreadID != thread || card.AgentID == nil || card.Role != "assistant" || len(card.Parts) != 1 || card.Parts[0].Kind != "credential" || card.Parts[0].Credential == nil {
+	if err != nil || card.ThreadID != thread || card.AgentID == nil || card.Role != contract.MessageRoleAssistant || len(card.Parts) != 1 || card.Parts[0].Kind != contract.PartKindCredential || card.Parts[0].Credential == nil {
 		return card, errors.Join(err, ErrChoice)
 	}
 	return card, nil

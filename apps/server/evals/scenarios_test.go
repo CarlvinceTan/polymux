@@ -60,8 +60,9 @@ func TestT2EndTurn(t *testing.T) {
 
 func TestT4Cancel(t *testing.T) {
 	opened := make(chan struct{})
+	closed := make(chan struct{})
 	release := make(chan struct{})
-	h := Start(t, Options{ID: "T4", Steps: []Step{Fixed(nil, HoldReply("partial", release, func() { close(opened) }, nil))}})
+	h := Start(t, Options{ID: "T4", Steps: []Step{Fixed(nil, HoldReply("partial", release, func() { close(opened) }, func() { close(closed) }))}})
 	if code := h.Send(agentID, "t4-user", "hold please"); code != 202 && code != 200 {
 		fail(t, "T4", fmt.Sprintf("send status %d", code))
 		return
@@ -70,6 +71,8 @@ func TestT4Cancel(t *testing.T) {
 	stopAt := time.Now()
 	_ = h.Stop(agentID) // HTTP 200 is always written; assert cancel via run error code.
 	run := h.WaitRun(agentID, "t4-user", agentID, cancelMax)
+	// The aborted stream must close, then a quiet window catches any late retry.
+	WaitHold(t, "T4", closed, cancelMax)
 	time.Sleep(100 * time.Millisecond)
 	for _, ts := range h.Emulator.RequestTimes() {
 		if ts.After(stopAt) {
@@ -566,7 +569,7 @@ func TestB1Spawn(t *testing.T) {
 		t.Run(target.name, func(t *testing.T) {
 			opened := make(chan struct{})
 			release := make(chan struct{})
-			args := map[string]any{"task": "CHILD_ONLY_B1: Complete the bounded task"}
+			args := map[string]any{"action": "run", "prompt": "CHILD_ONLY_B1: Complete the bounded task"}
 			if target.id != "" {
 				args["agent_id"] = target.id
 			}
@@ -591,11 +594,11 @@ func TestB1Spawn(t *testing.T) {
 				},
 				Steps: []Step{
 					Fixed(func(req *ChatRequest) error {
-						if !strings.Contains(string(req.Tools), "spawn_task") {
-							return fmt.Errorf("spawn_task is unavailable")
+						if !strings.Contains(string(req.Tools), "task") {
+							return fmt.Errorf("task is unavailable")
 						}
 						return nil
-					}, ToolReply("b1-spawn", "spawn_task", args)),
+					}, ToolReply("b1-spawn", "task", args)),
 					{Response: reply}, {Response: reply},
 				},
 			})
@@ -679,49 +682,8 @@ func TestB2BackgroundNotify(t *testing.T) {
 		return
 	}
 	parentID := store.NewRun("b2-user", "a", "a", "message").ID
-	deadlineAt := time.Now().Add(deadline)
-	var parent contract.Run
-	settled := false
-	for time.Now().Before(deadlineAt) {
-		var err error
-		parent, err = h.Store.Run(context.Background(), parentID)
-		if err != nil {
-			fail(t, "B2", "parent run: "+err.Error())
-			return
-		}
-		_, followErr := h.Store.Work(context.Background(), "followup:"+parentID)
-		if followErr != nil && !errors.Is(followErr, sql.ErrNoRows) {
-			fail(t, "B2", "followup lookup: "+followErr.Error())
-			return
-		}
-		followReady := followErr == nil
-		// Settled = terminal parent, or follow-up observed (then keep waiting for terminal).
-		if store.Terminal(parent.Status) {
-			settled = true
-			break
-		}
-		if followReady {
-			// Follow-up exists; wait out the rest of the deadline for terminal parent.
-			for time.Now().Before(deadlineAt) {
-				parent, err = h.Store.Run(context.Background(), parentID)
-				if err != nil {
-					fail(t, "B2", "parent run: "+err.Error())
-					return
-				}
-				if store.Terminal(parent.Status) {
-					settled = true
-					break
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !settled {
-		skip(t, "B2", "peer/follow-up flow could not be driven deterministically")
-		return
-	}
+	// Fail, not skip, when the peer flow never settles.
+	h.WaitRunID(parentID, deadline)
 
 	receipts := countPeerReceipts(h.Messages("a"))
 	time.Sleep(quietB2)

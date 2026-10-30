@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,7 +47,8 @@ func TestSecretPersists(t *testing.T) {
 	}
 }
 
-func TestExtractKeepsOnlyTheBinary(t *testing.T) {
+func release(t *testing.T) []byte {
+	t.Helper()
 	var archive bytes.Buffer
 	gz := gzip.NewWriter(&archive)
 	writer := tar.NewWriter(gz)
@@ -54,12 +58,62 @@ func TestExtractKeepsOnlyTheBinary(t *testing.T) {
 	}
 	_ = writer.Close()
 	_ = gz.Close()
+	return archive.Bytes()
+}
+
+func TestExtractKeepsOnlyTheBinary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bin", "dumbpipe")
-	if err := extract(archive.Bytes(), path); err != nil {
+	if err := extract(release(t), path); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(path); string(data) != "#!/bin/sh\n" {
 		t.Fatalf("extracted %q", data)
+	}
+}
+
+func TestInstallRejectsUnpinnedArchive(t *testing.T) {
+	archive := release(t)
+	path := filepath.Join(t.TempDir(), "dumbpipe")
+	if err := install(archive, strings.Repeat("0", 64), path); err == nil {
+		t.Fatal("installed an archive that does not match the pinned checksum")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("rejected archive left a binary: %v", err)
+	}
+	sum := sha256.Sum256(archive)
+	if err := install(archive, hex.EncodeToString(sum[:]), path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A paired server restarts its sidecar on boot, with its saved secret, and serves the printed ticket.
+func TestTicketFromSidecar(t *testing.T) {
+	ticket := "endpoint" + strings.Repeat("a", 40)
+	dir := t.TempDir()
+	seen := filepath.Join(dir, "secret-seen")
+	fake := filepath.Join(dir, "dumbpipe")
+	script := fmt.Sprintf("#!/bin/sh\nprintf %%s \"$IROH_SECRET\" > %q\necho \"dumbpipe connect-tcp %s\" >&2\nexec sleep 30\n", seen, ticket)
+	if err := os.WriteFile(fake, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("POLYMUX_DUMBPIPE", fake)
+	secret, err := Secret(filepath.Join(dir, "tunnel"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	served := New(ctx, dir, "127.0.0.1:1", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	select {
+	case <-served.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a paired tunnel did not start on boot")
+	}
+	if got := served.Ticket(0); got != ticket {
+		t.Fatalf("ticket %q", got)
+	}
+	if data, _ := os.ReadFile(seen); string(data) != secret {
+		t.Fatalf("sidecar got secret %q, want the saved one", data)
 	}
 }
 

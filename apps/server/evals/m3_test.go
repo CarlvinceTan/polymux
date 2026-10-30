@@ -3,7 +3,7 @@ package evals
 import (
 	"testing"
 
-	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
+	"github.com/CarlvinceTan/polymux/packages/memory"
 )
 
 func TestM3IdenticalWrites(t *testing.T) {

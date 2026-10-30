@@ -28,12 +28,16 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/proxy"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/secrets"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/settings"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/sshagent"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
+	"github.com/CarlvinceTan/polymux/packages/memory"
+	vaultstore "github.com/CarlvinceTan/polymux/packages/vault"
 )
 
 type Factory interface {
@@ -50,15 +54,24 @@ type Config struct {
 	Push        PushSender
 	Devices     *device.Broker
 	// Ticket returns this server's tunnel ticket, waiting at most the given time; nil disables it.
-	Ticket func(time.Duration) string
+	Ticket    func(time.Duration) string
+	PublicURL string
 	// BackgroundTimeout defaults to the normal turn limit when unset.
 	BackgroundTimeout time.Duration
+	GroupCaps         *GroupCaps
+	VaultKeys         vaultstore.Keys
 }
 type Server struct {
+	drafts     sync.Map
 	Store      *store.Store
 	memory     *memory.Store
 	settings   *settings.Store
 	secrets    *secrets.Store
+	vault      *vaultstore.Store
+	proxy      *proxy.Proxy
+	ssh        *sshagent.Agent
+	vaultMu    sync.Mutex
+	vaultJobs  map[string]*vaultJob
 	secretMu   sync.Mutex
 	outputs    *outputFiles
 	worktrees  *agentruntime.Worktrees
@@ -71,6 +84,8 @@ type Server struct {
 	deletes    map[string]*deletion
 	actorsMu   sync.RWMutex
 	closing    bool
+	admission  admission
+	instance   string
 	closeOnce  sync.Once
 	closeErr   error
 	mux        *http.ServeMux
@@ -82,8 +97,16 @@ type Server struct {
 	turns      sync.Map
 	voices     map[string]*voiceWork
 	voiceSeen  map[string]bool
-	speechHTTP *http.Client
-	speechDial func(context.Context, string) (*websocket.Conn, error)
+	speechDial func(ctx context.Context, provider, model, key string) (*websocket.Conn, error)
+	// keys holds provider keys; voice uses the key of a connected Gemini or OpenAI provider.
+	keys providers.SecretStore
+	// voiceFound caches which live voice providers have a usable key; see voiceKeys.
+	voiceMu    sync.Mutex
+	voiceAt    time.Time
+	voiceState string
+	voiceFound []string
+	clients    clientHub
+	prices     modelPrices
 }
 type actor struct {
 	id         string
@@ -91,7 +114,11 @@ type actor struct {
 	definition agentruntime.Definition
 	revision   uint64
 	sessionRev uint64
-	sessionMCP [32]byte
+	// sessionModel is the provider/model the open session runs on; a Not set bot can move.
+	sessionModel string
+	sessionMCP   [32]byte
+	// devices is the device tool set the open session was given.
+	devices    string
 	sessionDir string
 	mu         sync.Mutex
 	sessionMu  sync.Mutex
@@ -102,6 +129,14 @@ type actor struct {
 }
 
 func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
+	caps := DefaultGroups()
+	if c.GroupCaps != nil {
+		caps = *c.GroupCaps
+	}
+	if caps.MaxDepth < 0 || caps.MaxPerRun < 0 {
+		return nil, errors.New("group delegation limits must not be negative")
+	}
+	c.GroupCaps = &caps
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
@@ -185,6 +220,17 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 			}
 			d.Agent.Avatar = &avatar
 		}
+		if _, ok := configured[d.Agent.ID]; !ok && d.Agent.Provider == "" && d.Agent.Model != "" && !fallback(c.Factory) {
+			// No endpoint can run this model, so the bot becomes Not set and follows the providers.
+			d.Agent.Model = ""
+			data, err := json.Marshal(d)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := s.UpdateDefinition(ctx, d.Agent, data); err != nil {
+				return nil, err
+			}
+		}
 		definitions = append(definitions, d)
 		agents = append(agents, d.Agent)
 	}
@@ -203,8 +249,33 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	v := &Server{Store: s, settings: preferences, memory: memory.New(filepath.Join(c.DataDir, "memory")), worktrees: agentruntime.NewWorktrees(filepath.Join(c.DataDir, "worktrees")), config: c, ctx: ctx, cancel: cancel, actors: map[string]*actor{}, groups: map[string]*groupActor{}, presence: map[string]int{}, deletes: map[string]*deletion{}, voices: map[string]*voiceWork{}, voiceSeen: map[string]bool{}, mux: http.NewServeMux(), slots: make(chan struct{}, 4)}
+	v := &Server{Store: s, settings: preferences, keys: providers.NewKeychain(filepath.Join(c.DataDir, "provider-keys")), memory: memory.New(filepath.Join(c.DataDir, "memory")), worktrees: agentruntime.NewWorktrees(filepath.Join(c.DataDir, "worktrees")), config: c, ctx: ctx, cancel: cancel, actors: map[string]*actor{}, groups: map[string]*groupActor{}, presence: map[string]int{}, deletes: map[string]*deletion{}, voices: map[string]*voiceWork{}, voiceSeen: map[string]bool{}, mux: http.NewServeMux(), slots: make(chan struct{}, 4)}
 	v.secrets = vault
+	v.instance = ID()
+	if err := v.loadDrain(); err != nil {
+		cancel()
+		return nil, errors.Join(err, v.memory.Close())
+	}
+	if c.VaultKeys == nil {
+		c.VaultKeys = hostKeys{Dir: filepath.Join(c.DataDir, "vault")}
+	}
+	v.vault, err = vaultstore.Open(ctx, s.DB, c.VaultKeys)
+	if err != nil {
+		cancel()
+		return nil, errors.Join(err, v.memory.Close())
+	}
+	v.vaultJobs = map[string]*vaultJob{}
+	// Only a runtime that runs commands needs a secret environment: the proxy for web requests
+	// and the local agent socket for SSH keys.
+	if runtime, ok := c.Factory.(shellRuntime); ok {
+		if v.proxy, err = proxy.Start(filepath.Join(c.DataDir, "proxy"), v.fillSecrets, v.boundSecrets); err != nil {
+			c.Log.Warn("secret proxy unavailable", "error", err)
+		}
+		if v.ssh, err = sshagent.Start(v.sshKeys); err != nil {
+			c.Log.Warn("SSH key agent unavailable", "error", err)
+		}
+		runtime.SetShellEnv(v.shellEnv)
+	}
 	v.outputs = &outputFiles{store: s, dir: filepath.Join(c.DataDir, "attachments")}
 	for _, d := range definitions {
 		actorCtx, stop := context.WithCancel(ctx)
@@ -225,7 +296,10 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 		}
 	}
 	v.workers.Add(1)
-	go func() { defer v.workers.Done(); c.Index.Run(ctx) }()
+	go func() {
+		defer v.workers.Done()
+		c.Index.Run(ctx, v.admission.start, v.admission.done)
+	}()
 	v.workers.Add(1)
 	go v.schedule(ctx)
 	v.workers.Add(1)
@@ -269,6 +343,13 @@ func (s *Server) Close() error {
 		for _, group := range groups {
 			errs = append(errs, group.close())
 		}
+		s.vault.Close()
+		if s.proxy != nil {
+			errs = append(errs, s.proxy.Close())
+		}
+		if s.ssh != nil {
+			errs = append(errs, s.ssh.Close())
+		}
 		errs = append(errs, s.memory.Close())
 		s.closeErr = errors.Join(errs...)
 	})
@@ -277,16 +358,12 @@ func (s *Server) Close() error {
 func (s *Server) Handler() http.Handler { return s.config.Devices.Require(s) }
 
 func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if s.config.Devices == nil {
-		token, err := os.ReadFile(filepath.Join(s.config.DataDir, "devices", "local-token"))
-		if err != nil {
-			write(w, 500, map[string]string{"error": "local credential unavailable"})
-			return
-		}
-		write(w, 200, s.invite(r, strings.TrimSpace(string(token))))
+		fail(w, 503, "pair_unavailable", "Device pairing is unavailable.")
 		return
 	}
-	token, err := s.config.Devices.Issue(r.Context(), "Polymux app")
+	token, err := s.config.Devices.Invite(r.Context())
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not issue a pairing credential"})
 		return
@@ -296,6 +373,9 @@ func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 
 // invite carries the direct address and, when available, a tunnel ticket for other networks.
 func (s *Server) invite(r *http.Request, token string) map[string]string {
+	if s.config.PublicURL != "" {
+		return map[string]string{"url": s.config.PublicURL, "token": token}
+	}
 	value := map[string]string{"url": "http://" + r.Host, "token": token}
 	if s.config.Ticket != nil {
 		if ticket := s.config.Ticket(15 * time.Second); ticket != "" {
@@ -307,12 +387,23 @@ func (s *Server) invite(r *http.Request, token string) map[string]string {
 
 func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 	devices := []device.Pairing{}
+	host := ""
 	if s.config.Devices != nil {
+		host = s.config.Devices.Host(r.Context(), s.config.DataDir)
 		if listed, err := s.config.Devices.All(r.Context()); err == nil {
 			devices = listed
 		}
 	}
 	name, _ := os.Hostname()
+	online := s.clients.online()
+	for i := range devices {
+		if devices[i].ID == host {
+			devices[i].Name = name
+		}
+	}
+	if host != "" && !slices.Contains(online, host) {
+		online = append(online, host)
+	}
 	write(w, 200, map[string]any{
 		"server": map[string]any{
 			"name": name, "build": s.config.BuildSHA,
@@ -320,6 +411,8 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 		},
 		"devices": devices,
 		"current": device.Self(r.Context()),
+		"host":    host,
+		"online":  online,
 	})
 }
 
@@ -360,7 +453,7 @@ func (s *Server) labelDevice(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-// removeDevice revokes another device; a device cannot remove itself.
+// removeDevice revokes another client, never this device or the server.
 func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if s.config.Devices == nil {
@@ -371,19 +464,34 @@ func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "self", "This device can't remove itself.")
 		return
 	}
-	if err := s.config.Devices.Revoke(r.Context(), id); err != nil {
-		fail(w, 404, "not_found", err.Error())
+	if id == s.config.Devices.Host(r.Context(), s.config.DataDir) {
+		fail(w, 409, "host", "The server can’t be removed as a paired device.")
 		return
 	}
+	if err := s.config.Devices.Revoke(r.Context(), id); err != nil {
+		fail(w, 404, "not_found", "That device isn't paired.")
+		return
+	}
+	if err := s.Store.RevokePush(r.Context(), id); err != nil {
+		s.config.Log.Error("cancel revoked push notifications", "error", err)
+	}
+	s.clients.forget(id)
 	w.WriteHeader(204)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if !s.admitRequest(w, r) {
+		return
+	}
+	defer s.requestDone(r)
 	s.mux.ServeHTTP(w, r)
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /maintenance", s.drain)
+	s.mux.HandleFunc("POST /maintenance", s.drain)
+	s.vaultRoutes()
 	s.mountProviders()
 	s.mux.HandleFunc("GET /agents/{id}/history/{peerID}", s.peerHistory)
 	s.mux.HandleFunc("GET /threads/{id}/activity/{seq}", s.activityObject)
@@ -392,14 +500,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /triggers/{id}/events", s.ingestEvent)
 	s.mux.HandleFunc("GET /notifications", s.notices)
 	s.mux.HandleFunc("PUT /notifications/device", s.registerPush)
+	s.mux.HandleFunc("PUT /client", s.reportClient)
+	s.mux.HandleFunc("GET /client/requests", s.clientStream)
+	s.mux.HandleFunc("POST /client/requests/{id}", s.answerClient)
 	s.mux.HandleFunc("GET /settings", s.getSettings)
 	s.mux.HandleFunc("PATCH /settings", s.updateSettings)
-	s.mux.HandleFunc("PUT /settings/keys/{provider}", s.setSpeechKey)
-	s.mux.HandleFunc("DELETE /settings/keys/{provider}", s.setSpeechKey)
-	s.mux.HandleFunc("POST /speech/text", s.speechText)
 	s.mux.HandleFunc("GET /speech/live", s.speechLive)
 	s.mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		write(w, 200, map[string]any{"status": "ok", "runtime": "PiG", "buildSHA": s.config.BuildSHA, "semanticSearch": s.config.Index.Embedder != nil})
+		write(w, 200, map[string]any{"status": "ok", "runtime": "PiG", "buildSHA": s.config.BuildSHA, "semanticSearch": s.config.Index.Embedder != nil, "maintenance": s.admission.snapshot()})
 	})
 	s.mux.HandleFunc("GET /network", s.network)
 	s.mux.HandleFunc("GET /network/invite", s.networkInvite)
@@ -421,8 +529,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /agents/{id}/routines/{routineID}/runs", s.routineRuns)
 	s.mux.HandleFunc("POST /agents/{id}/routines", s.createRoutine)
 	s.mux.HandleFunc("DELETE /agents/{id}/routines/{routineID}", s.deleteRoutine)
-	s.mux.HandleFunc("POST /agents/{id}/focus", s.focus)
-	s.mux.HandleFunc("POST /agents/{id}/focus/answer", s.answerFocus)
 	s.mux.HandleFunc("GET /agents/{id}/proactivity", s.getProactivity)
 	s.mux.HandleFunc("PATCH /agents/{id}/proactivity", s.setProactivity)
 	s.sidebarRoutes()
@@ -432,12 +538,15 @@ func (s *Server) routes() {
 	})
 	s.mux.HandleFunc("POST /threads", s.createThread)
 	s.mux.HandleFunc("PATCH /threads/{id}", s.updateThread)
+	s.mux.HandleFunc("DELETE /threads/{id}", s.deleteThread)
 	s.mux.HandleFunc("GET /threads/{id}/messages", s.messages)
 	s.mux.HandleFunc("GET /threads/{id}/tool-runs", s.toolRuns)
 	s.mux.HandleFunc("POST /threads/{id}/messages", s.send)
 	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/answer", s.answerChoice)
 	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/credential", s.answerCredential)
+	s.mux.HandleFunc("PUT /threads/{id}/messages/{messageID}/reaction", s.react)
 	s.mux.HandleFunc("POST /threads/{id}/voice", s.voice)
+	s.mux.HandleFunc("POST /threads/{id}/voice/stream", s.voiceStream)
 	s.mux.HandleFunc("GET /threads/{id}/events", s.events)
 	s.mux.HandleFunc("GET /threads/{id}/stream", s.stream)
 	s.mux.HandleFunc("POST /threads/{id}/read", s.read)
@@ -445,18 +554,25 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /threads/{id}/search", s.search)
 	s.mux.HandleFunc("GET /search", s.globalSearch)
 	s.mux.HandleFunc("POST /attachments", s.upload)
+	s.mux.HandleFunc("GET /threads/{id}/draft", s.draft)
+	s.mux.HandleFunc("PUT /threads/{id}/draft", s.draft)
 	s.mux.HandleFunc("GET /attachments/{id}/content", s.download)
 	s.mux.HandleFunc("GET /attachments/{id}/thumbnail", s.thumbnail)
 }
 
-var errProfile = errors.New("invalid agent profile")
+// invalidProfile is a profile rejection whose text the client shows as is.
+type invalidProfile string
+
+func (e invalidProfile) Error() string { return string(e) }
+
+var errProfile = invalidProfile("Invalid agent profile.")
 
 func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	var request contract.CreateAgentRequest
 	if !decode(w, r, &request) {
 		return
 	}
-	a, err := s.addAgent(r.Context(), request)
+	a, err := s.addAgent(r.Context(), request, contract.Agent{})
 	if s.profileError(w, err) || s.sidebarError(w, err) {
 		return
 	}
@@ -468,9 +584,10 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) profileError(w http.ResponseWriter, err error) bool {
+	var invalid invalidProfile
 	switch {
-	case errors.Is(err, errProfile):
-		fail(w, 400, "invalid_agent", err.Error())
+	case errors.As(err, &invalid):
+		fail(w, 400, "invalid_agent", string(invalid))
 	case errors.Is(err, errClosing):
 		fail(w, 503, "closing", "The server is restarting. Try again shortly.")
 	case errors.Is(err, sql.ErrNoRows):
@@ -481,18 +598,19 @@ func (s *Server) profileError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentRequest) (contract.Agent, error) {
+// addAgent creates an agent; creator is the bot that asked for it, its zero value for the user.
+func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentRequest, creator contract.Agent) (contract.Agent, error) {
 	request.Name = strings.TrimSpace(request.Name)
 	if request.Name == "" {
-		request.Name = "New Bot"
+		request.Name = randomName()
 	}
 	request.Role = strings.TrimSpace(request.Role)
 	request.Prompt = strings.TrimSpace(request.Prompt)
 	if len(request.Name) > 128 || len(request.Role) > 256 || len(request.Prompt) > 64000 || request.InitialTask != nil && len(*request.InitialTask) > 64000 {
-		return contract.Agent{}, fmt.Errorf("%w: Enter an agent name and keep its profile within the size limit.", errProfile)
+		return contract.Agent{}, invalidProfile("Enter an agent name and keep its profile within the size limit.")
 	}
 	if request.Avatar != nil && !validAvatar(*request.Avatar) {
-		return contract.Agent{}, fmt.Errorf("%w: Choose a valid avatar and animation sequence.", errProfile)
+		return contract.Agent{}, invalidProfile("Choose a valid avatar and animation sequence.")
 	}
 	if request.Avatar != nil && request.Avatar.Blocks == nil {
 		request.Avatar.Blocks = []contract.AnimationBlock{}
@@ -501,15 +619,25 @@ func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentReque
 		avatar := defaultAvatar()
 		request.Avatar = &avatar
 	}
-	model := s.config.Model
+	provider, model, reasoning := s.defaultModel()
 	if request.Model != nil {
-		model = strings.TrimSpace(*request.Model)
+		// An explicit model runs on the fallback endpoint, as before providers existed.
+		provider, model = "", strings.TrimSpace(*request.Model)
 		if model == "" || len(model) > 256 {
-			return contract.Agent{}, fmt.Errorf("%w: Enter a valid model identifier.", errProfile)
+			return contract.Agent{}, invalidProfile("Enter a valid model identifier.")
+		}
+		if request.Provider != nil && *request.Provider != "" {
+			if !s.enabledModel(*request.Provider, model) {
+				return contract.Agent{}, invalidProfile("Choose a model that a configured provider has enabled.")
+			}
+			provider = *request.Provider
+		} else if !fallback(s.config.Factory) {
+			return contract.Agent{}, invalidProfile("Choose a model that a configured provider has enabled.")
 		}
 	}
 	d := agentruntime.Definition{
-		Agent:  contract.Agent{ID: ID(), Name: request.Name, Role: request.Role, Model: model, Avatar: request.Avatar},
+		Agent: contract.Agent{ID: ID(), Name: request.Name, Role: request.Role, Model: model, Avatar: request.Avatar,
+			Provider: provider, Reasoning: reasoning, CreatedBy: creator.ID},
 		Prompt: request.Prompt,
 		Tools:  []string{"read", "write", "edit", "bash", "find", "ls"},
 	}
@@ -523,7 +651,7 @@ func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentReque
 		s.actorsMu.Unlock()
 		return contract.Agent{}, errClosing
 	}
-	if err := s.Store.CreateDefinition(ctx, d.Agent, data, request.InitialTask, request.SectionID); err != nil {
+	if err := s.Store.CreateDefinition(ctx, d.Agent, data, request.InitialTask, request.SectionID, creator); err != nil {
 		s.actorsMu.Unlock()
 		return contract.Agent{}, err
 	}
@@ -534,6 +662,59 @@ func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentReque
 	go s.work(actorCtx, a)
 	s.actorsMu.Unlock()
 	return d.Agent, nil
+}
+
+// defaultModel is what new bots run on: the Settings default while a provider still has it enabled,
+// otherwise no model, which leaves the bot Not set.
+func (s *Server) defaultModel() (provider, model, reasoning string) {
+	settings := s.settings.Snapshot()
+	if settings.DefaultProvider != "" && s.enabledModel(settings.DefaultProvider, settings.DefaultModel) {
+		return settings.DefaultProvider, settings.DefaultModel, settings.DefaultReasoning
+	}
+	return "", "", settings.DefaultReasoning
+}
+
+var errNoProvider = errors.New("no provider is set up")
+
+// autoModel is what a Not set bot runs on: the default model, else the first provider's preferred
+// or first enabled model, else the fallback endpoint when it is configured.
+func (s *Server) autoModel() (provider, model string, err error) {
+	if provider, model, _ := s.defaultModel(); model != "" {
+		return provider, model, nil
+	}
+	for _, p := range s.settings.Providers() {
+		if !p.Enabled {
+			continue
+		}
+		if preferred := providers.Preferred(p.Type); preferred != "" && s.enabledModel(p.ID, preferred) {
+			return p.ID, preferred, nil
+		}
+		for _, m := range p.Models {
+			if m.Enabled && chatModel(m) {
+				return p.ID, m.ID, nil
+			}
+		}
+	}
+	if fallback(s.config.Factory) {
+		return "", s.config.Model, nil
+	}
+	return "", "", errNoProvider
+}
+
+// withModel fills in this turn's model for a Not set bot.
+func (s *Server) withModel(d agentruntime.Definition) (agentruntime.Definition, error) {
+	if d.Agent.Model != "" {
+		return d, nil
+	}
+	var err error
+	d.Agent.Provider, d.Agent.Model, err = s.autoModel()
+	return d, err
+}
+
+// fallback reports whether the runtime's own endpoint can serve bots that name no provider.
+func fallback(f Factory) bool {
+	runtime, ok := f.(interface{ Fallback() bool })
+	return !ok || runtime.Fallback()
 }
 
 func (s *Server) agentProfile(w http.ResponseWriter, r *http.Request) {
@@ -554,11 +735,15 @@ type updateAgentRequest struct {
 }
 
 type agentPatch struct {
-	Name      *string                `json:"name,omitempty"`
-	Role      *string                `json:"role,omitempty"`
-	Prompt    *string                `json:"prompt,omitempty"`
-	Workspace *string                `json:"workspace,omitempty"`
-	Avatar    *contract.AvatarDesign `json:"avatar,omitempty"`
+	TaskDelegation *bool                  `json:"task_delegation,omitempty"`
+	Name           *string                `json:"name,omitempty"`
+	Role           *string                `json:"role,omitempty"`
+	Prompt         *string                `json:"prompt,omitempty"`
+	Workspace      *string                `json:"workspace,omitempty"`
+	Avatar         *contract.AvatarDesign `json:"avatar,omitempty"`
+	Provider       *string                `json:"provider,omitempty"`
+	Model          *string                `json:"model,omitempty"`
+	Reasoning      *string                `json:"reasoning,omitempty"`
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
@@ -566,7 +751,10 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &request) {
 		return
 	}
-	profile, err := s.editAgent(r.Context(), r.PathValue("id"), agentPatch{Name: &request.Name, Role: &request.Role, Prompt: &request.Prompt, Workspace: request.Workspace})
+	profile, err := s.editAgent(r.Context(), r.PathValue("id"), agentPatch{
+		Name: request.Name, Role: request.Role, Prompt: request.Prompt, Workspace: request.Workspace,
+		Provider: request.Provider, Model: request.Model, Reasoning: request.Reasoning,
+	})
 	if !s.profileError(w, err) {
 		s.respond(w, profile, err)
 	}
@@ -586,6 +774,18 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 	}
 	if patch.Avatar != nil && !validAvatar(*patch.Avatar) {
 		return empty, errProfile
+	}
+	if patch.Reasoning != nil && !settings.ValidReasoning(*patch.Reasoning) {
+		return empty, invalidProfile("Choose a valid reasoning level.")
+	}
+	if (patch.Model == nil) != (patch.Provider == nil) {
+		return empty, invalidProfile("Choose a provider and model together.")
+	}
+	// An empty provider and model together leave the bot Not set.
+	if patch.Model != nil && (*patch.Model != "" || *patch.Provider != "") {
+		if strings.TrimSpace(*patch.Model) == "" || len(*patch.Model) > 256 || len(*patch.Provider) > 128 || strings.ContainsAny(*patch.Model, "\x00\r\n") || (*patch.Provider != "" && !s.enabledModel(*patch.Provider, *patch.Model)) || (*patch.Provider == "" && !fallback(s.config.Factory)) {
+			return empty, invalidProfile("Choose an available model for this bot.")
+		}
 	}
 	s.actorsMu.RLock()
 	defer s.actorsMu.RUnlock()
@@ -608,11 +808,20 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 	if patch.Prompt != nil {
 		d.Prompt = strings.TrimSpace(*patch.Prompt)
 	}
+	if patch.TaskDelegation != nil {
+		d.DelegationDisabled = !*patch.TaskDelegation
+	}
 	if patch.Workspace != nil {
 		d.Workspace, d.WorkspaceSet = *patch.Workspace, true
 	}
 	if patch.Avatar != nil {
 		d.Agent.Avatar = patch.Avatar
+	}
+	if patch.Model != nil {
+		d.Agent.Model, d.Agent.Provider = *patch.Model, *patch.Provider
+	}
+	if patch.Reasoning != nil {
+		d.Agent.Reasoning = *patch.Reasoning
 	}
 	d.Agent.Active = false
 	data, err := json.Marshal(d)
@@ -624,7 +833,7 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		return empty, err
 	}
 	changedPrompt := a.definition.Prompt != d.Prompt
-	if changedPrompt || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace {
+	if changedPrompt || a.definition.DelegationDisabled != d.DelegationDisabled || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace || a.definition.Agent.Model != d.Agent.Model || a.definition.Agent.Provider != d.Agent.Provider || a.definition.Agent.Reasoning != d.Agent.Reasoning {
 		a.revision++
 	}
 	a.definition = d
@@ -745,67 +954,18 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	after, ok := cursor(w, r, "after")
-	if !ok {
-		return
-	}
-	if last := r.Header.Get("Last-Event-ID"); last != "" {
-		n, err := strconv.ParseInt(last, 10, 64)
-		if err != nil || n < 0 {
-			fail(w, 400, "cursor", "Invalid Last-Event-ID.")
-			return
+	changed := func() <-chan struct{} { return s.Store.ThreadChanged(t.ID) }
+	s.serveEvents(w, r, changed, func(after int64) ([]sseFrame, error) {
+		events, err := s.Store.Events(r.Context(), t.ID, after, ssePage)
+		frames := make([]sseFrame, len(events))
+		for i, event := range events {
+			frames[i] = sseFrame{event.Seq, event.Type, event}
 		}
-		after = max(after, n)
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	controller := http.NewResponseController(w)
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-	for {
-		events, err := s.Store.Events(r.Context(), t.ID, after, 500)
-		if err != nil {
-			return
-		}
-		for _, event := range events {
-			data, err := json.Marshal(event)
-			if err != nil {
-				return
-			}
-			_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.Seq, event.Type, data); err != nil {
-				return
-			}
-			after = event.Seq
-		}
-		if err := controller.Flush(); err != nil {
-			return
-		}
-		_ = controller.SetWriteDeadline(time.Time{})
-		if len(events) == 500 {
-			continue
-		}
-		if len(events) == 0 {
-			if _, err := s.Store.Thread(r.Context(), t.ID); errors.Is(err, sql.ErrNoRows) {
-				return
-			}
-		}
-		select {
-		case <-r.Context().Done():
-			return
-		case <-s.ctx.Done():
-			return
-		case <-ticker.C:
-		case <-heartbeat.C:
-			_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
-				return
-			}
-		}
-	}
+		return frames, err
+	}, func() bool {
+		exists, err := s.Store.HasThread(r.Context(), t.ID)
+		return err == nil && !exists
+	})
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
@@ -817,13 +977,14 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &request) {
 		return
 	}
-	if request.ID == "" || len(request.ID) > 128 || len(request.Text) > 256000 || len(request.AttachmentIDs) > 20 || len(request.Mentions) > 16 || strings.TrimSpace(request.Text) == "" && len(request.AttachmentIDs) == 0 {
+	// Server-made message IDs contain a colon, so clients can't claim them.
+	if request.ID == "" || len(request.ID) > 128 || strings.Contains(request.ID, ":") || len(request.Text) > 256000 || len(request.AttachmentIDs) > 20 || len(request.Mentions) > 16 || strings.TrimSpace(request.Text) == "" && len(request.AttachmentIDs) == 0 {
 		fail(w, 400, "invalid_message", "Enter a message or add an attachment.")
 		return
 	}
 	parts := []contract.Part{}
 	if request.Text != "" {
-		parts = append(parts, contract.Part{Kind: "text", Text: &request.Text})
+		parts = append(parts, contract.Part{Kind: contract.PartKindText, Text: &request.Text})
 	}
 	for _, id := range request.AttachmentIDs {
 		a, _, err := s.Store.Attachment(r.Context(), id)
@@ -835,7 +996,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 			s.respond(w, nil, err)
 			return
 		}
-		parts = append(parts, contract.Part{Kind: "attachment", Attachment: &a})
+		parts = append(parts, contract.Part{Kind: contract.PartKindAttachment, Attachment: &a})
 	}
 	s.actorsMu.RLock()
 	defer s.actorsMu.RUnlock()
@@ -896,13 +1057,13 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		targets = groupTargets(request.Text, members, request.Mentions, true, value(t.LeadAgentID))
+		targets = groupTargets(request.Text, members, request.Mentions, true)
 		if len(targets) == 0 {
 			fail(w, 400, "ambiguous_mention", "Choose a member from the mention picker; this name is not unique.")
 			return
 		}
 		mentioned, everyone := groupMentions(request.Text, members)
-		routing = "lead"
+		routing = "auto"
 		for _, id := range request.Mentions {
 			if slices.Contains(t.AgentIDs, id) {
 				routing = "mentions"
@@ -915,7 +1076,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 			routing = "all"
 		}
 	}
-	m, created, err := s.Store.Accept(r.Context(), store.SendInput{ThreadID: t.ID, Request: request, Parts: parts, Targets: targets, Routing: routing})
+	m, created, err := s.Store.Accept(r.Context(), store.SendInput{ThreadID: t.ID, Request: request, Parts: parts, Targets: targets, Routing: routing, DeviceID: clientID(r.Context()), QueueOnly: s.admission.snapshot().State != "running"})
+	if err == nil {
+		s.clients.touch(clientID(r.Context()))
+	}
 	if errors.Is(err, store.ErrConflict) {
 		fail(w, 409, "message_conflict", err.Error())
 		return
@@ -1044,63 +1208,56 @@ func ID() string {
 func (s *Server) work(ctx context.Context, a *actor) {
 	defer s.workers.Done()
 	defer close(a.done)
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
 	for {
+		if !s.admission.wait(ctx, nil) {
+			return
+		}
+		queued := s.Store.JobQueued(a.id)
 		id, err := s.Store.Job(ctx, a.id)
 		if err == nil {
-			s.reply(ctx, a, id)
+			s.reply(ctx, ctx, a, id)
 			finishCtx, end := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			if err := s.Store.Finish(finishCtx, id); err != nil {
 				s.config.Log.Error("finish job", "error", err)
 			}
 			end()
+			s.admission.done()
 			continue
 		}
+		s.admission.done()
 		if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
 			s.config.Log.Error("claim job", "error", err)
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-queued:
 		}
 	}
 }
 
 var errEmptyReply = errors.New("the agent returned an empty reply")
 
-func (s *Server) reply(ctx context.Context, a *actor, id string, turn ...context.Context) contract.Message {
+// reply runs the queued job id; turn bounds the run, ctx its writes.
+func (s *Server) reply(ctx, turn context.Context, a *actor, id string) contract.Message {
 	work, err := s.Store.Work(ctx, id)
-	if len(turn) > 0 {
-		if override, ok := turn[0].Value(workKey{}).(store.Work); ok {
-			work = override
-			err = nil
-		}
-	}
 	if err != nil {
 		s.config.Log.Error("load job", "error", err)
 		return contract.Message{}
 	}
-	return s.execute(ctx, a, work, turn...)
+	return s.execute(ctx, turn, a, work)
 }
 
-type workKey struct{}
-
-func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ...context.Context) contract.Message {
-	parent := ctx
-	if len(turn) > 0 {
-		parent = turn[0]
-	}
+func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) contract.Message {
 	timeout := 10 * time.Minute
-	if work.Trigger == "review" {
+	if work.Trigger == contract.RunTriggerReview {
 		timeout = 2 * time.Minute
 	}
-	background := work.Trigger == "peer" || work.Trigger == "handoff" || work.Trigger == "task"
+	background := work.Trigger == contract.RunTriggerPeer || work.Trigger == contract.RunTriggerHandoff || work.Trigger == contract.RunTriggerTask
 	if background && s.config.BackgroundTimeout > 0 {
 		timeout = s.config.BackgroundTimeout
 	}
-	runCtx, cancel := context.WithTimeout(parent, timeout)
+	runCtx, cancel := context.WithTimeout(turn, timeout)
 	defer cancel()
 	a.mu.Lock()
 	a.cancel = cancel
@@ -1109,7 +1266,6 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	writeCtx, end := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
 	defer end()
 	user := work.Message
-	delegated := work.Trigger == "child"
 	run := store.NewRun(user.ID, user.ThreadID, a.id, work.Trigger)
 	if existing, e := s.Store.Run(writeCtx, run.ID); e == nil {
 		run = existing
@@ -1128,7 +1284,6 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 	active := &execution{cancel: cancel, done: make(chan struct{})}
 	s.turns.Store(run.ID, active)
 	defer func() { s.turns.Delete(run.ID); close(active.done) }()
-	var resourceErr error
 	release, resourceErr := s.acquire(runCtx, a.id)
 	if release != nil {
 		defer release()
@@ -1139,25 +1294,42 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		run.TaskID = &work.TaskID
 	}
 	// Crash resume replays the saved tool result.
-	continuing := run.Status == "resuming"
-	run.Status, run.Activity, run.Summary, run.StartedAt, run.FinishedAt = "running", "preparing", "Preparing reply", &now, nil
+	continuing := run.Status == contract.RunStatusResuming
+	run.Status, run.Activity, run.Summary, run.StartedAt, run.FinishedAt = contract.RunStatusRunning, contract.RunActivityPreparing, "Preparing reply", &now, nil
 	source := user.ID
-	if work.Trigger == "handoff" && user.ReplyToID != nil {
+	if work.Trigger == contract.RunTriggerHandoff && user.ReplyToID != nil {
 		source = *user.ReplyToID
 	}
-	if work.Trigger == "message" || work.Trigger == "handoff" {
+	if work.Trigger == contract.RunTriggerMessage || work.Trigger == contract.RunTriggerHandoff {
 		run.SourceMessageID = &source
 	}
-	if work.Trigger != "review" {
+	if work.Trigger != contract.RunTriggerReview {
 		run.MessageID = pointer("reply:" + run.ID)
 	}
 	state := &turnState{
 		run: run, work: work, store: s.Store,
 		cancel: cancel,
 	}
+	if continuing && a.threadID != "" {
+		messages, err := s.Store.GroupMessages(writeCtx, run.JobID)
+		if err != nil {
+			s.config.Log.Error("load resumed group posts", "error", err)
+			return contract.Message{}
+		}
+		for _, message := range messages {
+			if value(message.RunID) == run.ID {
+				state.posts++
+			}
+		}
+	}
 	runCtx = agentruntime.WithSteers(context.WithValue(runCtx, turnKey{}, state), func(ctx context.Context, persist func([]contract.Message) error) error {
 		return s.Store.DrainSteers(ctx, run.ID, persist)
 	})
+	// Memory is read again for every model request and never stored, so a correction applies at once and old
+	// copies don't pile up in the transcript. An introduction reads it too, to reflect what is already known.
+	if work.Trigger != contract.RunTriggerChild {
+		runCtx = agentruntime.WithFresh(runCtx, s.freshMemory(run, store.Text(work.Message)))
+	}
 	if err := s.Store.RunEvent(writeCtx, "run.update", &run, nil); err != nil {
 		s.config.Log.Error("start run", "error", err)
 		return contract.Message{}
@@ -1168,35 +1340,19 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		s.config.Log.Warn("prepare attachments", "error", prepareErr)
 	}
 	err := resourceErr
-	if err == nil && a.threadID != "" {
-		user, err = s.groupContext(runCtx, a, user)
-	} else if err == nil && work.Trigger != "created" {
-		user, err = s.peerContext(runCtx, store.Work{Trigger: work.Trigger, Message: user, DeliveryID: work.DeliveryID, ParentRunID: work.ParentRunID, Hops: work.Hops, FromAgentID: work.FromAgentID})
+	if err == nil {
+		user, err = s.turnInput(runCtx, a, run, work, user)
 	}
-	if err == nil && work.Trigger != "created" && !delegated {
-		user, err = s.workContext(runCtx, run, user)
-		if err == nil {
-			user, err = s.memoryContext(runCtx, run, user, store.Text(work.Message))
-		}
+	if work.Task != "" && work.Trigger == contract.RunTriggerHandoff {
+		text := "Invited by a group member (quoted peer data): " + untrusted.Wrap("peer "+work.FromAgentID, work.Task)
+		user.Parts = append(user.Parts, contract.Part{Kind: contract.PartKindText, Text: &text})
 	}
-	if err == nil && automatic(work.Trigger) {
-		user, err = s.autoContext(runCtx, run, work, user)
-	}
-	if err == nil && work.Trigger == "message" && a.threadID == "" {
-		user, err = s.resultContext(runCtx, run, user)
-	}
-	if work.Task != "" && work.Trigger == "handoff" {
-		text := "Explicit handoff task (quoted peer data): " + untrusted.Wrap("peer "+work.FromAgentID, work.Task)
-		user.Parts = append(user.Parts, contract.Part{Kind: "text", Text: &text})
-	}
-	m := contract.Message{ID: "reply:" + run.ID, ThreadID: user.ThreadID, Role: "assistant", Parts: []contract.Part{}, CreatedAt: store.Now(), Status: "streaming", AgentID: &a.id, RunID: &run.ID}
-	if work.Trigger == "message" || work.Trigger == "handoff" {
+	m := contract.Message{ID: "reply:" + run.ID, ThreadID: user.ThreadID, Role: contract.MessageRoleAssistant, Parts: []contract.Part{}, CreatedAt: store.Now(), Status: contract.MessageStatusStreaming, AgentID: &a.id, RunID: &run.ID}
+	if work.Trigger == contract.RunTriggerMessage || work.Trigger == contract.RunTriggerHandoff {
 		m.ReplyToID = &source
 	}
-	appendEvent := func(kind string, delta *string, problem *contract.Error, usage *contract.Usage) error {
-		_, err := s.Store.Append(writeCtx, contract.Event{ConversationID: m.ThreadID, Type: kind, MessageID: &m.ID, AgentID: &a.id, RunID: &run.ID, Text: delta, Error: problem, Usage: usage}, &m)
-		return err
-	}
+	st := newStream(s, writeCtx, a.id, work, state, &run, &m)
+	state.status = st.setStatus
 	if err := s.setPresence(writeCtx, a.id, true); err != nil {
 		s.config.Log.Error("presence", "error", err)
 		return contract.Message{}
@@ -1206,14 +1362,291 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			s.config.Log.Error("presence", "error", err)
 		}
 	}()
-	if work.Trigger != "review" {
-		if err := appendEvent("message.start", nil, nil, nil); err != nil {
+	if work.Trigger != contract.RunTriggerReview {
+		if err := st.event(contract.EventTypeMessageStart, nil, nil, nil); err != nil {
 			s.config.Log.Error("start message", "error", err)
 			return contract.Message{}
 		}
 	}
+	// Tools find the reply through runCtx, which the session captures when it opens.
+	scope := &htmlScope{messageID: m.ID, publish: st.publish}
+	runCtx = context.WithValue(runCtx, htmlKey{}, scope)
+	d, sess, isolated, err := s.turnSession(runCtx, writeCtx, a, work, run, state, err)
+	scope.cwd = outputCWD(d, s.config.DataDir)
+	var result agentruntime.Result
+	if err == nil {
+		err = runCtx.Err()
+	}
+	if err == nil {
+		err = st.setActivity(contract.RunActivityGenerating, "Composing reply")
+	}
+	if err == nil {
+		aborted := make(chan struct{})
+		// Durable work outlives Send's wait context until the session is aborted.
+		stopAbort := context.AfterFunc(runCtx, func() {
+			defer close(aborted)
+			// Only a resumable tool result may skip abort. Other runs still abort so shutdown settles them.
+			if ctx.Err() != nil {
+				check, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+				stored, loadErr := s.Store.Run(check, run.ID)
+				ready := loadErr == nil && stored.Attempt <= 1 && s.Store.ResumeReady(check, stored)
+				stop()
+				if ready {
+					return
+				}
+			}
+			abortCtx, end := context.WithTimeout(context.WithoutCancel(runCtx), time.Second)
+			defer end()
+			if e := sess.Abort(abortCtx); e != nil && !errors.Is(e, context.Canceled) {
+				s.config.Log.Warn("abort stopped session", "error", e)
+			}
+		})
+		turn := sess.Send
+		if continuing {
+			if st.submission == 0 {
+				if id, ok := s.Store.Submission(writeCtx, run.ID); ok {
+					st.submission = id
+				}
+			}
+			resumed, ok := sess.(interface {
+				Resume(context.Context, int64, func(agentruntime.Delta) error) (agentruntime.Result, error)
+			})
+			if !ok {
+				turn = func(context.Context, contract.Message, func(agentruntime.Delta) error) (agentruntime.Result, error) {
+					return agentruntime.Result{}, errors.New("session cannot resume a saved tool result")
+				}
+			} else {
+				turn = func(ctx context.Context, _ contract.Message, emit func(agentruntime.Delta) error) (agentruntime.Result, error) {
+					return resumed.Resume(ctx, st.submission, emit)
+				}
+			}
+		}
+		result, err = turn(runCtx, user, func(delta agentruntime.Delta) error { return st.handle(runCtx, delta) })
+		if !stopAbort() {
+			<-aborted
+		}
+	}
+	if background && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		err = errors.Join(err, runCtx.Err())
+		if sess != nil {
+			// Durable generation outlives Send's wait unless explicitly aborted.
+			abortCtx, stop := context.WithTimeout(writeCtx, 5*time.Second)
+			if e := sess.Abort(abortCtx); e != nil {
+				s.config.Log.Warn("abort stuck work", "error", e)
+			}
+			stop()
+		}
+	}
+	st.mu.Lock()
+	st.accepting = false
+	if e := st.flush(); e != nil {
+		err = errors.Join(err, e)
+	}
+	if len(result.Text) > 64<<10 {
+		err = errors.Join(err, errors.New("reply output budget exhausted"))
+	}
+	if state.task != nil && state.task.Output+max(len(result.Text), st.content.Len()) > 256<<10 {
+		err = errors.Join(err, errors.New("task output budget exhausted"))
+	}
+	if missing := len(result.Text) - st.content.Len(); missing > 0 {
+		if chain, ok := runCtx.Value(chainKey{}).(*chainState); ok && chain.spend(missing) {
+			err = errors.Join(err, errGroupBudget)
+		}
+	}
+	if err == nil {
+		err = runCtx.Err()
+	}
+	state.mu.Lock()
+	handed := state.handoff != nil
+	hookErr := state.hookErr
+	checkpoint := state.checkpoint
+	taskTools := state.tools
+	posted := state.posts > 0
+	state.mu.Unlock()
+	if hookErr != nil {
+		err = errors.Join(err, hookErr)
+	}
+	// Leave a saved tool result running so the next process can resume it once.
+	if err != nil && ctx.Err() != nil && run.Attempt <= 1 && s.Store.ResumeReady(writeCtx, run) {
+		st.mu.Unlock()
+		return contract.Message{}
+	}
+	silent := !handed && (strings.TrimSpace(result.Text) == "NO_RESPONSE" || result.Text == "" && strings.TrimSpace(st.content.String()) == "NO_RESPONSE" || result.Text == "" && st.content.Len() == 0 && posted)
+	if silent {
+		m.Parts = []contract.Part{}
+	}
+	if !silent && result.Text != "" && result.Text != st.content.String() {
+		setText(&m, &result.Text)
+	}
+	if err == nil && !silent && !handed && work.Trigger != contract.RunTriggerReview && len(m.Parts) == 0 {
+		err = errEmptyReply
+	}
+	if err == nil {
+		if handed {
+			state.mu.Lock()
+			target := state.target
+			state.mu.Unlock()
+			label := target
+			if agents, e := s.Store.Agents(writeCtx); e == nil {
+				for _, peer := range agents {
+					if peer.ID == target {
+						label = peer.Name
+					}
+				}
+			}
+			text := "Handed off to " + bounded(label, 128) + "."
+			m.Parts = append(m.Parts, contract.Part{Kind: contract.PartKindText, Text: &text})
+		}
+		m.Status = contract.MessageStatusDone
+		if silent {
+			m.Status = contract.MessageStatusSilent
+		}
+		state.mu.Lock()
+		waiting := len(state.waits) > 0
+		state.mu.Unlock()
+		outcome, summary := replyOutcome(work.Trigger, m.Parts, silent, handed, checkpoint != nil, waiting)
+		run.Status, run.Summary, run.Outcome = contract.RunStatusCompleted, summary, &outcome
+		if work.Trigger == contract.RunTriggerReview {
+			m.Parts = []contract.Part{}
+			state.mu.Lock()
+			if state.notice != nil && *state.notice != "" {
+				m.Parts = append(m.Parts, contract.Part{Kind: contract.PartKindText, Text: state.notice})
+			}
+			state.mu.Unlock()
+		}
+	} else {
+		m.Status = contract.MessageStatusError
+		var code, message string
+		code, message, run.Status, run.Summary = failure(err, ctx.Err() != nil, run.Attempt, background)
+		detail := redactError(err.Error())
+		run.Error = &contract.Error{Code: code, Message: message, Detail: detail}
+		m.Error = &contract.Error{Code: code, Message: message}
+		s.config.Log.Error("reply failed", "run_id", run.ID, "agent", run.AgentID, "code", code, "detail", detail)
+	}
+	finished := store.Now()
+	run.Activity, run.FinishedAt = "", &finished
+	for _, tool := range st.tools {
+		tool.Status = run.Status
+		if _, e := s.Store.Append(writeCtx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeToolDone, RunID: &run.ID, AgentID: &run.AgentID, Tool: &tool}, nil); e != nil {
+			err = errors.Join(err, e)
+		}
+		st.keep(tool)
+	}
+	st.tools = map[string]contract.ToolActivity{}
+	st.syncTools()
+	final := contract.Event{ConversationID: m.ThreadID, Type: contract.EventTypeMessageDone, MessageID: &m.ID, AgentID: &a.id, RunID: &run.ID, Usage: &result.Usage, Message: &m}
+	if err != nil {
+		final.Type, final.Error, final.Usage = contract.EventTypeMessageError, run.Error, nil
+	}
+	finalized := false
+	var finalErr error
+	if work.Trigger == contract.RunTriggerReview {
+		finalErr = s.Store.FinalizeReview(writeCtx, &m, &run)
+	} else {
+		if err != nil {
+			checkpoint = nil
+		}
+		finalErr = s.Store.FinalizeTask(writeCtx, final, &m, &run, nil, checkpoint, taskTools, max(len(result.Text), st.content.Len()))
+	}
+	if e := finalErr; e != nil {
+		err = errors.Join(err, e)
+		m.Status = contract.MessageStatusError
+		s.config.Log.Error("finish run", "error", e)
+	} else {
+		finalized = true
+	}
+	st.mu.Unlock()
+	s.afterTurn(ctx, writeCtx, turn, a, turnEnd{work: work, run: run, reply: m, def: d, session: sess, state: state, userID: user.ID,
+		err: err, isolated: isolated, finalized: finalized, handed: handed})
+	return m
+}
+
+// turnEnd is what a finished turn hands to its follow-up effects.
+type turnEnd struct {
+	work      store.Work
+	run       contract.Run
+	reply     contract.Message
+	def       agentruntime.Definition
+	session   agentruntime.Session
+	state     *turnState
+	userID    string
+	err       error
+	isolated  bool
+	finalized bool
+	handed    bool
+}
+
+// afterTurn runs a finished turn's side effects: diff cards, cancellations, receipts and handoffs.
+func (s *Server) afterTurn(ctx, writeCtx, turn context.Context, a *actor, done turnEnd) {
+	if done.finalized && !done.isolated && done.def.Workspace != "" && done.work.Trigger != contract.RunTriggerCreated {
+		s.admission.fork()
+		go func() {
+			defer s.admission.done()
+			s.diffCard(done.def, done.run)
+		}()
+	}
+	if done.finalized && endsChildren(done.run.Status) {
+		s.cancelTree(writeCtx, done.run.ID)
+	}
+	if done.err != nil {
+		s.config.Log.Warn("agent reply", "id", done.userID, "error", redactError(done.err.Error()))
+	}
+	a.mu.Lock()
+	a.cancel = nil
+	a.mu.Unlock()
+	if (done.work.Trigger == contract.RunTriggerCreated || done.isolated) && done.session != nil {
+		a.sessionMu.Lock()
+		if e := done.session.Close(); e != nil {
+			s.config.Log.Warn("close temporary session", "error", e)
+		}
+		a.sessionMu.Unlock()
+		if !done.isolated {
+			a.mu.Lock()
+			a.session = nil
+			a.mu.Unlock()
+		}
+	}
+	if done.finalized && store.Terminal(done.run.Status) && done.work.DeliveryID != "" {
+		if e := s.Store.Receipt(writeCtx, done.work.DeliveryID, done.run, done.reply); e != nil {
+			s.config.Log.Error("publish peer result", "error", e)
+		} else if done.work.ParentRunID != nil {
+			if origin, e := s.Store.Run(writeCtx, *done.work.ParentRunID); e == nil && endsChildren(origin.Status) {
+				s.cancelTree(writeCtx, origin.ID)
+			}
+		}
+	}
+	if a.threadID != "" && done.finalized && !done.handed && done.run.Status == contract.RunStatusCompleted {
+		if err := s.groupRelay(writeCtx, done); err != nil {
+			s.config.Log.Error("invite group peers", "error", err)
+		}
+	}
+	done.state.mu.Lock()
+	removals := slices.Clone(done.state.removals)
+	done.state.mu.Unlock()
+	if done.finalized && (done.reply.Status == contract.MessageStatusDone || done.reply.Status == contract.MessageStatusSilent) {
+		for _, id := range removals {
+			s.admission.fork()
+			go func() {
+				defer s.admission.done()
+				if err := s.eraseAgent(context.WithoutCancel(ctx), id); err != nil {
+					s.config.Log.Error("remove bot", "agent", id, "error", err)
+				}
+			}()
+		}
+	}
+}
+
+// turnSession reuses the actor's session when its definition and MCP scope are unchanged,
+// or opens one for this turn. It joins setup failures onto err and opens nothing after one.
+func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work store.Work, run contract.Run, state *turnState, err error) (agentruntime.Definition, agentruntime.Session, bool, error) {
+	delegated := work.Trigger == contract.RunTriggerChild
 	a.mu.Lock()
 	d, revision := a.definition, a.revision
+	a.mu.Unlock()
+	d, modelErr := s.withModel(d)
+	err = errors.Join(err, modelErr)
+	model := d.Agent.Provider + "/" + d.Agent.Model
+	// Resolve MCP scope unlocked; it reads the store.
 	effective, scopeErr := s.effectiveMCP(runCtx, a.id, d.MCP)
 	if scopeErr != nil {
 		err = errors.Join(err, scopeErr)
@@ -1225,13 +1658,15 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		err = errors.Join(err, scopeErr)
 	}
 	scopeHash := sha256.Sum256(configJSON)
+	a.mu.Lock()
 	sess := a.session
-	isolated := delegated || automatic(work.Trigger) && work.Trigger != "follow_up"
+	isolated := delegated || automatic(work.Trigger) && work.Trigger != contract.RunTriggerFollowUp
 	if isolated {
 		sess = nil
 	}
 	var stale agentruntime.Session
-	reopen := a.sessionRev != revision || a.sessionMCP != scopeHash || work.Trigger == "created"
+	devices := strings.Join(s.clients.allowed(), ",")
+	reopen := a.sessionRev != revision || a.sessionModel != model || a.sessionMCP != scopeHash || a.devices != devices || work.Trigger == contract.RunTriggerCreated
 	if health, ok := sess.(interface{ Reusable() bool }); ok {
 		reopen = reopen || !health.Reusable()
 	}
@@ -1244,19 +1679,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		d.Worktree = a.sessionDir
 	}
 	a.mu.Unlock()
-	state.external = map[string]bool{}
-	for _, name := range []string{"generate_image", "generate_video", "http_request"} {
-		state.external[name] = true
-	}
-	if len(d.Devices) > 0 {
-		state.external["run_device"] = true
-	}
-	for _, name := range d.Tools {
-		state.external[name] = true
-	}
-	for _, tool := range d.ExtraTools {
-		state.external[tool.Name()] = true
-	}
+	state.external = externalTools(d)
 	for _, server := range d.MCP {
 		state.prefixes = append(state.prefixes, server.Name+"__")
 	}
@@ -1272,7 +1695,7 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 		var pathErr error
 		if isolated {
 			d.Scope = fmt.Sprintf("peer-%x", sha256.Sum256([]byte(work.DeliveryID)))
-			if work.Trigger == "child" {
+			if work.Trigger == contract.RunTriggerChild {
 				d.Scope = fmt.Sprintf("child-%x", sha256.Sum256([]byte(run.ID)))
 			}
 			if automatic(work.Trigger) {
@@ -1291,42 +1714,15 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			err = fmt.Errorf("agent runtime is unavailable")
 		} else {
 			d.BeforeTool = beforeTool
-			d.Intro = work.Trigger == "created"
+			d.AfterInner = afterInner
+			d.Intro = work.Trigger == contract.RunTriggerCreated
 			if d.Intro {
 				d.Tools = []string{}
 				d.MCP = nil
-				d.ExtraTools = nil
+				// An introduction may offer choices but does no work.
+				d.ExtraTools = append(d.ExtraTools[:0:0], &chatTool{store: s.Store, question: true})
 			} else {
-				d.ExtraTools = slices.Clone(d.ExtraTools)
-				if work.Trigger != "review" {
-					d.ExtraTools = append(d.ExtraTools, s.sidebarTools()...)
-				}
-				if work.Trigger != "child" {
-					d.ExtraTools = append(d.ExtraTools,
-						&peerTool{server: s, handoff: a.threadID != ""}, &spawnTool{server: s}, &subagentTool{server: s}, &groupTool{server: s}, &routineTool{server: s}, &triggerTool{server: s},
-						&agentTool{server: s, action: "create"}, &agentTool{server: s, action: "update"}, &agentTool{server: s, action: "delete"}, &groupEdit{server: s}, &chatTool{store: s.Store}, &chatTool{store: s.Store, question: true})
-				}
-				if work.Trigger != "child" && a.threadID == "" {
-					d.ExtraTools = append(d.ExtraTools, &integrationTool{server: s})
-					for _, action := range []string{"request", "list", "forget"} {
-						d.ExtraTools = append(d.ExtraTools, &credentialTool{server: s, action: action})
-					}
-					state.external["manage_integrations"] = true
-				}
-				if !delegated {
-					d.ExtraTools = append(d.ExtraTools, &workTool{store: s.Store})
-					d.ExtraTools = append(d.ExtraTools, &taskTool{server: s})
-					d.ExtraTools = append(d.ExtraTools, &historyTool{store: s.Store})
-					for _, action := range []string{"save", "recall", "forget"} {
-						d.ExtraTools = append(d.ExtraTools, &memoryTool{store: s.Store, provider: s.memory, action: action})
-					}
-					d.ExtraTools = append(d.ExtraTools, &projectTool{store: s.Store})
-				}
-				if work.Trigger == "review" {
-					d.ExtraTools = append(d.ExtraTools, &reviewTool{})
-				}
-				d.ExtraTools = append(d.ExtraTools, &htmlTool{store: s.Store, dir: filepath.Join(s.config.DataDir, "attachments")})
-				d.ExtraTools = append(d.ExtraTools, &attachTool{files: s.outputs}, &mediaTool{server: s, files: s.outputs, kind: "image"}, &mediaTool{server: s, files: s.outputs, kind: "video"}, &httpTool{server: s})
+				d.ExtraTools = append(slices.Clone(d.ExtraTools), s.turnTools(a, work, state)...)
 			}
 			if err == nil && !d.Intro && d.Workspace != "" {
 				// Prepare the conversation's checkout before a session opens; a
@@ -1355,7 +1751,9 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 				a.mu.Lock()
 				a.session = sess
 				a.sessionRev = revision
+				a.sessionModel = model
 				a.sessionMCP = scopeHash
+				a.devices = devices
 				a.sessionDir = d.Worktree
 				a.mu.Unlock()
 			}
@@ -1370,575 +1768,13 @@ func (s *Server) execute(ctx context.Context, a *actor, work store.Work, turn ..
 			return context.WithValue(runCtx, turnKey{}, state), true
 		})
 	}
-	var result agentruntime.Result
-	var submissionID int64
-	var content strings.Builder
-	var pending strings.Builder
-	var lastFlush time.Time
-	tools := map[string]contract.ToolActivity{}
-	fileActivities := map[string]contract.Activity{}
-	history := slices.Clone(run.Tools)
-	keep := func(tool contract.ToolActivity) {
-		for i := range history {
-			if history[i].ID == tool.ID {
-				history[i] = tool
-				return
-			}
-		}
-		history = append(history, tool)
-	}
-	syncTools := func() {
-		run.Tools = slices.Clone(history)
-		run.ToolID = nil
-		ids := []string{}
-		for id := range tools {
-			ids = append(ids, id)
-		}
-		slices.Sort(ids)
-		for _, id := range ids {
-			run.ToolID = pointer(id)
-		}
-	}
-	flush := func() error {
-		if pending.Len() == 0 {
-			return nil
-		}
-		text := pending.String()
-		pending.Reset()
-		lastFlush = time.Now()
-		if work.Trigger == "review" {
-			return nil
-		}
-		return appendEvent("message.delta", &text, nil, nil)
-	}
-	var messageMu sync.Mutex
-	accepting := true
-	scope := &htmlScope{messageID: m.ID, cwd: outputCWD(d, s.config.DataDir), publish: func(toolCtx context.Context, attachment contract.Attachment, path string) error {
-		messageMu.Lock()
-		defer messageMu.Unlock()
-		if err := toolCtx.Err(); err != nil {
-			return err
-		}
-		if !accepting {
-			return errors.New("visual card reply has ended")
-		}
-		for _, part := range m.Parts {
-			if part.Attachment != nil && part.Attachment.ID == attachment.ID {
-				return nil
-			}
-		}
-		next := m
-		next.Parts = append(slices.Clone(m.Parts), contract.Part{Kind: "attachment", Attachment: &attachment})
-		event := contract.Event{ConversationID: m.ThreadID, Type: "message.attachment", MessageID: &m.ID, AgentID: &a.id, RunID: &run.ID, Attachment: &attachment}
-		if _, err := s.Store.PublishAttachment(toolCtx, attachment, path, event, &next); err != nil {
-			return err
-		}
-		m = next
-		return nil
-	}}
-	runCtx = context.WithValue(runCtx, htmlKey{}, scope)
-	setActivity := func(activity, summary string) error {
-		if run.Activity == activity && run.Summary == summary {
-			return nil
-		}
-		run.Activity, run.Summary = activity, summary
-		return s.Store.RunEvent(writeCtx, "run.update", &run, nil)
-	}
-	if err == nil {
-		err = runCtx.Err()
-	}
-	if err == nil {
-		err = setActivity("generating", "Composing reply")
-	}
-	if err == nil {
-		aborted := make(chan struct{})
-		// Durable work outlives Send's wait context until the session is aborted.
-		stopAbort := context.AfterFunc(runCtx, func() {
-			defer close(aborted)
-			// Only a resumable tool result may skip abort. Other runs still abort so shutdown settles them.
-			if ctx.Err() != nil {
-				check, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-				stored, loadErr := s.Store.Run(check, run.ID)
-				ready := loadErr == nil && stored.Attempt <= 1 && s.Store.ResumeReady(check, stored)
-				stop()
-				if ready {
-					return
-				}
-			}
-			abortCtx, end := context.WithTimeout(context.WithoutCancel(runCtx), time.Second)
-			defer end()
-			if e := sess.Abort(abortCtx); e != nil && !errors.Is(e, context.Canceled) {
-				s.config.Log.Warn("abort stopped session", "error", e)
-			}
-		})
-		turn := sess.Send
-		if continuing {
-			if submissionID == 0 {
-				if id, ok := s.Store.Submission(writeCtx, run.ID); ok {
-					submissionID = id
-				}
-			}
-			resumed, ok := sess.(interface {
-				Resume(context.Context, int64, func(agentruntime.Delta) error) (agentruntime.Result, error)
-			})
-			if !ok {
-				turn = func(context.Context, contract.Message, func(agentruntime.Delta) error) (agentruntime.Result, error) {
-					return agentruntime.Result{}, errors.New("session cannot resume a saved tool result")
-				}
-			} else {
-				turn = func(ctx context.Context, _ contract.Message, emit func(agentruntime.Delta) error) (agentruntime.Result, error) {
-					return resumed.Resume(ctx, submissionID, emit)
-				}
-			}
-		}
-		result, err = turn(runCtx, user, func(delta agentruntime.Delta) error {
-			messageMu.Lock()
-			defer messageMu.Unlock()
-			if delta.Kind == "submission" {
-				id, convErr := strconv.ParseInt(delta.ToolID, 10, 64)
-				if convErr != nil {
-					return convErr
-				}
-				submissionID = id
-				return s.Store.SaveSubmission(writeCtx, run.ID, id)
-			}
-			if e := runCtx.Err(); e != nil {
-				return e
-			}
-			if len(delta.ToolID) > 256 {
-				return errors.New("tool metadata budget exhausted")
-			}
-			if delta.Kind != "" || delta.Tool != "" {
-				if e := flush(); e != nil {
-					return e
-				}
-			}
-			if delta.Kind == "context.compacted" {
-				_, e := s.Store.Append(writeCtx, contract.Event{
-					Type: delta.Kind, ConversationID: m.ThreadID, RunID: &run.ID, AgentID: &a.id,
-				}, nil)
-				return e
-			}
-			if delta.Kind == "run.retrying" {
-				text := "Retrying…"
-				if _, e := s.Store.Append(writeCtx, contract.Event{
-					Type: delta.Kind, ConversationID: m.ThreadID, RunID: &run.ID, AgentID: &a.id, Text: &text,
-				}, nil); e != nil {
-					return e
-				}
-				return setActivity("generating", text)
-			}
-			if delta.Kind == "generating" {
-				if len(tools) > 0 {
-					return nil
-				}
-				return setActivity("generating", "Composing reply")
-			}
-			if delta.Kind == "tool.done" {
-				state.mu.Lock()
-				var effectErr error
-				if externalTool(state, delta.Tool) {
-					effectErr = s.Store.EndEffect(writeCtx, run.ID, delta.ToolID, delta.Failed)
-				}
-				if effectErr != nil {
-					state.hookErr = effectErr
-				}
-				state.mu.Unlock()
-				if effectErr != nil {
-					return effectErr
-				}
-				status := "completed"
-				if delta.Failed {
-					status = "failed"
-				}
-				if payload, ok := fileActivities[delta.ToolID]; ok {
-					delete(fileActivities, delta.ToolID)
-					if !delta.Failed {
-						if err := s.Store.Activity(writeCtx, run.ConversationID, run.AgentID, payload); err != nil {
-							return err
-						}
-					}
-				}
-				finished := contract.ToolActivity{ID: delta.ToolID, RunID: run.ID, Name: bounded(delta.Tool, 128), Status: status}
-				if tracked, ok := tools[delta.ToolID]; ok {
-					finished.Summary = tracked.Summary
-				}
-				delete(tools, delta.ToolID)
-				finished.Output = pointer(bounded(delta.Output, 2048))
-				keep(finished)
-				syncTools()
-				run.Activity, run.Summary = "generating", "Composing reply"
-				if len(tools) > 0 {
-					run.Activity, run.Summary = "tool", "Using tools"
-				}
-				state.mu.Lock()
-				handing := state.handoff != nil
-				state.mu.Unlock()
-				if handing {
-					run.Activity, run.Summary = "handoff", "Handing off to peer"
-				}
-				return s.Store.RunEvent(writeCtx, "tool.done", &run, &finished)
-			}
-			if delta.Tool != "" {
-				toolID := delta.ToolID
-				if toolID == "" {
-					toolID = ID()
-				}
-				if len(toolID) > 256 || len(tools) >= 32 {
-					return errors.New("tool metadata budget exhausted")
-				}
-				tool := contract.ToolActivity{ID: toolID, RunID: run.ID, Name: bounded(delta.Tool, 128), Status: "running"}
-				if delta.Tool == "write" || delta.Tool == "edit" {
-					var input struct {
-						Path string `json:"path"`
-					}
-					if json.Unmarshal([]byte(delta.Args), &input) == nil {
-						kind, label := "", filepath.Base(input.Path)
-						switch label {
-						case "SKILL.md":
-							kind, label = "skill.saved", filepath.Base(filepath.Dir(input.Path))
-						case "AGENTS.md", "CLAUDE.md", "GEMINI.md":
-							kind = "instructions.updated"
-						}
-						if kind != "" {
-							payload, err := store.NewActivity(kind, input.Path, label)
-							if err != nil {
-								return err
-							}
-							fileActivities[toolID] = payload
-						}
-					}
-				}
-				tool.Summary = pointer(bounded(delta.Brief, 200))
-				tools[toolID] = tool
-				keep(tool)
-				syncTools()
-				run.Activity, run.Summary = "tool", "Using "+bounded(delta.Tool, 128)
-				if delta.Tool == "show_html" {
-					run.Activity, run.Summary = "rendering", "Preparing visual card"
-				}
-				if e := s.Store.RunEvent(writeCtx, "tool.start", &run, &tool); e != nil {
-					return e
-				}
-				if delta.Tool == "show_html" || delta.Tool == "send_to_user" || delta.Tool == "ask_user" || delta.Tool == "request_secret" || delta.Tool == "attach_file" || delta.Tool == "generate_image" || delta.Tool == "generate_video" {
-					return nil
-				}
-				if work.Trigger == "review" {
-					return nil
-				}
-				m.Parts = append(m.Parts, contract.Part{Kind: "tool", Name: pointer(bounded(delta.Tool, 128))})
-				return appendEvent("message.tool_call", nil, nil, nil)
-			}
-			if delta.Text == "" {
-				return nil
-			}
-			if content.Len()+len(delta.Text) > 64<<10 {
-				return errors.New("reply output budget exhausted")
-			}
-			if state.task != nil && state.task.Output+content.Len()+len(delta.Text) > 256<<10 {
-				return errors.New("task output budget exhausted")
-			}
-			if chain, _ := runCtx.Value(chainKey{}).(*chainState); chain != nil {
-				chain.mu.Lock()
-				chain.output += len(delta.Text)
-				over := chain.output > 128<<10
-				chain.mu.Unlock()
-				if over {
-					return errors.New("group output budget exhausted")
-				}
-			}
-			if len(tools) == 0 {
-				if e := setActivity("generating", "Composing reply"); e != nil {
-					return e
-				}
-			}
-			content.WriteString(delta.Text)
-			text := content.String()
-			if strings.HasPrefix("NO_RESPONSE", strings.TrimSpace(text)) {
-				return nil
-			}
-			var found bool
-			for n := range m.Parts {
-				if m.Parts[n].Kind == "text" {
-					m.Parts[n].Text = &text
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.Parts = append(m.Parts, contract.Part{Kind: "text", Text: &text})
-			}
-			pending.WriteString(delta.Text)
-			if pending.Len() >= 2048 || time.Since(lastFlush) >= 40*time.Millisecond {
-				return flush()
-			}
-			return nil
-		})
-		if !stopAbort() {
-			<-aborted
-		}
-	}
-	if background && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		err = errors.Join(err, runCtx.Err())
-		if sess != nil {
-			// Durable generation outlives Send's wait unless explicitly aborted.
-			abortCtx, stop := context.WithTimeout(writeCtx, 5*time.Second)
-			if e := sess.Abort(abortCtx); e != nil {
-				s.config.Log.Warn("abort stuck work", "error", e)
-			}
-			stop()
-		}
-	}
-	messageMu.Lock()
-	accepting = false
-	if e := flush(); e != nil {
-		err = errors.Join(err, e)
-	}
-	if len(result.Text) > 64<<10 {
-		err = errors.Join(err, errors.New("reply output budget exhausted"))
-	}
-	if state.task != nil && state.task.Output+max(len(result.Text), content.Len()) > 256<<10 {
-		err = errors.Join(err, errors.New("task output budget exhausted"))
-	}
-	if missing := len(result.Text) - content.Len(); missing > 0 {
-		if chain, ok := runCtx.Value(chainKey{}).(*chainState); ok {
-			chain.mu.Lock()
-			chain.output += missing
-			over := chain.output > 128<<10
-			chain.mu.Unlock()
-			if over {
-				err = errors.Join(err, errors.New("group output budget exhausted"))
-			}
-		}
-	}
-	if err == nil {
-		err = runCtx.Err()
-	}
-	state.mu.Lock()
-	handed := state.handoff != nil
-	hookErr := state.hookErr
-	checkpoint := state.checkpoint
-	taskTools := state.tools
-	posted := state.posts > 0
-	state.mu.Unlock()
-	if hookErr != nil {
-		err = errors.Join(err, hookErr)
-	}
-	// Leave a saved tool result running so the next process can resume it once.
-	if err != nil && ctx.Err() != nil && run.Attempt <= 1 && s.Store.ResumeReady(writeCtx, run) {
-		messageMu.Unlock()
-		return contract.Message{}
-	}
-	silent := !handed && (strings.TrimSpace(result.Text) == "NO_RESPONSE" || result.Text == "" && strings.TrimSpace(content.String()) == "NO_RESPONSE" || result.Text == "" && content.Len() == 0 && posted)
-	if silent {
-		m.Parts = []contract.Part{}
-	}
-	if !silent && result.Text != "" && result.Text != content.String() {
-		found := false
-		for n := range m.Parts {
-			if m.Parts[n].Kind == "text" {
-				m.Parts[n].Text = &result.Text
-				found = true
-				break
-			}
-		}
-		if !found {
-			m.Parts = append(m.Parts, contract.Part{Kind: "text", Text: &result.Text})
-		}
-	}
-	if err == nil && !silent && !handed && work.Trigger != "review" && len(m.Parts) == 0 {
-		err = errEmptyReply
-	}
-	if err == nil {
-		if handed {
-			state.mu.Lock()
-			target := state.target
-			state.mu.Unlock()
-			label := target
-			if agents, e := s.Store.Agents(writeCtx); e == nil {
-				for _, peer := range agents {
-					if peer.ID == target {
-						label = peer.Name
-					}
-				}
-			}
-			text := "Handed off to " + bounded(label, 128) + "."
-			m.Parts = append(m.Parts, contract.Part{Kind: "text", Text: &text})
-		}
-		m.Status = "done"
-		if silent {
-			m.Status = "silent"
-		}
-		run.Status, run.Summary, run.Outcome = "completed", "Reply complete", pointer("reply")
-		if silent {
-			run.Outcome = pointer("silent")
-		}
-		if work.Trigger == "created" {
-			run.Outcome = pointer("introduced")
-		}
-		if handed {
-			run.Outcome = pointer("handoff")
-		}
-		if checkpoint != nil {
-			run.Outcome, run.Summary = pointer("checkpoint"), "Task checkpoint saved"
-		}
-		state.mu.Lock()
-		if len(state.waits) > 0 && !handed {
-			run.Outcome, run.Summary = pointer("waiting_input"), "Waiting for your input; independent work can continue"
-		}
-		state.mu.Unlock()
-		for _, part := range m.Parts {
-			if part.Attachment != nil && part.Attachment.Kind == "html" {
-				run.Outcome = pointer("artifact")
-			}
-		}
-		if work.Trigger == "review" {
-			m.Parts = []contract.Part{}
-			state.mu.Lock()
-			if state.notice != nil && *state.notice != "" {
-				m.Parts = append(m.Parts, contract.Part{Kind: "text", Text: state.notice})
-			}
-			state.mu.Unlock()
-		}
-	} else {
-		m.Status = "error"
-		code := "provider"
-		message := "The agent could not complete this reply."
-		if errors.Is(err, errEmptyReply) {
-			code, message = "empty", "The agent returned an empty reply."
-			run.Status, run.Summary = "failed", "Empty reply"
-		}
-		if errors.Is(err, context.Canceled) {
-			code = "stopped"
-			message = "Reply stopped."
-		}
-		run.Status, run.Summary = "failed", "Reply failed"
-		if code == "stopped" {
-			run.Status, run.Summary = "cancelled", "Reply stopped"
-		}
-		if errors.Is(err, store.ErrMembers) {
-			code, message, run.Status, run.Summary = "membership", "Agent is no longer a member of this chat.", "cancelled", "Member removed"
-		}
-		var repoErr *agentruntime.RepoError
-		if errors.As(err, &repoErr) {
-			code, message = "workspace", repoErr.Error()
-			run.Status, run.Summary = "failed", "Repository unavailable"
-		}
-		if ctx.Err() != nil {
-			code, message, run.Status, run.Summary = "interrupted", "The server stopped during this reply. Review before retrying.", "interrupted", "Execution interrupted"
-			if run.Attempt > 1 {
-				message = "The server restarted again during resume. Review before retrying."
-			}
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			code = "timeout"
-			message = "The model took too long to reply."
-			if background {
-				// Agent context only. The parent follow-up speaks to the user.
-				message = "The background task timed out and was stopped."
-				run.Summary = "Background work timed out"
-			}
-		}
-		detail := redactError(err.Error())
-		run.Error = &contract.Error{Code: code, Message: message, Detail: detail}
-		s.config.Log.Error("reply failed", "run_id", run.ID, "agent", run.AgentID, "code", code, "detail", detail)
-	}
-	now = store.Now()
-	run.Activity, run.FinishedAt = "", &now
-	for _, tool := range tools {
-		tool.Status = run.Status
-		if _, e := s.Store.Append(writeCtx, contract.Event{ConversationID: run.ConversationID, Type: "tool.done", RunID: &run.ID, AgentID: &run.AgentID, Tool: &tool}, nil); e != nil {
-			err = errors.Join(err, e)
-		}
-		keep(tool)
-	}
-	tools = map[string]contract.ToolActivity{}
-	syncTools()
-	final := contract.Event{ConversationID: m.ThreadID, Type: "message.done", MessageID: &m.ID, AgentID: &a.id, RunID: &run.ID, Usage: &result.Usage, Message: &m}
-	if err != nil {
-		final.Type, final.Error, final.Usage = "message.error", run.Error, nil
-	}
-	finalized := false
-	var finalErr error
-	if work.Trigger == "review" {
-		finalErr = s.Store.FinalizeReview(writeCtx, &m, &run)
-	} else {
-		if err != nil {
-			checkpoint = nil
-		}
-		finalErr = s.Store.FinalizeTask(writeCtx, final, &m, &run, nil, checkpoint, taskTools, max(len(result.Text), content.Len()))
-	}
-	if e := finalErr; e != nil {
-		err = errors.Join(err, e)
-		m.Status = "error"
-		s.config.Log.Error("finish run", "error", e)
-	} else {
-		finalized = true
-	}
-	messageMu.Unlock()
-	if finalized && !isolated && d.Workspace != "" && work.Trigger != "created" {
-		go s.diffCard(d, run)
-	}
-	if finalized && endsChildren(run.Status) {
-		s.cancelTree(writeCtx, run.ID)
-	}
-	if err != nil {
-		s.config.Log.Warn("agent reply", "id", user.ID, "error", redactError(err.Error()))
-	}
-	a.mu.Lock()
-	a.cancel = nil
-	a.mu.Unlock()
-	if (work.Trigger == "created" || isolated) && sess != nil {
-		a.sessionMu.Lock()
-		if e := sess.Close(); e != nil {
-			s.config.Log.Warn("close temporary session", "error", e)
-		}
-		a.sessionMu.Unlock()
-		if !isolated {
-			a.mu.Lock()
-			a.session = nil
-			a.mu.Unlock()
-		}
-	}
-	if finalized && store.Terminal(run.Status) && work.DeliveryID != "" {
-		if e := s.Store.Receipt(writeCtx, work.DeliveryID, run, m); e != nil {
-			s.config.Log.Error("publish peer result", "error", e)
-		} else if work.ParentRunID != nil {
-			if origin, e := s.Store.Run(writeCtx, *work.ParentRunID); e == nil && endsChildren(origin.Status) {
-				s.cancelTree(writeCtx, origin.ID)
-			}
-		}
-	}
-	if chain, _ := parent.Value(chainKey{}).(*chainState); finalized && chain != nil && handed && run.Status == "completed" {
-		state.mu.Lock()
-		pending := state.handoff
-		target := state.target
-		state.mu.Unlock()
-		if pending != nil {
-			chain.mu.Lock()
-			chain.next = &handoffWork{work: *pending, target: target}
-			chain.mu.Unlock()
-		}
-	}
-	state.mu.Lock()
-	removals := slices.Clone(state.removals)
-	state.mu.Unlock()
-	if finalized && (m.Status == "done" || m.Status == "silent") {
-		for _, id := range removals {
-			go func() {
-				if err := s.eraseAgent(context.WithoutCancel(ctx), id); err != nil {
-					s.config.Log.Error("remove bot", "agent", id, "error", err)
-				}
-			}()
-		}
-	}
-	return m
+	return d, sess, isolated, err
 }
 
 func pointer(text string) *string { return &text }
 
 func endsChildren(status string) bool {
-	return status == "failed" || status == "cancelled" || status == "interrupted"
+	return status == contract.RunStatusFailed || status == contract.RunStatusCancelled || status == contract.RunStatusInterrupted
 }
 
 func (s *Server) cancelTree(ctx context.Context, id string) {
@@ -1998,7 +1834,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			kind = k
 		}
 	}
-	a := contract.Attachment{ID: id, Kind: kind, Name: name, MimeType: mimeType, Size: n, URL: "/attachments/" + id + "/content", IndexingState: "pending"}
+	a := contract.Attachment{ID: id, Kind: kind, Name: name, MimeType: mimeType, Size: n, URL: "/attachments/" + id + "/content", IndexingState: contract.AttachmentIndexingStatePending}
 	if kind == "image" || kind == "video" {
 		if err := makeThumbnail(r.Context(), path, path+".jpg", kind); err == nil {
 			url := "/attachments/" + id + "/thumbnail"
@@ -2009,6 +1845,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.Store.SaveAttachment(r.Context(), a, path); err != nil {
 		os.Remove(path)
+		os.Remove(path + ".jpg")
 		s.respond(w, nil, err)
 		return
 	}
@@ -2027,6 +1864,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", a.MimeType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": a.Name}))
+	w.Header().Set("Cache-Control", immutable)
 	http.ServeFile(w, r, path)
 }
 func (s *Server) thumbnail(w http.ResponseWriter, r *http.Request) {
@@ -2036,8 +1874,12 @@ func (s *Server) thumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", immutable)
 	http.ServeFile(w, r, path+".jpg")
 }
+
+// An attachment's bytes never change under its id.
+const immutable = "private, max-age=31536000, immutable"
 
 var errorSecrets = regexp.MustCompile(`(?i)(authorization["']?\s*[:=]\s*["']?(?:bearer\s+|basic\s+)?|bearer\s+|(?:api_key|apikey|key|token)["']?\s*[:=]\s*["']?)[^\s"',;&}]+|sk-[a-z0-9_-]+`)
 

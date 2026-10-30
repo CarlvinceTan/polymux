@@ -5,9 +5,91 @@ public enum ShapeID: String, CaseIterable, Codable, Identifiable, Sendable {
     case hexagon = "hexagone", cloud = "nuage", droplet = "goutte"
     case star, clover, flower, burst, pentagon
     case square, sparkle, heart, tablet, wedge, house
+    // Stored IDs stay stable when the artwork changes.
+    case pumpkin, apple, pear, strawberry, bun, toast, cupcake, cat, dog, panda = "bear", rabbit
+    case fox, crab = "hamster", elephant = "capybara", octopus = "otter", pig, deer, koala = "sheep"
+    case giraffe = "alpaca", cow, turtle = "squirrel", tiger, frog = "lion", mouse = "hedgehog"
+    case walrus = "seal", beaver, guineaPig = "guinea_pig", chinchilla, ferret, monkey
+    case chick, duck, penguin, bat = "owl", axolotl = "parrot", goose
+    case whale, bull, moon, wave, blossom, popcorn = "gumdrop", peanut, saucer, beacon, plus, magnet, acorn, pebbles, bulb = "cushion", trophy = "ring", gem
+    case hamburger = "banana", carrot, pizza, sushi, iceCream = "ice_cream"
+    case sun, leaf, tree, cactus, mushroom, mountain, volcano, rainbow, snowflake
+    case rocket, robot, camera, clock, key, bell, book, teapot
+    case lemon, orangeFruit = "orange_fruit", watermelon, avocado, cherry, cookie, cheese, egg, candy, donut
+    case tulip, sunflower = "rose", sprout, fern, balloon = "pinecone", shell, palm = "coral", snowman = "crystal", lightning = "comet", planet
+    case mug, lantern, gift, pencil, hammer = "paintbrush", umbrella
+    case wateringCan = "backpack", gamepad = "headphones", guitar, telescope
     public var id: String { rawValue }
     public var label: String {
         switch self {
+        case .lemon: "Lemon"
+        case .orangeFruit: "Orange"
+        case .watermelon: "Watermelon"
+        case .avocado: "Avocado"
+        case .cherry: "Cherry"
+        case .cookie: "Cookie"
+        case .cheese: "Cheese"
+        case .egg: "Egg"
+        case .candy: "Candy"
+        case .donut: "Donut"
+        case .tulip: "Tulip"
+        case .sunflower: "Sunflower"
+        case .sprout: "Sprout"
+        case .fern: "Fern"
+        case .balloon: "Balloon"
+        case .shell: "Shell"
+        case .palm: "Palm"
+        case .snowman: "Snowman"
+        case .lightning: "Lightning"
+        case .planet: "Planet"
+        case .mug: "Mug"
+        case .lantern: "Lantern"
+        case .gift: "Gift"
+        case .pencil: "Pencil"
+        case .hammer: "Hammer"
+        case .umbrella: "Umbrella"
+        case .wateringCan: "Watering can"
+        case .gamepad: "Gamepad"
+        case .guitar: "Guitar"
+        case .telescope: "Telescope"
+        case .hamburger: "Hamburger"
+        case .carrot: "Carrot"
+        case .pizza: "Pizza"
+        case .sushi: "Sushi"
+        case .iceCream: "Ice cream"
+        case .sun: "Sun"
+        case .leaf: "Leaf"
+        case .tree: "Tree"
+        case .cactus: "Cactus"
+        case .mushroom: "Mushroom"
+        case .mountain: "Mountain"
+        case .volcano: "Volcano"
+        case .rainbow: "Rainbow"
+        case .snowflake: "Snowflake"
+        case .rocket: "Rocket"
+        case .robot: "Robot"
+        case .camera: "Camera"
+        case .clock: "Clock"
+        case .key: "Key"
+        case .bell: "Bell"
+        case .book: "Book"
+        case .teapot: "Teapot"
+        case .whale: "Whale"
+        case .bull: "Bull"
+        case .moon: "Moon"
+        case .wave: "Wave"
+        case .blossom: "Blossom"
+        case .popcorn: "Popcorn"
+        case .peanut: "Peanut"
+        case .saucer: "Saucer"
+        case .beacon: "Beacon"
+        case .plus: "Plus"
+        case .magnet: "Magnet"
+        case .acorn: "Acorn"
+        case .pebbles: "Pebbles"
+        case .bulb: "Light bulb"
+        case .trophy: "Trophy"
+        case .gem: "Gem"
         case .circle: "Circle"
         case .pebble: "Pebble"
         case .squircle: "Squircle"
@@ -27,14 +109,57 @@ public enum ShapeID: String, CaseIterable, Codable, Identifiable, Sendable {
         case .tablet: "Tablet"
         case .wedge: "Wedge"
         case .house: "House"
+        case .pumpkin: "Pumpkin"
+        case .apple: "Apple"
+        case .pear: "Pear"
+        case .strawberry: "Strawberry"
+        case .bun: "Bun"
+        case .toast: "Toast"
+        case .cupcake: "Cupcake"
+        case .cat: "Cat"
+        case .dog: "Dog"
+        case .panda: "Panda"
+        case .rabbit: "Rabbit"
+        case .fox: "Fox"
+        case .crab: "Crab"
+        case .elephant: "Elephant"
+        case .octopus: "Octopus"
+        case .pig: "Pig"
+        case .deer: "Deer"
+        case .koala: "Koala"
+        case .giraffe: "Giraffe"
+        case .cow: "Cow"
+        case .turtle: "Turtle"
+        case .tiger: "Tiger"
+        case .frog: "Frog"
+        case .mouse: "Mouse"
+        case .walrus: "Walrus"
+        case .beaver: "Beaver"
+        case .guineaPig: "Guinea pig"
+        case .chinchilla: "Chinchilla"
+        case .ferret: "Ferret"
+        case .monkey: "Monkey"
+        case .chick: "Chick"
+        case .duck: "Duck"
+        case .penguin: "Penguin"
+        case .bat: "Bat"
+        case .axolotl: "Axolotl"
+        case .goose: "Goose"
         }
     }
     public var radii: [Double] { SHAPE_BY_ID[rawValue]!.radii }
 
-    public static let creationShapes: [ShapeID] = [
-        .circle, .cloud, .square, .sparkle, .clover, .heart, .flower,
-        .droplet, .tablet, .wedge, .house, .star, .hexagon
-    ]
+    public static let creationShapes: [ShapeID] = {
+        let animals: Set<ShapeID> = [
+            .cat, .dog, .rabbit, .pig, .deer, .koala, .turtle, .frog, .mouse,
+            .monkey, .penguin, .axolotl, .whale, .bull,
+            .panda, .fox, .crab, .elephant, .octopus, .giraffe, .cow, .tiger, .walrus, .bat
+        ]
+        return [
+            .circle, .cloud, .square, .sparkle, .clover, .heart, .flower,
+            .droplet, .tablet, .wedge, .house, .star, .hexagon, .plus
+        ] + allCases.filter { $0.category != .shapes && ($0.category != .animals || animals.contains($0)) }
+    }()
 }
 
 public enum ColorID: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -83,13 +208,6 @@ private func normalize(_ radii: [Double], _ maxRadius: Double = 1) -> [Double] {
 
 public let SHAPES: [BotShape] = {
     let angles = (0..<PROFILE_SAMPLES).map { Double($0) / Double(PROFILE_SAMPLES) * TAU }
-    let pebble = normalize(angles.map { 1 + 0.075 * cos(2 * $0 + 0.5) + 0.035 * cos(3 * $0 + 2.1) }, 1.02)
-    let cloud = normalize(unionOfCirclesProfile([
-        CircleSpec(x: -0.44, y: 0.2, r: 0.54), CircleSpec(x: 0.46, y: 0.2, r: 0.5),
-        CircleSpec(x: 0.02, y: 0.3, r: 0.6), CircleSpec(x: -0.24, y: -0.3, r: 0.48),
-        CircleSpec(x: 0.3, y: -0.24, r: 0.44)
-    ]), 1.02)
-    let droplet = normalize(profileFromPolygon(hullOfCircles(0, 0.28, 0.66, 0, -0.96, 0.05), 0, 0), 1.04)
     let capsule = profileFromPolygon(hullOfCircles(-0.42, 0, 0.62, 0.42, 0, 0.62), 0, 0)
     let clover = normalize(unionOfCirclesProfile([-0.38, 0.38].flatMap { x in
         [-0.38, 0.38].map { y in CircleSpec(x: x, y: y, r: 0.52) }
@@ -105,21 +223,23 @@ public let SHAPES: [BotShape] = {
     ], 0.16), 0, 0), 1.12)
     return [
         BotShape(id: .circle, radii: [Double](repeating: 1, count: PROFILE_SAMPLES)),
-        BotShape(id: .pebble, radii: pebble),
-        BotShape(id: .squircle, radii: normalize(superellipseProfile(4.2), 1.15)),
+        BotShape(id: .pebble, radii: PEBBLE_CONTOUR),
+        BotShape(id: .squircle, radii: SQUIRCLE_CONTOUR),
         BotShape(id: .capsule, radii: capsule),
         BotShape(id: .triangle, radii: regularPolygonProfile(3, 1.12, 0.34, -90)),
-        BotShape(id: .hexagon, radii: regularPolygonProfile(6, 1.04, 0.26, 0)),
-        BotShape(id: .cloud, radii: cloud), BotShape(id: .droplet, radii: droplet),
+        BotShape(id: .hexagon, radii: HEXAGON_CONTOUR),
+        BotShape(id: .cloud, radii: CLOUD_CONTOUR), BotShape(id: .droplet, radii: DROPLET_CONTOUR),
         BotShape(id: .star, radii: STAR_CONTOUR), BotShape(id: .clover, radii: clover),
         BotShape(id: .flower, radii: flower), BotShape(id: .burst, radii: burst),
         BotShape(id: .pentagon, radii: regularPolygonProfile(5, 1.08, 0.3, -90)),
         BotShape(id: .square, radii: normalize(superellipseProfile(5), 1.12)),
         BotShape(id: .sparkle, radii: SPARKLE_CONTOUR), BotShape(id: .heart, radii: HEART_CONTOUR),
-        BotShape(id: .tablet, radii: normalize(profileFromPolygon(hullOfCircles(-0.4, 0, 0.65, 0.4, 0, 0.65), 0, 0), 1.12)),
-        BotShape(id: .wedge, radii: regularPolygonProfile(3, 1.15, 0.3, -90)),
+        BotShape(id: .tablet, radii: TABLET_CONTOUR),
+        BotShape(id: .wedge, radii: WEDGE_CONTOUR),
         BotShape(id: .house, radii: house)
-    ]
+    ] + ShapeID.allCases.compactMap { id in
+        id.character.map { BotShape(id: id, radii: $0.radii) }
+    }
 }()
 
 public let SHAPE_BY_ID = Dictionary(uniqueKeysWithValues: SHAPES.map { ($0.id.rawValue, $0) })
@@ -144,4 +264,25 @@ public func mixHex(_ from: String, _ to: String, _ t: Double) -> String {
     let a = parse(from), b = parse(to)
     let components = zip(a, b).map { Int(floor(Double($0) + Double($1 - $0) * t + 0.5)) }
     return "#" + components.map { String(format: "%02x", $0) }.joined()
+}
+
+/// `hex`, darkened on a light `backing` or lightened on a dark one until it stands out from it.
+public func legible(_ hex: String, on backing: String) -> String {
+    func luminance(_ value: String) -> Double {
+        let v = Int(value.dropFirst(), radix: 16) ?? 0
+        let linear = [16, 8, 0].map { shift -> Double in
+            let c = Double((v >> shift) & 255) / 255
+            return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    }
+    let back = luminance(backing)
+    func contrast(_ value: String) -> Double {
+        let l = luminance(value)
+        return (max(l, back) + 0.05) / (min(l, back) + 0.05)
+    }
+    let target = back > 0.5 ? "#000000" : "#FFFFFF"
+    var result = hex, t = 0.0
+    while contrast(result) < 1.8 && t < 1 { t += 0.05; result = mixHex(hex, target, t) }
+    return result
 }

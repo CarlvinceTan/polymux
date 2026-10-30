@@ -2,7 +2,7 @@ import Foundation
 
 enum SidebarWidth {
     static let minimum: CGFloat = 260
-    static let maximum: CGFloat = 440
+    static let maximum: CGFloat = 400
     static let initial = 320.0
 }
 
@@ -20,16 +20,26 @@ enum SidebarStage {
 
 @Observable @MainActor
 final class SidebarState {
-    var stage = SidebarStage.expanded
-    var edge: CGFloat = SidebarWidth.initial
-    @ObservationIgnored weak var anchor: SidebarAnchor?
+    var stage: SidebarStage
 
-    func reveal() -> Bool { anchor?.reveal() ?? false }
+    init(stage: SidebarStage = .expanded) {
+        self.stage = stage
+        if stage == .collapsed { edge = 0 }
+    }
+    @ObservationIgnored var edge: CGFloat = SidebarWidth.initial {
+        didSet { handle?.moveEdge(edge) }
+    }
+    @ObservationIgnored weak var anchor: SidebarAnchor?
+    @ObservationIgnored weak var handle: SidebarHandle?
+
+    func beginReveal() -> UUID? { anchor?.beginReveal() }
+    func endReveal(_ token: UUID) { anchor?.endReveal(token) }
 }
 
 struct SidebarLimits: NSViewRepresentable {
     @Binding var width: Double
     let state: SidebarState
+    let minimum: CGFloat
 
     func makeNSView(context: Context) -> SidebarAnchor {
         let view = SidebarAnchor()
@@ -41,6 +51,7 @@ struct SidebarLimits: NSViewRepresentable {
         view.state = state
         state.anchor = view
         view.savedWidth = width
+        view.minimum = minimum
         view.onWidth = { value in
             if abs(width - value) > 0.5 { width = value }
         }
@@ -53,6 +64,7 @@ struct SidebarLimits: NSViewRepresentable {
 }
 
 final class SidebarAnchor: NSView {
+    var minimum = PaneWidth.window
     var savedWidth = SidebarWidth.initial {
         didSet {
             if abs(oldValue - savedWidth) > 0.5 && !dragging { restoreWidth = true }
@@ -117,7 +129,10 @@ final class SidebarAnchor: NSView {
         item = nil
     }
 
-    @objc private func resized(_ notification: Notification) { schedule() }
+    @objc private func resized(_ notification: Notification) {
+        publishEdge()
+        schedule()
+    }
 
     private func track(_ event: NSEvent) -> NSEvent? {
         guard let split, let item, let window else { return event }
@@ -125,6 +140,8 @@ final class SidebarAnchor: NSView {
             if event.type == .leftMouseUp {
                 dragging = false
                 snapped = false
+                let actual = item.viewController.view.frame.width
+                if !item.isCollapsed { onWidth?(Double(min(SidebarWidth.maximum, max(SidebarWidth.minimum, actual)))) }
                 return nil
             }
             guard event.type == .leftMouseDragged else { return event }
@@ -135,9 +152,11 @@ final class SidebarAnchor: NSView {
                 snapped = true
                 let actual = item.viewController.view.frame.width
                 onWidth?(Double(min(SidebarWidth.maximum, max(SidebarWidth.minimum, actual))))
-                move(true)
+                collapse()
             } else {
                 split.setPosition(min(SidebarWidth.maximum, max(SidebarWidth.minimum, position)), ofDividerAt: 0)
+                split.layoutSubtreeIfNeeded()
+                publishEdge()
             }
             return nil
         }
@@ -155,11 +174,19 @@ final class SidebarAnchor: NSView {
         return nil
     }
 
-    func reveal() -> Bool {
-        guard window != nil, split != nil, item != nil else { return false }
-        guard movement == nil else { return true }
-        move(false)
-        return true
+    /// Starts tracking a reveal that SwiftUI animates, so the toolbar follows the edge.
+    func beginReveal() -> UUID? {
+        guard window != nil, split != nil, item != nil, movement == nil else { return nil }
+        let token = UUID()
+        movement = token
+        publish(.expanding)
+        trackEdge()
+        return token
+    }
+
+    func endReveal(_ token: UUID) {
+        guard let item, let split else { return }
+        finish(token, item: item, split: split)
     }
 
     private func publish(_ stage: SidebarStage) {
@@ -172,21 +199,27 @@ final class SidebarAnchor: NSView {
         }
     }
 
-    private func move(_ collapsed: Bool) {
+    private func trackEdge() {
+        revealTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.publishEdge() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        revealTimer = timer
+    }
+
+    private func collapse() {
         guard let item, let split else { return }
         let token = UUID()
         movement = token
-        publish(collapsed ? .collapsing : .expanding)
-        revealTimer?.invalidate()
-        revealTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.publishEdge() }
-        }
+        publish(.collapsing)
+        trackEdge()
         // Apply the toolbar diff before AppKit starts changing column geometry.
         DispatchQueue.main.async { [weak self, weak item, weak split] in
             guard let self, let item, let split, self.movement == token,
                   self.item === item, self.split === split else { return }
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                item.isCollapsed = collapsed
+                item.isCollapsed = true
                 self.finish(token, item: item, split: split)
             } else {
                 NSAnimationContext.runAnimationGroup { @Sendable [weak self] context in
@@ -196,7 +229,7 @@ final class SidebarAnchor: NSView {
                     MainActor.assumeIsolated {
                         guard let self, self.movement == token, let item = self.item, let split = self.split,
                               let controller = split.delegate as? NSSplitViewController else { return }
-                        if item.isCollapsed != collapsed { controller.toggleSidebar(nil) }
+                        if !item.isCollapsed { controller.toggleSidebar(nil) }
                         split.layoutSubtreeIfNeeded()
                     }
                 } completionHandler: { @Sendable [weak self] in
@@ -229,14 +262,28 @@ final class SidebarAnchor: NSView {
     }
 
     private func configure() {
-        guard window != nil else { return }
+        guard let window else { return }
+        if window.title != "Polymux" { window.title = "Polymux" }
+        window.titleVisibility = .hidden
+        window.standardWindowButton(.closeButton)?.setAccessibilityLabel("Close")
+        window.standardWindowButton(.miniaturizeButton)?.setAccessibilityLabel("Minimize")
+        window.standardWindowButton(.zoomButton)?.setAccessibilityLabel("Full screen")
+        if abs(window.contentMinSize.width - minimum) > 0.5 {
+            window.contentMinSize.width = minimum
+            if window.contentLayoutRect.width < minimum {
+                window.setContentSize(NSSize(width: minimum, height: window.contentLayoutRect.height))
+            }
+        }
         if split == nil || item == nil { attach() }
         guard let split, let item else { return }
         publishEdge()
         if item.minimumThickness != SidebarWidth.minimum { item.minimumThickness = SidebarWidth.minimum }
         if item.maximumThickness != SidebarWidth.maximum { item.maximumThickness = SidebarWidth.maximum }
         if !item.canCollapse { item.canCollapse = true }
-        guard movement == nil else { return }
+        if item.collapseBehavior != .preferResizingSiblingsWithFixedSplitView {
+            item.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        }
+        guard movement == nil, !dragging else { return }
         let collapsed = item.isCollapsed || split.isSubviewCollapsed(item.viewController.view)
         if collapsed {
             wasCollapsed = true
@@ -251,13 +298,15 @@ final class SidebarAnchor: NSView {
         if restoreWidth || wasCollapsed {
             restoreWidth = false
             wasCollapsed = false
-            split.setPosition(min(SidebarWidth.maximum, max(SidebarWidth.minimum, CGFloat(savedWidth))), ofDividerAt: 0)
+            let target = min(SidebarWidth.maximum, max(SidebarWidth.minimum, CGFloat(savedWidth)))
+            if abs(item.viewController.view.frame.width - target) > 0.5 {
+                split.setPosition(target, ofDividerAt: 0)
+            }
         }
         let restored = item.viewController.view.frame.width
         if restored < SidebarWidth.minimum || restored > SidebarWidth.maximum {
             split.setPosition(min(SidebarWidth.maximum, max(SidebarWidth.minimum, restored)), ofDividerAt: 0)
         } else {
-            onWidth?(Double(restored))
             publish(.expanded)
         }
     }
@@ -307,13 +356,27 @@ final class SidebarAnchor: NSView {
     }
 }
 
-struct SidebarControl: NSViewRepresentable {
+struct SidebarControl: View {
     let state: SidebarState
-    let edge: CGFloat
+    let reveal: () -> Void
+    let search: () -> Void
+    let add: () -> Void
+    let group: () -> Void
+    let settings: () -> Void
+
+    var body: some View {
+        SidebarBridge(state: state, expanded: state.stage == .expanded,
+                      reveal: reveal, search: search, add: add, group: group, settings: settings)
+    }
+}
+
+private struct SidebarBridge: NSViewRepresentable {
+    let state: SidebarState
     let expanded: Bool
     let reveal: () -> Void
     let search: () -> Void
     let add: () -> Void
+    let group: () -> Void
     let settings: () -> Void
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
@@ -321,9 +384,10 @@ struct SidebarControl: NSViewRepresentable {
     func makeNSView(context: Context) -> SidebarHandle { SidebarHandle() }
 
     func updateNSView(_ view: SidebarHandle, context: Context) {
-        view.update(edge: edge, expanded: expanded,
+        state.handle = view
+        view.update(edge: state.edge,
                     content: SidebarContent(state: state, expanded: expanded, enabled: enabled, scheme: scheme,
-                                            reveal: reveal, search: search, add: add, settings: settings))
+                                            reveal: reveal, search: search, add: add, group: group, settings: settings))
     }
 
     static func dismantleNSView(_ view: SidebarHandle, coordinator: ()) { view.detach() }
@@ -333,15 +397,20 @@ final class SidebarHandle: NSView {
     private var accessory: NSTitlebarAccessoryViewController?
     private var button: SidebarBar?
     private var clip: SidebarClip?
+    private var moves: [NSObjectProtocol] = []
     private var edge: CGFloat = SidebarWidth.initial
-    private var expanded = true
+    private var scheduled = false
 
-    fileprivate func update(edge: CGFloat, expanded: Bool, content: SidebarContent) {
+    fileprivate func update(edge: CGFloat, content: SidebarContent) {
         self.edge = edge
-        self.expanded = expanded
         if button == nil { button = SidebarBar() }
         button?.update(content)
         attach()
+        clipButton()
+    }
+
+    func moveEdge(_ edge: CGFloat) {
+        self.edge = edge
         clipButton()
     }
 
@@ -351,6 +420,9 @@ final class SidebarHandle: NSView {
     }
 
     func detach() {
+        clip?.onLayout = nil
+        moves.forEach(NotificationCenter.default.removeObserver)
+        moves = []
         if let accessory, let window = accessory.view.window,
            let index = window.titlebarAccessoryViewControllers.firstIndex(of: accessory) {
             window.removeTitlebarAccessoryViewController(at: index)
@@ -364,14 +436,7 @@ final class SidebarHandle: NSView {
         let clip = SidebarClip(frame: NSRect(x: 0, y: 0, width: 44, height: 36))
         clip.wantsLayer = true
         clip.clipsToBounds = false
-        button.translatesAutoresizingMaskIntoConstraints = false
         clip.addSubview(button)
-        NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
-            button.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
-            button.centerYAnchor.constraint(equalTo: clip.centerYAnchor),
-            button.heightAnchor.constraint(equalToConstant: 36)
-        ])
         clip.onLayout = { [weak self] in self?.clipButton() }
         let accessory = NSTitlebarAccessoryViewController()
         // Keep the button fixed while the sidebar edge reveals it.
@@ -380,27 +445,42 @@ final class SidebarHandle: NSView {
         self.clip = clip
         self.accessory = accessory
         window.addTitlebarAccessoryViewController(accessory)
+        // AppKit settles the accessory's position after the first layout; a move alone
+        // doesn't relayout the clip, so its width would keep the stale origin.
+        var view: NSView? = clip
+        while let moved = view {
+            moved.postsFrameChangedNotifications = true
+            moves.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: moved, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.clipButton() }
+            })
+            view = moved.superview
+        }
         clipButton()
     }
 
     private func clipButton() {
+        guard clip != nil, !scheduled else { return }
+        scheduled = true
+        // Frame notifications can arrive while SwiftUI is replacing the window toolbar.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scheduled = false
+            self.updateClip()
+        }
+    }
+
+    private func updateClip() {
         guard let clip else { return }
         let origin = clip.convert(NSPoint.zero, to: nil).x
-        let width = expanded ? max(0, edge - origin) : 44
-        if abs(clip.frame.width - width) > 0.5 { clip.setFrameSize(NSSize(width: width, height: clip.frame.height)) }
-        if expanded {
-            clip.layer?.mask = nil
-            return
+        let visible = max(0, edge - origin)
+        let width = max(44, visible)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            if abs(clip.frame.width - width) > 0.5 { clip.setFrameSize(NSSize(width: width, height: clip.frame.height)) }
+            button?.frame = NSRect(x: 0, y: (clip.bounds.height - 36) / 2, width: width, height: 36)
+            button?.moveEdge(visible)
         }
-        let left = min(clip.bounds.width, max(0, edge - origin))
-        let mask = CAShapeLayer()
-        mask.frame = clip.bounds
-        mask.path = CGPath(rect: NSRect(x: left, y: 0, width: clip.bounds.width - left,
-                                      height: clip.bounds.height), transform: nil)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        clip.layer?.mask = mask
-        CATransaction.commit()
     }
 }
 
@@ -412,11 +492,14 @@ private struct SidebarContent {
     let reveal: () -> Void
     let search: () -> Void
     let add: () -> Void
+    let group: () -> Void
     let settings: () -> Void
 
 }
 
 private final class SidebarBar: NSView {
+    private let controls = NSView()
+    private var visible: CGFloat = SidebarWidth.initial
     private let group = NSGlassEffectView()
     private let settings = NSGlassEffectView()
     private let reveal = NSGlassEffectView()
@@ -453,34 +536,75 @@ private final class SidebarBar: NSView {
             glass.cornerRadius = 18
             glass.style = .regular
             if #available(macOS 27, *) { glass.effectIsInteractive = true }
-            addSubview(glass)
         }
+        controls.wantsLayer = true
+        controls.clipsToBounds = false
+        controls.addSubview(group)
+        controls.addSubview(settings)
+        addSubview(reveal)
+        addSubview(controls)
     }
 
     required init?(coder: NSCoder) { nil }
 
     func update(_ content: SidebarContent) {
         appearance = NSAppearance(named: content.scheme == .dark ? .darkAqua : .aqua)
-        actions = [content.search, content.add, content.settings, content.reveal]
-        group.isHidden = !content.expanded
-        settings.isHidden = !content.expanded
+        actions = [content.search, content.add, content.settings, content.reveal, content.group]
+        controls.isHidden = content.state.stage == .collapsed
+        controls.clipsToBounds = content.state.stage.moving
         reveal.isHidden = content.expanded
-        for button in buttons { button.isEnabled = content.enabled }
+        for button in buttons { button.isEnabled = content.enabled && !content.state.stage.moving }
         buttons[3].isEnabled = content.enabled && content.state.stage == .collapsed
+        needsLayout = true
+    }
+
+    func moveEdge(_ visible: CGFloat) {
+        guard self.visible != visible else { return }
+        self.visible = visible
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
         let y = (bounds.height - 36) / 2
-        group.frame = NSRect(x: bounds.width - 128, y: y, width: 72, height: 36)
-        settings.frame = NSRect(x: bounds.width - 48, y: y, width: 36, height: 36)
-        reveal.frame = NSRect(x: (bounds.width - 36) / 2, y: y, width: 36, height: 36)
+        controls.frame = NSRect(x: 0, y: y, width: visible, height: 36)
+        group.frame = NSRect(x: visible - 128, y: 0, width: 72, height: 36)
+        settings.frame = NSRect(x: visible - 48, y: 0, width: 36, height: 36)
+        reveal.frame = NSRect(x: 4, y: y, width: 36, height: 36)
+        let left = min(36, max(0, visible - 4))
+        let mask = CAShapeLayer()
+        mask.path = CGPath(rect: CGRect(x: left, y: 0, width: 36 - left, height: 36), transform: nil)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        reveal.layer?.mask = mask
+        CATransaction.commit()
     }
 
     @objc private func activate(_ button: NSButton) {
+        if button.tag == 1 {
+            // Opened once the press finishes: the menu's tracking loop would otherwise hold an accessibility press open.
+            perform(#selector(showCreate(_:)), with: button, afterDelay: 0, inModes: [.default])
+            return
+        }
         actions[button.tag]()
     }
+
+    @objc private func showCreate(_ button: NSButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.allowsContextMenuPlugIns = false
+        for (tag, title) in [(1, "New Bot"), (4, "New Group Chat")] {
+            let item = NSMenuItem(title: title, action: #selector(create(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = tag
+            menu.addItem(item)
+        }
+        // Clear the menu's top inset as well as the button.
+        let y = button.isFlipped ? button.bounds.maxY + 12 : button.bounds.minY - 12
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: y), in: button)
+    }
+
+    @objc private func create(_ item: NSMenuItem) { actions[item.tag]() }
 }
 
 private final class SidebarClip: NSView {

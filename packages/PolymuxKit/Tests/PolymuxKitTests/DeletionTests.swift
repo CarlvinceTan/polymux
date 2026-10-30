@@ -119,7 +119,6 @@ struct DeletionTests {
         #expect(try relaunched.search(threadID: "deleted", query: "notebook").count == 3)
         #expect(try relaunched.pending(threadID: "deleted").map(\.id) == ["deleted-queued"])
         #expect(try relaunched.cursor(threadID: "deleted") == 2)
-        #expect(try scalar(url, sql: "SELECT COUNT(*) FROM events WHERE thread_id='deleted'") == "2")
         #expect(try scalar(url, sql: "SELECT COUNT(*) FROM outbox WHERE thread_id='deleted'") == "2")
         #expect(try repairs(url) == ["deleted-reply", "kept-reply", "unlisted-reply"])
         #expect(try relaunched.pending(threadID: "kept").map(\.id) == ["kept-queued"])

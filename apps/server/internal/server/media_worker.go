@@ -30,6 +30,10 @@ func (s *Server) runMedia(ctx context.Context) {
 }
 
 func (s *Server) checkMedia(ctx context.Context, now time.Time) {
+	if !s.admission.start() {
+		return
+	}
+	defer s.admission.done()
 	dir := filepath.Join(s.config.DataDir, "media-jobs")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -142,14 +146,14 @@ func (s *Server) publishMedia(ctx context.Context, job mediaJob, attachment *con
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	message := contract.Message{ID: id, ThreadID: job.Conversation, AgentID: &job.Owner, Role: "assistant", Status: "done", CreatedAt: store.Now(), Parts: []contract.Part{}}
-	event := contract.Event{ConversationID: job.Conversation, Type: "message.end", MessageID: &id, AgentID: &job.Owner}
+	message := contract.Message{ID: id, ThreadID: job.Conversation, AgentID: &job.Owner, Role: contract.MessageRoleAssistant, Status: contract.MessageStatusDone, CreatedAt: store.Now(), Parts: []contract.Part{}}
+	event := contract.Event{ConversationID: job.Conversation, Type: contract.EventTypeMessageEnd, MessageID: &id, AgentID: &job.Owner}
 	if attachment != nil {
-		message.Parts = append(message.Parts, contract.Part{Kind: "attachment", Attachment: attachment})
+		message.Parts = append(message.Parts, contract.Part{Kind: contract.PartKindAttachment, Attachment: attachment})
 		_, err = s.Store.PublishAttachment(ctx, *attachment, path, event, &message)
 	} else {
 		text := "Video generation finished without a video. The request has not been resubmitted."
-		message.Parts = append(message.Parts, contract.Part{Kind: "text", Text: &text})
+		message.Parts = append(message.Parts, contract.Part{Kind: contract.PartKindText, Text: &text})
 		_, err = s.Store.Append(ctx, event, &message)
 	}
 	return err

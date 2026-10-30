@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 import QuickLook
 import QuickLookThumbnailing
 import UniformTypeIdentifiers
@@ -24,7 +25,7 @@ struct DraftPreview: View {
                 } else {
                     Image(systemName: symbol)
                         .font(.system(size: 28, weight: .light))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.muted)
                     VStack {
                         Spacer()
                         filename
@@ -68,10 +69,10 @@ struct DraftPreview: View {
             Text(extensionName.isEmpty ? file.url.lastPathComponent : file.url.deletingPathExtension().lastPathComponent)
                 .lineLimit(1).truncationMode(.middle)
             if !extensionName.isEmpty {
-                Text(".\(extensionName)").fixedSize().layoutPriority(1)
+                Text(".\(extensionName)").lineLimit(1).layoutPriority(1)
             }
         }
-        .font(.system(size: 10)).foregroundStyle(.secondary)
+        .font(.system(size: 10)).foregroundStyle(.muted)
     }
 
     private var removeButton: some View {
@@ -131,14 +132,38 @@ private enum DraftThumbnails {
               values.isRegularFile == true else { return nil }
         let key = "\(file.url.absoluteString)|\(values.fileSize ?? 0)|\(values.contentModificationDate?.timeIntervalSince1970 ?? 0)|\(side)|\(scale)" as NSString
         if let cached = cache.object(forKey: key) { return cached.image }
-        let request = QLThumbnailGenerator.Request(fileAt: file.url, size: CGSize(width: side, height: side),
-                                                  scale: scale, representationTypes: [.thumbnail, .lowQualityThumbnail])
-        request.contentType = file.kind
-        let image = await DraftRequest(request).image()
+        var image: CGImage?
+        if file.kind.conforms(to: .image) {
+            image = await Task.detached(priority: .userInitiated) {
+                decode(file.url, side: side, scale: scale)
+            }.value
+        }
+        guard !Task.isCancelled else { return nil }
+        if image == nil {
+            let request = QLThumbnailGenerator.Request(fileAt: file.url, size: CGSize(width: side, height: side),
+                                                      scale: scale, representationTypes: .thumbnail)
+            request.contentType = file.kind
+            image = await DraftRequest(request).image()
+        }
         guard !Task.isCancelled else { return nil }
         let cost = image.map { $0.bytesPerRow * $0.height } ?? 1
         cache.setObject(DraftImage(image), forKey: key, cost: cost)
         return image
+    }
+
+    nonisolated private static func decode(_ url: URL, side: CGFloat, scale: CGFloat) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat,
+              width > 0, height > 0 else { return nil }
+        // The square crop needs display-resolution pixels on the shorter edge.
+        let pixels = ceil(min(max(width, height), side * scale * max(width, height) / min(width, height)))
+        let options = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                       kCGImageSourceCreateThumbnailWithTransform: true,
+                       kCGImageSourceShouldCacheImmediately: true,
+                       kCGImageSourceThumbnailMaxPixelSize: pixels] as CFDictionary
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
     }
 }
 

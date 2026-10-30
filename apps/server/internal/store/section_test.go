@@ -34,6 +34,107 @@ func sectionFixture(t *testing.T) (*Store, string) {
 	return s, path
 }
 
+func TestPinPlacement(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		id     string
+		before *string
+		after  *string
+		want   []string
+		fail   bool
+	}{
+		{name: "first slot", id: "b", before: new("a"), want: []string{"b", "a"}},
+		{name: "last slot", id: "a", after: new("b"), want: []string{"b", "a"}},
+		{name: "new pin", id: "group", before: new("a"), want: []string{"group", "a", "b"}},
+		{name: "missing anchor", id: "group", before: new("missing"), fail: true},
+		{name: "unpinned anchor", id: "group", before: new("lead"), fail: true},
+		{name: "conflicting anchors", id: "group", before: new("a"), after: new("b"), fail: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			s, _ := sectionFixture(t)
+			ctx := t.Context()
+			if _, _, err := s.CreateSection(ctx, "work", "Work", nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.PlaceThread(ctx, "group", Placement{SectionSet: true, SectionID: new("work")}); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"a", "b"} {
+				if err := s.PlaceThread(ctx, id, Placement{Pinned: new(true)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			previous, err := s.Sidebar(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = s.PlaceThread(ctx, test.id, Placement{Pinned: new(true), BeforeID: test.before, AfterID: test.after})
+			if test.fail {
+				if !errors.Is(err, ErrAnchor) {
+					t.Fatalf("invalid anchor: %v", err)
+				}
+				next, err := s.Sidebar(ctx)
+				if err != nil || !reflect.DeepEqual(previous, next) {
+					t.Fatalf("failed drop changed sidebar: %v, %v", next, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			threads, err := s.Threads(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids := []string{}
+			for _, thread := range threads {
+				if thread.Pinned == nil || !*thread.Pinned {
+					continue
+				}
+				if thread.PinOrder == nil || *thread.PinOrder != float64(len(ids)) || thread.SectionID != nil {
+					t.Fatalf("invalid pin placement: %+v", thread)
+				}
+				ids = append(ids, thread.ID)
+			}
+			if !slices.Equal(ids, test.want) {
+				t.Fatalf("pins = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
+func TestUnassignedMigration(t *testing.T) {
+	s, path := sectionFixture(t)
+	ctx := t.Context()
+	if _, _, err := s.CreateSection(ctx, "custom", "Unassigned", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PlaceThread(ctx, "a", Placement{SectionSet: true, SectionID: new("custom")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM sections WHERE id=?; DROP INDEX sections_custom_name; CREATE UNIQUE INDEX sections_name ON sections(name COLLATE NOCASE)`, UnassignedID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sections, err := s.Sections(ctx)
+	if err != nil || len(sections) != 2 || sections[0].ID != "custom" || sections[1].ID != UnassignedID || sections[1].ChatCount != 3 {
+		t.Fatal("migration lost an existing section or its placement", sections, err)
+	}
+	thread, err := s.Thread(ctx, "a")
+	if err != nil || thread.SectionID == nil || *thread.SectionID != "custom" {
+		t.Fatal("migration moved an assigned chat", thread, err)
+	}
+}
+
 func TestSectionsPersist(t *testing.T) {
 	s, path := sectionFixture(t)
 	for _, id := range []string{"one", "two", "three"} {
@@ -78,7 +179,7 @@ func TestSectionsPersist(t *testing.T) {
 	}
 	defer s.Close()
 	sections, err := s.Sections(t.Context())
-	if err != nil || len(sections) != 3 || !slices.Equal([]string{sections[0].ID, sections[1].ID, sections[2].ID}, []string{"three", "one", "two"}) || !sections[2].Collapsed || sections[2].Name != "Career" || sections[2].ChatCount != 2 {
+	if err != nil || len(sections) != 4 || !slices.Equal([]string{sections[0].ID, sections[1].ID, sections[2].ID, sections[3].ID}, []string{UnassignedID, "three", "one", "two"}) || !sections[3].Collapsed || sections[3].Name != "Career" || sections[3].ChatCount != 2 {
 		t.Fatal(sections, err)
 	}
 	if err := s.UpdateThread(t.Context(), "group", contract.UpdateThreadRequest{Pinned: new(true)}); err != nil {
@@ -105,6 +206,52 @@ func TestSectionsPersist(t *testing.T) {
 	var count int
 	if err := s.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM messages WHERE id='live'`).Scan(&count); err != nil || count != 1 {
 		t.Fatal("message changed", count, err)
+	}
+}
+
+func TestUnassignedSection(t *testing.T) {
+	s, path := sectionFixture(t)
+	ctx := t.Context()
+	if _, _, err := s.CreateSection(ctx, "work", "Work", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PlaceThread(ctx, "a", Placement{SectionSet: true, SectionID: new("work")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PlaceThread(ctx, "b", Placement{Pinned: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	section, err := s.UpdateSection(ctx, UnassignedID, nil, new(true))
+	if err != nil || !section.Collapsed || section.ChatCount != 2 {
+		t.Fatal("unassigned includes pinned or assigned chats", section, err)
+	}
+	if _, err := s.ReorderSidebar(ctx, SidebarOrder{Kind: "sections", ID: UnassignedID, AfterID: new("work")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateSection(ctx, UnassignedID, new("Changed"), nil); !errors.Is(err, ErrSectionFixed) {
+		t.Fatal("renamed unassigned", err)
+	}
+	if _, err := s.DeleteSection(ctx, UnassignedID); !errors.Is(err, ErrSectionFixed) {
+		t.Fatal("deleted unassigned", err)
+	}
+	if err := s.PlaceThread(ctx, "a", Placement{SectionSet: true, SectionID: new(UnassignedID)}); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := s.Thread(ctx, "a")
+	if err != nil || thread.SectionID != nil {
+		t.Fatal("unassigned must keep null placement", thread, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sections, err := s.Sections(ctx)
+	if err != nil || len(sections) != 2 || sections[1].ID != UnassignedID || !sections[1].Collapsed || sections[1].Name != "Unassigned" || sections[1].ChatCount != 3 {
+		t.Fatal("unassigned state did not persist", sections, err)
 	}
 }
 
@@ -168,7 +315,7 @@ func TestSidebarImport(t *testing.T) {
 		t.Fatal("preview changed database, WAL, or directory entries")
 	}
 	sections, _ := s.Sections(t.Context())
-	if len(sections) != 2 {
+	if len(sections) != 3 {
 		t.Fatal("preview mutated sections")
 	}
 	for i := 0; i < 2; i++ {
@@ -178,7 +325,7 @@ func TestSidebarImport(t *testing.T) {
 		}
 	}
 	sections, _ = s.Sections(t.Context())
-	if len(sections) != 3 || sections[0].ID != "source-projects" || sections[1].ID != "source-team" || sections[2].ID != "local" {
+	if len(sections) != 4 || sections[0].ID != "source-projects" || sections[1].ID != "source-team" || sections[2].ID != UnassignedID || sections[3].ID != "local" {
 		t.Fatal("source order or extra section lost", sections)
 	}
 	saved, err := s.SidebarSource(t.Context(), "grokbot")

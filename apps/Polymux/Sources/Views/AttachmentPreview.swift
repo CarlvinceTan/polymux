@@ -8,6 +8,7 @@ struct AttachmentPreview: View {
     let client: APIClient
     var showsName = true
     var square: CGFloat? = nil
+    var radius: CGFloat = 8
     @Environment(\.displayScale) private var displayScale
     @State private var thumbnail: CGImage?
     @State private var loading = false
@@ -16,13 +17,12 @@ struct AttachmentPreview: View {
         VStack(alignment: .leading, spacing: 5) {
             Group {
                 if let imageURL {
-                    AsyncImage(url: imageURL) { phase in
-                        switch phase {
-                        case .success(let image): image.resizable().aspectRatio(contentMode: square == nil ? .fit : .fill)
-                        case .empty: placeholder
-                        case .failure: fallback
-                        @unknown default: fallback
-                        }
+                    CachedImage(url: imageURL, name: "preview-" + attachment.name, client: client) { image in
+                        image.resizable().aspectRatio(contentMode: square == nil ? .fit : .fill)
+                    } placeholder: {
+                        placeholder
+                    } failure: {
+                        AnyView(fallback)
                     }
                 } else if let thumbnail {
                     Image(decorative: thumbnail, scale: displayScale)
@@ -35,10 +35,10 @@ struct AttachmentPreview: View {
             }
             .frame(width: square, height: square)
             .frame(maxWidth: square ?? 160, maxHeight: square ?? 140)
-            .clipShape(.rect(cornerRadius: 8))
+            .clipShape(.rect(cornerRadius: radius))
             if showsName {
                 Text(attachment.name)
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.caption2).foregroundStyle(.muted)
                     .lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: 160, alignment: .leading)
             }
@@ -49,10 +49,10 @@ struct AttachmentPreview: View {
     }
 
     private var imageURL: URL? {
-        if attachment.kind == "image" {
+        if attachment.kind == AttachmentKind.image {
             return client.resolve(attachment.thumbnailURL ?? attachment.url)
         }
-        if attachment.kind == "video", let poster = attachment.thumbnailURL, !poster.isEmpty {
+        if attachment.kind == AttachmentKind.video, let poster = attachment.thumbnailURL, !poster.isEmpty {
             return client.resolve(poster)
         }
         return nil
@@ -64,15 +64,15 @@ struct AttachmentPreview: View {
 
     private var fallback: some View {
         Image(systemName: symbol)
-            .font(.system(size: 32, weight: .light)).foregroundStyle(.secondary)
+            .font(.system(size: 32, weight: .light)).foregroundStyle(.muted)
             .frame(width: square ?? 100, height: square ?? 100)
             .background(.quaternary.opacity(0.45))
     }
 
     private var symbol: String {
-        if attachment.kind == "image" { return "photo" }
-        if attachment.kind == "video" { return "film" }
-        if attachment.kind == "audio" { return "waveform" }
+        if attachment.kind == AttachmentKind.image { return "photo" }
+        if attachment.kind == AttachmentKind.video { return "film" }
+        if attachment.kind == AttachmentKind.audio { return "waveform" }
         let kind = UTType(mimeType: attachment.mimeType) ?? UTType(filenameExtension: (attachment.name as NSString).pathExtension)
         if kind?.conforms(to: .pdf) == true { return "doc.richtext" }
         if kind?.conforms(to: .html) == true { return "globe" }
@@ -87,7 +87,7 @@ struct AttachmentPreview: View {
         guard imageURL == nil, let url = client.resolve(attachment.url) else { return }
         loading = true
         do {
-            let file = try await MediaCache.shared.file(url: url, name: attachment.name)
+            let file = try await MediaCache.shared.file(url: url, name: attachment.name, client: client)
             try Task.checkCancellation()
             let request = QLThumbnailGenerator.Request(fileAt: file, size: CGSize(width: 160, height: 140), scale: displayScale, representationTypes: .all)
             let representation = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)

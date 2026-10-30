@@ -10,22 +10,59 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
+	"time"
 )
 
 var ErrMissing = errors.New("credential is unavailable")
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
+const (
+	KindAPI = "api"
+	KindSSH = "ssh"
+)
+
 type Credential struct {
-	Name   string `json:"name"`
+	Name string `json:"name"`
+	// Kind is KindAPI for an HTTP credential and KindSSH for a private key.
+	Kind   string `json:"kind,omitempty"`
 	Origin string `json:"origin"`
-	Header string `json:"header"`
-	Scheme string `json:"scheme"`
-	Value  string `json:"value,omitempty"`
+	// Origins are extra bound origins, so one secret can serve a tool that spans hosts, like gh.
+	Origins []string `json:"origins,omitempty"`
+	Header  string   `json:"header"`
+	Scheme  string   `json:"scheme"`
+	// ExpiresAt is a unix-milli expiry; 0 never expires.
+	ExpiresAt int64 `json:"expiresAt,omitempty"`
+	// Ephemeral secrets live only in memory and are never written to disk.
+	Ephemeral bool   `json:"ephemeral,omitempty"`
+	Value     string `json:"value,omitempty"`
 }
+
+// Allows reports whether this secret is bound to origin.
+func (c Credential) Allows(origin string) bool {
+	if origin == c.Origin {
+		return true
+	}
+	for _, bound := range c.Origins {
+		if bound == origin {
+			return true
+		}
+	}
+	return false
+}
+
+func (c Credential) expired(now int64) bool { return c.ExpiresAt > 0 && now >= c.ExpiresAt }
+
+// IsSSH reports whether this credential is a private key rather than an HTTP credential.
+func (c Credential) IsSSH() bool { return c.Kind == KindSSH }
 
 type Store struct {
 	db   *sql.DB
 	aead cipher.AEAD
+	now  func() int64
+	mu   sync.Mutex
+	// memory holds ephemeral secrets by owner then name; they never reach the database.
+	memory map[string]map[string]Credential
 }
 
 func ValidName(name string) bool { return namePattern.MatchString(name) }
@@ -76,10 +113,13 @@ func Open(dir string, db *sql.DB) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db, aead: aead}, nil
+	return &Store{db: db, aead: aead, now: func() int64 { return time.Now().UnixMilli() }, memory: map[string]map[string]Credential{}}, nil
 }
 
 func (s *Store) Get(owner, name string) (Credential, error) {
+	if credential, ok := s.fromMemory(owner, name); ok {
+		return credential, nil
+	}
 	var data []byte
 	if err := s.db.QueryRow(`SELECT data FROM credentials WHERE owner=? AND name=?`, owner, name).Scan(&data); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -87,29 +127,80 @@ func (s *Store) Get(owner, name string) (Credential, error) {
 		}
 		return Credential{}, err
 	}
-	return s.open(owner, name, data)
+	credential, err := s.open(owner, name, data)
+	if err != nil {
+		return Credential{}, err
+	}
+	if credential.expired(s.now()) {
+		_ = s.Delete(owner, name)
+		return Credential{}, ErrMissing
+	}
+	return credential, nil
+}
+
+// fromMemory returns a live ephemeral secret, sweeping it when expired.
+func (s *Store) fromMemory(owner, name string) (Credential, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	credential, ok := s.memory[owner][name]
+	if !ok {
+		return Credential{}, false
+	}
+	if credential.expired(s.now()) {
+		delete(s.memory[owner], name)
+		return Credential{}, false
+	}
+	return credential, true
 }
 
 func (s *Store) List(owner string) []Credential {
+	return s.list(owner, false)
+}
+
+// Values returns the owner's unexpired credentials of kind with their values, for the SSH
+// agent to sign with; callers must never return them to the model.
+func (s *Store) Values(owner, kind string) []Credential {
+	items := []Credential{}
+	for _, credential := range s.list(owner, true) {
+		if credential.Kind == kind {
+			items = append(items, credential)
+		}
+	}
+	return items
+}
+
+func (s *Store) list(owner string, values bool) []Credential {
+	now := s.now()
 	items := []Credential{}
 	rows, err := s.db.Query(`SELECT name,data FROM credentials WHERE owner=? ORDER BY name`, owner)
-	if err != nil {
-		return items
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		var data []byte
-		if rows.Scan(&name, &data) != nil {
-			continue
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var data []byte
+			if rows.Scan(&name, &data) != nil {
+				continue
+			}
+			credential, err := s.open(owner, name, data)
+			if err != nil || credential.expired(now) {
+				continue
+			}
+			if !values {
+				credential.Value = ""
+			}
+			items = append(items, credential)
 		}
-		credential, err := s.open(owner, name, data)
-		if err != nil {
-			continue
-		}
-		credential.Value = ""
-		items = append(items, credential)
 	}
+	s.mu.Lock()
+	for _, credential := range s.memory[owner] {
+		if !credential.expired(now) {
+			if !values {
+				credential.Value = ""
+			}
+			items = append(items, credential)
+		}
+	}
+	s.mu.Unlock()
 	return items
 }
 
@@ -147,15 +238,41 @@ func (s *Store) open(owner, name string, data []byte) (Credential, error) {
 }
 
 func (s *Store) Save(owner string, credential Credential) error {
+	if credential.Ephemeral {
+		if owner == "" || !ValidName(credential.Name) || credential.Value == "" || len(credential.Value) > 16384 {
+			return errors.New("invalid credential")
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.memory[owner] == nil {
+			s.memory[owner] = map[string]Credential{}
+		}
+		// A memory-only secret replaces any saved one of the same name, and vice versa.
+		s.memory[owner][credential.Name] = credential
+		_, _ = s.db.Exec(`DELETE FROM credentials WHERE owner=? AND name=?`, owner, credential.Name)
+		return nil
+	}
 	data, err := s.Seal(owner, credential)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO credentials(owner,name,data) VALUES(?,?,?) ON CONFLICT(owner,name) DO UPDATE SET data=excluded.data`, owner, credential.Name, data)
-	return err
+	if _, err = s.db.Exec(`INSERT INTO credentials(owner,name,data) VALUES(?,?,?) ON CONFLICT(owner,name) DO UPDATE SET data=excluded.data`, owner, credential.Name, data); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.memory[owner], credential.Name)
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Store) Delete(owner, name string) error {
+	s.mu.Lock()
+	if name == "" {
+		delete(s.memory, owner)
+	} else {
+		delete(s.memory[owner], name)
+	}
+	s.mu.Unlock()
 	var err error
 	if name == "" {
 		_, err = s.db.Exec(`DELETE FROM credentials WHERE owner=?`, owner)

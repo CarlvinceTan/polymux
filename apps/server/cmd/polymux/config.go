@@ -7,8 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/server"
 )
 
 type modelConfig struct {
@@ -20,6 +23,30 @@ type modelConfig struct {
 	// Headers are sent with every provider request; Session names one of them to carry a stable per-conversation value.
 	Headers map[string]string `json:"headers"`
 	Session string            `json:"sessionHeader"`
+	// Window is the model's context window in tokens; zero uses the runtime default.
+	Window int `json:"contextWindow"`
+}
+
+func loadGroups() (server.GroupCaps, error) {
+	caps := server.DefaultGroups()
+	for _, field := range []struct {
+		name   string
+		target *int
+	}{
+		{name: "POLYMUX_GROUP_MAX_DEPTH", target: &caps.MaxDepth},
+		{name: "POLYMUX_GROUP_MAX_FANOUT", target: &caps.MaxPerRun},
+	} {
+		raw, present := os.LookupEnv(field.name)
+		if !present {
+			continue
+		}
+		value, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || value < 0 {
+			return caps, fmt.Errorf("%s must be a whole number of zero or more", field.name)
+		}
+		*field.target = value
+	}
+	return caps, nil
 }
 
 func loadModel(dir string) (modelConfig, error) {
@@ -46,6 +73,9 @@ func loadModel(dir string) (modelConfig, error) {
 		if !validHeaderValue(value) {
 			return config, fmt.Errorf("invalid model header value for %q", name)
 		}
+	}
+	if config.Window < 0 {
+		return config, errors.New("model contextWindow must not be negative")
 	}
 	if config.Session != "" && !validHeaderName(config.Session) {
 		return config, errors.New("model sessionHeader must be a valid header name")

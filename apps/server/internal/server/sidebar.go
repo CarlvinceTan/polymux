@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
 
@@ -40,6 +42,8 @@ func (s *Server) sidebarError(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		code, message, status = "not_found", "The sidebar item could not be found.", 404
+	case errors.Is(err, store.ErrSectionFixed):
+		code, message = "fixed_section", "Unassigned cannot be renamed or removed."
 	case errors.Is(err, store.ErrSectionName):
 		code, message = "invalid_name", "Enter a section name within forty characters."
 	case errors.Is(err, store.ErrSectionTaken):
@@ -108,10 +112,53 @@ func (s *Server) updateSection(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// deleteSection removes a section. Its chats return to the main list, or with ?chats=1 are
+// deleted too: a bot's own chat deletes the bot, a group chat deletes just that chat.
 func (s *Server) deleteSection(w http.ResponseWriter, r *http.Request) {
-	ids, err := s.Store.DeleteSection(r.Context(), r.PathValue("id"))
+	id := r.PathValue("id")
+	if id == store.UnassignedID {
+		s.sidebarError(w, store.ErrSectionFixed)
+		return
+	}
+	deleted := []string{}
+	if r.URL.Query().Get("chats") == "1" {
+		sections, err := s.Store.Sections(r.Context())
+		if err != nil {
+			s.respond(w, nil, err)
+			return
+		}
+		// Check the section first so a bad id deletes nothing.
+		if !slices.ContainsFunc(sections, func(section contract.Section) bool { return section.ID == id }) {
+			s.sidebarError(w, store.ErrSectionMissing)
+			return
+		}
+		threads, err := s.Store.Threads(r.Context())
+		if err != nil {
+			s.respond(w, nil, err)
+			return
+		}
+		for _, thread := range threads {
+			if thread.SectionID == nil || *thread.SectionID != id {
+				continue
+			}
+			if thread.ID == thread.AgentID {
+				err = s.eraseAgent(r.Context(), thread.AgentID)
+			} else {
+				err = s.eraseGroup(r.Context(), thread.ID)
+			}
+			if s.profileError(w, err) {
+				return
+			}
+			if err != nil {
+				s.respond(w, nil, err)
+				return
+			}
+			deleted = append(deleted, thread.ID)
+		}
+	}
+	ids, err := s.Store.DeleteSection(r.Context(), id)
 	if !s.sidebarError(w, err) {
-		s.respond(w, map[string]any{"deleted": r.PathValue("id"), "returnedChatIDs": ids}, err)
+		s.respond(w, map[string]any{"deleted": id, "returnedChatIDs": ids, "deletedChatIDs": deleted}, err)
 	}
 }
 

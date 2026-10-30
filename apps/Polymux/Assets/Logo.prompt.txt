@@ -1,0 +1,17 @@
+Approved Polymux logo, generated with the built-in imagegen tool on 2026-10-29.
+
+Make a faithful OUTLINE version of this exact attached abstract P/ribbon logo. Preserve the exact overall silhouette, the rounded right-hand bowl, flat top, upper-left triangular taper, lower-left diamond/ribbon extension, central angular diamond-shaped negative space and small gap at the left. Replace the black solid fill with black interiors bounded by clean pure-white contour strokes on a flat solid black background. Trace the original external and internal shape boundaries accurately; do not redesign, simplify away any region, bridge gaps, invent connections or change proportions. Use one consistent medium-fine outline width, about 3.5 percent of the mark's overall width, with smoothly rounded joins and caps matching the reference's softened corners. The result should be an elegant hollow outline of the same mark, with no solid white areas. No eyes, shading, gradients, extrusion, shadows, glow, texture, text or extra symbols. Center the mark on a square black canvas at about 62 percent canvas height with generous margins. Standalone preview only; do not apply it to Polymux.
+
+Approved production refinement, using the outline above as input:
+
+Make ONE precise refinement to this exact approved abstract P/ribbon outline logo: increase the white outline thickness by about 30 percent, a modest but clearly noticeable increase so it reads better as an app icon. Keep a single perfectly consistent line weight throughout the mark. Preserve the exact shape, proportions, composition, rounded right bowl, flat top, upper-left triangular shape, lower-left diamond/ribbon extension, angular central opening, softened corners and small open gap on the left. Do not close or narrow away the left gap. Maintain the same centerline geometry, mark scale, position, square black canvas and pure white outline with black interiors. Only the stroke becomes a little heavier; no redesign, no filled white regions, no extra lines, no eyes, no gradient, no extrusion, no glow, no texture, no text. This is the production logo refinement requested by the user.
+
+Stroke refinement requested on 2026-10-29, using the approved outline as the edit target and the installed OpenAI app icon as a line-weight reference:
+
+Preserve the exact abstract P/ribbon structure, proportions and rounded corners. Increase the white outline to match the visual stroke weight of the OpenAI knot when both appear as app icons. Use a uniform line about twice the previous thickness, keeping the small black opening at the left midpoint clear. Pure white on pure black, without gradients, shadows, extrusion, extra shapes or an outer frame.
+
+Spacing refinement requested on 2026-10-29:
+
+Equalize the three narrow black clearances: above the inner chevron, between the two facing left tips, and below the inner chevron. Keep the existing bold white outline, softened corners and outer P/ribbon silhouette. Open the lower clearance so none of the three almost touch.
+
+Run uv run --no-project scripts/icon.py to export the transparent native icon layer, connecting logo, website logo and favicon from Logo.png. AppIcon.icon supplies the solid black background; Xcode generates platform sizes.

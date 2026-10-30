@@ -25,6 +25,9 @@ private struct Reference: Decodable {
     var path: String
 }
 
+/// Shapes whose outlines follow Grok Bot rather than the pinned upstream, so parity checks skip them.
+let grokShapes: Set<String> = ["galet", "squircle", "hexagone", "nuage", "goutte"]
+
 private func reference() throws -> Reference {
     try JSONDecoder().decode(Reference.self, from: Data(ReferenceFixture.json.utf8))
 }
@@ -32,7 +35,7 @@ private func reference() throws -> Reference {
 @Suite
 struct CoreTests {
     @Test func catalogsPreserveEveryUpstreamOption() {
-        #expect(Set(ShapeID.creationShapes).count == 13)
+        #expect(Set(ShapeCategory.shapes.shapes).count == 14)
         #expect(Set(ShapeID.creationShapes).isSubset(of: Set(ShapeID.allCases)))
         #expect(ColorID.allCases.count == 12)
         #expect(ExpressionID.allCases.count == 16)
@@ -55,7 +58,7 @@ struct CoreTests {
     }
 
     @Test func fullRadialProfilesMatchPinnedReference() throws {
-        for shape in try reference().shapes {
+        for shape in try reference().shapes where !grokShapes.contains(shape.id) {
             let native = try #require(SHAPE_BY_ID[shape.id])
             #expect(native.radii.count == PROFILE_SAMPLES)
             for (actual, expected) in zip(native.radii, shape.radii) {
@@ -133,7 +136,7 @@ struct CoreTests {
     @Test func everyEyeCorrectionMatchesPinnedReference() throws {
         let fixture = try reference()
         #expect(fixture.fitting.count == 296)
-        for fit in fixture.fitting {
+        for fit in fixture.fitting where !grokShapes.contains(fit.shape) {
             let shape = try #require(SHAPE_BY_ID[fit.shape])
             let state = try #require(StateID(rawValue: fit.state))
             let actual = decalageDesYeux(shape.radii, state, fit.expression)

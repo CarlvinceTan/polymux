@@ -1,6 +1,13 @@
 {
   "version": 1,
   "skills": {
+    "cua-driver": {
+      "source": "trycua/cua",
+      "ref": "cua-driver-rs-v0.37.0",
+      "sourceType": "github",
+      "skillPath": "libs/cua-driver/rust/Skills/cua-driver/SKILL.md",
+      "computedHash": "ad3cd3bfb05838e3793b6284a0be478fd987b28590eea0ff055ed9c288f41e17"
+    },
     "golang-code-style": {
       "source": "samber/cc-skills-golang",
       "sourceType": "github",
@@ -84,6 +91,24 @@
       "sourceType": "github",
       "skillPath": "skills/golang-troubleshooting/SKILL.md",
       "computedHash": "5e754f70758a1096b9e0fd6c0b24cc2200e2808b4f0285ea8dcf2e6c4981fd2a"
+    },
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "6974dbfbd18485b5c8aac0b84b33f1dd2d9eb4dba83d45efdc6964591773098d"
+    },
+    "svelte-code-writer": {
+      "source": "sveltejs/ai-tools",
+      "sourceType": "github",
+      "skillPath": "plugins/claude/svelte/skills/svelte-code-writer/SKILL.md",
+      "computedHash": "abe888cce357ab0fa0104ff2266edaf9c3a8382320b303f920cd777762a6bc85"
+    },
+    "svelte-core-bestpractices": {
+      "source": "sveltejs/ai-tools",
+      "sourceType": "github",
+      "skillPath": "plugins/claude/svelte/skills/svelte-core-bestpractices/SKILL.md",
+      "computedHash": "3cd6c1f1a92b8bf52af8120e5cb3a93b5512f83b905fd902b895adafb7225456"
     }
   }
 }

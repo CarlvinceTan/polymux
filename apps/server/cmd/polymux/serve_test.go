@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"io"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -11,7 +13,79 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
+
+type addressedListener struct {
+	net.Listener
+	address *net.TCPAddr
+}
+
+func (l addressedListener) Addr() net.Addr { return l.address }
+
+func TestTunnelListener(t *testing.T) {
+	for _, address := range []string{"127.0.0.1", "100.64.0.7", "192.168.1.5", "0.0.0.0", "::"} {
+		t.Run(address, func(t *testing.T) {
+			primary, err := net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer primary.Close()
+			bound := primary.Addr().(*net.TCPAddr)
+			listener := addressedListener{Listener: primary, address: &net.TCPAddr{IP: net.ParseIP(address), Port: bound.Port}}
+			local, err := tunnelListener(listener)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer local.Close()
+			if !local.Addr().(*net.TCPAddr).IP.IsLoopback() {
+				t.Fatalf("encrypted tunnel forwards to non-loopback %s", local.Addr())
+			}
+			api := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				host, _, _ := net.SplitHostPort(r.RemoteAddr)
+				if !net.ParseIP(host).IsLoopback() {
+					t.Error("tunnel hop left loopback")
+				}
+				if r.Header.Get("Authorization") != "Bearer test-device" {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})}
+			defer api.Close()
+			done := make(chan error, 1)
+			go func() { done <- api.Serve(local) }()
+			client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil}}
+			defer client.CloseIdleConnections()
+			for _, authorized := range []bool{false, true} {
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+local.Addr().String(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := http.StatusUnauthorized
+				if authorized {
+					request.Header.Set("Authorization", "Bearer test-device")
+					want = http.StatusNoContent
+				}
+				response, err := client.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.Copy(io.Discard, response.Body)
+				response.Body.Close()
+				if response.StatusCode != want {
+					t.Fatalf("status = %d, want %d", response.StatusCode, want)
+				}
+			}
+			if err := api.Shutdown(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != http.ErrServerClosed {
+				t.Fatalf("listener shutdown: %v", err)
+			}
+		})
+	}
+}
 
 func TestNetworkBoundary(t *testing.T) {
 	for _, test := range []struct {
@@ -23,9 +97,9 @@ func TestNetworkBoundary(t *testing.T) {
 		{address: "[fd7a:115c:a1e0::1]:7337", allowed: true},
 		{address: "0.0.0.0:7337"},
 		{address: ":7337"},
-		{address: "192.168.1.5:7337", allowed: true},
-		{address: "10.0.0.1:7337", allowed: true},
-		{address: "172.16.0.1:7337", allowed: true},
+		{address: "192.168.1.5:7337"},
+		{address: "10.0.0.1:7337"},
+		{address: "172.16.0.1:7337"},
 		{address: "127.0.0.1:7337", allowed: true},
 		{address: "[::1]:7337", allowed: true},
 		{address: "8.8.8.8:7337"},
@@ -51,6 +125,22 @@ func TestNetworkBoundary(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Plain HTTP reaches only loopback and Tailscale peers; a LAN numbered from Tailscale's range stays LAN.
+func TestTrustedPeers(t *testing.T) {
+	interfaces := []lanInterface{
+		{Name: "en0", Addrs: []net.Addr{&net.IPNet{IP: net.ParseIP("100.70.0.2"), Mask: net.CIDRMask(24, 32)}}},
+		{Name: "utun4", Addrs: []net.Addr{&net.IPNet{IP: net.ParseIP("100.101.1.1"), Mask: net.CIDRMask(32, 32)}}},
+	}
+	for address, want := range map[string]bool{
+		"127.0.0.1": true, "::1": true, "100.101.1.1": true, "100.88.4.2": true, "fd7a:115c:a1e0::9": true,
+		"192.168.1.20": false, "10.0.0.4": false, "100.70.0.9": false, "8.8.8.8": false,
+	} {
+		if trustedPeer(netip.MustParseAddr(address), interfaces) != want {
+			t.Errorf("%s trusted = %v", address, !want)
+		}
 	}
 }
 

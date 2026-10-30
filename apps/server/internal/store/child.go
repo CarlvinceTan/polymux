@@ -21,9 +21,9 @@ func (s *Store) Spawn(ctx context.Context, parent, call, target, task string) (c
 		return contract.Run{}, err
 	}
 	id := fmt.Sprintf("child:%x", sha256.Sum256(key))
-	work := Work{Trigger: "child", ParentRunID: &parent, Task: task,
-		Message: contract.Message{ID: id, ThreadID: target, Role: "user", CreatedAt: Now(), Parts: []contract.Part{{Kind: "text", Text: &task}}}}
-	run := NewRun(id, target, target, "child")
+	work := Work{Trigger: contract.RunTriggerChild, ParentRunID: &parent, Task: task,
+		Message: contract.Message{ID: id, ThreadID: target, Role: contract.MessageRoleUser, CreatedAt: Now(), Parts: []contract.Part{{Kind: contract.PartKindText, Text: &task}}}}
+	run := NewRun(id, target, target, contract.RunTriggerChild)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return run, err
@@ -62,7 +62,7 @@ func (s *Store) Spawn(ctx context.Context, parent, call, target, task string) (c
 	if err := json.Unmarshal([]byte(data), &source); err != nil {
 		return run, err
 	}
-	if source.Status != "running" || source.Trigger == "child" || source.Trigger == "created" {
+	if source.Status != contract.RunStatusRunning || source.Trigger == contract.RunTriggerChild || source.Trigger == contract.RunTriggerCreated {
 		return run, errors.New("spawning requires a running bot turn")
 	}
 	var count int
@@ -84,7 +84,7 @@ func (s *Store) Spawn(ctx context.Context, parent, call, target, task string) (c
 	if count >= 8 {
 		return run, errors.New("child task limit reached")
 	}
-	if err := queueTx(ctx, tx, work, target); err != nil {
+	if err := s.queueTx(ctx, tx, work, target); err != nil {
 		return run, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT data FROM runs WHERE id=?`, run.ID).Scan(&data); err != nil {
@@ -144,11 +144,11 @@ func (s *Store) StopChild(ctx context.Context, agent, id string) ([]string, erro
 		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=? AND state='queued'`, job); err != nil {
 			return nil, err
 		}
-		if err := finishRuns(ctx, tx, job); err != nil {
+		if err := s.finishRuns(ctx, tx, job); err != nil {
 			return nil, err
 		}
 	} else if !Terminal(status) {
-		if ids, err = stopTree(ctx, tx, "id", id); err != nil {
+		if ids, err = s.stopTree(ctx, tx, "id", id); err != nil {
 			return nil, err
 		}
 	}

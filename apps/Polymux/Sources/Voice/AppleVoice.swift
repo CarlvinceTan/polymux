@@ -36,7 +36,7 @@ final class VoiceAudio {
                 try input.setVoiceProcessingEnabled(true)
                 input.isVoiceProcessingInputMuted = muted
             } catch {
-                throw VoiceFailure.echo(error.localizedDescription)
+                throw VoiceFailure.echo
             }
         }
         let inputFormat = input.outputFormat(forBus: 0)

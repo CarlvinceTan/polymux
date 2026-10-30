@@ -129,6 +129,70 @@ func TestGroupValidation(t *testing.T) {
 	}
 }
 
+func TestGroupQueue(t *testing.T) {
+	for _, status := range []string{"running", "failed", "completed"} {
+		t.Run(status, func(t *testing.T) {
+			s := runStore(t)
+			group, err := s.CreateThread(t.Context(), "group", contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := s.Send(t.Context(), group.ID, contract.SendRequest{ID: "root", Text: "Discuss"}, nil, "a"); err != nil {
+				t.Fatal(err)
+			}
+			parent := NewRun("root", group.ID, "a", contract.RunTriggerMessage)
+			parent.Status = contract.RunStatusRunning
+			if err := s.RunEvent(t.Context(), "run.update", &parent, nil); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"first", "second"} {
+				root := "root"
+				work := Work{
+					Trigger: contract.RunTriggerHandoff, DeliveryID: id, ParentRunID: &parent.ID,
+					Message: contract.Message{ID: id, ThreadID: group.ID, ReplyToID: &root},
+				}
+				delivery := contract.PeerDelivery{
+					ID: id, SourceAgentID: "a", TargetAgentID: "b", ConversationID: group.ID,
+					ParentRunID: parent.ID, Intent: contract.PeerDeliveryIntentHandoff,
+					Status: contract.PeerDeliveryStatusQueued, CreatedAt: Now(),
+				}
+				if _, err := s.Deliver(t.Context(), delivery, work, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			parent.Status = status
+			if err := s.RunEvent(t.Context(), "run.update", &parent, nil); err != nil {
+				t.Fatal(err)
+			}
+			queue, err := s.GroupQueue(t.Context(), group.ID, "root")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status != "completed" {
+				if len(queue) != 0 {
+					t.Fatal("an unfinished or failed source released work", queue)
+				}
+				return
+			}
+			if len(queue) != 2 || queue[0].Delivery.ID != "first" || queue[1].Delivery.ID != "second" {
+				t.Fatal("group invitations lost FIFO order", queue)
+			}
+			for _, item := range queue {
+				run, err := s.Run(t.Context(), *item.Delivery.RunID)
+				if err != nil || run.JobID != "root" || *run.SourceMessageID != "root" {
+					t.Fatal("invitation lost its root job or source", run, err)
+				}
+			}
+			if err := s.Finish(t.Context(), "root"); err != nil {
+				t.Fatal(err)
+			}
+			if queue, err := s.GroupQueue(t.Context(), group.ID, "root"); err != nil || len(queue) != 0 {
+				t.Fatal("finished root left group work queued", queue, err)
+			}
+		})
+	}
+}
+
 func TestGroupUpdate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db")
 	s, err := Open(t.Context(), path)

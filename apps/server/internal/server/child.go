@@ -5,44 +5,79 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
 )
 
-type spawnTool struct{ server *Server }
-
-func (*spawnTool) Name() string                           { return "spawn_task" }
-func (*spawnTool) Label() string                          { return "Spawn child task" }
-func (*spawnTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
-func (*spawnTool) Description() string {
-	return "Queue a bounded child task in a separate session and continue your turn without waiting. Supply only the explicit task, never private conversation history or secrets. agent_id optionally selects an available agent; omit it to use your own agent in a fresh session. Children cannot delegate further."
+type delegateTool struct {
+	server  *Server
+	agentID string
 }
-func (t *spawnTool) Schema() ai.ToolSchema {
+
+func (t *delegateTool) enabled() bool {
+	t.server.actorsMu.RLock()
+	defer t.server.actorsMu.RUnlock()
+	a := t.server.actors[t.agentID]
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.definition.DelegationDisabled
+}
+
+func (*delegateTool) Name() string                           { return "task" }
+func (*delegateTool) Label() string                          { return "Delegate task" }
+func (*delegateTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
+func (t *delegateTool) Description() string {
+	if !t.enabled() {
+		return "List or stop previously delegated tasks. New task delegation is disabled by the user."
+	}
+	return "Delegate a bounded task to a subagent in a fresh session. Run returns a task ID immediately; the result returns automatically when finished. Give a self-contained prompt with relevant context and the expected result, never unrelated private history or secrets. Omit agent_id to use your own agent; set it to select an available agent. Children cannot delegate. Use list to inspect tasks and their latest output, or stop with id to cancel one."
+}
+func (t *delegateTool) Schema() ai.ToolSchema {
+	actions := []string{"list", "stop"}
+	if t.enabled() {
+		actions = append([]string{"run"}, actions...)
+	}
 	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
-			"task":     map[string]any{"type": "string", "minLength": 1, "maxLength": 8192},
+			"action":   map[string]any{"type": "string", "enum": actions},
+			"prompt":   map[string]any{"type": "string", "minLength": 1, "maxLength": 8192, "description": "Self-contained instructions for run"},
 			"agent_id": map[string]any{"type": "string", "maxLength": 128},
+			"id":       map[string]any{"type": "string", "maxLength": 256, "description": "Task ID for stop"},
 		},
-		"required": []string{"task"},
+		"required": []string{"action"},
 	}}
 }
-func (t *spawnTool) Execute(ctx context.Context, call string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+func (t *delegateTool) Execute(ctx context.Context, call string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
 	if state == nil {
 		return agent.AgentToolResult{}, errors.New("no active turn")
 	}
 	var input struct {
-		Task    string `json:"task"`
+		Action  string `json:"action"`
+		Task    string `json:"prompt"`
 		AgentID string `json:"agent_id"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
 	}
+	if input.Action == "list" || input.Action == "stop" {
+		return t.manage(ctx, args)
+	}
+	if input.Action != "run" {
+		return agent.AgentToolResult{}, errors.New("invalid task action")
+	}
+	if !t.enabled() {
+		return agent.AgentToolResult{}, errors.New("task delegation is disabled")
+	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.work.Trigger == "created" || state.work.Trigger == "child" || state.handoff != nil || state.checkpoint != nil {
+	if state.work.Trigger == contract.RunTriggerCreated || state.work.Trigger == contract.RunTriggerChild || state.handoff != nil || state.checkpoint != nil {
 		return agent.AgentToolResult{}, errors.New("spawning requires an active bot turn")
 	}
 	if input.AgentID == "" {
@@ -60,27 +95,9 @@ func (t *spawnTool) Execute(ctx context.Context, call string, args json.RawMessa
 	return toolResult(run)
 }
 
-type subagentTool struct{ server *Server }
-
-func (*subagentTool) Name() string                           { return "manage_subagents" }
-func (*subagentTool) Label() string                          { return "Manage child tasks" }
-func (*subagentTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
-func (*subagentTool) Description() string {
-	return "List the child tasks you spawned with spawn_task (newest first, with status and the latest output), or stop one that is queued, wedged, looping or no longer needed. Stopping also stops anything it started; a stopped task's effects may be incomplete."
-}
-func (t *subagentTool) Schema() ai.ToolSchema {
-	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{
-		"type": "object", "additionalProperties": false,
-		"properties": map[string]any{
-			"action": map[string]any{"type": "string", "enum": []string{"list", "stop"}},
-			"id":     map[string]any{"type": "string", "maxLength": 256, "description": "Child run ID from list or spawn_task"},
-		},
-		"required": []string{"action"},
-	}}
-}
-func (t *subagentTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+func (t *delegateTool) manage(ctx context.Context, args json.RawMessage) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
-	if state == nil || state.work.Trigger == "created" || state.work.Trigger == "child" {
+	if state == nil || state.work.Trigger == contract.RunTriggerCreated || state.work.Trigger == contract.RunTriggerChild {
 		return agent.AgentToolResult{}, errors.New("managing child tasks requires an active bot turn")
 	}
 	var input struct {

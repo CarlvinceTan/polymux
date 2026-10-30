@@ -31,7 +31,7 @@ func TestReusedAttachDirectory(t *testing.T) {
 	patchWorkspace(t, api, "assistant", repo)
 	for _, id := range []string{"first", "second"} {
 		text := "Prepare and attach the report"
-		message := api.execute(t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
+		message := api.execute(t.Context(), t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
 			ID: id, ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}},
 		}})
 		if message.Status != "done" {

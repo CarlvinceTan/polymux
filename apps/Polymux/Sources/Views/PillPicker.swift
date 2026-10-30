@@ -4,36 +4,44 @@ struct PillPicker<Value: Hashable>: View {
     let title: String
     @Binding var selection: Value
     let options: [(title: String, value: Value)]
-    @Namespace private var pill
+    let compact: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(_ title: String, selection: Binding<Value>, options: [(title: String, value: Value)]) {
+    init(_ title: String, selection: Binding<Value>, options: [(title: String, value: Value)], compact: Bool = false) {
         self.title = title
         _selection = selection
         self.options = options
+        self.compact = compact
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: compact ? 4 : 8) {
             ForEach(options, id: \.value) { option in
                 Button {
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { selection = option.value }
+                    selection = option.value
                 } label: {
-                    // Reserve the medium width so selecting doesn't shift neighbours.
-                    Text(option.title).fontWeight(.medium).hidden()
-                        .overlay { FluidLabel(title: option.title, weight: selection == option.value ? 510 : 400) }
+                    Text(option.title)
                         .font(.subheadline)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .matchedGeometryEffect(id: option.value, in: pill)
+                        .padding(.horizontal, compact ? 8 : 14).padding(.vertical, 10)
                 }
                 .buttonStyle(TabButton())
                 .accessibilityLabel(option.title)
                 .accessibilityAddTraits(selection == option.value ? .isSelected : [])
+                .anchorPreference(key: PillAnchor.self, value: .bounds) {
+                    selection == option.value ? $0 : nil
+                }
             }
         }
-        .background {
-            Capsule().fill(Color.primary.opacity(0.11))
-                .matchedGeometryEffect(id: selection, in: pill, isSource: false)
+        .backgroundPreferenceValue(PillAnchor.self) { anchor in
+            GeometryReader { geometry in
+                if let anchor {
+                    let frame = geometry[anchor]
+                    GlassPill(frame: frame)
+                        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: frame)
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
@@ -47,31 +55,31 @@ private struct TabButton: ButtonStyle {
     }
 }
 
-/// Animates the system font's variable weight axis smoothly; Font.Weight only snaps.
-/// Drawn at an exact centre so the text doesn't snap sideways as its width changes.
-private nonisolated struct FluidLabel: View, Animatable {
-    let title: String
-    var weight: CGFloat
-    var animatableData: CGFloat {
-        get { weight }
-        set { weight = newValue }
-    }
+private struct PillAnchor: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
 
-    var body: some View {
-        Canvas { context, size in
-            context.draw(Text(title).font(Font(font)), at: CGPoint(x: size.width / 2, y: size.height / 2))
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+// Give the glass every intermediate frame instead of swapping effects between tabs.
+private nonisolated struct GlassPill: View, Animatable {
+    var frame: CGRect
+
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>> {
+        get { .init(.init(frame.minX, frame.minY), .init(frame.width, frame.height)) }
+        set {
+            frame = CGRect(x: newValue.first.first, y: newValue.first.second,
+                           width: newValue.second.first, height: newValue.second.second)
         }
     }
 
-    private var font: CTFont {
-        #if os(macOS)
-        let size = NSFont.preferredFont(forTextStyle: .subheadline).pointSize
-        #else
-        let size = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
-        #endif
-        let base = CTFontCreateUIFontForLanguage(.system, size, nil)!
-        let axis = 0x77676874 // 'wght'
-        let variation = CTFontDescriptorCreateWithAttributes([kCTFontVariationAttribute: [axis: weight]] as CFDictionary)
-        return CTFontCreateCopyWithAttributes(base, size, nil, variation)
+    var body: some View {
+        Color.clear
+            .frame(width: frame.width, height: frame.height)
+            .glassEffect(.regular, in: Capsule())
+            .offset(x: frame.minX, y: frame.minY)
+            .transaction { $0.animation = nil }
     }
 }

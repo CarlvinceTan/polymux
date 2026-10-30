@@ -33,3 +33,20 @@ public func createRng(_ seed: UInt32) -> () -> Double {
 }
 
 public func r2(_ v: Double) -> Double { floor(v * 100 + 0.5) / 100 }
+
+/// CSS cubic-bezier(x1, y1, x2, y2) easing at `t`, solved with Newton's method.
+func bezierEase(_ t: Double, _ curve: [Double]) -> Double {
+    func value(_ u: Double, _ a: Double, _ b: Double) -> Double {
+        let s = 1 - u
+        return 3 * s * s * u * a + 3 * s * u * u * b + u * u * u
+    }
+    var u = t
+    for _ in 0..<8 {
+        let error = value(u, curve[0], curve[2]) - t
+        let s = 1 - u
+        let slope = 3 * s * s * curve[0] + 6 * s * u * (curve[2] - curve[0]) + 3 * u * u * (1 - curve[2])
+        if abs(error) < 1e-6 || abs(slope) < 1e-6 { break }
+        u = clamp(u - error / slope)
+    }
+    return value(u, curve[1], curve[3])
+}

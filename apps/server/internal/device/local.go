@@ -41,3 +41,16 @@ func (s *Store) Local(ctx context.Context, dir string) (string, error) {
 	}
 	return token, nil
 }
+
+// Host is the device on the server's own machine, found by its owner credential.
+func (s *Store) Host(ctx context.Context, dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "devices", "local-token"))
+	if err != nil {
+		return ""
+	}
+	p, err := s.Authenticate(ctx, string(data))
+	if err != nil {
+		return ""
+	}
+	return p.ID
+}

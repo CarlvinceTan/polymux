@@ -5,9 +5,8 @@ import test from 'node:test';
 import {JSDOM} from 'jsdom';
 import {parse} from 'svelte/compiler';
 import {parse as parseYaml} from 'yaml';
-import {docsContentRoot, loadPublishedDocs} from '../scripts/docs-content.mjs';
-import {loadProductFeatures, siteRoot} from '../scripts/product-content.mjs';
-import {renderSafeMarkdown} from '../src/lib/markdown.js';
+import {docsContentRoot, loadPublishedDocs, loadProductFeatures, siteRoot} from '../scripts/content.ts';
+import {renderSafeMarkdown} from '../lib/content/markdown.js';
 
 function images(node) {
   if (!node || typeof node !== 'object') return [];
@@ -17,8 +16,8 @@ function images(node) {
   ];
 }
 
-test('home and product templates contain branding images only, not app screenshots', () => {
-  for (const filename of ['App.svelte', 'ProductPage.svelte']) {
+test('product templates contain branding images only, not historical app screenshots', () => {
+  for (const filename of ['pages/product/ProductPage.svelte']) {
     const source = readFileSync(resolve(siteRoot, 'src', filename), 'utf8');
     const ast = parse(source, {modern: true});
     for (const image of images(ast.fragment)) {

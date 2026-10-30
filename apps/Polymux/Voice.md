@@ -1,45 +1,34 @@
 # Voice conversations
 
-Voice is a private conversation with a spokesperson agent representing the selected
-agent or group. Typed messaging remains a separate, direct conversation.
+Voice is a private conversation that never enters typed chat or search.
 
-- STT/TTS: Apple recognition → text spokesperson LLM → Apple synthesis.
-- Live: a native-audio LLM is the spokesperson, with no extra frontend LLM.
-- Both spokespersons consult workers through `ask_agent` and `VoiceBridge`.
-- `POST /threads/{id}/voice` executes workers in isolated, non-persisted sessions.
-  It preserves their configured model, identity, builtin tools, MCP, workspace,
-  coordination limits, and tool hooks. No private text enters chat or search.
-- Workers explicitly use `send_to_user` or `show_html` to publish useful material
-  in typed chat. Ordinary worker replies return only to the spokesperson.
-- Closing or cancelling a private request never calls the typed thread's stop
-  endpoint. Private tasks are not queued offline or automatically replayed.
+- Cascaded: Apple recognition → the chat's agent → Apple synthesis. The transcript goes
+  straight to `POST /threads/{id}/voice/stream`; the agent replies in spoken style and its
+  text streams as server-sent events, so speech starts at the first sentence. Any provider works.
+- Live (full duplex): a native-audio model (Gemini Live or OpenAI Realtime) is a spokesperson
+  that consults the chat's agents through `ask_agent` → `VoiceBridge` → `POST /threads/{id}/voice`.
+- Voice turns run in isolated, non-persisted sessions with the agent's configured model, identity,
+  tools, MCP, workspace, coordination limits and tool hooks. Their durable transcript is deleted
+  when the turn ends. Agents use `send_to_user` or `show_html` to publish into typed chat on purpose.
+- Closing or cancelling a voice turn never stops the typed thread. Voice turns are not queued
+  offline or replayed automatically; a failed session retries itself a few times.
 
-## Adding a provider
+## Adding a live provider
 
-Implement `LiveProvider` in PolymuxKit and add its server relay and settings validation.
-The provider handles setup, wire encoding, and normalized events; the server authenticates upstream.
-`LiveStore` owns audio, playback interruption, and asynchronous worker consultation.
-Use mono PCM16 little-endian bytes with explicit sample rates, retain tool-call IDs,
-and distinguish turn completion from an idle session. Never expose credentials in errors.
+Implement `LiveProvider` in PolymuxKit (setup, wire encoding, normalized `LiveEvent`s) and teach
+`/speech/live` to dial it (`dialSpeech`, `configureSpeech`) and validate its voices in settings.
+`LiveStore` owns audio, playback interruption and asynchronous agent consultation. Use mono
+PCM16 little-endian bytes with explicit sample rates, keep tool-call IDs, and distinguish turn
+completion from an idle session. Never expose credentials in errors.
 
-For STT/TTS, implement `TextProvider` and add its server relay. `Spokesperson`
-owns private conversation history and the worker tool loop. Preserve provider-owned
-assistant state, including function signatures, in `TextAnswer.state`.
-
-Model/provider preferences, voice instructions, theme, and saved sidebar width belong
-to the server. Clients poll `/settings` and PATCH only changed fields. Speech API keys
-are write-only through `/settings/keys/{provider}` and stay in the server's owner-only
-`settings.json`; GET returns only configured provider names. `/speech/text` and
-`/speech/live` authenticate and relay Gemini traffic without returning the key.
-These endpoints rely on the same private-tailnet boundary as the rest of Polymux and
-reject browser-origin requests. Do not expose the server publicly.
-Old device preferences are not uploaded and existing device keys are not imported.
-Set the key once through Settings after updating. Settings apply when reopening
-voice. Live playback interruption is separate from delegated-task cancellation;
-STT/TTS currently cancels the current private turn on barge-in.
+Voice mode, live provider, model, voice, language and instructions are server settings. Keys come
+from the connected provider of the same type in Settings → Providers; the server adds them
+upstream, so the app never holds them.
+`/speech/live` rejects browser-origin requests and relies on the same network boundary as the
+rest of Polymux: loopback, Tailscale, or the encrypted tunnel. Live playback interruption is separate from cancelling delegated work.
 
 Run `swift test`, the macOS/iOS builds, and `go test -race -tags sqlite_fts5 ./...`
-in `apps/server`. The privacy and spokesperson tests guard this separation.
+in `apps/server`. The privacy and voice stream tests guard this separation.
 Shared UI rules and the macOS input-focus check are documented in `DESIGN.md`
 at the repository root.
 

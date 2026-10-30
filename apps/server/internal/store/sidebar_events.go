@@ -99,7 +99,7 @@ func sameSections(a, b []contract.Section) bool {
 	return true
 }
 
-func sidebarCommit(ctx context.Context, tx *sql.Tx, before contract.SidebarSnapshot, label string, deleted *contract.Section, returned []string) error {
+func (s *Store) sidebarCommit(ctx context.Context, tx *sql.Tx, before contract.SidebarSnapshot, label string, deleted *contract.Section, returned []string) error {
 	after, err := sidebarSnapshot(ctx, tx)
 	if err != nil {
 		return err
@@ -149,6 +149,11 @@ func sidebarCommit(ctx context.Context, tx *sql.Tx, before contract.SidebarSnaps
 	if _, err := tx.ExecContext(ctx, `UPDATE sidebar_events SET data=? WHERE seq=?`, string(data), event.Seq); err != nil {
 		return err
 	}
+	// Changed threads include deleted ones, whose streams then end.
+	s.events.wake("")
+	for _, id := range event.ChangedThreadIDs {
+		s.events.wake(id)
+	}
 	if deleted != nil {
 		section, err := json.Marshal(deleted)
 		if err != nil {
@@ -163,11 +168,11 @@ func sidebarCommit(ctx context.Context, tx *sql.Tx, before contract.SidebarSnaps
 		}
 	}
 	if actor.agent != "" {
-		activity := contract.Event{ConversationID: actor.agent, AgentID: &actor.agent, Type: "activity", Summary: &label}
+		activity := contract.Event{ConversationID: actor.agent, AgentID: &actor.agent, Type: contract.EventTypeActivity, Summary: &label}
 		if actor.run != "" {
 			activity.RunID = &actor.run
 		}
-		if _, err := appendTx(ctx, tx, activity, nil); err != nil {
+		if _, err := s.appendTx(ctx, tx, activity, nil); err != nil {
 			return err
 		}
 	}

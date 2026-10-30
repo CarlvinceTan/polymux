@@ -23,6 +23,23 @@ struct SidebarOffMainTests {
         #expect(span.withinBudget)
     }
 
+    @Test func aStreamingReplyKeepsTheLastFinishedMessageForTheRow() async throws {
+        let rig = try await Rig()
+        #expect(rig.sidebar.lastFinished["arlo"]?.text == "Earlier")
+        var streaming = Message(id: "m-stream", threadID: "arlo", role: MessageRole.assistant,
+                                parts: [Part(kind: PartKind.text, text: "Half")],
+                                createdAt: WireDate.string(Date(timeIntervalSince1970: 1_700_000_700)),
+                                status: MessageStatus.streaming, seq: 2)
+        rig.sidebar.note(Event(seq: 2, conversationID: "arlo", type: EventType.messageStart,
+                               message: streaming, createdAt: streaming.createdAt))
+        #expect(rig.sidebar.threads.first { $0.id == "arlo" }?.lastMessage?.status == MessageStatus.streaming)
+        #expect(rig.sidebar.lastFinished["arlo"]?.text == "Earlier")
+        streaming.status = MessageStatus.done
+        rig.sidebar.note(Event(seq: 3, conversationID: "arlo", type: EventType.messageDone,
+                               message: streaming, createdAt: streaming.createdAt))
+        #expect(rig.sidebar.lastFinished["arlo"]?.text == "Half")
+    }
+
     @Test func stalledRowReportsAMiss() async throws {
         let rig = try await Rig()
         rig.sidebar.rowStall = .milliseconds(70)
@@ -92,7 +109,7 @@ struct SidebarOffMainTests {
         #expect(rig.sidebar.threads.first { $0.id == "arlo" }?.title == "Arlo West")
         await rig.sidebar.settled()
         #expect(rig.sidebar.threads.first { $0.id == "arlo" }?.title == "Arlo")
-        #expect(rig.sidebar.editIssues["arlo"] == "Couldn’t save the new name. Retry")
+        #expect(rig.sidebar.editIssues["arlo"] == "Couldn’t save the new name on this device.")
     }
 
     @Test func renameStaysVisibleWhileTheSaveIsStalled() async throws {
@@ -107,7 +124,7 @@ struct SidebarOffMainTests {
         await rig.sidebar.cacheActor.release()
         await rig.sidebar.settled()
         #expect(rig.sidebar.threads.first { $0.id == "arlo" }?.title == "Arlo")
-        #expect(rig.sidebar.editIssues["arlo"] == "Couldn’t save the new name. Retry")
+        #expect(rig.sidebar.editIssues["arlo"] == "Couldn’t save the new name on this device.")
     }
 
     @Test func failedEditKeepsTheRenameAndRetriesTheSave() async throws {
@@ -135,10 +152,10 @@ struct SidebarOffMainTests {
         await rig.sidebar.cacheActor.release()
         await accepting
         #expect(rig.sidebar.agents.contains { $0.id == "nova" })
-        #expect(rig.sidebar.error == "Couldn’t save this agent. Retry")
+        #expect(rig.sidebar.error == "Couldn’t save this bot on this device.")
         await rig.sidebar.reload()
         #expect(rig.sidebar.agents.contains { $0.id == "nova" })
-        #expect(rig.sidebar.error == "Couldn’t save this agent. Retry")
+        #expect(rig.sidebar.error == "Couldn’t save this bot on this device.")
     }
 
     @Test func actorStallDoesNotBlockTheMainHeartbeat() async throws {

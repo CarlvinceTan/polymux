@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/secrets"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
 
@@ -78,7 +80,7 @@ func TestMCPScopeRuntime(t *testing.T) {
 	}
 	turn := func(id, message string) {
 		t.Helper()
-		result := api.execute(t.Context(), api.actors[id], store.Work{Trigger: "message", Message: contract.Message{ID: message, ThreadID: id, Role: "user", Parts: []contract.Part{{Kind: "text", Text: new("Hello")}}}})
+		result := api.execute(t.Context(), t.Context(), api.actors[id], store.Work{Trigger: "message", Message: contract.Message{ID: message, ThreadID: id, Role: "user", Parts: []contract.Part{{Kind: "text", Text: new("Hello")}}}})
 		if result.Status != "done" {
 			t.Fatal("fixture turn failed", result.Status)
 		}
@@ -318,7 +320,7 @@ func TestMCPAutomaticScope(t *testing.T) {
 		if err := api.Store.BindMCP(t.Context(), "assistant", "notes", &enabled, nil, false); err != nil {
 			t.Fatal(err)
 		}
-		result := api.execute(t.Context(), api.actors["assistant"], store.Work{Trigger: "routine", RoutineID: &routine.ID, Message: contract.Message{ID: []string{"automatic-enabled", "automatic-disabled"}[index], ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: new("Continue")}}}})
+		result := api.execute(t.Context(), t.Context(), api.actors["assistant"], store.Work{Trigger: "routine", RoutineID: &routine.ID, Message: contract.Message{ID: []string{"automatic-enabled", "automatic-disabled"}[index], ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: new("Continue")}}}})
 		if result.Status != "done" {
 			t.Fatal("automatic fixture turn failed", result.Status)
 		}
@@ -327,5 +329,128 @@ func TestMCPAutomaticScope(t *testing.T) {
 		if !definition.Automatic || enabled != (len(definition.MCP) == 1) || enabled && definition.MCP[0].Name != "notes" {
 			t.Fatal("automatic turn did not honor agent-specific MCP scope")
 		}
+	}
+}
+
+// probeMCP answers the streamable HTTP handshake a probe sends.
+func probeMCP(t *testing.T, names ...string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.ID) == 0 {
+			w.WriteHeader(202)
+			return
+		}
+		result := any(map[string]any{"protocolVersion": "2025-03-26", "serverInfo": map[string]string{"name": "status", "version": "1"}, "capabilities": map[string]any{"tools": map[string]any{}}})
+		if request.Method == "tools/list" {
+			tools := make([]any, 0, len(names))
+			for _, name := range names {
+				tools = append(tools, map[string]any{"name": name, "inputSchema": map[string]any{"type": "object"}})
+			}
+			result = map[string]any{"tools": tools}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestMCPStatus(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	live := probeMCP(t, "echo", "browser_click", "page")
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+	for name, url := range map[string]string{"live": live.URL, "dead": deadURL, "masked": live.URL} {
+		if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: name, URL: url}, "", nil, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := api.Store.BindMCP(t.Context(), "assistant", name, new(name != "masked"), new(name == "masked"), false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A binding whose shared setup is gone cannot connect, and the agent's own
+	// definition is probed when no binding carries it.
+	if err := api.Store.BindMCP(t.Context(), "assistant", "gone", new(true), nil, true); err != nil {
+		t.Fatal(err)
+	}
+	owner := api.actors["assistant"]
+	owner.mu.Lock()
+	owner.definition.MCP = []agentruntime.MCPServer{{Name: "private", URL: live.URL, NativeOnly: true}, {Name: "dead", URL: deadURL}}
+	owner.mu.Unlock()
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, httptest.NewRequest("GET", "/agents/assistant/mcp/status", nil))
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var statuses []contract.MCPStatus
+	if err := json.Unmarshal(response.Body.Bytes(), &statuses); err != nil {
+		t.Fatal(err)
+	}
+	connected := map[string]bool{}
+	for _, status := range statuses {
+		connected[status.Name] = status.Connected
+		tools := []string{}
+		if status.Connected {
+			tools = []string{"echo", "browser_click", "page"}
+		}
+		if status.Name == "private" {
+			tools = []string{"echo"}
+		}
+		if status.Tools == nil || !slices.Equal(status.Tools, tools) {
+			t.Fatalf("wrong tool inventory for %s: %v, want %v", status.Name, status.Tools, tools)
+		}
+	}
+	// "dead" stays in the definition as a local server, so a hidden shared binding
+	// cannot mask it; only the hidden "masked" connection is left out.
+	expected := map[string]bool{"live": true, "dead": false, "gone": false, "private": true}
+	if !reflect.DeepEqual(connected, expected) {
+		t.Fatalf("statuses %+v", statuses)
+	}
+	response = httptest.NewRecorder()
+	api.ServeHTTP(response, httptest.NewRequest("GET", "/agents/missing/mcp/status", nil))
+	if response.Code != 404 {
+		t.Fatal("unknown agent status", response.Code)
+	}
+}
+
+func TestMCPSecretHeaders(t *testing.T) {
+	const value = "mcp-header-secret-value"
+	api, _ := startTest(t, &testFactory{})
+	if err := api.secrets.Save("assistant", secrets.Credential{Name: "linear", Origin: "https://mcp.example.com", Header: "Authorization", Scheme: "Bearer", Value: value}); err != nil {
+		t.Fatal(err)
+	}
+	state := &turnState{run: contract.Run{AgentID: "assistant", ConversationID: "assistant"}, work: store.Work{Trigger: "message"}}
+	ctx := context.WithValue(t.Context(), turnKey{}, state)
+	tool := &integrationTool{server: api}
+	for _, action := range []string{
+		`{"action":"mcp","name":"linear","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer {{secret:linear}}","X-Team":"core"}}`,
+		// Updating other settings keeps the stored headers.
+		`{"action":"mcp","name":"linear","url":"https://mcp.example.com/mcp","native_only":true}`,
+	} {
+		if _, err := tool.Execute(ctx, "update", json.RawMessage(action), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	effective, err := api.effectiveMCP(t.Context(), "assistant", nil)
+	if err != nil || len(effective) != 1 || effective[0].Auth["Authorization"] != "Bearer "+value || effective[0].Auth["X-Team"] != "core" {
+		t.Fatalf("headers were not filled for the connection: %+v %v", effective, err)
+	}
+	stored, err := json.Marshal(effective)
+	if err != nil || strings.Contains(string(stored), value) {
+		t.Fatal("a filled header would be stored or compared", err)
+	}
+	records, err := api.Store.MCPServers(t.Context())
+	if err != nil || len(records) != 1 || strings.Contains(string(records[0].Data), value) || !strings.Contains(string(records[0].Data), "{{secret:linear}}") {
+		t.Fatal("shared setup should keep only the reference", err)
+	}
+	// Another bot attaching the setup gets its own secret, not this one.
+	other, err := api.effectiveMCP(t.Context(), "other", []agentruntime.MCPServer{effective[0]})
+	if err != nil || len(other) != 1 || other[0].Auth["Authorization"] != "" {
+		t.Fatalf("another bot used this bot's secret: %+v %v", other, err)
 	}
 }

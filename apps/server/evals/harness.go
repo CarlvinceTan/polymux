@@ -40,6 +40,7 @@ type Harness struct {
 	extras       map[string][]agent.AgentTool
 
 	backgroundTimeout time.Duration
+	window            int
 }
 
 // Options configures a harness start.
@@ -54,7 +55,12 @@ type Options struct {
 	// Extras maps agent ID to additional ExtraTools (typed_tool, error_tool, …).
 	Extras  map[string][]agent.AgentTool
 	Summary func(*ChatRequest) Response
+	// Window is the model context window in tokens; compaction scenarios set a small one.
+	Window int
 }
+
+// compactWindow is small enough that the eval prompt and tools trigger compaction.
+const compactWindow = 16384
 
 // Start opens temp data, durable runtime, and HTTP server pointed at the emulator.
 func Start(t *testing.T, opts Options) *Harness {
@@ -86,6 +92,10 @@ func Start(t *testing.T, opts Options) *Harness {
 		extras:  opts.Extras,
 
 		backgroundTimeout: opts.BackgroundTimeout,
+		window:            opts.Window,
+	}
+	if h.window == 0 {
+		h.window = agentruntime.DefaultWindow
 	}
 	if h.effects == nil {
 		h.effects = map[string]*atomic.Int32{}
@@ -137,7 +147,7 @@ func (h *Harness) open() {
 		db.Close()
 		h.die(err.Error())
 	}
-	runtime, err := agentruntime.NewDurable(context.Background(), h.Dir, h.Emulator.URL, evalModel, evalKey, agentruntime.Client{}, storage)
+	runtime, err := agentruntime.NewDurable(context.Background(), h.Dir, h.Emulator.URL, evalModel, evalKey, agentruntime.Client{Window: h.window}, storage)
 	if err != nil {
 		closeStorage()
 		db.Close()
@@ -248,7 +258,7 @@ func (h *Harness) WaitRun(thread, job, agent string, deadline time.Duration) con
 	if agent == "" {
 		agent = thread
 	}
-	return h.WaitRunID(store.NewRun(job, thread, agent, "message").ID, deadline)
+	return h.WaitRunID(store.NewRun(job, thread, agent, contract.RunTriggerMessage).ID, deadline)
 }
 
 // WaitRunID polls a run id until terminal.
@@ -302,7 +312,7 @@ func WaitHold(t *testing.T, id string, ch <-chan struct{}, deadline time.Duratio
 
 // RunID is the deterministic run id for a message job on an agent thread.
 func RunID(job, agent string) string {
-	return store.NewRun(job, agent, agent, "message").ID
+	return store.NewRun(job, agent, agent, contract.RunTriggerMessage).ID
 }
 
 // Messages returns thread messages.
@@ -319,7 +329,7 @@ func (h *Harness) Messages(thread string) []contract.Message {
 func (h *Harness) AssistantDone(thread string) []contract.Message {
 	var out []contract.Message
 	for _, m := range h.Messages(thread) {
-		if m.Role == "assistant" && m.Status == "done" {
+		if m.Role == contract.MessageRoleAssistant && m.Status == contract.MessageStatusDone {
 			out = append(out, m)
 		}
 	}
@@ -446,7 +456,7 @@ func messageText(m contract.Message) string { return store.Text(m) }
 func assistantCount(messages []contract.Message) int {
 	n := 0
 	for _, m := range messages {
-		if m.Role == "assistant" {
+		if m.Role == contract.MessageRoleAssistant {
 			n++
 		}
 	}
@@ -455,7 +465,7 @@ func assistantCount(messages []contract.Message) int {
 
 func hasMessageError(events []contract.Event) bool {
 	for _, e := range events {
-		if e.Type == "message.error" {
+		if e.Type == contract.EventTypeMessageError {
 			return true
 		}
 	}

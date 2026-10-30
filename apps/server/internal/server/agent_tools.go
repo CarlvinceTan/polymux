@@ -14,6 +14,8 @@ import (
 type agentTool struct {
 	server *Server
 	action string
+	// models adds a model choice to create, once there are models to choose between.
+	models bool
 }
 
 func (t *agentTool) Name() string                         { return t.action + "_agent" }
@@ -22,9 +24,9 @@ func (*agentTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolMod
 func (t *agentTool) Description() string {
 	switch t.action {
 	case "create":
-		return "Hire a persistent bot with its own direct chat. Set its name, role and instructions (prompt); initial_task starts its first task after its introduction. Omit name for New Bot. This is different from a temporary spawn_task."
+		return "Hire a persistent bot with its own direct chat. Set its role and instructions (prompt); initial_task starts its first task after its introduction. Omit name for a random 4–5-letter name; only set name when the user requests a specific name. This is different from a temporary task."
 	case "update":
-		return "Update your own name, role, instructions (prompt), workspace or avatar, or another bot by agent_id. Omitted fields stay unchanged. Changes persist; instructions and workspace take effect next turn. Avatar values use the application's shape, color and expression IDs."
+		return "Update your own name, role, instructions (prompt), workspace, avatar or task delegation, or another bot by agent_id. Change task_delegation only when the user explicitly asks to enable or disable delegation. Omitted fields stay unchanged. Changes persist; instructions and workspace take effect next turn. Avatar values use the application's shape, color and expression IDs."
 	default:
 		return "Remove a bot and its chat by stable agent_id. Deletion starts after your current reply finishes so active chats can close cleanly."
 	}
@@ -41,7 +43,12 @@ func (t *agentTool) Schema() ai.ToolSchema {
 		if t.action == "create" {
 			delete(properties, "agent_id")
 			properties["initial_task"] = map[string]any{"type": "string", "maxLength": 64000}
+			if t.models {
+				properties["model"] = map[string]any{"type": "string", "maxLength": 256}
+				properties["provider"] = map[string]any{"type": "string", "maxLength": 128}
+			}
 		} else {
+			properties["task_delegation"] = map[string]any{"type": "boolean", "description": "Enable or disable this bot’s task delegation only at the user’s explicit request"}
 			properties["workspace"] = map[string]any{"type": "string", "maxLength": 4096}
 			for field, values := range map[string]map[string]bool{"shape": shapes, "color": colors, "expression": expressions} {
 				options := make([]string, 0, len(values))
@@ -69,6 +76,8 @@ func (t *agentTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 		Shape      *string `json:"shape"`
 		Color      *string `json:"color"`
 		Expression *string `json:"expression"`
+		Model      *string `json:"model"`
+		Provider   *string `json:"provider"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
@@ -81,7 +90,11 @@ func (t *agentTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 	}
 	switch t.action {
 	case "create":
-		created, err := t.server.addAgent(ctx, contract.CreateAgentRequest{Name: value(input.Name), Role: value(input.Role), Prompt: value(input.Prompt), InitialTask: input.Task})
+		creator, err := t.server.Store.Profile(ctx, state.run.AgentID)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		created, err := t.server.addAgent(ctx, contract.CreateAgentRequest{Name: value(input.Name), Role: value(input.Role), Prompt: value(input.Prompt), InitialTask: input.Task, Model: input.Model, Provider: input.Provider}, creator.Agent)
 		if err != nil {
 			return agent.AgentToolResult{}, err
 		}
@@ -110,6 +123,9 @@ func (t *agentTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 		profile, err := t.server.editAgent(ctx, input.AgentID, input.agentPatch)
 		if err != nil {
 			return agent.AgentToolResult{}, err
+		}
+		if input.TaskDelegation != nil {
+			return toolResult(map[string]any{"profile": profile, "task_delegation": *input.TaskDelegation})
 		}
 		return toolResult(profile)
 	case "delete":

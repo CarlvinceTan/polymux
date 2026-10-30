@@ -3,94 +3,57 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/gorilla/websocket"
 )
 
 const geminiHost = "generativelanguage.googleapis.com"
 
-func (s *Server) speechText(w http.ResponseWriter, r *http.Request) {
-	if !nativeRequest(w, r) {
-		return
-	}
-	v, key := s.settings.Speech()
-	if key == "" {
-		fail(w, 409, "missing_key", "Set the provider API key in Settings.")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	body, err := io.ReadAll(r.Body)
-	var payload map[string]json.RawMessage
-	if err != nil || json.Unmarshal(body, &payload) != nil || payload == nil {
-		fail(w, 400, "invalid_request", "Invalid speech request.")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-	defer cancel()
-	stop := context.AfterFunc(s.ctx, cancel)
-	defer stop()
-	endpoint := "https://" + geminiHost + "/v1beta/models/" + strings.TrimPrefix(v.TextModel, "models/") + ":generateContent"
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
-	if err != nil {
-		fail(w, 502, "speech", "Speech provider unavailable.")
-		return
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("x-goog-api-key", key)
-	client := s.speechHTTP
-	if client == nil {
-		client = &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		fail(w, 502, "speech", "Speech provider unavailable.")
-		return
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(response.Body, 16<<10))
-		if depleted(string(data)) {
-			fail(w, 502, "speech_credits", "Provider credits depleted.")
-			return
-		}
-		fail(w, 502, "speech", "Speech provider rejected the request. Check the API key and model.")
-		return
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
-	if err != nil || len(data) > 8<<20 || !json.Valid(data) {
-		fail(w, 502, "speech", "Invalid speech provider response.")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(200)
-	_, _ = w.Write(data)
-}
+const openAIHost = "api.openai.com"
 
-func dialSpeech(ctx context.Context, key string) (*websocket.Conn, error) {
-	endpoint := url.URL{Scheme: "wss", Host: geminiHost, Path: "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"}
-	query := url.Values{"key": {key}}
-	endpoint.RawQuery = query.Encode()
+// dialSpeech opens the provider's live speech socket with the server's key, which never reaches the app.
+func dialSpeech(ctx context.Context, provider, model, key string) (*websocket.Conn, error) {
+	endpoint := url.URL{Scheme: "wss", Host: geminiHost, Path: "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
+		RawQuery: url.Values{"key": {key}}.Encode()}
+	header := http.Header{}
+	if provider == "openai" {
+		endpoint = url.URL{Scheme: "wss", Host: openAIHost, Path: "/v1/realtime", RawQuery: url.Values{"model": {model}}.Encode()}
+		header.Set("Authorization", "Bearer "+key)
+	}
 	dialer := websocket.Dialer{HandshakeTimeout: 20 * time.Second}
-	conn, response, err := dialer.DialContext(ctx, endpoint.String(), nil)
+	conn, response, err := dialer.DialContext(ctx, endpoint.String(), header)
 	if response != nil && response.Body != nil {
 		response.Body.Close()
 	}
 	return conn, err
 }
 
+// speechKey is the API key live speech uses: a connected provider's, else a Gemini voice key saved
+// before voice used Providers.
+func (s *Server) speechKey(provider string) string {
+	for _, p := range s.settings.Providers() {
+		if p.Enabled && p.Type == provider {
+			if key, err := s.keys.Get(p.ID); err == nil && key != "" {
+				return key
+			}
+		}
+	}
+	return ""
+}
+
 func (s *Server) speechLive(w http.ResponseWriter, r *http.Request) {
 	if !nativeRequest(w, r) {
 		return
 	}
-	v, key := s.settings.Speech()
+	v := s.settings.Snapshot()
+	key := s.speechKey(v.LiveProvider)
 	if key == "" {
-		fail(w, 409, "missing_key", "Set the provider API key in Settings.")
+		fail(w, 409, "missing_key", "Add an API key for this voice provider in Providers.")
 		return
 	}
 	if !websocket.IsWebSocketUpgrade(r) {
@@ -105,7 +68,7 @@ func (s *Server) speechLive(w http.ResponseWriter, r *http.Request) {
 	if dial == nil {
 		dial = dialSpeech
 	}
-	upstream, err := dial(ctx, key)
+	upstream, err := dial(ctx, v.LiveProvider, strings.TrimPrefix(v.LiveModel, "models/"), key)
 	if err != nil {
 		fail(w, 502, "speech", "Speech provider unavailable.")
 		return
@@ -130,17 +93,10 @@ func (s *Server) speechLive(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal(data, &message) != nil {
 		return
 	}
-	setup, ok := message["setup"].(map[string]any)
-	if !ok {
+	// The first message configures the session; the server's model and voice settings win.
+	if !configureSpeech(message, v) {
 		return
 	}
-	setup["model"] = "models/" + strings.TrimPrefix(v.LiveModel, "models/")
-	generation, ok := setup["generationConfig"].(map[string]any)
-	if !ok {
-		generation = map[string]any{}
-		setup["generationConfig"] = generation
-	}
-	generation["speechConfig"] = map[string]any{"voiceConfig": map[string]any{"prebuiltVoiceConfig": map[string]any{"voiceName": v.LiveVoice}}}
 	data, err = json.Marshal(message)
 	if err != nil {
 		return
@@ -184,4 +140,38 @@ func (s *Server) speechLive(w http.ResponseWriter, r *http.Request) {
 func depleted(message string) bool {
 	message = strings.ToLower(message)
 	return strings.Contains(message, "credits") && strings.Contains(message, "depleted")
+}
+
+// configureSpeech applies the chosen model and voice to a session's opening message.
+func configureSpeech(message map[string]any, v contract.Settings) bool {
+	if v.LiveProvider == "openai" {
+		session, ok := message["session"].(map[string]any)
+		if message["type"] != "session.update" || !ok {
+			return false
+		}
+		audio, _ := session["audio"].(map[string]any)
+		if audio == nil {
+			audio = map[string]any{}
+			session["audio"] = audio
+		}
+		output, _ := audio["output"].(map[string]any)
+		if output == nil {
+			output = map[string]any{}
+			audio["output"] = output
+		}
+		output["voice"] = v.LiveVoice
+		return true
+	}
+	setup, ok := message["setup"].(map[string]any)
+	if !ok {
+		return false
+	}
+	setup["model"] = "models/" + strings.TrimPrefix(v.LiveModel, "models/")
+	generation, ok := setup["generationConfig"].(map[string]any)
+	if !ok {
+		generation = map[string]any{}
+		setup["generationConfig"] = generation
+	}
+	generation["speechConfig"] = map[string]any{"voiceConfig": map[string]any{"prebuiltVoiceConfig": map[string]any{"voiceName": v.LiveVoice}}}
+	return true
 }

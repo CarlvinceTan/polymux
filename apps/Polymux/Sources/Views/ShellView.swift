@@ -1,36 +1,64 @@
 import SwiftUI
 import PolymuxKit
 import AvatarKit
+import CoreTransferable
+#if os(macOS)
+import AppKit
+#endif
 
 struct ShellView: View {
     let session: AppSession
     @Binding var showSettings: Bool
     @State private var selection: String?
     @AppStorage private var lastChat: String?
+    /// The open New Bot or New Group Chat form, so a relaunch continues where it left off.
+    @AppStorage private var lastCreation: String?
+    @AppStorage private var botSection: String?
+    /// Whether the chat's side panel was open, so a relaunch reopens it.
+    @AppStorage private var lastPanel: Bool
     @Environment(\.scenePhase) private var scenePhase
     @State private var windowID = UUID()
     @State private var visibility = NavigationSplitViewVisibility.all
+    @State private var connectionDismissed = false
     @State private var searching = false
     @State private var searchTarget: SearchDestination?
     @State private var hovered: String?
-    @State private var adding = false
+    @State private var creation: ChatCreation?
     @State private var editing: AvatarContact?
-    @State private var profiling: AvatarContact?
-    @State private var grouping: PolymuxKit.Thread?
+    @State private var profileOpen = false
+    @State private var profileID = UUID()
+    @State private var openChat = OpenChat()
     @State private var deleteTarget: AvatarContact?
+    @State private var groupDelete: PolymuxKit.Thread?
     @State private var deleting: String?
     @State private var deleteError: String?
+    @State private var sectionIssue: String?
+    @State private var sectionDelete: PolymuxKit.Section?
+    @State private var removed: Set<String> = []
     @State private var sectionID: String?
-    @State private var sectionKey = UUID().uuidString
-    @State private var sectionCreation: Task<String?, Never>?
-    @State private var dropped: [URL] = []
+    @State private var sectionDraft: PolymuxKit.Section?
+    @State private var sectionThread: PolymuxKit.Thread?
+    @State private var drops: [String: [DroppedFile]] = [:]
+    @State private var files: [String: [DraftFile]] = [:]
+    @State private var dragging: SidebarItem?
+    @State private var dropTarget: SidebarDestination?
+    @State private var sidebarFrames: [SidebarArea: CGRect] = [:]
+    @State private var pinFrames: [SidebarArea: CGRect] = [:]
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     #if os(macOS)
     @State private var sidebar = SidebarState()
     @State private var sidebarOpening = false
+    @State private var dropFolder: URL?
+    @State private var chatFrames: [String: CGRect] = [:]
+    @State private var dropWindow: NSWindow?
     #endif
 
     @AppStorage("sidebarWidth") private var sidebarWidth = SidebarWidth.initial
+    @AppStorage("profileWidth") private var profileWidth = 360.0
 
     init(session: AppSession, showSettings: Binding<Bool>) {
         self.session = session
@@ -38,6 +66,27 @@ struct ShellView: View {
         let saved = AppStorage<String?>("lastChat.\(session.address)")
         _lastChat = saved
         _selection = State(initialValue: saved.wrappedValue)
+        let creation = AppStorage<String?>("lastCreation.\(session.address)")
+        _lastCreation = creation
+        _botSection = AppStorage<String?>("botSection.\(session.address)")
+        _creation = State(initialValue: creation.wrappedValue.flatMap(ChatCreation.init(rawValue:)))
+        let panel = AppStorage(wrappedValue: false, "lastPanel.\(session.address)")
+        _lastPanel = panel
+        _profileOpen = State(initialValue: panel.wrappedValue)
+        #if DEBUG
+        // Screenshots of a chat's side panel need it open without a click: --verify-panel <chat id>.
+        let arguments = CommandLine.arguments
+        #if os(macOS)
+        if arguments.contains("--verify-sidebar-collapsed") {
+            _visibility = State(initialValue: .detailOnly)
+            _sidebar = State(initialValue: SidebarState(stage: .collapsed))
+        }
+        #endif
+        if let flag = arguments.firstIndex(of: "--verify-panel"), flag + 1 < arguments.count {
+            _selection = State(initialValue: arguments[flag + 1])
+            _profileOpen = State(initialValue: true)
+        }
+        #endif
     }
 
     private var chatSelection: Binding<String?> {
@@ -74,10 +123,56 @@ struct ShellView: View {
         })
     }
 
+    /// The chat's panel: an agent's profile, or a group chat's editor.
+    private var profileShown: Bool { profileOpen && selectedChat != nil }
+
+    private var profileBinding: Binding<Bool> {
+        Binding(get: { profileOpen }, set: { value in
+            guard value != profileOpen else { return }
+            if value { profileID = UUID() }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { profileOpen = value }
+        })
+    }
+
+    #if os(macOS)
+    private var panelWidth: CGFloat {
+        min(PaneWidth.profile, max(PaneWidth.profileMin, CGFloat(profileWidth)))
+    }
+
+    private var minimumWidth: CGFloat {
+        let left = sidebar.stage == .collapsed || sidebar.stage == .collapsing ? 0 : CGFloat(sidebarWidth)
+        let right = profileShown ? panelWidth : 0
+        return max(PaneWidth.window, PaneWidth.chat + left + right)
+    }
+    #endif
+
     var body: some View {
         NavigationSplitView(columnVisibility: $visibility) {
             List(selection: chatSelection) {
                 sidebarContent
+            }
+            .coordinateSpace(name: "chatList")
+            .onPreferenceChange(SidebarFrames.self) { sidebarFrames = $0 }
+            .overlay {
+                GeometryReader { geometry in
+                    let origin = geometry.frame(in: .named("chatList")).origin
+                    Color.clear.contentShape(Rectangle())
+                        .onDrop(of: [SidebarItem.contentType.identifier],
+                                delegate: SidebarDrop(item: dragging, origin: origin,
+                                                      frames: sidebarFrames.merging(pinFrames) { _, fixed in fixed },
+                                                      sections: dropSections.map(\.id), pins: pinnedChats.map(\.id),
+                                                      target: $dropTarget, receive: dropSidebar))
+                        .allowsHitTesting(dragging != nil)
+                    SidebarFeedback(frames: sidebarFrames, target: dropTarget)
+                        .offset(x: -origin.x, y: -origin.y)
+                }
+            }
+            .onChange(of: dragging) { _, active in
+                if active == nil { dropTarget = nil; pinFrames = [:] }
+                else { pinFrames = sidebarFrames.filter { if case .pin = $0.key { true } else { false } } }
+            }
+            .overlayPreferenceValue(AvatarAnchors.self) { anchors in
+                HandoffOverlay(handoffs: session.sidebar.activity.handoffs, anchors: anchors)
             }
             .appMenu {
                 Button("Create section", systemImage: "folder.badge.plus") { createSection() }
@@ -85,6 +180,8 @@ struct ShellView: View {
             }
             #if os(macOS)
             .listStyle(.sidebar)
+            .background { DropOrigin { dropWindow = $0 }.frame(width: 0, height: 0) }
+            .onPreferenceChange(ChatFrames.self) { chatFrames = $0 }
             .tint(Color(white: colorScheme == .dark ? 0.24 : 0.87))
             .scrollContentBackground(.hidden)
             .scrollEdgeEffectHidden()
@@ -96,6 +193,17 @@ struct ShellView: View {
             .listStyle(.plain)
             #endif
             .scrollIndicators(.hidden)
+            .overlay {
+                if session.sidebar.isConnected && session.sidebar.threads.isEmpty && dropSections.isEmpty {
+                    Text("No chats yet.").foregroundStyle(.muted)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if selectedChat == nil {
+                    ConnectionStatus(connected: session.sidebar.isConnected, dismissed: $connectionDismissed)
+                        .padding(.horizontal, 12).padding(.bottom, 8)
+                }
+            }
             #if os(macOS)
             .navigationTitle("")
             #else
@@ -107,7 +215,8 @@ struct ShellView: View {
             .navigationSplitViewColumnWidth(min: SidebarWidth.minimum, ideal: max(SidebarWidth.minimum, CGFloat(sidebarWidth)), max: SidebarWidth.maximum)
             .background {
                 #if os(macOS)
-                SidebarLimits(width: widthBinding, state: sidebar).frame(width: 0, height: 0)
+                SidebarLimits(width: widthBinding, state: sidebar, minimum: minimumWidth)
+                    .frame(width: 0, height: 0)
                 #endif
             }
             .toolbar {
@@ -124,12 +233,22 @@ struct ShellView: View {
                 }
                 .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 10) {
-                        toolbarButton("Search", symbol: "magnifyingglass") { searching = true }
-                        toolbarButton("New chat", symbol: "plus") { adding = true }
-                    }
+                    toolbarButton("Search", symbol: "magnifyingglass") { searching = true }
                 }
                 .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("New chat", systemImage: "plus") {
+                        Button("New Bot", systemImage: "face.smiling") { newBot() }
+                        Button("New Group Chat", systemImage: "person.2") { creation = .group }
+                    }
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 18, weight: .regular))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .accessibilityLabel("New chat")
+                }
                 #endif
             }
             .toolbar(removing: .sidebarToggle)
@@ -137,15 +256,30 @@ struct ShellView: View {
         } detail: {
             if let thread = selectedChat,
                let agent = participants(thread).first {
-                ChatPane(agent: agent, thread: thread, session: session, drops: $dropped, destination: searchTarget)
-                    .id(thread.id)
+                chatPane(thread, agent: agent)
             } else if let notice = session.sidebar.notice {
                 ContentUnavailableView(notice, systemImage: "exclamationmark.bubble")
             } else {
-                Color.clear
+                VStack(spacing: 16) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 58, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    if session.sidebar.threads.isEmpty {
+                        Text("No chats yet.").foregroundStyle(.muted)
+                        Button("New Bot", systemImage: "plus") { newBot() }
+                            .buttonStyle(.glass)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .environment(\.connectionDismissed, $connectionDismissed)
+        #if os(macOS)
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        .panelBarHost()
+        #endif
         .navigationTitle("")
         .background {
             Text("Application status")
@@ -157,6 +291,8 @@ struct ShellView: View {
             if let thread = session.sidebar.displayed(value) { lastChat = thread.id }
             Notifications.shared.visible(scenePhase == .active ? selectedChat?.id : nil, window: windowID)
         }
+        .onChange(of: creation) { _, value in lastCreation = value?.rawValue }
+        .onChange(of: profileOpen) { _, open in lastPanel = open }
         .onChange(of: conversations.map(\.id), initial: true) { _, _ in
             if let thread = selectedChat { selection = thread.id }
         }
@@ -167,21 +303,14 @@ struct ShellView: View {
         .onChange(of: Notifications.shared.routeID, initial: true) { _, _ in
             if let thread = Notifications.shared.destination { selection = thread }
         }
-        #if os(macOS)
-        .dropDestination(for: URL.self) { urls, _ in
-            let files = urls.filter(\.isFileURL)
-            guard !files.isEmpty, let selection = selectedChat?.id,
-                  session.sidebar.threads.contains(where: { $0.id == selection }) else { return false }
-            dropped.append(contentsOf: files)
-            return true
-        }
-        #endif
         .toolbar(removing: .sidebarToggle)
         #if os(macOS)
+        .task { dropFolder = try? await DroppedFile.prepare() }
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .background {
-            SidebarControl(state: sidebar, edge: sidebar.edge, expanded: sidebar.stage == .expanded,
-                           reveal: showSidebar, search: { searching = true }, add: { adding = true },
+            SidebarControl(state: sidebar,
+                           reveal: showSidebar, search: { searching = true }, add: { newBot() },
+                           group: { creation = .group },
                            settings: { showSettings = true }).frame(width: 0, height: 0)
         }
         .onChange(of: sidebar.stage, initial: true) { _, stage in
@@ -201,20 +330,26 @@ struct ShellView: View {
                 searching = false
             }
         }
-        .panel(isPresented: $adding) {
-            NewBotView(session: session, close: { adding = false }) { thread in
-                selection = thread.id
-                adding = false
+        .onChange(of: searching) { _, shown in
+            if shown { profileBinding.wrappedValue = false }
+        }
+        .panel(item: $creation) { kind in
+            switch kind {
+            case .bot:
+                NewBotView(session: session, sectionID: botSection, close: { creation = nil }) { thread in
+                    selection = thread.id
+                    creation = nil
+                }
+            case .group:
+                NewGroupView(session: session, close: { creation = nil }) { thread in
+                    profileOpen = false
+                    selection = thread.id
+                    creation = nil
+                }
             }
         }
         .panel(item: $editing) { contact in
             AvatarEditor(agentID: contact.agent.id, name: contact.agent.name, client: session.client, store: session.avatars)
-        }
-        .panel(item: $grouping) { thread in
-            GroupEditor(thread: thread, session: session)
-        }
-        .panel(item: $profiling) { contact in
-            ProfileView(agent: contact.agent, session: session)
         }
         .alert("Delete agent?", isPresented: Binding(
             get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }
@@ -224,12 +359,31 @@ struct ShellView: View {
         } message: { contact in
             Text("This will permanently remove \(contact.agent.name) and their conversation.")
         }
-        .alert("Couldn’t delete agent", isPresented: Binding(
-            get: { deleteError != nil }, set: { if !$0 { deleteError = nil } }
-        )) {
-            Button("OK") { deleteError = nil }
-        } message: { Text(deleteError ?? "") }
-        .task {
+        .alert("Delete chat?", isPresented: Binding(get: { groupDelete != nil }, set: { if !$0 { groupDelete = nil } }),
+               presenting: groupDelete) { thread in
+            Button("Delete", role: .destructive) { Task { await delete(thread) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { thread in
+            Text("This permanently removes \(thread.title) and its messages. Its bots stay available.")
+        }
+        .alert("Delete “\(sectionDelete?.name ?? "")”?", isPresented: Binding(
+            get: { sectionDelete != nil }, set: { if !$0 { sectionDelete = nil } }
+        ), presenting: sectionDelete) { section in
+            Button("Delete section") { Task { await deleteSection(section, chats: false) } }
+            if !chats(in: section.id).isEmpty {
+                Button("Delete section and chats", role: .destructive) { Task { await deleteSection(section, chats: true) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { section in
+            let count = chats(in: section.id).count
+            if count == 0 {
+                Text("This section has no chats.")
+            } else {
+                Text("Deleting just the section moves its \(count == 1 ? "chat" : "\(count) chats") to the main list. Deleting its chats also permanently removes them, and each bot whose own chat is in it.")
+            }
+        }
+        // A hidden window refreshes rarely, and at once when it shows again.
+        .task(id: scenePhase == .background) {
             while !Task.isCancelled {
                 await session.sidebar.refresh()
                 await session.layout.refresh()
@@ -237,73 +391,113 @@ struct ShellView: View {
                     session.avatars.sync(agents: session.sidebar.agents)
                     await session.avatars.flush(client: session.client)
                 }
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(scenePhase == .background ? 30 : 3))
             }
         }
     }
 
-    @ViewBuilder private var sidebarContent: some View {
-        if let issue = session.layout.issue {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(issue).font(.footnote).foregroundStyle(.secondary)
-                Button("Retry") { Task { await session.layout.retry() } }
-                    .disabled(session.layout.isSaving)
+    private func chatPane(_ thread: PolymuxKit.Thread, agent: Agent) -> some View {
+        let pane = ChatPane(agent: agent, thread: thread, session: session,
+                            drops: chatDrops(thread.id), files: chatFiles(thread.id),
+                            showProfile: profileBinding, openChat: openChat, destination: searchTarget,
+                            store: session.initialChat?.threadID == thread.id ? session.initialChat : nil)
+            .id(thread.id)
+        #if os(macOS)
+        return HStack(spacing: 0) {
+            pane.frame(minWidth: PaneWidth.chat, maxWidth: .infinity, maxHeight: .infinity)
+            if profileShown {
+                ProfilePanel(agent: agent, thread: thread, session: session, openChat: openChat,
+                             close: { profileBinding.wrappedValue = false }, jump: openChat.jump)
+                    .id(profileID)
+                    .frame(width: panelWidth)
+                    .background(SideSurface().ignoresSafeArea())
+                    .overlay(alignment: .leading) {
+                        SideDivider(width: $profileWidth) { profileBinding.wrappedValue = false }
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
-            .listRowBackground(sidebarSurface)
         }
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        .navigationSplitViewColumnWidth(min: PaneWidth.chat + (profileShown ? panelWidth : 0),
+                                        ideal: 720 + (profileShown ? panelWidth : 0))
+        #else
+        return pane
+        #endif
+    }
+
+    @ViewBuilder private var sidebarContent: some View {
+        let all = conversations
+        let edges = (first: all.first?.id, last: all.last?.id)
+        if let issue = deleteError ?? sectionIssue ?? session.layout.issue ?? session.sidebar.commits.notice {
+            Text(issue).font(.footnote).foregroundStyle(.muted)
+                .listRowBackground(sidebarSurface)
+                .task(id: issue) {
+                    // A failed delete, avatar save or an over-long section name needs no action, so its note fades on its own.
+                    guard deleteError != nil || sectionIssue != nil || session.sidebar.commits.notice != nil else { return }
+                    try? await Task.sleep(for: .seconds(6))
+                    deleteError = nil
+                    sectionIssue = nil
+                    session.sidebar.commits.clearNotice()
+                }
+        }
+        let pins = displayedPins
         if !pins.isEmpty {
             PinGrid {
                 ForEach(pins) { thread in pinnedLink(thread) }
             }
             .padding(.vertical, 6)
             .padding(.bottom, 12)
+            .sidebarArea(.pins)
             .listRowInsets(sectionInsets)
             .listRowBackground(sidebarSurface)
             .listRowSeparator(.hidden)
+        } else if case .chat = dragging {
+            Text("Pinned")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+                .sidebarArea(.pins)
+                .listRowInsets(sectionInsets)
+                .listRowBackground(sidebarSurface)
+                .listRowSeparator(.hidden)
         }
-        ForEach(session.layout.sections.map {
-            (id: $0.id == sectionID ? sectionKey : $0.id, section: $0)
-        }, id: \.id) { row in
+        ForEach(dropSections, id: \.id) { section in
+            let rows = chats(in: section.id, from: all)
             Section {
-                sectionHeader(row.section)
-                if !row.section.collapsed {
-                    if chats(in: row.section.id).isEmpty {
-                        Text("Drag Bots here")
+                sectionHeader(section, count: rows.count)
+                if !section.collapsed {
+                    if rows.isEmpty {
+                        Text("No chats yet.")
                             .foregroundStyle(Color.primary.opacity(0.7))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 10)
                             .contentShape(Rectangle())
-                            .dropDestination(for: String.self) { items, _ in dropChat(items, to: row.section.id) }
+                            .sidebarArea(section.id == SidebarLayout.unassignedID ? .unassigned : .section(section.id))
                             .listRowBackground(sidebarSurface)
                             .listRowInsets(sectionInsets)
                             .listRowSeparator(.hidden)
                     } else {
-                        ForEach(chats(in: row.section.id)) { thread in chatLink(thread) }
+                        ForEach(rows) { thread in chatLink(thread, edges: edges) }
                     }
                 }
             }
-        }
-        if !chats(in: nil).isEmpty {
-            Section {
-                if !session.layout.sections.isEmpty {
-                    Text("Unassigned")
-                        .font(.body)
-                        .foregroundStyle(Color.primary.opacity(0.7))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
-                        .contentShape(Rectangle())
-                        .dropDestination(for: String.self) { items, _ in dropChat(items, to: nil) }
-                        .listRowInsets(sectionInsets)
-                        .listRowBackground(sidebarSurface)
-                        .listRowSeparator(.hidden)
-                        .accessibilityAddTraits(.isHeader)
-                }
-                ForEach(chats(in: nil)) { thread in chatLink(thread) }
-            }
+            .opacity(dragging == .section(section.id) ? 0.4 : 1)
         }
     }
 
-    private var pins: [PolymuxKit.Thread] { conversations.filter { $0.pinned == true } }
+    private var pinnedChats: [PolymuxKit.Thread] { conversations.filter { $0.pinned == true } }
+
+    private var displayedPins: [PolymuxKit.Thread] {
+        guard case let .chat(id) = dragging, case let .pin(before) = dropTarget else { return pinnedChats }
+        let ids = DropTarget.pins(pinnedChats.map(\.id), moving: id, before: before)
+        return ids.compactMap { id in conversations.first { $0.id == id } }
+    }
+
+    private var dropSections: [PolymuxKit.Section] {
+        let sections: [PolymuxKit.Section]
+        if case .chat = dragging { sections = session.layout.sections }
+        else { sections = session.layout.visibleSections(from: conversations) }
+        return sections + (sectionDraft.map { [$0] } ?? [])
+    }
 
     private var sectionInsets: EdgeInsets {
         #if os(macOS)
@@ -313,26 +507,21 @@ struct ShellView: View {
         #endif
     }
 
-    private func chats(in sectionID: String?) -> [PolymuxKit.Thread] {
-        conversations.filter { thread in
-            thread.pinned != true && (thread.sectionID == sectionID ||
-                (sectionID == nil && !session.layout.sections.contains(where: { $0.id == thread.sectionID })))
-        }.sorted { lhs, rhs in
-            let left = lhs.sectionOrder ?? .greatestFiniteMagnitude
-            let right = rhs.sectionOrder ?? .greatestFiniteMagnitude
-            if left != right { return left < right }
-            let leftDate = lhs.lastMessage?.date ?? .distantPast
-            let rightDate = rhs.lastMessage?.date ?? .distantPast
-            return leftDate == rightDate ? lhs.id < rhs.id : leftDate > rightDate
-        }
+    /// A section's chats, keeping the conversation list's newest-first order.
+    private func chats(in sectionID: String?, from all: [PolymuxKit.Thread]? = nil) -> [PolymuxKit.Thread] {
+        session.layout.chats(in: sectionID, from: all ?? conversations)
     }
 
-    @ViewBuilder private func sectionHeader(_ section: PolymuxKit.Section) -> some View {
+    @ViewBuilder private func sectionHeader(_ section: PolymuxKit.Section, count: Int) -> some View {
+        let unassigned = section.id == SidebarLayout.unassignedID
+        let area: SidebarArea = unassigned ? .unassigned : .section(section.id)
+        let visible = session.layout.visibleSections(from: conversations)
         if sectionID == section.id {
             HStack {
-                SectionEditor(name: section.name, save: finishSection, cancel: { sectionID = nil })
+                SectionEditor(name: section.name, save: finishSection, cancel: cancelSection,
+                              saveOnBlur: sectionDraft == nil)
                 Spacer()
-                if section.collapsed { Text(chats(in: section.id).count, format: .number) }
+                if section.collapsed { Text(count, format: .number) }
                 else { Image(systemName: "chevron.down") }
             }
             .font(.body)
@@ -343,6 +532,7 @@ struct ShellView: View {
             .listRowInsets(sectionInsets)
             .listRowBackground(rowBackground(section.id))
             .listRowSeparator(.hidden)
+            .sidebarArea(.section(section.id))
         } else {
             Button {
                 Task { await session.layout.collapse(section.id, collapsed: !section.collapsed) }
@@ -350,7 +540,7 @@ struct ShellView: View {
                 HStack {
                     Text(section.name)
                     Spacer()
-                    if section.collapsed { Text(chats(in: section.id).count, format: .number) }
+                    if section.collapsed { Text(count, format: .number) }
                     else { Image(systemName: "chevron.down") }
                 }
                 .font(.body)
@@ -359,11 +549,12 @@ struct ShellView: View {
                 .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ToggleRow())
             .textCase(nil)
             .listRowInsets(sectionInsets)
             .listRowBackground(rowBackground(section.id))
             .listRowSeparator(.hidden)
+            .sidebarArea(area)
             .accessibilityAddTraits(.isHeader)
             .disabled(session.layout.isSaving)
             .onHover { inside in
@@ -371,33 +562,40 @@ struct ShellView: View {
                 else if hovered == section.id { hovered = nil }
             }
             .accessibilityLabel("\(section.collapsed ? "Expand" : "Collapse") \(section.name)")
-            .draggable("polymux-section:\(section.id)")
-            .dropDestination(for: String.self) { items, _ in
-                if dropChat(items, to: section.id) { return true }
-                guard !session.layout.isSaving, let value = items.first,
-                      value.hasPrefix("polymux-section:") else { return false }
-                let id = String(value.dropFirst("polymux-section:".count))
-                let ordered = session.layout.sections.map(\.id)
-                guard let source = ordered.firstIndex(of: id), let target = ordered.firstIndex(of: section.id),
-                      source != target else { return false }
-                let before = source < target ? ordered.dropFirst(target + 1).first : section.id
-                Task { await session.layout.reorder(id, before: before) }
-                return true
+            .sidebarDrag(.section(section.id), active: $dragging) {
+                Text(section.name)
+                    .font(.body).lineLimit(1)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .frame(maxWidth: 220)
+                    .background(sidebarSurface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay { RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 0.5) }
             }
-            .appMenu {
-                Button("Rename", systemImage: "pencil") {
-                    sectionCreation = nil
-                    sectionKey = UUID().uuidString
-                    sectionID = section.id
-                }
-                .disabled(session.layout.isSaving)
+            .appMenu(destructive: ["Delete section"]) {
+                Button("New Bot", systemImage: "face.smiling") { newBot(in: section.id) }
                 Divider()
-                Button("Move up", systemImage: "arrow.up") { Task { await session.layout.shift(section.id, by: -1) } }
-                    .disabled(session.layout.isSaving || session.layout.sections.first?.id == section.id)
-                Button("Move down", systemImage: "arrow.down") { Task { await session.layout.shift(section.id, by: 1) } }
-                    .disabled(session.layout.isSaving || session.layout.sections.last?.id == section.id)
+                if !unassigned {
+                    Button("Rename", systemImage: "pencil") {
+                        cancelSection()
+                        sectionID = section.id
+                    }
+                    .disabled(session.layout.isSaving)
+                    Divider()
+                }
+                Button("Move up", systemImage: "arrow.up") {
+                    Task { await session.layout.shift(section.id, by: -1, among: visible) }
+                }
+                .disabled(session.layout.isSaving || visible.first?.id == section.id)
+                Button("Move down", systemImage: "arrow.down") {
+                    Task { await session.layout.shift(section.id, by: 1, among: visible) }
+                }
+                .disabled(session.layout.isSaving || visible.last?.id == section.id)
                 Divider()
                 Button("Create section", systemImage: "folder.badge.plus") { createSection() }
+                if !unassigned {
+                    Divider()
+                    Button("Delete section", systemImage: "trash", role: .destructive) { sectionDelete = section }
+                        .disabled(session.layout.isSaving)
+                }
             }
         }
     }
@@ -405,8 +603,9 @@ struct ShellView: View {
     private func pinnedLink(_ thread: PolymuxKit.Thread) -> some View {
         chatControl(thread) {
             VStack(spacing: 6) {
-                AvatarStack(members: participants(thread), size: 76, conversationID: thread.id,
-                            runs: thread.runs, activity: session.sidebar.activity, connected: session.sidebar.isConnected)
+                AvatarStack(members: participants(thread), isGroup: thread.isGroup, size: 76, conversationID: thread.id,
+                            runs: thread.runs, activity: session.sidebar.activity, connected: session.sidebar.isConnected,
+                            unread: thread.unreadCount > 0)
                 Text(title(thread)).font(.callout).foregroundStyle(Color.primary).lineLimit(1)
             }
             .padding(.horizontal, 8)
@@ -418,20 +617,28 @@ struct ShellView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title(thread)), pinned chat")
-        .draggable("polymux-chat:\(thread.id)")
+        .accessibilityValue(session.sidebar.activity.marker(conversationID: thread.id, agentIDs: participants(thread).map(\.id),
+                                                           unread: thread.unreadCount > 0)?.label ?? "")
+        .sidebarDrag(.chat(thread.id), active: $dragging) { dragPreview(thread) }
+        .sidebarArea(.pin(thread.id))
+        .opacity(dragging == .chat(thread.id) ? 0 : 1)
         #if os(macOS)
         .overlay { rowMenu(thread).accessibilityHidden(true) }
+        .onDrop(of: ChatDrop.types, delegate: chatDrop)
         #else
         .appMenu { chatMenu(thread) }
         #endif
         .onHover { hovered = $0 ? thread.id : nil }
     }
 
+    private func newBot(in section: String? = nil) {
+        botSection = section == SidebarLayout.unassignedID ? nil : section
+        creation = .bot
+    }
+
     private func createSection(for thread: PolymuxKit.Thread? = nil) {
         guard !session.layout.isSaving else { return }
         let localID = UUID().uuidString
-        sectionKey = localID
-        sectionID = localID
         let names = Set(session.layout.sections.map { $0.name.lowercased() })
         var name = "New section"
         var suffix = 2
@@ -439,43 +646,86 @@ struct ShellView: View {
             name = "New section \(suffix)"
             suffix += 1
         }
-        let initial = name
-        sectionCreation = Task {
-            guard let id = await session.layout.create(initial, id: localID, accepted: { id in
-                if sectionID == localID { sectionID = id }
-            }) else {
-                if sectionID == localID { sectionID = nil }
-                return nil
-            }
-            if let thread { await session.layout.move(thread, to: id) }
-            return id
-        }
+        sectionDraft = PolymuxKit.Section(id: localID, name: name)
+        sectionThread = thread
+        sectionID = localID
     }
 
     private func finishSection(_ name: String) {
         guard let id = sectionID else { return }
-        let creation = sectionCreation
-        sectionID = nil
-        sectionCreation = nil
+        let draft = sectionDraft
+        let thread = sectionThread
+        cancelSection()
         Task {
-            let savedID: String
-            if let creation {
-                guard let created = await creation.value else { return }
-                savedID = created
-            } else { savedID = id }
-            await session.layout.rename(savedID, to: name)
+            if let draft {
+                guard let created = await session.layout.create(name, id: draft.id) else { return }
+                if let thread { await session.layout.move(thread, to: created) }
+            } else { await session.layout.rename(id, to: name) }
         }
+    }
+
+    private func cancelSection() {
+        sectionID = nil
+        sectionDraft = nil
+        sectionThread = nil
     }
 
     private func move(_ thread: PolymuxKit.Thread, to sectionID: String?) {
         Task { await session.layout.move(thread, to: sectionID) }
     }
 
-    private func dropChat(_ items: [String], to sectionID: String?) -> Bool {
-        guard !session.layout.isSaving, let value = items.first, value.hasPrefix("polymux-chat:"),
-              let thread = conversations.first(where: { $0.id == String(value.dropFirst("polymux-chat:".count)) }),
-              thread.pinned == true || thread.sectionID != sectionID else { return false }
-        move(thread, to: sectionID)
+    private func chatDrops(_ id: String) -> Binding<[DroppedFile]> {
+        Binding(get: { drops[id] ?? [] }, set: { drops[id] = $0.isEmpty ? nil : $0 })
+    }
+
+    private func chatFiles(_ id: String) -> Binding<[DraftFile]> {
+        Binding(get: { files[id] ?? [] }, set: { files[id] = $0.isEmpty ? nil : $0 })
+    }
+
+    #if os(macOS)
+    private var chatDrop: ChatDrop {
+        ChatDrop(frames: chatFrames, window: dropWindow,
+                 open: { if selection != $0 { selection = $0 } }, attach: attach)
+    }
+
+    private func attach(_ id: String) -> Bool {
+        guard conversations.contains(where: { $0.id == id }) else { return false }
+        selection = id
+        guard let folder = dropFolder else { drops[id, default: []].append(.failed); return false }
+        let accepted = DroppedFile.receive(from: NSPasteboard(name: .drag), into: folder) {
+            drops[id, default: []].append($0)
+        }
+        if accepted {
+            dropFolder = nil
+            Task { dropFolder = try? await DroppedFile.prepare() }
+        }
+        return accepted
+    }
+    #endif
+
+    private func dropSidebar(_ item: SidebarItem, to destination: SidebarDestination) -> Bool {
+        guard !session.layout.isSaving else { return false }
+        switch (item, destination) {
+        case let (.section(id), .section(target, after)):
+            let ordered = dropSections.map(\.id)
+            guard id != target, let index = ordered.firstIndex(of: target) else { return false }
+            let before = after ? ordered.dropFirst(index + 1).first : target
+            Task { await session.layout.reorder(id, before: before) }
+        case let (.chat(id), .pin(before)):
+            guard let thread = conversations.first(where: { $0.id == id }), id != before else { return false }
+            Task { await session.layout.pin(thread, pinned: true, before: before) }
+        case let (.chat(id), .chats(area)):
+            guard let thread = conversations.first(where: { $0.id == id }) else { return false }
+            let sectionID: String?
+            switch area {
+            case let .section(id): sectionID = id
+            case .unassigned: sectionID = nil
+            default: return false
+            }
+            guard thread.pinned == true || thread.sectionID != sectionID else { return false }
+            move(thread, to: sectionID)
+        default: return false
+        }
         return true
     }
 
@@ -485,9 +735,9 @@ struct ShellView: View {
         return RowMenu(profile: { edit(thread) }, pinned: thread.pinned == true,
                        pin: { togglePin(thread) },
                        avatar: thread.isGroup ? nil : { if let agent { editing = AvatarContact(agent: agent) } },
-                       delete: thread.isGroup ? nil : { if let agent { requestDelete(agent) } },
+                       delete: { if thread.isGroup { groupDelete = thread } else if let agent { requestDelete(agent) } },
                        title: thread.isGroup ? "Edit chat" : "Edit profile",
-                       sections: session.layout.sections, sectionID: thread.sectionID,
+                       sections: session.layout.customSections, sectionID: thread.sectionID,
                        move: { move(thread, to: $0) }, create: { createSection(for: thread) })
             .disabled(session.layout.isSaving)
     }
@@ -498,7 +748,7 @@ struct ShellView: View {
             togglePin(thread)
         }
         Menu("Move to", systemImage: "folder") {
-            ForEach(session.layout.sections, id: \.id) { section in
+            ForEach(session.layout.customSections, id: \.id) { section in
                 Button { move(thread, to: section.id) } label: {
                     Label(section.name, systemImage: thread.sectionID == section.id ? "checkmark" : "folder")
                 }
@@ -509,9 +759,10 @@ struct ShellView: View {
         }
         .disabled(session.layout.isSaving)
         if thread.isGroup {
-            Button("Edit chat", systemImage: "pencil") { grouping = thread }
+            Button("Edit chat", systemImage: "pencil") { openProfile(thread) }
+            Button("Delete", systemImage: "trash", role: .destructive) { groupDelete = thread }
         } else if let agent = participants(thread).first {
-            Button("Edit profile", systemImage: "pencil") { profiling = AvatarContact(agent: agent) }
+            Button("Edit profile", systemImage: "pencil") { openProfile(thread) }
             Button("Customise avatar", systemImage: "face.smiling") { editing = AvatarContact(agent: agent) }
             Divider()
             Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(agent) }
@@ -530,10 +781,17 @@ struct ShellView: View {
     private func showSidebar() {
         guard sidebar.stage == .collapsed, !sidebarOpening else { return }
         sidebarOpening = true
-        if !sidebar.reveal() {
+        guard let token = sidebar.beginReveal() else {
             sidebar.stage = .expanding
             visibility = .all
+            return
         }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+            visibility = .all
+        }
+        // The binding finishes before the column's slide; settle the stage once it ends.
+        let delay = reduceMotion ? 0.05 : 0.22
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { sidebar.endReveal(token) }
     }
     #endif
 
@@ -553,6 +811,19 @@ struct ShellView: View {
         if selectedChat?.id == id { return Color.primary.opacity(0.11) }
         if hovered == id { return Color.primary.opacity(0.06) }
         return .clear
+    }
+
+    private func dragPreview(_ thread: PolymuxKit.Thread) -> some View {
+        VStack(spacing: 6) {
+            AvatarStack(members: participants(thread), isGroup: thread.isGroup, size: 60, conversationID: thread.id,
+                        runs: thread.runs, activity: session.sidebar.activity, connected: session.sidebar.isConnected,
+                        unread: thread.unreadCount > 0)
+            Text(title(thread)).font(.callout).lineLimit(1)
+        }
+        .padding(8)
+        .frame(width: 80)
+        .background(sidebarSurface, in: RoundedRectangle(cornerRadius: 10))
+        .environment(\.rasterAvatars, true)
     }
 
     private func rowBackground(_ id: String) -> some View {
@@ -577,33 +848,42 @@ struct ShellView: View {
             .glassEffect(.regular.interactive(), in: Circle())
     }
 
+    /// Chats with at least one known agent: pinned first, then newest message first.
     private var conversations: [PolymuxKit.Thread] {
-        session.sidebar.threads.map { session.layout.applying(to: $0) }.filter { !participants($0).isEmpty }.sorted { lhs, rhs in
-            switch (lhs.pinRank, rhs.pinRank) {
-            case let (left?, right?) where left != right: return left < right
-            case (.some, .none): return true
-            case (.none, .some): return false
-            default: break
+        let agents = Set(session.sidebar.agents.map(\.id))
+        return session.sidebar.threads
+            .filter { !removed.contains($0.id) && $0.participantIDs.contains(where: agents.contains) }
+            .map { (thread: session.layout.applying(to: $0), date: $0.lastMessage?.date ?? .distantPast) }
+            .sorted { lhs, rhs in
+                switch (lhs.thread.pinRank, rhs.thread.pinRank) {
+                case let (left?, right?) where left != right: return left < right
+                case (.some, .none): return true
+                case (.none, .some): return false
+                default: break
+                }
+                if lhs.date == rhs.date { return lhs.thread.id < rhs.thread.id }
+                return lhs.date > rhs.date
             }
-            let left = lhs.lastMessage?.date ?? .distantPast
-            let right = rhs.lastMessage?.date ?? .distantPast
-            if left == right { return lhs.id < rhs.id }
-            return left > right
-        }
+            .map(\.thread)
     }
 
-    private func chatLink(_ thread: PolymuxKit.Thread) -> some View {
+    private func chatLink(_ thread: PolymuxKit.Thread, edges: (first: String?, last: String?)) -> some View {
         chatControl(thread) {
             if thread.isGroup {
-                GroupRow(thread: thread, members: participants(thread), activity: session.sidebar.activity, connected: session.sidebar.isConnected)
+                GroupRow(thread: thread, members: participants(thread), activity: session.sidebar.activity,
+                         connected: session.sidebar.isConnected, finished: session.sidebar.lastFinished[thread.id])
             } else if let agent = participants(thread).first {
                 AgentRow(agent: agent, thread: thread,
                          duplicate: session.sidebar.agents.filter { $0.name == agent.name }.count > 1,
-                         activity: session.sidebar.activity, connected: session.sidebar.isConnected)
+                         activity: session.sidebar.activity, connected: session.sidebar.isConnected,
+                         finished: session.sidebar.lastFinished[thread.id])
             }
         }
         .navigationLinkIndicatorVisibility(.hidden)
         .listRowBackground(rowBackground(thread.id))
+        .sidebarArea(thread.sectionID.flatMap { id in
+            session.layout.sections.contains(where: { $0.id == id }) ? .section(id) : nil
+        } ?? .unassigned)
         #if os(macOS)
         // The native sidebar adds 6pt between these insets and the highlight.
         .listRowInsets(EdgeInsets(top: 0, leading: RowDetails.gap - 6, bottom: 0, trailing: RowDetails.gap - 6))
@@ -612,7 +892,7 @@ struct ShellView: View {
         }
         .accessibilityActions {
             Button(thread.pinned == true ? "Unpin" : "Pin") { togglePin(thread) }
-            ForEach(session.layout.sections, id: \.id) { section in
+            ForEach(session.layout.customSections, id: \.id) { section in
                 Button("Move to \(section.name)") { move(thread, to: section.id) }
             }
             Button("Move to Unassigned") { move(thread, to: nil) }
@@ -625,8 +905,8 @@ struct ShellView: View {
         }
         #else
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-        .listRowSeparator(thread.id == conversations.first?.id ? .hidden : .automatic, edges: .top)
-        .listRowSeparator(thread.id == conversations.last?.id ? .hidden : .automatic, edges: .bottom)
+        .listRowSeparator(thread.id == edges.first ? .hidden : .automatic, edges: .top)
+        .listRowSeparator(thread.id == edges.last ? .hidden : .automatic, edges: .bottom)
         .appMenu {
             chatMenu(thread)
         }
@@ -638,12 +918,24 @@ struct ShellView: View {
         }
         #endif
         .disabled(deleting == thread.agentID)
-        .draggable("polymux-chat:\(thread.id)")
-        .dropDestination(for: String.self) { items, _ in dropChat(items, to: thread.sectionID) }
+        .sidebarDrag(.chat(thread.id), active: $dragging) { dragPreview(thread) }
+        .opacity(dragging == .chat(thread.id) ? 0.4 : 1)
+        #if os(macOS)
+        .onDrop(of: ChatDrop.types, delegate: chatDrop)
+        #endif
         .onHover { inside in
-            if inside { hovered = thread.id }
+            if inside { if laidOut(thread) { hovered = thread.id } }
             else if hovered == thread.id { hovered = nil }
         }
+    }
+
+    /// A row inserted under a still pointer reports hover before its first layout; only trust laid-out rows.
+    private func laidOut(_ thread: PolymuxKit.Thread) -> Bool {
+        #if os(macOS)
+        chatFrames[thread.id] != nil
+        #else
+        true
+        #endif
     }
 
     @ViewBuilder private func chatControl<Label: View>(_ thread: PolymuxKit.Thread,
@@ -652,6 +944,12 @@ struct ShellView: View {
         Button { selection = thread.id } label: {
             label().frame(maxWidth: .infinity).contentShape(Rectangle())
         }
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: ChatFrames.self,
+                                           value: [thread.id: geometry.frame(in: .named("chatList"))])
+                }
+            }
             .buttonStyle(.plain)
             .tag(thread.id)
             .accessibilityAddTraits(selectedChat?.id == thread.id ? .isSelected : [])
@@ -664,26 +962,138 @@ struct ShellView: View {
         Task { await session.layout.pin(thread, pinned: thread.pinned != true) }
     }
 
-    private func edit(_ thread: PolymuxKit.Thread) {
-        if thread.isGroup { grouping = thread }
-        else if let agent = participants(thread).first { profiling = AvatarContact(agent: agent) }
+    private func edit(_ thread: PolymuxKit.Thread) { openProfile(thread) }
+
+    /// Opens the chat with its side panel: the agent's profile, or the group's editor.
+    private func openProfile(_ thread: PolymuxKit.Thread) {
+        selection = thread.id
+        profileBinding.wrappedValue = true
     }
 
     private func requestDelete(_ agent: Agent) {
         deleteTarget = AvatarContact(agent: agent)
     }
 
+    private func delete(_ thread: PolymuxKit.Thread) async {
+        removed.insert(thread.id)
+        do {
+            _ = try await session.client.deleteThread(id: thread.id)
+            await session.sidebar.refresh()
+            if selection == thread.id {
+                profileBinding.wrappedValue = false
+                selection = conversations.first?.id
+            }
+        } catch {
+            removed.remove(thread.id)
+            deleteError = error.reason(or: "Couldn’t delete this chat.")
+        }
+    }
+
+    private func deleteSection(_ section: PolymuxKit.Section, chats: Bool) async {
+        let doomed = chats ? self.chats(in: section.id) : []
+        // Hide the doomed chats now so they don't flash into the main list.
+        removed.formUnion(doomed.map(\.id))
+        defer { removed.subtract(doomed.map(\.id)) }
+        guard await session.layout.delete(section.id, chats: chats), chats else { return }
+        for thread in doomed where !thread.isGroup { session.avatars.remove(id: thread.agentID) }
+        await session.sidebar.refresh()
+        if !conversations.contains(where: { $0.id == selection }) { selection = conversations.first?.id }
+    }
+
     private func delete(_ agent: Agent) async {
         deleting = agent.id
         defer { deleting = nil }
+        // The chat leaves the list at once and comes back if the server refuses.
+        let hidden = session.sidebar.thread(for: agent)?.id
+        if let hidden { removed.insert(hidden) }
         do {
             try await session.client.deleteAgent(id: agent.id)
             session.avatars.remove(id: agent.id)
             await session.sidebar.refresh()
             if !session.sidebar.threads.contains(where: { $0.id == selection }) { selection = conversations.first?.id }
-        } catch { deleteError = error.localizedDescription }
+        } catch {
+            if let hidden { removed.remove(hidden) }
+            deleteError = error.isOffline ? "You’re offline, so \(agent.name) wasn’t deleted." : error.reason(or: "Couldn’t delete \(agent.name).")
+        }
     }
 }
+
+#if os(macOS)
+private struct ChatDrop: DropDelegate {
+    let frames: [String: CGRect]
+    let window: NSWindow?
+    let open: (String) -> Void
+    let attach: (String) -> Bool
+    static var types: [String] { DroppedFile.types }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        !info.hasItemsConforming(to: [SidebarItem.contentType.identifier]) && info.hasItemsConforming(to: Self.types)
+    }
+
+    func dropEntered(info: DropInfo) {
+        if let id = target() { open(id) }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard let id = target() else { return DropProposal(operation: .forbidden) }
+        open(id)
+        return DropProposal(operation: .copy)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let id = target() else { return false }
+        open(id)
+        return attach(id)
+    }
+
+    private func target() -> String? {
+        guard let window else { return nil }
+        // List can retain a row's receiver after hover changes the selection.
+        return DropTarget.chat(at: NSEvent.mouseLocation, frames: frames, window: window.frame)
+    }
+}
+
+private struct ChatFrames: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+private struct DropOrigin: NSViewRepresentable {
+    let changed: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> DropView { DropView() }
+
+    func updateNSView(_ view: DropView, context: Context) {
+        view.changed = changed
+        view.measure()
+    }
+}
+
+private final class DropView: NSView {
+    var changed: (NSWindow?) -> Void = { _ in }
+    private var pending = false
+    private weak var lastWindow: NSWindow?
+
+    override func layout() { super.layout(); measure() }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); measure() }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func measure() {
+        guard !pending else { return }
+        pending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            pending = false
+            guard lastWindow !== window else { return }
+            lastWindow = window
+            changed(window)
+        }
+    }
+}
+#endif
 
 private struct PinGrid: Layout {
     private let gap: CGFloat = 4
@@ -718,208 +1128,20 @@ private struct PinGrid: Layout {
     }
 }
 
-struct AgentRow: View {
-    let agent: Agent
-    let thread: PolymuxKit.Thread?
-    let duplicate: Bool
-    var gap: CGFloat? = nil
-    var activity: ActivityStore?
-    var connected = true
-
-    var body: some View {
-        HStack(spacing: gap ?? RowDetails.gap) {
-            AgentAvatar(agentID: agent.id, conversationID: thread?.id ?? agent.id,
-                        runs: thread?.runs ?? [], activity: activity, connected: connected,
-                        unread: (thread?.unreadCount ?? 0) > 0)
-                .frame(width: avatarSize, height: avatarSize)
-                .modifier(OnlineDot(shown: agent.active, size: avatarSize))
-                #if os(macOS)
-                .frame(width: 34)
-                #endif
-                .accessibilityHidden(true)
-            RowDetails(name: agent.name, preview: preview, thread: thread)
-        }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(agent.name), \(agent.role), \(preview)")
-        .accessibilityValue([agent.active ? "Active" : nil, unread ? "Unread" : nil, presentation.label]
-            .compactMap { $0 }.joined(separator: ", "))
-    }
-
-    private var unread: Bool { (thread?.unreadCount ?? 0) > 0 }
-
-    private var avatarSize: CGFloat {
-        #if os(iOS)
-        60
-        #else
-        52
-        #endif
-    }
-
-    private var presentation: ActivityView {
-        ActivityStore.present(runs: thread?.runs ?? [], conversationID: thread?.id ?? agent.id,
-                              agentID: agent.id, connected: connected)
-    }
-
-    private var preview: String {
-        guard let message = thread?.lastMessage else { return duplicate ? agent.role : "" }
-        let text: String
-        if let question = message.parts.first(where: { $0.kind == "choice" })?.question, !question.isEmpty {
-            text = question
-        } else if message.status == "streaming" {
-            // The reply is shown whole when it finishes; name its activity until then.
-            text = presentation.working ? presentation.label : ""
-        } else if !message.text.isEmpty {
-            text = message.text.replacingOccurrences(of: "\n", with: " ")
-        } else if let name = message.parts.compactMap(\.attachment).first?.name {
-            text = name
-        } else {
-            text = ""
-        }
-        return duplicate ? "\(agent.role) · \(agent.id.prefix(6)) · \(text)" : text
-    }
-}
-
-struct GroupRow: View {
-    let thread: PolymuxKit.Thread
-    let members: [Agent]
-    var activity: ActivityStore?
-    var connected = true
-
-    var body: some View {
-        HStack(spacing: RowDetails.gap) {
-            #if os(macOS)
-            AvatarStack(members: members, conversationID: thread.id, runs: thread.runs, activity: activity, connected: connected).frame(width: 34)
-            #else
-            AvatarStack(members: members, size: 60, conversationID: thread.id, runs: thread.runs, activity: activity, connected: connected)
-            #endif
-            RowDetails(name: thread.title, preview: preview, thread: thread)
-        }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(thread.title), \(members.map(\.name).joined(separator: ", ")), \(preview)")
-        .accessibilityValue(thread.unreadCount > 0 ? "Unread" : "")
-    }
-
-    private var preview: String {
-        guard let message = thread.lastMessage else { return members.map(\.name).joined(separator: ", ") }
-        return message.text.isEmpty ? message.attachments.first?.name ?? "Attachment" : message.text.replacingOccurrences(of: "\n", with: " ")
-    }
-}
-
-private struct RowDetails: View {
-    let name: String
-    let preview: String
-    let thread: PolymuxKit.Thread?
-
-    static var gap: CGFloat {
-        #if os(macOS)
-        8
-        #else
-        10
-        #endif
-    }
-
-    private var foreground: Color {
-        #if os(macOS)
-        Color(nsColor: .labelColor)
-        #else
-        .primary
-        #endif
-    }
-
-    private var secondary: Color {
-        #if os(macOS)
-        Color(nsColor: .secondaryLabelColor)
-        #else
-        .secondary
-        #endif
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Text(name)
-                    #if os(iOS)
-                    .font(.headline)
-                    #else
-                    .font(.body.weight(.medium))
-                    #endif
-                    .foregroundStyle(foreground).lineLimit(1)
-                Spacer(minLength: 4)
-                if thread?.pinned == true {
-                    Image(systemName: "pin.fill")
-                        .font(.caption2).foregroundStyle(secondary)
-                        .accessibilityLabel("Pinned")
-                }
-                if let date = thread?.lastMessage?.date {
-                    Text(date, format: ProgressiveTime())
-                        .font(.caption2).foregroundStyle(secondary).lineLimit(1).fixedSize()
-                }
-            }
-            if !preview.isEmpty || (thread?.unreadCount ?? 0) > 0 {
-                HStack(spacing: 6) {
-                    Text(preview)
-                        #if os(iOS)
-                        .font(.subheadline)
-                        #else
-                        .font(.caption)
-                        #endif
-                        .lineLimit(1).foregroundStyle(secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if (thread?.unreadCount ?? 0) > 0 {
-                        Circle().fill(.blue).frame(width: 8, height: 8).accessibilityHidden(true)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Marks an online agent at the top right of its avatar, with a gap cut into the avatar
-/// like overlapping avatars have.
-private struct OnlineDot: ViewModifier {
-    let shown: Bool
-    let size: CGFloat
-    private static let green = Color(red: 49 / 255, green: 162 / 255, blue: 76 / 255)
-
-    func body(content: Content) -> some View {
-        if shown {
-            // The drawn body is 200/316 of the avatar frame; the dot sits on it at 45°.
-            let body = size * 200 / 316
-            let dot = body * 0.22
-            let gap = body * 2 / 46
-            let offset = CGSize(width: body / 2 * 0.7071, height: -body / 2 * 0.7071)
-            content
-                .mask {
-                    Hole(center: CGPoint(x: size / 2 + offset.width, y: size / 2 + offset.height), radius: dot / 2 + gap)
-                        .fill(style: FillStyle(eoFill: true))
-                }
-                .overlay {
-                    Circle().fill(Self.green).frame(width: dot, height: dot).offset(offset)
-                }
-        } else {
-            content
-        }
-    }
-}
-
-/// The avatar frame with a round hole punched out where the dot sits.
-private struct Hole: Shape {
-    let center: CGPoint
-    let radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path(rect.insetBy(dx: -rect.width, dy: -rect.height))
-        path.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-        return path
-    }
+/// A plain button without the pressed dimming, so a toggled row keeps its look under the pointer.
+private struct ToggleRow: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
 }
 
 struct SearchDestination: Equatable {
     let id = UUID()
     let threadID: String
     let messageID: String?
+}
+
+private enum ChatCreation: String, Identifiable {
+    case bot, group
+    var id: Self { self }
 }
 
 private struct AvatarContact: Identifiable {

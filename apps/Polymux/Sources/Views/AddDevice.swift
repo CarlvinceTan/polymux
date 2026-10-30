@@ -6,12 +6,14 @@ import PolymuxKit
 struct AddDevice: View {
     let client: APIClient?
     let onBack: () -> Void
-    let join: (URL) -> Void
+    let join: (URL) async throws -> Void
     @Environment(\.panelClose) private var close
     @State private var invite: Invite?
     @State private var issue: String?
     @State private var pasted = ""
     @State private var pasteIssue: String?
+    @State private var joining = false
+    @State private var joinTask: Task<Void, Never>?
 
     var body: some View {
         PanelView("Add device", onClose: { close() }, onBack: onBack) {
@@ -27,14 +29,15 @@ struct AddDevice: View {
                                 Button("Copy link", systemImage: "doc.on.doc") { copy(invite.link) }
                             }
                             .buttonStyle(.glass)
+                            Text("Single-use link. Expires in 3 minutes.")
+                                .font(.footnote).foregroundStyle(.muted)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     } else if let issue {
-                        Text(issue).font(.footnote).foregroundStyle(.red)
-                        Button("Retry") { Task { await load() } }
+                        Text(issue).font(.footnote).foregroundStyle(.muted).frame(maxWidth: .infinity)
                     } else if client == nil {
-                        Text("Connect to a server first.").foregroundStyle(.secondary)
+                        Text("Connect to a server first.").foregroundStyle(.muted).frame(maxWidth: .infinity)
                     } else {
                         ProgressView().frame(maxWidth: .infinity)
                     }
@@ -43,15 +46,20 @@ struct AddDevice: View {
                 Section("Join with a link") {
                     TextField("Pairing link", text: $pasted, prompt: Text("Paste a pairing link"))
                         .labelsHidden()
-                        .accessibilityIdentifier("settings.link")
                         .lineLimit(1)
                         .autocorrectionDisabled()
                         .onSubmit(submit)
+                        .disabled(joining)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         #endif
+                    Button("Join", action: submit)
+                        .disabled(joining || pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityLabel("Join server")
                     if let pasteIssue {
-                        Text(pasteIssue).font(.footnote).foregroundStyle(.red)
+                        Text(pasteIssue).font(.footnote).foregroundStyle(.muted)
+                    } else if joining {
+                        Text("Connecting…").font(.footnote).foregroundStyle(.muted)
                     }
                 }
                 .panelRow()
@@ -59,23 +67,38 @@ struct AddDevice: View {
             .formStyle(.grouped)
         }
         .panelDismiss(onClose: { close() })
-        .task(id: client?.baseURL) { await load() }
+        .onDisappear { joinTask?.cancel() }
+        .task(id: client?.id) {
+            // Tries again on its own until a code is ready.
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(invite == nil ? 5 : 120))
+            }
+        }
     }
 
     private func load() async {
         guard let client else { return }
-        issue = nil
-        do { invite = try await client.invite() }
-        catch { issue = error.localizedDescription }
+        do { invite = try await client.invite(); issue = nil }
+        catch { issue = error.isOffline ? "Offline" : "Couldn’t create a pairing code." }
     }
 
     private func submit() {
+        guard !joining else { return }
         guard let url = URL(string: pasted.trimmingCharacters(in: .whitespacesAndNewlines)), Invite(link: url) != nil else {
             pasteIssue = "Paste a valid Polymux pairing link."
             return
         }
         pasteIssue = nil
-        join(url)
+        joining = true
+        joinTask = Task {
+            defer { joining = false }
+            do { try await join(url) }
+            catch is CancellationError {}
+            catch {
+                pasteIssue = error.isOffline ? "Can’t reach this server. Check its connection and try the link again." : error.reason(or: "Couldn’t pair with this server.")
+            }
+        }
     }
 
     private func copy(_ link: URL) {

@@ -2,8 +2,9 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
-	"strings"
+	"time"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/settings"
@@ -19,7 +20,7 @@ func nativeRequest(w http.ResponseWriter, r *http.Request) bool {
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	write(w, 200, s.settings.Snapshot())
+	write(w, 200, s.voiceKeys(s.settings.Snapshot()))
 }
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
@@ -34,35 +35,35 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	s.settingsResult(w, v, err)
 }
 
-func (s *Server) setSpeechKey(w http.ResponseWriter, r *http.Request) {
-	if !nativeRequest(w, r) {
-		return
-	}
-	if r.PathValue("provider") != "gemini" {
-		fail(w, 400, "invalid_provider", "Choose a supported provider.")
-		return
-	}
-	key := ""
-	if r.Method == http.MethodPut {
-		var p contract.SpeechKey
-		if !decode(w, r, &p) {
-			return
-		}
-		key = strings.TrimSpace(p.Key)
-		if key == "" {
-			fail(w, 400, "invalid_key", "Enter an API key.")
-			return
-		}
-	}
-	v, err := s.settings.SetKey(key)
-	s.settingsResult(w, v, err)
-}
-
 func (s *Server) settingsResult(w http.ResponseWriter, v contract.Settings, err error) {
 	w.Header().Set("Cache-Control", "no-store")
 	if errors.Is(err, settings.ErrInvalid) {
 		fail(w, 400, "invalid_settings", "Choose valid settings and a supported voice provider.")
 		return
 	}
-	s.respond(w, v, err)
+	s.respond(w, s.voiceKeys(v), err)
+}
+
+// voiceKeys marks the live voice providers the app can use: a connected provider of that type
+// with an API key supplies it, so voice needs no key of its own. Keychain reads are cached
+// briefly, since clients poll settings every few seconds.
+func (s *Server) voiceKeys(v contract.Settings) contract.Settings {
+	// Any change to providers or settings checks again at once.
+	state := fmt.Sprint(v.Revision, s.settings.Providers())
+	s.voiceMu.Lock()
+	if state != s.voiceState || time.Since(s.voiceAt) > 30*time.Second {
+		s.voiceState = state
+		s.voiceFound = s.voiceFound[:0]
+		for _, kind := range []string{"gemini", "openai"} {
+			if s.speechKey(kind) != "" {
+				s.voiceFound = append(s.voiceFound, kind)
+			}
+		}
+		s.voiceAt = time.Now()
+	}
+	// Never null: clients decode speechKeys as a list.
+	found := append([]string{}, s.voiceFound...)
+	s.voiceMu.Unlock()
+	v.SpeechKeys = found
+	return v
 }

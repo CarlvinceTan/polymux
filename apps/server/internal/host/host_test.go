@@ -99,15 +99,18 @@ func TestHostAPIRequiresNativeValidPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name, body, origin string
-		status             int
+		name, body, origin, remote string
+		status                     int
 	}{
-		{"off", `{"enabled":false}`, "", 200}, {"missing", `{}`, "", 400}, {"unknown", `{"enabled":true,"command":"bad"}`, "", 400},
-		{"browser", `{"enabled":true}`, "https://untrusted.test", 403},
+		{"off", `{"enabled":false}`, "", "127.0.0.1:5000", 200}, {"missing", `{}`, "", "127.0.0.1:5000", 400},
+		{"unknown", `{"enabled":true,"command":"bad"}`, "", "127.0.0.1:5000", 400},
+		{"browser", `{"enabled":true}`, "https://untrusted.test", "127.0.0.1:5000", 403},
+		{"remote", `{"enabled":true}`, "", "100.64.0.24:5000", 403},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPatch, "/host", strings.NewReader(test.body))
 			r.Header.Set("Origin", test.origin)
+			r.RemoteAddr = test.remote
 			w := httptest.NewRecorder()
 			c.ServeHTTP(w, r)
 			if w.Code != test.status {

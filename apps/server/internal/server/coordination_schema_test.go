@@ -32,7 +32,8 @@ func TestPeerSchema(t *testing.T) {
 		{
 			name: "group",
 			tool: peerTool{handoff: true},
-			want: []string{"Members can speak again later", "six hops"},
+			want: []string{"Members can speak again when invited", "Group delegation limits apply", "@Name"},
+			omit: []string{"six hops", "Plain @mentions never hand off"},
 		},
 		{
 			name: "private group",

@@ -22,7 +22,13 @@ func sectionCall(t *testing.T, api *Server, owner, name, args string) (agent.Age
 	t.Helper()
 	state := &turnState{run: contract.Run{ID: "fixture-run", AgentID: owner, ConversationID: owner}, work: store.Work{Trigger: "message"}, store: api.Store}
 	ctx := context.WithValue(t.Context(), turnKey{}, state)
-	result, err := (&sectionTool{server: api, name: name}).Execute(ctx, "call", json.RawMessage(args), nil)
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(args), &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["action"] = name
+	merged, _ := json.Marshal(fields)
+	result, err := (&sectionTool{server: api}).Execute(ctx, "call", merged, nil)
 	if err != nil {
 		t.Fatal(name, err)
 	}
@@ -83,7 +89,7 @@ func TestSectionToolSequence(t *testing.T) {
 		}
 	}
 	updates, err := api.Store.SidebarEvents(t.Context(), 0, 100)
-	if err != nil || len(updates) != 5 || updates[1].Type != "sidebar.updated" || !slices.Equal(updates[1].ChangedThreadIDs, []string{"liam"}) || len(updates[4].Sections) != 0 || !slices.Equal(updates[4].ChangedThreadIDs, []string{"liam"}) {
+	if err != nil || len(updates) != 5 || updates[1].Type != "sidebar.updated" || !slices.Equal(updates[1].ChangedThreadIDs, []string{"liam"}) || len(updates[4].Sections) != 1 || updates[4].Sections[0].ID != store.UnassignedID || !slices.Equal(updates[4].ChangedThreadIDs, []string{"liam"}) {
 		t.Fatal("expected five ordered layout events", len(updates), err)
 	}
 	var actor, snapshot, returned string
@@ -167,7 +173,7 @@ func TestSectionToolRate(t *testing.T) {
 		t.Fatal("rate cap blocked harmless no-op", value)
 	}
 	after, err := api.Store.Sidebar(t.Context())
-	if err != nil || before.Cursor != after.Cursor || len(after.Sections) != 0 {
+	if err != nil || before.Cursor != after.Cursor || len(after.Sections) != 1 || after.Sections[0].ID != store.UnassignedID {
 		t.Fatal("rate rejection did not roll back", err)
 	}
 	result, value = sectionCall(t, api, "other", "create_section", `{"name":"Other agent"}`)
@@ -264,7 +270,7 @@ func TestSidebarStream(t *testing.T) {
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
 			t.Fatal(err)
 		}
-		if event.Seq != updates[0].Seq+1 || event.Type != "sidebar.updated" || len(event.Sections) != 2 {
+		if event.Seq != updates[0].Seq+1 || event.Type != "sidebar.updated" || len(event.Sections) != 3 {
 			t.Fatal("SSE cursor replayed or skipped sidebar update")
 		}
 		return

@@ -7,69 +7,10 @@
 	objects = {
 
 
-/* Readiness UI tests */
- B10000000000000000000001 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = PolymuxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
- B10000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = PolymuxUITests; sourceTree = "<group>"; };
- B10000000000000000000003 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
- B10000000000000000000004 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
- B10000000000000000000005 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
- B10000000000000000000006 = {isa = PBXContainerItemProxy; containerPortal = A10000000000000000000010; proxyType = 1; remoteGlobalIDString = A10000000000000000000009; remoteInfo = Polymux; };
- B10000000000000000000007 = {isa = PBXTargetDependency; target = A10000000000000000000009; targetProxy = B10000000000000000000006; };
- B10000000000000000000008 = {
-  isa = PBXNativeTarget;
-  buildConfigurationList = B10000000000000000000009;
-  buildPhases = (B10000000000000000000003, B10000000000000000000004, B10000000000000000000005);
-  buildRules = ();
-  dependencies = (B10000000000000000000007);
-  fileSystemSynchronizedGroups = (B10000000000000000000002);
-  name = PolymuxUITests;
-  productName = PolymuxUITests;
-  productReference = B10000000000000000000001;
-  productType = "com.apple.product-type.bundle.ui-testing";
- };
- B10000000000000000000009 = {isa = XCConfigurationList; buildConfigurations = (B10000000000000000000010, B10000000000000000000011); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
- B10000000000000000000010 = {
-  isa = XCBuildConfiguration;
-  buildSettings = {
-   ARCHS = arm64;
-   CODE_SIGN_STYLE = Automatic;
-   GENERATE_INFOPLIST_FILE = YES;
-   IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-   MACOSX_DEPLOYMENT_TARGET = 27.0;
-   PRODUCT_BUNDLE_IDENTIFIER = com.flarehq.polymux.uitests;
-   PRODUCT_NAME = "$(TARGET_NAME)";
-   SDKROOT = auto;
-   SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
-   SUPPORTS_MACCATALYST = NO;
-   SWIFT_VERSION = 5.0;
-   TARGETED_DEVICE_FAMILY = "1,2";
-   TEST_TARGET_NAME = Polymux;
-  };
-  name = Debug;
- };
- B10000000000000000000011 = {
-  isa = XCBuildConfiguration;
-  buildSettings = {
-   ARCHS = arm64;
-   CODE_SIGN_STYLE = Automatic;
-   GENERATE_INFOPLIST_FILE = YES;
-   IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-   MACOSX_DEPLOYMENT_TARGET = 27.0;
-   PRODUCT_BUNDLE_IDENTIFIER = com.flarehq.polymux.uitests;
-   PRODUCT_NAME = "$(TARGET_NAME)";
-   SDKROOT = auto;
-   SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
-   SUPPORTS_MACCATALYST = NO;
-   SWIFT_VERSION = 5.0;
-   TARGETED_DEVICE_FAMILY = "1,2";
-   TEST_TARGET_NAME = Polymux;
-  };
-  name = Release;
- };
-
 /* Begin PBXBuildFile section */
 		A10000000000000000000001 /* PolymuxKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000020 /* PolymuxKit */; };
 		A10000000000000000000021 /* AvatarKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000022 /* AvatarKit */; };
+		A10000000000000000000023 /* PolymuxUpdates in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000024 /* PolymuxUpdates */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -87,6 +28,7 @@
 			files = (
 				A10000000000000000000001 /* PolymuxKit in Frameworks */,
 				A10000000000000000000021 /* AvatarKit in Frameworks */,
+				A10000000000000000000023 /* PolymuxUpdates in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -97,7 +39,6 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000003 /* Sources */,
-				B10000000000000000000002 /* PolymuxUITests */,
 				A10000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -106,7 +47,6 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000002 /* Polymux.app */,
-				B10000000000000000000001 /* PolymuxUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -133,6 +73,7 @@
 			packageProductDependencies = (
 				A10000000000000000000020 /* PolymuxKit */,
 				A10000000000000000000022 /* AvatarKit */,
+				A10000000000000000000024 /* PolymuxUpdates */,
 			);
 			productName = Polymux;
 			productReference = A10000000000000000000002 /* Polymux.app */;
@@ -147,7 +88,6 @@
 				BuildIndependentTargetsInParallel = 1;
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
-					B10000000000000000000008 = {CreatedOnToolsVersion = 27.0; TestTargetID = A10000000000000000000009; };
 					A10000000000000000000009 = {
 						CreatedOnToolsVersion = 27.0;
 					};
@@ -170,7 +110,6 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				B10000000000000000000008 /* PolymuxUITests */,
 				A10000000000000000000009 /* Polymux */,
 			);
 		};
@@ -229,6 +168,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 23YB4896XA;
 				ENABLE_APP_SANDBOX = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -236,7 +176,9 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.flarehq.polymux.app;
@@ -263,6 +205,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 23YB4896XA;
 				ENABLE_APP_SANDBOX = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -270,7 +213,9 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.flarehq.polymux.app;
@@ -323,6 +268,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
 			productName = AvatarKit;
+		};
+		A10000000000000000000024 /* PolymuxUpdates */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
+			productName = PolymuxUpdates;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

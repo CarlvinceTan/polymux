@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -27,14 +30,14 @@ func TestGroupTargets(t *testing.T) {
 		name, text     string
 		explicit, want []string
 	}{
-		{"default", "Hello team", nil, []string{"ann"}},
+		{"default", "Hello team", nil, []string{"ann", "anna", "writer", "edit"}},
 		{"prefix", "Ask @Anna to review", nil, []string{"anna"}},
-		{"email", "contact@everyone name@Anna", nil, []string{"ann"}},
+		{"email", "contact@everyone name@Anna", nil, []string{"ann", "anna", "writer", "edit"}},
 		{"everyone", "@everyone review", nil, []string{"ann", "anna", "writer", "edit"}},
 		{"unicode", "@Research Writer ask @ÉDITEUR", nil, []string{"writer", "edit"}},
 		{"explicit", "Hello", []string{"edit", "outsider", "edit"}, []string{"edit"}},
 		{"combined", "Ask @Ann", []string{"edit"}, []string{"edit", "ann"}},
-		{"suffix", "Ask @Ann-more", nil, []string{"ann"}},
+		{"suffix", "Ask @Ann-more", nil, []string{"ann", "anna", "writer", "edit"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := groupTargets(test.text, members, test.explicit, true); !reflect.DeepEqual(got, test.want) {
@@ -44,6 +47,403 @@ func TestGroupTargets(t *testing.T) {
 	}
 	if got := groupTargets("No handoff", members, nil, false); len(got) != 0 {
 		t.Fatal("unmentioned reply caused an autonomous handoff")
+	}
+}
+
+func TestGroupPeers(t *testing.T) {
+	data, err := os.ReadFile("testdata/group-peers.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Members []contract.Agent
+		Cases   []struct {
+			Name, Text, Speaker string
+			Want                []string
+		}
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range fixture.Cases {
+		t.Run(test.Name, func(t *testing.T) {
+			got := []string{}
+			for _, peer := range groupPeers(test.Text, fixture.Members, test.Speaker) {
+				got = append(got, peer.ID)
+			}
+			if !slices.Equal(got, test.Want) {
+				t.Fatalf("peers %v want %v", got, test.Want)
+			}
+		})
+	}
+}
+
+func waitGroup(t *testing.T, api *Server, job string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var state string
+		if err := api.Store.DB.QueryRowContext(t.Context(), `SELECT state FROM jobs WHERE id=?`, job).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		if state == "done" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("group turn did not finish")
+}
+
+func TestGroupParticipation(t *testing.T) {
+	for _, test := range []struct {
+		name, text string
+		members    []string
+		pass       bool
+		want       []string
+		replies    int
+	}{
+		{"all pass", "Discuss", []string{"a", "b"}, true, []string{"a", "b"}, 0},
+		{"one pass", "Discuss", []string{"a", "b", "c"}, false, []string{"a", "b", "c"}, 3},
+		{"all sixteen", "Discuss", strings.Fields("a b c d e f g h i j k l m n o p"), false, strings.Fields("a b c d e f g h i j k l m n o p"), 16},
+		{"mention only", "@B check", []string{"a", "b"}, false, []string{"b"}, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var mu sync.Mutex
+			calls := []string{}
+			factory := &voiceFactory{script: func(_ context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+				mu.Lock()
+				calls = append(calls, d.Agent.ID)
+				mu.Unlock()
+				text := "Finding from " + d.Agent.ID
+				if test.pass {
+					text = "NO_RESPONSE"
+				}
+				return agentruntime.Result{Text: text}, nil
+			}}
+			api, _ := voiceTest(t, factory, func(config *Config) {
+				for _, id := range test.members[2:] {
+					config.Definitions = append(config.Definitions, agentruntime.Definition{Agent: contract.Agent{ID: id, Name: strings.ToUpper(id)}})
+				}
+			})
+			group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: test.members})
+			if err != nil {
+				t.Fatal(err)
+			}
+			botSend(t, api, group.ID, "discussion", test.text)
+			waitGroup(t, api, "discussion")
+			mu.Lock()
+			got := slices.Clone(calls)
+			mu.Unlock()
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("turns %v want %v", got, test.want)
+			}
+			messages, err := api.Store.Messages(t.Context(), group.ID, 0, 100)
+			if err != nil || len(messages) != test.replies+1 {
+				t.Fatalf("visible messages %d want %d: %v", len(messages), test.replies+1, err)
+			}
+			for _, message := range messages[1:] {
+				if message.Status != "done" || value(message.ReplyToID) != "discussion" {
+					t.Fatal("group reply lost its outcome or root source", message)
+				}
+			}
+			var active int
+			if err := api.Store.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM runs WHERE status IN('queued','running')`).Scan(&active); err != nil || active != 0 {
+				t.Fatal("group turn left unfinished runs", active, err)
+			}
+		})
+	}
+}
+
+func TestGroupRelayContext(t *testing.T) {
+	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, message contract.Message) (agentruntime.Result, error) {
+		state := ctx.Value(turnKey{}).(*turnState)
+		if d.Agent.ID == "a" {
+			return agentruntime.Result{Text: "@B review this finding"}, nil
+		}
+		for _, part := range message.Parts {
+			if value(part.Text) == "@A Perform the task once" {
+				return agentruntime.Result{}, fmt.Errorf("invitation replayed the user's instruction")
+			}
+		}
+		if state.work.FromAgentID != "a" || state.work.Hops != 1 || !strings.Contains(store.Text(message), `<untrusted_data source="peer a">`) {
+			return agentruntime.Result{}, fmt.Errorf("invitation lost its peer scope or depth")
+		}
+		return agentruntime.Result{Text: "Revised finding"}, nil
+	}}
+	api, _ := voiceTest(t, factory)
+	group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	botSend(t, api, group.ID, "context", "@A Perform the task once")
+	waitGroup(t, api, "context")
+	messages, err := api.Store.Messages(t.Context(), group.ID, 0, 100)
+	if err != nil || len(messages) != 3 || store.Text(messages[2]) != "Revised finding" {
+		t.Fatal("invitation repeated work or missed shared findings", messages, err)
+	}
+	for _, message := range messages {
+		if message.Status != "done" {
+			t.Fatal("group context check failed", message)
+		}
+	}
+}
+
+func TestGroupRelay(t *testing.T) {
+	for _, test := range []struct {
+		name, text string
+		replies    map[string]string
+		caps       GroupCaps
+		fail       bool
+		want       []string
+	}{
+		{
+			name: "initial pass before invitations", text: "Discuss",
+			replies: map[string]string{"a": "@C review this"}, caps: DefaultGroups(),
+			want: []string{"a", "b", "c", "d", "c"},
+		},
+		{
+			name: "ordered fanout", text: "@A review",
+			replies: map[string]string{"a": "@D then @C then @B"}, caps: GroupCaps{MaxDepth: 6, MaxPerRun: 2},
+			want: []string{"a", "d", "c"},
+		},
+		{
+			name: "bounded conversation loop", text: "@A review",
+			replies: map[string]string{"a": "@B review", "b": "@A review"}, caps: GroupCaps{MaxDepth: 2, MaxPerRun: 3},
+			want: []string{"a", "b", "a"},
+		},
+		{
+			name: "tunable depth beyond six", text: "@A review",
+			replies: map[string]string{"a": "@B review", "b": "@A review"}, caps: GroupCaps{MaxDepth: 8, MaxPerRun: 3},
+			want: []string{"a", "b", "a", "b", "a", "b", "a", "b", "a"},
+		},
+		{
+			name: "independent invitations", text: "Discuss",
+			replies: map[string]string{"a": "@C review A", "b": "@C review B"}, caps: DefaultGroups(),
+			want: []string{"a", "b", "c", "d", "c", "c"},
+		},
+		{
+			name: "delegation disabled", text: "@A review",
+			replies: map[string]string{"a": "@B review"}, caps: GroupCaps{MaxPerRun: 3}, want: []string{"a"},
+		},
+		{
+			name: "fanout disabled", text: "@A review",
+			replies: map[string]string{"a": "@B review"}, caps: GroupCaps{MaxDepth: 6}, want: []string{"a"},
+		},
+		{
+			name: "self mention", text: "@A review",
+			replies: map[string]string{"a": "@A finished"}, caps: DefaultGroups(), want: []string{"a"},
+		},
+		{
+			name: "failed replies do not invite", text: "@A review", fail: true,
+			replies: map[string]string{"a": "@B review"}, caps: DefaultGroups(), want: []string{"a"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var mu sync.Mutex
+			calls := []string{}
+			factory := &voiceFactory{script: func(_ context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+				mu.Lock()
+				calls = append(calls, d.Agent.ID)
+				mu.Unlock()
+				text := test.replies[d.Agent.ID]
+				if text == "" {
+					text = "Finding from " + d.Agent.ID
+				}
+				if test.fail {
+					return agentruntime.Result{Text: text}, errors.New("synthetic failure")
+				}
+				return agentruntime.Result{Text: text}, nil
+			}}
+			api, _ := voiceTest(t, factory, func(config *Config) {
+				config.GroupCaps = &test.caps
+				for _, id := range []string{"c", "d"} {
+					config.Definitions = append(config.Definitions, agentruntime.Definition{Agent: contract.Agent{ID: id, Name: strings.ToUpper(id)}})
+				}
+			})
+			group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b", "c", "d"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			botSend(t, api, group.ID, "relay", test.text)
+			waitGroup(t, api, "relay")
+			mu.Lock()
+			got := slices.Clone(calls)
+			mu.Unlock()
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("speakers %v want %v", got, test.want)
+			}
+			messages, err := api.Store.GroupMessages(t.Context(), "relay")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, message := range messages {
+				if value(message.ReplyToID) != "relay" {
+					t.Fatal("invited reply lost its root user message", message)
+				}
+			}
+			queue, err := api.Store.GroupQueue(t.Context(), group.ID, "relay")
+			if err != nil || len(queue) != 0 {
+				t.Fatal("group left an invitation queued", queue, err)
+			}
+		})
+	}
+}
+
+func TestGroupPosts(t *testing.T) {
+	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		for index := range 5 {
+			for _, tool := range d.ExtraTools {
+				if tool.Name() == "send_to_user" {
+					for range 2 {
+						if _, err := tool.Execute(ctx, fmt.Sprint(index), json.RawMessage(`{"text":"A new finding"}`), nil); err != nil {
+							return agentruntime.Result{}, err
+						}
+					}
+				}
+			}
+		}
+		return agentruntime.Result{Text: "Final result from " + d.Agent.ID}, nil
+	}}
+	api, _ := voiceTest(t, factory)
+	group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	botSend(t, api, group.ID, "posts", "Discuss")
+	waitGroup(t, api, "posts")
+	messages, err := api.Store.GroupMessages(t.Context(), "posts")
+	if err != nil || len(messages) != 12 {
+		t.Fatal("posts or final results were truncated by a message-count cap", len(messages), err)
+	}
+	finals := 0
+	for _, message := range messages {
+		if strings.HasPrefix(store.Text(message), "Final result from ") {
+			finals++
+		}
+		if value(message.ReplyToID) != "posts" {
+			t.Fatal("group post lost attribution", message)
+		}
+	}
+	if finals != 2 {
+		t.Fatal("progress messages suppressed a member's final result")
+	}
+}
+
+func TestGroupPostBudget(t *testing.T) {
+	var mu sync.Mutex
+	calls := []string{}
+	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		mu.Lock()
+		calls = append(calls, d.Agent.ID)
+		mu.Unlock()
+		for index := range 20 {
+			for _, tool := range d.ExtraTools {
+				if tool.Name() != "send_to_user" {
+					continue
+				}
+				args, _ := json.Marshal(map[string]string{"text": strings.Repeat("x", 8192)})
+				_, err := tool.Execute(ctx, fmt.Sprint(index), args, nil)
+				if err != nil {
+					return agentruntime.Result{}, err
+				}
+			}
+		}
+		return agentruntime.Result{Text: "NO_RESPONSE"}, nil
+	}}
+	api, _ := voiceTest(t, factory)
+	group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	botSend(t, api, group.ID, "budget", "Discuss")
+	waitGroup(t, api, "budget")
+	mu.Lock()
+	got := slices.Clone(calls)
+	mu.Unlock()
+	if !slices.Equal(got, []string{"a"}) {
+		t.Fatal("output budget did not stop later group work", got)
+	}
+	messages, err := api.Store.GroupMessages(t.Context(), "budget")
+	if err != nil || len(messages) <= 10 {
+		t.Fatal("a message-count cap replaced the output budget", len(messages), err)
+	}
+	bytes := 0
+	for _, message := range messages {
+		bytes += len(store.Text(message))
+	}
+	if bytes > 128<<10 {
+		t.Fatal("progress posts bypassed the shared output budget", bytes)
+	}
+}
+
+func TestGroupRelayIdempotence(t *testing.T) {
+	factory := &voiceFactory{script: func(_ context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		if d.Agent.ID == "a" {
+			return agentruntime.Result{Text: "@B review"}, nil
+		}
+		return agentruntime.Result{Text: "Reviewed"}, nil
+	}}
+	api, _ := voiceTest(t, factory)
+	group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	botSend(t, api, group.ID, "repeat", "@A review")
+	waitGroup(t, api, "repeat")
+	messages, err := api.Store.GroupMessages(t.Context(), "repeat")
+	if err != nil || len(messages) != 2 {
+		t.Fatal("initial invitation failed", messages, err)
+	}
+	work, err := api.Store.Work(t.Context(), "repeat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := api.Store.Run(t.Context(), *messages[0].RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := api.groupRelay(t.Context(), turnEnd{work: work, run: run, reply: messages[0]}); err != nil {
+		t.Fatal("repeated invitation was not idempotent", err)
+	}
+	var count int
+	if err := api.Store.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM deliveries`).Scan(&count); err != nil || count != 1 {
+		t.Fatal("repeated relay created another delivery", count, err)
+	}
+}
+
+func TestGroupQuestions(t *testing.T) {
+	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		state := ctx.Value(turnKey{}).(*turnState)
+		if strings.HasPrefix(state.work.Message.ID, "answer:") {
+			return agentruntime.Result{Text: "Answer handled by " + d.Agent.ID}, nil
+		}
+		if d.Agent.ID == "a" {
+			_, err := botCall(ctx, d, "ask_user", `{"question":"Which option?","options":[{"id":"yes","label":"Yes"},{"id":"no","label":"No"}]}`)
+			return agentruntime.Result{Text: "NO_RESPONSE"}, err
+		}
+		return agentruntime.Result{Text: "NO_RESPONSE"}, nil
+	}}
+	api, _ := voiceTest(t, factory)
+	group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	botSend(t, api, group.ID, "question", "Discuss")
+	waitGroup(t, api, "question")
+	messages, err := api.Store.GroupMessages(t.Context(), "question")
+	if err != nil || len(messages) != 1 || messages[0].Parts[0].Kind != "choice" {
+		t.Fatal("group did not pause the member waiting for an answer", messages, err)
+	}
+	card := messages[0]
+	if _, err := api.Store.AnswerChoice(t.Context(), group.ID, card.ID, contract.ChoiceAnswer{OptionID: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	waitGroup(t, api, "answer:"+card.ID)
+	replies, err := api.Store.GroupMessages(t.Context(), "answer:"+card.ID)
+	if err != nil || len(replies) != 1 || store.Text(replies[0]) != "Answer handled by a" {
+		t.Fatal("answer restarted group rounds or woke a different member", replies, err)
 	}
 }
 
@@ -138,7 +538,7 @@ func TestGroupMentionSpans(t *testing.T) {
 		{"separate-short", "@Alex Smith ask @Alex", []string{"long"}, []string{"long", "short"}},
 		{"typed-separate", "@Alex and @Alex Smith", nil, []string{"short"}},
 		{"unicode", "@ÉDITEUR Principal ask @Alex Smith", nil, []string{"unicode"}},
-		{"email", "person@Alex Smith", nil, []string{"short"}},
+		{"email", "person@Alex Smith", nil, []string{"short", "long", "same", "unicode"}},
 		{"everyone", "@everyone review", []string{"long"}, []string{"long", "short", "same", "unicode"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -322,10 +722,10 @@ func TestGroupHistory(t *testing.T) {
 			t.Fatalf("authors %v want %v", authors, want)
 		}
 	}
-	send("first", "Hello team", nil, []string{"writer"})
+	send("first", "Hello team", nil, []string{"writer", "edit", "ann"})
 	send("second", "@Éditeur review this", nil, []string{"edit"})
 	send("third", "@everyone compare", nil, []string{"writer", "edit", "ann"})
-	send("fourth", "handoff please", nil, []string{"writer", "edit"})
+	send("fourth", "handoff please", nil, []string{"writer", "edit", "ann"})
 	send("fifth", "Selected member", []string{"ann"}, []string{"ann"})
 	for _, definition := range definitions {
 		messages, err := api.Store.Messages(t.Context(), definition.Agent.ID, 0, 100)
@@ -392,7 +792,7 @@ func TestGroupHistory(t *testing.T) {
 	if err != nil || restored.AgentID != "edit" || !reflect.DeepEqual(restored.AgentIDs, []string{"edit", "ann"}) {
 		t.Fatalf("remaining group members/history were lost %+v %v", restored, err)
 	}
-	send("seventh", "Hello remaining team", nil, []string{"edit"})
+	send("seventh", "Hello remaining team", nil, []string{"edit", "ann"})
 	request, _ = http.NewRequest(http.MethodPatch, web.URL+"/threads/"+thread.ID, strings.NewReader(`{"title":"New trip"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response, err = http.DefaultClient.Do(request)
@@ -428,9 +828,14 @@ func TestGroupStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var group contract.Thread
-	json.NewDecoder(response.Body).Decode(&group)
+	body, _ := io.ReadAll(response.Body)
 	response.Body.Close()
+	// Clients decode runs as a required list.
+	if !strings.Contains(string(body), `"runs":[]`) {
+		t.Fatalf("new group = %s, want an empty runs list", body)
+	}
+	var group contract.Thread
+	json.Unmarshal(body, &group)
 	response, err = http.Post(web.URL+"/threads/"+group.ID+"/messages", "application/json", strings.NewReader(`{"id":"stopped","text":"@everyone hello","attachmentIDs":[]}`))
 	if err != nil {
 		t.Fatal(err)
@@ -457,7 +862,7 @@ func TestGroupStop(t *testing.T) {
 			sent := slices.Clone(f.sent)
 			f.mu.Unlock()
 			if len(sent) != 1 {
-				t.Fatal("stop started a subsequent member reply")
+				t.Fatal("stop started a further member reply")
 			}
 			return
 		}
@@ -559,6 +964,8 @@ func TestGroupMembership(t *testing.T) {
 				authors = append(authors, *message.AgentID)
 			}
 		}
+		slices.Sort(authors)
+		want = slices.Sorted(slices.Values(want))
 		if !reflect.DeepEqual(authors, want) {
 			t.Fatalf("turn %s authors %v want %v", id, authors, want)
 		}
@@ -569,7 +976,7 @@ func TestGroupMembership(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("active member reply did not start")
 	}
-	send("queued", "@everyone next", nil)
+	send("queued", "A new request", nil)
 	send("old-mention", "@Beta review this", []string{"b"})
 	send("named", "@Alpha review this", nil)
 	profileRequest(t, api, http.MethodPatch, "/agents/a", `{"name":"Delta","role":"","prompt":""}`, 200)
@@ -601,7 +1008,7 @@ func TestGroupMembership(t *testing.T) {
 	send("rejoined", "@everyone hello again", nil)
 	settled("rejoined", []string{"b", "c"})
 	send("new-first", "Hello", nil)
-	settled("new-first", []string{"c"})
+	settled("new-first", []string{"b", "c"})
 	updated = patch(group.ID, `{"title":"Renamed only"}`, 200)
 	if !reflect.DeepEqual(updated.AgentIDs, []string{"b", "c"}) {
 		t.Fatal("title-only update cleared members")
@@ -641,4 +1048,71 @@ func TestGroupMembership(t *testing.T) {
 	if agents, err := api.Store.Agents(t.Context()); err != nil || len(agents) != 3 {
 		t.Fatalf("membership removed global agents %+v %v", agents, err)
 	}
+}
+
+func TestGroupMembersTakeTurns(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(t.Context(), filepath.Join(dir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	f := &groupFactory{holdID: "both", started: make(chan struct{}, 1), release: make(chan struct{})}
+	api, err := New(t.Context(), db, Config{DataDir: dir, Definitions: []agentruntime.Definition{{Agent: contract.Agent{ID: "a", Name: "A"}}, {Agent: contract.Agent{ID: "b", Name: "B"}}}, Factory: f, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	web := httptest.NewServer(api)
+	defer web.Close()
+	response, err := http.Post(web.URL+"/threads", "application/json", strings.NewReader(`{"agentIDs":["a","b"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var group contract.Thread
+	json.NewDecoder(response.Body).Decode(&group)
+	response.Body.Close()
+	response, err = http.Post(web.URL+"/threads/"+group.ID+"/messages", "application/json", strings.NewReader(`{"id":"both","text":"@everyone hello","attachmentIDs":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	select {
+	case <-f.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first member did not start")
+	}
+	f.mu.Lock()
+	started := len(f.sent)
+	f.mu.Unlock()
+	if started != 1 {
+		t.Fatal("members started at the same time")
+	}
+	close(f.release)
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		messages, err := db.Messages(t.Context(), group.ID, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := 0
+		for _, message := range messages {
+			if message.Role == "assistant" && message.Status == "done" {
+				done++
+			}
+			if message.Role == "assistant" && message.Status == "error" {
+				t.Fatal("member reply failed")
+			}
+		}
+		if done == 2 {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.sent) < 2 || !strings.Contains(store.Text(f.sent[1].message), "Reply from a") {
+				t.Fatal("second member did not receive the first member's contribution")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("both members did not reply")
 }

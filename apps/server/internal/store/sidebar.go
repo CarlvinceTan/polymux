@@ -41,7 +41,7 @@ func validateSidebar(source SidebarImport) error {
 	threads := map[string]bool{}
 	for _, section := range source.Sections {
 		name, err := sectionName(section.Name)
-		if err != nil || name != section.Name || section.ID == "" || len(section.ID) > 128 || seen[section.ID] || section.ThreadIDs == nil || section.Collapsed == nil {
+		if err != nil || name != section.Name || (section.ID == "" || section.ID == UnassignedID) || len(section.ID) > 128 || seen[section.ID] || section.ThreadIDs == nil || section.Collapsed == nil {
 			return ErrSidebarImport
 		}
 		seen[section.ID] = true
@@ -94,7 +94,7 @@ func (s *Store) ImportSidebar(ctx context.Context, source SidebarImport, apply b
 		threads[id] = true
 	}
 	var extra int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sections`).Scan(&extra); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sections WHERE id<>?`, UnassignedID).Scan(&extra); err != nil {
 		return report, err
 	}
 	for _, section := range source.Sections {
@@ -102,7 +102,7 @@ func (s *Store) ImportSidebar(ctx context.Context, source SidebarImport, apply b
 			continue
 		}
 		var current string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM sections WHERE name=? COLLATE NOCASE`, section.Name).Scan(&current)
+		err := tx.QueryRowContext(ctx, `SELECT id FROM sections WHERE id<>? AND name=? COLLATE NOCASE`, UnassignedID, section.Name).Scan(&current)
 		if err == nil && current != section.ID {
 			return report, ErrSectionTaken
 		}
@@ -242,7 +242,7 @@ func (s *Store) ImportSidebar(ctx context.Context, source SidebarImport, apply b
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sidebar_sources(source,data,updated_at) VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at`, source.Source, string(data), Now()); err != nil {
 		return report, err
 	}
-	if err := sidebarCommit(ctx, tx, before, "Imported sidebar layout", nil, nil); err != nil {
+	if err := s.sidebarCommit(ctx, tx, before, "Imported sidebar layout", nil, nil); err != nil {
 		return report, err
 	}
 	report.Applied = true

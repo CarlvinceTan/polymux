@@ -1,87 +1,119 @@
 import SwiftUI
 import PolymuxKit
 
+/// A group chat's side panel: its name and members. Adding agents and a member's profile open
+/// as pages within the panel, with Back, rather than as modals.
 struct GroupEditor: View {
     let thread: PolymuxKit.Thread
     let session: AppSession
-    @Environment(\.panelClose) private var dismiss
+    var jump: (String) -> Void = { _ in }
     @State private var name: String
+    @State private var searching = false
     @State private var selected: [String]
-    @State private var lead: String
     @State private var query = ""
     @State private var picking = false
     @State private var profiling: Agent?
     @State private var hovered: String?
     @State private var hoveredRemove: String?
-    @FocusState private var nameFocused: Bool
     @FocusState private var searchFocused: Bool
+    @Environment(\.panelClose) private var close
 
-    init(thread: PolymuxKit.Thread, session: AppSession) {
+    init(thread: PolymuxKit.Thread, session: AppSession, jump: @escaping (String) -> Void = { _ in }) {
         self.thread = thread
         self.session = session
+        self.jump = jump
         _name = State(initialValue: thread.title)
         _selected = State(initialValue: thread.participantIDs)
-        _lead = State(initialValue: thread.leadAgentID ?? thread.agentID)
     }
 
     var body: some View {
-        PanelView(picking ? "Add agents" : "Edit chat", enabled: profiling == nil, onClose: { dismiss() },
-                  onBack: picking ? { finishPicker() } : nil,
-                  header: picking ? AnyView(pickerHeader) : nil) {
-            if picking { picker }
-            else { profile }
-        } actions: {
-            if picking {
-                Button("Done", action: finishPicker)
+        Group {
+            if let profiling {
+                ProfileView(agent: profiling, session: session, inspector: true, onBack: { self.profiling = nil })
+                    .id(profiling.id)
+            } else if picking {
+                VStack(spacing: 8) {
+                    pickerHeader.padding(.horizontal, 16).padding(.top, 8)
+                    picker
+                }
+            } else {
+                details
             }
         }
-        .panel(item: $profiling) { agent in
-            ProfileView(agent: agent, session: session)
+        #if os(macOS)
+        .panelBar(value: picking, enabled: profiling == nil) {
+            HStack(spacing: 8) {
+                if picking {
+                    PanelNavButton(symbol: "chevron.left", label: "Back", action: finishPicker)
+                }
+                Spacer(minLength: 0)
+                if !picking {
+                    PanelNavButton(symbol: "magnifyingglass", label: "Search this chat") { searching = true }
+                }
+                PanelNavButton(symbol: "xmark", label: "Close side panel") { close() }
+            }
         }
-        .panelDismiss(enabled: profiling == nil, onClose: { dismiss() })
+        #else
+        .toolbar {
+            if picking || profiling != nil {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Back", systemImage: "chevron.left") {
+                        if profiling != nil { profiling = nil } else { finishPicker() }
+                    }
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Search this chat", systemImage: "magnifyingglass") { searching = true }
+                }
+            }
+        }
+        #endif
+        .panel(isPresented: $searching) {
+            SearchPanel(session: session, scope: thread.id, close: { searching = false }) { result in
+                searching = false
+                jump(result.messageID ?? result.threadID)
+            }
+        }
+        #if os(iOS)
+        .navigationTitle(profiling != nil ? "Profile" : picking ? "Add agents" : "Chat")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(picking || profiling != nil)
+        #endif
         .onChange(of: name) { _, _ in save(delay: .milliseconds(550)) }
-        .onChange(of: selected) { _, _ in
-            if !selected.contains(lead) { lead = selected.first ?? "" }
-            save(delay: .zero)
-        }
-        .onChange(of: lead) { _, _ in save(delay: .zero) }
+        .onChange(of: selected) { _, _ in save(delay: .zero) }
     }
 
-    private var profile: some View {
-        Form {
-            Section("Chat") {
-                TextField("Name", text: $name)
-                    .autocorrectionDisabled().focused($nameFocused)
-                    .accessibilityLabel("Chat name")
-                Picker("Default responder", selection: $lead) {
-                    ForEach(selected, id: \.self) { id in Text(memberName(id)).tag(id) }
-                }
-            }
-            .panelRow()
-            Section {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88, maximum: 120), spacing: 16)],
-                          alignment: .center, spacing: 16) {
-                    ForEach(selected, id: \.self) { id in
-                        memberTile(id)
+    private var details: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                VStack(spacing: 8) {
+                    AvatarStack(members: members, isGroup: true, size: 100, height: 100)
+                    InlineText(text: $name, prompt: "Chat name", font: .title2.weight(.semibold))
+                        .autocorrectionDisabled()
+                    if let issue = hint ?? session.sidebar.editIssues[thread.id] {
+                        // Edits resend on their own once the server answers.
+                        Text(issue).font(.footnote).foregroundStyle(.muted)
                     }
-                    addTile
                 }
-                .padding(.vertical, 8)
-            } header: {
-                Text("Members")
-            } footer: {
-                if let hint { Text(hint).font(.footnote).foregroundStyle(.secondary) }
-            }
-            .panelRow()
-            if let issue = session.sidebar.editIssues[thread.id] {
-                Section {
-                    Text(issue).foregroundStyle(.secondary).textSelection(.enabled)
-                    Button("Try again") { session.sidebar.retryEdit(thread.id) }
+                .frame(maxWidth: .infinity)
+                SetupGroup("Members") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 88, maximum: 120), spacing: 16)],
+                              alignment: .center, spacing: 16) {
+                        ForEach(selected, id: \.self) { id in
+                            memberTile(id)
+                        }
+                        addTile
+                    }
+                    .padding(.top, 8)
                 }
-                .panelRow()
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .formStyle(.grouped)
+    }
+
+    private var members: [Agent] {
+        selected.compactMap { id in session.sidebar.agents.first { $0.id == id } }
     }
 
     private func memberTile(_ id: String) -> some View {
@@ -158,7 +190,7 @@ struct GroupEditor: View {
     private var pickerHeader: some View {
         HStack(spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(.muted)
                 TextField("Search agents", text: $query)
                     .textFieldStyle(.plain).autocorrectionDisabled()
                     .focused($searchFocused).onSubmit(chooseFirst)
@@ -175,8 +207,8 @@ struct GroupEditor: View {
         List {
             if selected.count == 16 {
                 Text("A chat can have up to 16 agents.")
-                    .font(.caption).foregroundStyle(.secondary).listRowSeparator(.hidden)
-                    .panelRow()
+                    .font(.caption).foregroundStyle(.muted).listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
             }
             ForEach(contacts) { agent in
                 Button { choose(agent) } label: {
@@ -192,16 +224,16 @@ struct GroupEditor: View {
                 .listRowSeparator(agent.id == contacts.last?.id ? .hidden : .automatic, edges: .bottom)
                 .alignmentGuide(.listRowSeparatorTrailing) { $0[.trailing] }
                 .accessibilityLabel("Add \(memberName(agent.id)) to chat")
-                .panelRow()
+                .listRowBackground(Color.clear)
             }
             if contacts.isEmpty {
                 Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                      ? "All available agents are already in this chat." : "No matching agents.")
-                    .foregroundStyle(.secondary).listRowSeparator(.hidden)
-                    .panelRow()
+                    .foregroundStyle(.muted).listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
             }
         }
-        .listStyle(.plain).contentMargins(.horizontal, 0, for: .scrollContent)
+        .listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent)
     }
 
     private var rowInset: EdgeInsets {
@@ -245,7 +277,6 @@ struct GroupEditor: View {
 
     private func openPicker() {
         guard selected.count < 16 else { return }
-        nameFocused = false
         query = ""
         picking = true
     }
@@ -280,10 +311,9 @@ struct GroupEditor: View {
         guard validMembers else { return }
         var updated = session.sidebar.threads.first { $0.id == thread.id } ?? thread
         let title = validName ? cleanName : updated.title
-        guard title != updated.title || selected != updated.participantIDs || lead != updated.leadAgentID else { return }
+        guard title != updated.title || selected != updated.participantIDs else { return }
         updated.title = title
         updated.agentIDs = selected
-        updated.leadAgentID = lead
         Task { await session.sidebar.edit(updated, delay: delay) }
     }
 }

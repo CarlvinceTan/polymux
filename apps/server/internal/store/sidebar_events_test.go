@@ -2,9 +2,10 @@ package store
 
 import (
 	"encoding/json"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"reflect"
 	"testing"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
 func TestSidebarRollback(t *testing.T) {
@@ -67,7 +68,7 @@ func TestSidebarReplayRestart(t *testing.T) {
 	}
 	defer s.Close()
 	events, err := s.SidebarEvents(t.Context(), before.Cursor, 100)
-	if err != nil || len(events) != 1 || events[0].Seq <= before.Cursor || events[0].Sections[0].ID != "one" {
+	if err != nil || len(events) != 1 || events[0].Seq <= before.Cursor || len(events[0].Sections) != 2 || events[0].Sections[1].ID != "one" {
 		t.Fatal("layout event did not survive restart", err)
 	}
 	after, err := s.Sidebar(t.Context())
@@ -103,7 +104,7 @@ func TestSidebarCreationRollback(t *testing.T) {
 	}
 	agent := contract.Agent{ID: "rejected-agent", Name: "Rejected"}
 	definition := json.RawMessage(`{"agent":{"id":"rejected-agent","name":"Rejected"},"prompt":"Fixture instructions"}`)
-	if err := s.CreateDefinition(t.Context(), agent, definition, nil, new("one")); err == nil {
+	if err := s.CreateDefinition(t.Context(), agent, definition, nil, new("one"), contract.Agent{}); err == nil {
 		t.Fatal("agent creation ignored event failure")
 	}
 	after, err := s.Sidebar(t.Context())

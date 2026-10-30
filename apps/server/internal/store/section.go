@@ -12,6 +12,9 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
+const UnassignedID = "__unassigned__"
+
+var ErrSectionFixed = errors.New("unassigned cannot be renamed or removed")
 var ErrSectionName = errors.New("invalid section name")
 var ErrSectionLimit = errors.New("section limit reached")
 var ErrSectionTaken = errors.New("section name already exists")
@@ -27,7 +30,8 @@ func (s *Store) migrateSections(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS sections(id TEXT PRIMARY KEY,name TEXT NOT NULL,position REAL NOT NULL,collapsed INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
-CREATE UNIQUE INDEX IF NOT EXISTS sections_name ON sections(name COLLATE NOCASE);
+DROP INDEX IF EXISTS sections_name;
+CREATE UNIQUE INDEX IF NOT EXISTS sections_custom_name ON sections(name COLLATE NOCASE) WHERE id<>'__unassigned__';
 CREATE TABLE IF NOT EXISTS sidebar_sources(source TEXT PRIMARY KEY,data TEXT NOT NULL,updated_at TEXT NOT NULL);`); err != nil {
 		return err
 	}
@@ -49,6 +53,9 @@ CREATE TABLE IF NOT EXISTS sidebar_sources(source TEXT PRIMARY KEY,data TEXT NOT
 	if err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO sections(id,name,position,created_at,updated_at) VALUES(?,'Unassigned',(SELECT COALESCE(max(position)+1,0) FROM sections),?,?)`, UnassignedID, Now(), Now()); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -60,7 +67,7 @@ func sectionName(name string) (string, error) {
 	return name, nil
 }
 
-const sectionSelect = `SELECT s.id,s.name,s.position,s.collapsed,s.created_at,s.updated_at,(SELECT count(*) FROM threads t WHERE t.section_id=s.id) FROM sections s`
+const sectionSelect = `SELECT s.id,s.name,s.position,s.collapsed,s.created_at,s.updated_at,(SELECT count(*) FROM threads t WHERE t.pinned=0 AND (t.section_id=s.id OR (s.id='__unassigned__' AND t.section_id IS NULL))) FROM sections s`
 
 func sectionScan(row interface{ Scan(...any) error }) (contract.Section, error) {
 	var section contract.Section
@@ -86,6 +93,9 @@ func (s *Store) Sections(ctx context.Context) ([]contract.Section, error) {
 }
 
 func (s *Store) CreateSection(ctx context.Context, id, name string, after *string) (contract.Section, bool, error) {
+	if id == UnassignedID {
+		return contract.Section{}, false, ErrSectionFixed
+	}
 	name, err := sectionName(name)
 	if err != nil {
 		return contract.Section{}, false, err
@@ -99,7 +109,7 @@ func (s *Store) CreateSection(ctx context.Context, id, name string, after *strin
 	if err != nil {
 		return contract.Section{}, false, err
 	}
-	old, err := sectionScan(tx.QueryRowContext(ctx, sectionSelect+` WHERE s.name=? COLLATE NOCASE`, name))
+	old, err := sectionScan(tx.QueryRowContext(ctx, sectionSelect+` WHERE s.id<>? AND s.name=? COLLATE NOCASE`, UnassignedID, name))
 	if err == nil {
 		return old, false, nil
 	}
@@ -107,7 +117,7 @@ func (s *Store) CreateSection(ctx context.Context, id, name string, after *strin
 		return old, false, err
 	}
 	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sections`).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sections WHERE id<>?`, UnassignedID).Scan(&count); err != nil {
 		return old, false, err
 	}
 	if count >= 30 {
@@ -126,10 +136,13 @@ func (s *Store) CreateSection(ctx context.Context, id, name string, after *strin
 	if err != nil {
 		return old, false, err
 	}
-	return section, true, sidebarCommit(ctx, tx, before, "Created section 📁 "+section.Name, nil, nil)
+	return section, true, s.sidebarCommit(ctx, tx, before, "Created section 📁 "+section.Name, nil, nil)
 }
 
 func (s *Store) UpdateSection(ctx context.Context, id string, name *string, collapsed *bool) (contract.Section, error) {
+	if id == UnassignedID && name != nil {
+		return contract.Section{}, ErrSectionFixed
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return contract.Section{}, err
@@ -150,7 +163,7 @@ func (s *Store) UpdateSection(ctx context.Context, id string, name *string, coll
 			return section, err
 		}
 		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sections WHERE id<>? AND name=? COLLATE NOCASE`, id, section.Name).Scan(&count); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sections WHERE id<>? AND id<>? AND name=? COLLATE NOCASE`, id, UnassignedID, section.Name).Scan(&count); err != nil {
 			return section, err
 		}
 		if count != 0 {
@@ -171,10 +184,13 @@ func (s *Store) UpdateSection(ctx context.Context, id string, name *string, coll
 	if oldName != section.Name {
 		label = "Renamed section 📁 " + oldName + " → " + section.Name
 	}
-	return section, sidebarCommit(ctx, tx, before, label, nil, nil)
+	return section, s.sidebarCommit(ctx, tx, before, label, nil, nil)
 }
 
 func (s *Store) DeleteSection(ctx context.Context, id string) ([]string, error) {
+	if id == UnassignedID {
+		return nil, ErrSectionFixed
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -198,7 +214,7 @@ func (s *Store) DeleteSection(ctx context.Context, id string) ([]string, error) 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sections WHERE id=?`, id); err != nil {
 		return nil, err
 	}
-	return ids, sidebarCommit(ctx, tx, before, fmt.Sprintf("Deleted section 📁 %s · %d chats returned", section.Name, len(ids)), &section, ids)
+	return ids, s.sidebarCommit(ctx, tx, before, fmt.Sprintf("Deleted section 📁 %s · %d chats returned", section.Name, len(ids)), &section, ids)
 }
 
 type Placement struct {
@@ -218,6 +234,9 @@ type SidebarOrder struct {
 }
 
 func (s *Store) PlaceThread(ctx context.Context, id string, request Placement) error {
+	if request.SectionID != nil && *request.SectionID == UnassignedID {
+		request.SectionID = nil
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -260,10 +279,13 @@ func (s *Store) PlaceThread(ctx context.Context, id string, request Placement) e
 		}
 	}
 	if request.BeforeID != nil || request.AfterID != nil {
+		kind := "chats"
 		if pinned {
-			return ErrPlacement
+			kind = "pins"
+			section = nil
 		}
-		if err := reorderTx(ctx, tx, SidebarOrder{Kind: "chats", ID: id, SectionID: section, BeforeID: request.BeforeID, AfterID: request.AfterID}); err != nil {
+		order := SidebarOrder{Kind: kind, ID: id, SectionID: section, BeforeID: request.BeforeID, AfterID: request.AfterID}
+		if err := reorderTx(ctx, tx, order); err != nil {
 			return err
 		}
 	}
@@ -287,7 +309,7 @@ func (s *Store) PlaceThread(ctx context.Context, id string, request Placement) e
 			label = "Moved " + title + " to " + value.Name
 		}
 	}
-	return sidebarCommit(ctx, tx, before, label, nil, nil)
+	return s.sidebarCommit(ctx, tx, before, label, nil, nil)
 }
 
 func (s *Store) ReorderSidebar(ctx context.Context, request SidebarOrder) (float64, error) {
@@ -306,13 +328,15 @@ func (s *Store) ReorderSidebar(ctx context.Context, request SidebarOrder) (float
 	var order float64
 	if request.Kind == "sections" {
 		err = tx.QueryRowContext(ctx, `SELECT position FROM sections WHERE id=?`, request.ID).Scan(&order)
+	} else if request.Kind == "pins" {
+		err = tx.QueryRowContext(ctx, `SELECT pin_order FROM threads WHERE id=?`, request.ID).Scan(&order)
 	} else {
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(section_order,0) FROM threads WHERE id=?`, request.ID).Scan(&order)
 	}
 	if err != nil {
 		return 0, err
 	}
-	return order, sidebarCommit(ctx, tx, before, "Reordered "+request.Kind, nil, nil)
+	return order, s.sidebarCommit(ctx, tx, before, "Reordered "+request.Kind, nil, nil)
 }
 
 func sidebarIDs(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
@@ -333,6 +357,9 @@ func sidebarIDs(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]s
 }
 
 func reorderTx(ctx context.Context, tx *sql.Tx, request SidebarOrder) error {
+	if request.SectionID != nil && *request.SectionID == UnassignedID {
+		request.SectionID = nil
+	}
 	if request.BeforeID != nil && request.AfterID != nil {
 		return ErrAnchor
 	}
@@ -343,6 +370,11 @@ func reorderTx(ctx context.Context, tx *sql.Tx, request SidebarOrder) error {
 			return ErrAnchor
 		}
 		ids, err = sidebarIDs(ctx, tx, `SELECT id FROM sections ORDER BY position,id`)
+	} else if request.Kind == "pins" {
+		if request.SectionID != nil {
+			return ErrAnchor
+		}
+		ids, err = sidebarIDs(ctx, tx, `SELECT id FROM threads WHERE pinned=1 ORDER BY pin_order,id`)
 	} else if request.Kind == "chats" {
 		ids, err = sidebarIDs(ctx, tx, `SELECT id FROM threads WHERE pinned=0 AND section_id IS ? ORDER BY section_order,CASE id WHEN 'assistant' THEN 0 ELSE 1 END,id`, request.SectionID)
 	} else {
@@ -378,6 +410,8 @@ func reorderTx(ctx context.Context, tx *sql.Tx, request SidebarOrder) error {
 	for position, id := range ids {
 		if request.Kind == "sections" {
 			_, err = tx.ExecContext(ctx, `UPDATE sections SET position=?,updated_at=? WHERE id=?`, position, Now(), id)
+		} else if request.Kind == "pins" {
+			_, err = tx.ExecContext(ctx, `UPDATE threads SET pin_order=? WHERE id=?`, position, id)
 		} else {
 			_, err = tx.ExecContext(ctx, `UPDATE threads SET section_order=? WHERE id=?`, position, id)
 		}

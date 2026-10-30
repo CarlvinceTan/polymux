@@ -3,13 +3,14 @@ package providers
 import (
 	"bytes"
 	"fmt"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/settings"
 	"log"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/settings"
 )
 
 type fakeStore map[string]string
@@ -24,7 +25,7 @@ func TestP2KeysNeverPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := fakeStore{}
-	r := Registry{s, f}
+	r := Registry{Settings: s, Secrets: f}
 	var logs bytes.Buffer
 	old := log.Writer()
 	log.SetOutput(&logs)
@@ -33,6 +34,7 @@ func TestP2KeysNeverPersisted(t *testing.T) {
 	if err := r.Save(want); err != nil {
 		t.Fatal(err)
 	}
+	want = []Provider{want[1], want[0]}
 	const key = "p2-secret-never-persist"
 	if err := r.SetKey("p2", key); err != nil {
 		t.Fatal(err)
@@ -63,7 +65,7 @@ func TestP2KeysNeverPersisted(t *testing.T) {
 		t.Fatal("metadata did not round-trip")
 	}
 	got := s.Providers()
-	got[0].Models[0].Tags[0] = "changed"
+	got[1].Models[0].Tags[0] = "changed"
 	if !reflect.DeepEqual(s.Providers(), want) {
 		t.Fatal("snapshot aliases state")
 	}
@@ -73,7 +75,7 @@ func TestRegistryValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := Registry{s, fakeStore{}}
+	r := Registry{Settings: s, Secrets: fakeStore{}}
 	for _, p := range [][]Provider{{{ID: ""}}, {{ID: "a"}, {ID: "a"}}, {{ID: "a", Headers: map[string]string{"Authorization": "secret"}}}} {
 		if r.Save(p) == nil {
 			t.Fatal("invalid metadata accepted")

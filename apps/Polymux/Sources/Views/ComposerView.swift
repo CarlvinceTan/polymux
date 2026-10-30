@@ -3,23 +3,37 @@ import PhotosUI
 import UniformTypeIdentifiers
 import PolymuxKit
 
-struct DraftFile: Identifiable {
+nonisolated struct DraftFile: Identifiable, Sendable {
     let id = UUID()
     let url: URL
     let kind: UTType
+
+    /// The file as the chat's send queue takes it.
+    var local: LocalFile {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+        let category = kind.conforms(to: .image) ? AttachmentKind.image : kind.conforms(to: .movie) ? AttachmentKind.video
+            : kind.conforms(to: .audio) ? AttachmentKind.audio : AttachmentKind.file
+        return LocalFile(id: id.uuidString, url: url, name: url.lastPathComponent, kind: category,
+                         mimeType: kind.preferredMIMEType ?? "application/octet-stream", size: size)
+    }
 }
 
 struct ComposerView: View {
     let client: APIClient
+    let draft: DraftStore
     let isVoiceActive: Bool
-    let send: (String, [Attachment], ReplyContext?, [String]) async -> Void
+    let send: (String, [LocalFile], ReplyContext?, [String]) async -> Void
     var reply: ReplyContext? = nil
     var agentName = ""
     var clearReply: () -> Void = {}
-    var drops: Binding<[URL]> = .constant([])
+    var restoreReply: (ReplyContext?) -> Void = { _ in }
+    var drops: Binding<[DroppedFile]> = .constant([])
     var members: [Agent] = []
     var drafting: (Bool) -> Void = { _ in }
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var motion: Animation? { reduceMotion ? nil : .easeOut(duration: 0.2) }
     @State private var dictation = DictationInput()
     @State private var dictationDraft = DictationDraft()
     @State private var ignoresDictation = false
@@ -29,33 +43,60 @@ struct ComposerView: View {
     @State private var text = ""
     @State private var selection: TextSelection?
     @State private var insertion = NSRange(location: 0, length: 0)
-    @State private var files: [DraftFile] = []
+    @Binding var files: [DraftFile]
     @State private var photos: [PhotosPickerItem] = []
     @State private var attachments = false
     @State private var importing = false
     @State private var pickingPhotos = false
     @State private var camera = false
-    @State private var uploading = false
-    @State private var loadingPhotos = false
+    @State private var imports = 0
+    private var loadingPhotos: Bool { imports > 0 }
     @State private var error: String?
-    @State private var unsent = false
     @State private var draftTask: Task<Void, Never>?
     @FocusState private var focused: Bool
+
+    private var currentDraft: ChatDraft {
+        ChatDraft(text: text, mentions: mentions.map {
+            .init(id: $0.id, text: $0.text, location: $0.range.location, length: $0.range.length)
+        }, reply: reply)
+    }
+
+    private func applyDraft() {
+        let saved = draft.value
+        if text != saved.text { text = saved.text }
+        mentions = saved.mentions.compactMap {
+            guard $0.location >= 0, $0.length >= 0, $0.location <= saved.text.utf16.count,
+                  $0.length <= saved.text.utf16.count - $0.location else { return nil }
+            let range = NSRange(location: $0.location, length: $0.length)
+            guard Range(range, in: saved.text) != nil else { return nil }
+            return MentionToken(id: $0.id, text: $0.text, range: range)
+        }
+        if reply != saved.reply { restoreReply(saved.reply) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             controls
-            if unsent {
-                Button("Unsent", systemImage: "arrow.clockwise", action: submit)
-                    .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
-                    .accessibilityLabel("Unsent. Resend message")
-                    .padding(.leading, controlSize + 12)
-            } else if let error {
-                Text(error).font(.caption2).foregroundStyle(.secondary).padding(.leading, controlSize + 12)
+            if let error = error ?? draft.issue {
+                Text(error).font(.caption2).foregroundStyle(.muted).padding(.leading, controlSize + 12)
             }
         }
-        .disabled(uploading || loadingPhotos)
+        .animation(motion, value: recording)
+        .animation(motion, value: error)
         .task { await dictation.refresh() }
+        .task {
+            await Task.yield()
+            if !isVoiceActive { focused = true }
+        }
+        .task(id: scenePhase == .background) {
+            await draft.restore()
+            applyDraft()
+            if scenePhase != .background { await draft.watch() }
+        }
+        .onChange(of: draft.value) { _, _ in applyDraft() }
+        .onChange(of: currentDraft) { _, value in
+            draft.edit(value, after: value.text.isEmpty ? .zero : .milliseconds(400))
+        }
         .onChange(of: isVoiceActive) { _, active in
             focused = !active
             if active {
@@ -65,6 +106,7 @@ struct ComposerView: View {
         }
         .onDisappear {
             draftTask?.cancel()
+            draft.flush()
             drafting(false)
             Task { await stopDictation() }
         }
@@ -80,11 +122,17 @@ struct ComposerView: View {
             if !value, !recording { drafting(false) }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { Task { await stopDictation() } }
+            if phase == .background {
+                draft.flush()
+                Task { await stopDictation() }
+            }
             if phase == .active { Task { await dictation.refresh() } }
         }
         .onChange(of: dictation.active) { _, active in
-            if !active { dictationDraft.stop() }
+            if !active {
+                dictationDraft.stop()
+                if !isVoiceActive { focused = true }
+            }
         }
         .onChange(of: recording) { _, active in
             drafting(active)
@@ -100,52 +148,64 @@ struct ComposerView: View {
         .onChange(of: reply?.messageID) { _, value in
             if value != nil { focused = true }
         }
-        .onChange(of: drops.wrappedValue) { _, urls in
-            guard !urls.isEmpty else { return }
+        .onChange(of: drops.wrappedValue, initial: true) { _, items in
+            guard !items.isEmpty else { return }
             drops.wrappedValue = []
             error = nil
-            for url in urls {
-                do { try addFile(url) }
-                catch { self.error = error.localizedDescription }
+            for item in items {
+                switch item {
+                case let .file(url):
+                    let kind = UTType(filenameExtension: url.pathExtension) ?? .data
+                    withAnimation(motion) { files.append(DraftFile(url: url, kind: kind)) }
+                case .failed:
+                    error = "Couldn’t attach that file."
+                }
             }
             focused = true
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            do {
-                for url in try result.get() { try addFile(url) }
-            } catch { self.error = error.localizedDescription }
+            imports += 1
+            Task {
+                defer { imports -= 1 }
+                do {
+                    for url in try result.get() { try await addFile(url) }
+                } catch { self.error = "Couldn’t attach that file." }
+            }
         }
         .photosPicker(isPresented: $pickingPhotos, selection: $photos, maxSelectionCount: 8, matching: .any(of: [.images, .videos]))
         .onChange(of: photos) { _, items in
             guard !items.isEmpty else { return }
-            loadingPhotos = true
+            imports += 1
             Task {
                 do {
                     for item in items {
                         let type = item.supportedContentTypes.first ?? .data
                         if let data = try await item.loadTransferable(type: Data.self) {
-                            let file = FileManager.default.temporaryDirectory
-                                .appending(path: "Photo-\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "bin")")
-                            try data.write(to: file, options: .atomic)
-                            withAnimation { files.append(DraftFile(url: file, kind: type)) }
+                            let file = try await Task.detached(priority: .userInitiated) {
+                                let file = FileManager.default.temporaryDirectory
+                                    .appending(path: "Photo-\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "bin")")
+                                try data.write(to: file, options: .atomic)
+                                return file
+                            }.value
+                            withAnimation(motion) { files.append(DraftFile(url: file, kind: type)) }
                         }
                     }
                     photos = []
-                } catch { self.error = error.localizedDescription }
-                loadingPhotos = false
+                } catch { self.error = "Couldn’t attach that photo." }
+                imports -= 1
             }
         }
         #if os(macOS)
         .panel(isPresented: $camera) {
             CameraView { url in
-                withAnimation { files.append(DraftFile(url: url, kind: .jpeg)) }
+                withAnimation(motion) { files.append(DraftFile(url: url, kind: .jpeg)) }
                 camera = false
             }
         }
         #else
         .sheet(isPresented: $camera) {
             CameraView { url in
-                withAnimation { files.append(DraftFile(url: url, kind: .jpeg)) }
+                withAnimation(motion) { files.append(DraftFile(url: url, kind: .jpeg)) }
                 camera = false
             }
             .ignoresSafeArea()
@@ -173,7 +233,7 @@ struct ComposerView: View {
                             .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                             #endif
                     }
-                    .padding(6).frame(minWidth: 190)
+                    .padding(6).frame(minWidth: 160)
                     .presentationCompactAdaptation(.popover)
                 }
             }
@@ -187,21 +247,22 @@ struct ComposerView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Cancel reply", systemImage: "xmark") { clearReply() }
                                 .labelStyle(.iconOnly).buttonStyle(.plain)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.muted)
                         }
+                        .transition(.opacity)
                     }
                     if !files.isEmpty {
                         ScrollView(.horizontal) {
                             HStack(alignment: .center, spacing: 10) {
                                 ForEach(files) { file in
                                     DraftPreview(file: file) {
-                                        withAnimation { files.removeAll { $0.id == file.id } }
+                                        withAnimation(motion) { files.removeAll { $0.id == file.id } }
                                     }
                                 }
                             }
                         }
                         .scrollIndicators(.hidden)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.opacity)
                     }
                     TextField("Message", text: draftText, selection: $selection, axis: .vertical)
                         .lineLimit(1...7).textFieldStyle(.plain)
@@ -211,8 +272,21 @@ struct ComposerView: View {
                             if let first = mentionChoices.first { mention(first) }
                             else { submit() }
                         }
+                        .onKeyPress(keys: [.return], phases: .down) { key in
+                            guard key.modifiers.contains(.shift) else { return .ignored }
+                            let range: Range<String.Index>
+                            if case let .selection(bounds) = selection?.indices { range = bounds }
+                            else { range = text.endIndex..<text.endIndex }
+                            var updated = text
+                            updated.replaceSubrange(range, with: "\n")
+                            let offset = text.distance(from: text.startIndex, to: range.lowerBound) + 1
+                            draftText.wrappedValue = updated
+                            selection = TextSelection(insertionPoint: text.index(text.startIndex, offsetBy: offset))
+                            return .handled
+                        }
                         .accessibilityLabel("Message")
                         .anchorPreference(key: MentionAnchor.self, value: .bounds) { $0 }
+                        .transaction { $0.animation = nil }
                 }
             }
             .padding(.horizontal, 15).padding(.vertical, isExpanded ? 12 : 7)
@@ -233,21 +307,10 @@ struct ComposerView: View {
                 }
             }
             .zIndex(1)
-            if uploading || loadingPhotos {
+            if loadingPhotos {
                 ProgressView().controlSize(.small).frame(width: controlSize, height: controlSize)
             } else {
-                Button { toggleDictation() } label: {
-                    Image(systemName: recording ? "pause.fill" : dictation.denied ? "mic.slash.fill" : "mic.fill")
-                        .font(.system(size: 15))
-                        .frame(width: controlSize, height: controlSize)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: Circle())
-                .inputAccessory()
-                .accessibilityLabel(recording ? "Pause dictation" : "Start dictation")
-                .accessibilityValue(dictation.denied ? "Permission denied" : recording ? "Listening" : "")
-                .disabled(dictation.stopping || isVoiceActive)
+                // One button on the right, mirroring + on the left: send once there's something to send, otherwise dictate.
                 if hasContent && !recording {
                     Button { submit() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 15, weight: .semibold))
@@ -257,9 +320,25 @@ struct ComposerView: View {
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Circle())
                     .accessibilityLabel("Send message")
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                } else {
+                    Button { toggleDictation() } label: {
+                        Image(systemName: recording ? "pause.fill" : dictation.active ? "xmark" : dictation.denied ? "mic.slash.fill" : "mic.fill")
+                            .font(.system(size: 15))
+                            .frame(width: controlSize, height: controlSize)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .inputAccessory()
+                    .accessibilityLabel(recording ? "Pause dictation" : dictation.active ? "Cancel dictation" : "Start dictation")
+                    .accessibilityValue(dictation.denied ? "Permission denied" : recording ? "Listening" : dictation.active ? "Preparing" : "")
+                    .disabled(dictation.stopping || isVoiceActive)
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
             }
         }
+        .animation(motion, value: hasContent)
     }
 
     private var mentionQuery: (start: String.Index, term: String)? {
@@ -333,11 +412,11 @@ struct ComposerView: View {
                 else { Color.clear.frame(width: 8) }
                 HStack(spacing: 8) {
                     if member.id == "everyone" {
-                        Text("All members").font(.caption).foregroundStyle(.secondary)
+                        Text("All members").font(.caption).foregroundStyle(.muted)
                             .lineLimit(1).layoutPriority(-1)
                     }
                     if first {
-                        Image(systemName: "return").font(.caption).foregroundStyle(.secondary)
+                        Image(systemName: "return").font(.caption).foregroundStyle(.muted)
                             .fixedSize().accessibilityHidden(true)
                     }
                 }
@@ -399,7 +478,7 @@ struct ComposerView: View {
     }
 
     private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty }
-    private var recording: Bool { dictation.active && !dictation.stopping }
+    private var recording: Bool { dictation.ready && !dictation.stopping }
     private var isExpanded: Bool { !recording && (!files.isEmpty || reply != nil) }
 
     private var controlSize: CGFloat {
@@ -410,19 +489,21 @@ struct ComposerView: View {
         #endif
     }
 
-    private func addFile(_ url: URL) throws {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let source = (url as NSURL).filePathURL ?? url
-        guard try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory != true else {
-            throw CocoaError(.fileReadUnsupportedScheme)
-        }
-        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let copy = folder.appending(path: source.lastPathComponent)
-        try FileManager.default.copyItem(at: source, to: copy)
-        let kind = UTType(filenameExtension: source.pathExtension) ?? .data
-        withAnimation { files.append(DraftFile(url: copy, kind: kind)) }
+    private func addFile(_ url: URL) async throws {
+        let file = try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let source = (url as NSURL).filePathURL ?? url
+            guard try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory != true else {
+                throw CocoaError(.fileReadUnsupportedScheme)
+            }
+            let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let copy = folder.appending(path: source.lastPathComponent)
+            try FileManager.default.copyItem(at: source, to: copy)
+            return DraftFile(url: copy, kind: UTType(filenameExtension: source.pathExtension) ?? .data)
+        }.value
+        withAnimation(motion) { files.append(file) }
     }
 
     private func toggleDictation() {
@@ -450,8 +531,8 @@ struct ComposerView: View {
                 let cursor = String.Index(utf16Offset: result.cursor, in: text)
                 selection = TextSelection(insertionPoint: cursor)
             }
-        } failure: { failure in
-            error = dictation.denied ? "Allow microphone and speech recognition in Settings." : failure.localizedDescription
+        } failure: { _ in
+            error = dictation.denied ? "Allow microphone and speech recognition in Settings." : "Dictation isn’t available right now."
         }
     }
 
@@ -477,7 +558,7 @@ struct ComposerView: View {
 
     private func submit() {
         if dictation.active { ignoresDictation = true; Task { await stopDictation() } }
-        guard hasContent, !uploading, !loadingPhotos else { return }
+        guard hasContent, !loadingPhotos else { return }
         let draft = text
         let pending = files
         let quote = reply
@@ -485,21 +566,18 @@ struct ComposerView: View {
             error = "A mentioned agent left this chat. Remove or reselect the mention before sending."
             return
         }
-        uploading = true
-        error = nil
-        unsent = false
+        // The bubble appears at once and uploads run behind it, so the composer is free straight away.
+        withAnimation(motion) {
+            error = nil
+            text = ""
+            mentions = []
+            files.removeAll { file in pending.contains { $0.id == file.id } }
+            clearReply()
+        }
+        focused = true
         Task {
-            do {
-                var attachments: [Attachment] = []
-                for file in pending { attachments.append(try await client.upload(file: file.url)) }
-                text = ""
-                mentions = []
-                let submitted = Set(pending.map(\.id))
-                withAnimation { files.removeAll { submitted.contains($0.id) } }
-                await send(draft, attachments, quote, targets)
-            } catch { unsent = true }
-            uploading = false
-            focused = true
+            let local = await Task.detached(priority: .userInitiated) { pending.map(\.local) }.value
+            await send(draft, local, quote, targets)
         }
     }
 }
@@ -651,10 +729,12 @@ struct CameraView: UIViewControllerRepresentable {
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
             guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.85) else { return }
             let url = FileManager.default.temporaryDirectory.appending(path: "Camera-\(UUID().uuidString.prefix(8)).jpg")
-            do {
-                try data.write(to: url)
-                parent.capture(url)
-            } catch { parent.dismiss() }
+            Task {
+                do {
+                    try await Task.detached(priority: .userInitiated) { try data.write(to: url) }.value
+                    parent.capture(url)
+                } catch { parent.dismiss() }
+            }
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
@@ -665,34 +745,30 @@ struct CameraView: UIViewControllerRepresentable {
 private struct Waveform: View {
     let level: Float
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var samples: [Sample] = []
+    @State private var samples: [Float] = []
     @State private var volume: Float = 0
     @State private var envelope: Float = 0
-    @State private var smooth: Float = 0
-
-    private struct Sample: Identifiable {
-        let id = UUID()
-        let level: Float
-    }
 
     var body: some View {
         GeometryReader { geometry in
-            let count = max(1, Int(ceil(geometry.size.width / 5.5)) + 1)
+            let count = max(1, Int(ceil(geometry.size.width / 5.5)))
             HStack(spacing: 2.5) {
-                ForEach(samples) { sample in
+                ForEach(0..<count, id: \.self) { index in
+                    let sample = index < samples.count ? samples[index] : 0
                     Capsule().fill(Color.primary)
-                        .frame(width: 3, height: 5 + 13 * CGFloat(sample.level))
-                        .transition(.identity)
+                        .frame(width: 3, height: 3 + 15 * CGFloat(sample))
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
             .clipped()
             .task(id: count) {
+                samples = Array(samples.prefix(count))
+                    + Array(repeating: 0, count: max(0, count - samples.count))
                 while !Task.isCancelled {
-                    envelope += (volume * 0.65 - envelope) * 0.4
-                    smooth += (envelope - smooth) * 0.4
+                    let target = sqrt(max(0, (volume - 0.02) / 0.98))
+                    envelope += (target - envelope) * (target > envelope ? 0.85 : 0.5)
                     withAnimation(reduceMotion ? nil : .linear(duration: 0.06)) {
-                        samples.insert(Sample(level: smooth), at: 0)
+                        samples.insert(envelope, at: 0)
                         if samples.count > count { samples.removeLast(samples.count - count) }
                     }
                     do { try await Task.sleep(for: .milliseconds(60)) }

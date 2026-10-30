@@ -8,6 +8,7 @@ tags:
   - Comparisons
   - Personal AI
 published: true
+updated: 2026-10-24
 ---
 
 > **Version note, October 2026:** This August comparison describes the earlier Electron app. Polymux's current source is a native SwiftUI app backed by a Go agent server, without the tabbed Hub, Drive, and Browser workspace described below. See the [current introduction](/docs/) and [installation guide](/docs/installation/). The comparison is retained as a dated article, not current setup guidance.

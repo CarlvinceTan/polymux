@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"slices"
+	"strings"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
@@ -13,74 +13,46 @@ import (
 	"github.com/MichaelKinsy/PiG/ai"
 )
 
-var sidebarNames = []string{"list_sections", "create_section", "rename_section", "delete_section", "pin_chat", "unpin_chat", "move_chat", "reorder"}
-
-func sidebarToolName(name string) bool { return slices.Contains(sidebarNames, name) }
+// sidebarActions are what organize_chats can do, one tool rather than eight.
+var sidebarActions = []string{"list_sections", "create_section", "rename_section", "delete_section", "pin_chat", "unpin_chat", "move_chat", "reorder"}
 
 func (s *Server) sidebarTools() []agent.AgentTool {
-	tools := make([]agent.AgentTool, 0, len(sidebarNames))
-	for _, name := range sidebarNames {
-		tools = append(tools, &sectionTool{server: s, name: name})
-	}
-	return tools
+	return []agent.AgentTool{&sectionTool{server: s}}
 }
 
 type sectionTool struct {
 	server *Server
-	name   string
 }
 
-func (t *sectionTool) Name() string                         { return t.name }
-func (*sectionTool) Label() string                          { return "Organize sidebar" }
+func (*sectionTool) Name() string                           { return "organize_chats" }
+func (*sectionTool) Label() string                          { return "Organize chats" }
 func (*sectionTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
-func (t *sectionTool) ToolClass() string {
-	if t.name == "list_sections" {
-		return "read"
-	}
-	return "reversible"
-}
+func (*sectionTool) ToolClass() string                      { return "reversible" }
 func (*sectionTool) Description() string {
-	return "Manage this user's saved sidebar sections, chat pins, and placement. List sections first to reuse stable IDs. Pinning removes a chat from its section; unpin a chat before moving it. Deleting a section returns its chats to the main list and keeps every conversation. Repeating an existing state is a no-op. Ordering uses a before/after ID in the same list, never a raw order number. Changes sync across devices and are limited to thirty actual mutations per minute per agent."
+	return "Organize the user's chat list: sections, pins and placement. list_sections first to get stable IDs. Unassigned is built in and cannot be renamed or deleted. " +
+		"create_section needs name (after_section_id optional); rename_section needs section_id and name; delete_section needs section_id and returns its chats to the main list. " +
+		"pin_chat/unpin_chat need chat_id; move_chat needs chat_id and section_id (null for the main list), and a pinned chat must be unpinned first. " +
+		"reorder needs kind (sections or chats), id, and before_id or after_id in the same list. Repeating a state is a no-op; at most thirty changes a minute."
 }
 func (t *sectionTool) Schema() ai.ToolSchema {
-	text := func() map[string]any { return map[string]any{"type": "string"} }
-	properties := map[string]any{}
-	required := []string{}
-	add := func(name string, needed bool) {
-		properties[name] = text()
-		if needed {
-			required = append(required, name)
-		}
+	text := map[string]any{"type": "string"}
+	properties := map[string]any{
+		"action":           map[string]any{"type": "string", "enum": sidebarActions},
+		"name":             text,
+		"section_id":       map[string]any{"type": []string{"string", "null"}},
+		"after_section_id": text,
+		"chat_id":          text,
+		"kind":             map[string]any{"type": "string", "enum": []string{"sections", "chats"}},
+		"id":               text,
+		"before_id":        text,
+		"after_id":         text,
 	}
-	switch t.name {
-	case "create_section":
-		add("name", true)
-		add("after_section_id", false)
-	case "rename_section":
-		add("section_id", true)
-		add("name", true)
-	case "delete_section":
-		add("section_id", true)
-	case "pin_chat", "unpin_chat":
-		add("chat_id", true)
-	case "move_chat":
-		add("chat_id", true)
-		properties["section_id"] = map[string]any{"type": []string{"string", "null"}}
-		required = append(required, "section_id")
-	case "reorder":
-		properties["kind"] = map[string]any{"type": "string", "enum": []string{"sections", "chats"}}
-		required = append(required, "kind")
-		add("id", true)
-		add("section_id", false)
-		add("before_id", false)
-		add("after_id", false)
-	}
-	return ai.ToolSchema{Name: t.name, Description: t.Description(), Parameters: map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}}
+	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": []string{"action"}}}
 }
 
 func (t *sectionTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
-	if state == nil || state.work.Trigger == "created" || state.work.Trigger == "review" {
+	if state == nil || state.work.Trigger == contract.RunTriggerCreated || state.work.Trigger == contract.RunTriggerReview {
 		return agent.AgentToolResult{}, errors.New("no sidebar scope")
 	}
 	member, err := t.server.Store.Member(ctx, state.run.AgentID, state.run.ConversationID)
@@ -91,6 +63,7 @@ func (t *sectionTool) Execute(ctx context.Context, _ string, args json.RawMessag
 		return agent.AgentToolResult{}, store.ErrMembers
 	}
 	var input struct {
+		Action         string          `json:"action"`
 		Name           string          `json:"name"`
 		SectionID      json.RawMessage `json:"section_id"`
 		AfterSectionID *string         `json:"after_section_id"`
@@ -112,7 +85,7 @@ func (t *sectionTool) Execute(ctx context.Context, _ string, args json.RawMessag
 	ctx, change := store.SidebarActor(ctx, state.run.AgentID, state.run.ID)
 	var result map[string]any
 	s := t.server.Store
-	switch t.name {
+	switch input.Action {
 	case "list_sections":
 		sections, err := s.Sections(ctx)
 		if err != nil {
@@ -124,6 +97,9 @@ func (t *sectionTool) Execute(ctx context.Context, _ string, args json.RawMessag
 		}
 		return toolResult(out)
 	case "create_section":
+		if input.Name == "" {
+			return sidebarFailure("invalid_name", "Give the section a name.")
+		}
 		var section contract.Section
 		var created bool
 		section, created, err = s.CreateSection(ctx, ID(), input.Name, input.AfterSectionID)
@@ -146,7 +122,10 @@ func (t *sectionTool) Execute(ctx context.Context, _ string, args json.RawMessag
 		}
 		result = map[string]any{"deleted": *sectionID, "returned_chat_ids": ids}
 	case "pin_chat", "unpin_chat":
-		pinned := t.name == "pin_chat"
+		if input.ChatID == "" {
+			return sidebarFailure("not_found", "Choose a chat ID.")
+		}
+		pinned := input.Action == "pin_chat"
 		err = s.PlaceThread(ctx, input.ChatID, store.Placement{Pinned: &pinned})
 		result = map[string]any{"chat_id": input.ChatID, "pinned": pinned}
 	case "move_chat":
@@ -160,7 +139,7 @@ func (t *sectionTool) Execute(ctx context.Context, _ string, args json.RawMessag
 		order, err = s.ReorderSidebar(ctx, store.SidebarOrder{Kind: input.Kind, ID: input.ID, SectionID: sectionID, BeforeID: input.BeforeID, AfterID: input.AfterID})
 		result = map[string]any{"id": input.ID, "order": order}
 	default:
-		return agent.AgentToolResult{}, errors.New("unknown sidebar tool")
+		return sidebarFailure("invalid_action", "Choose one of: "+strings.Join(sidebarActions, ", ")+".")
 	}
 	if err != nil {
 		switch {
@@ -170,6 +149,8 @@ func (t *sectionTool) Execute(ctx context.Context, _ string, args json.RawMessag
 			return sidebarFailure("section_not_found", "The section could not be found.")
 		case errors.Is(err, store.ErrChatPinned):
 			return sidebarFailure("chat_pinned", "Unpin the chat before moving it.")
+		case errors.Is(err, store.ErrSectionFixed):
+			return sidebarFailure("fixed_section", "Unassigned cannot be renamed or removed.")
 		case errors.Is(err, store.ErrSectionName):
 			return sidebarFailure("invalid_name", "Use a section name within forty characters.")
 		case errors.Is(err, store.ErrSectionTaken):

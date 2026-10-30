@@ -15,6 +15,8 @@ public struct NetworkInfo: Codable, Sendable {
         public let name: String
         /// The name someone chose for it; empty when unset.
         public var label: String?
+        /// False while an invite for it hasn't been used yet.
+        public var paired: Bool?
 
         public var title: String {
             if let label, !label.isEmpty { label } else { name }
@@ -25,10 +27,14 @@ public struct NetworkInfo: Codable, Sendable {
     public var devices: [Device]
     /// The device making the request, when the server identifies it.
     public let current: String?
+    /// The device on the server's own machine.
+    public let host: String?
+    /// Devices online now: the server or a connected app.
+    public let online: [String]?
 }
 
 
-/// A one-time pairing for another device: the direct address, its credential and, when the
+/// A one-time pairing for another device: the direct address, its invitation and, when the
 /// server runs a tunnel, a ticket that reaches it from other networks.
 public struct Invite: Codable, Sendable, Equatable {
     public let url: String
@@ -54,9 +60,18 @@ public struct Invite: Codable, Sendable, Equatable {
     /// Reads a pairing link back; nil for anything that is not one.
     public init?(link: URL) {
         guard link.scheme == "polymux", link.host == "connect",
+              link.user == nil, link.password == nil, link.port == nil,
+              link.path.isEmpty, link.fragment == nil,
               let items = URLComponents(url: link, resolvingAgainstBaseURL: false)?.queryItems,
+              items.filter({ $0.name == "url" }).count == 1,
+              items.filter({ $0.name == "token" }).count == 1,
+              items.filter({ $0.name == "ticket" }).count <= 1,
               let url = items.first(where: { $0.name == "url" })?.value,
-              let token = items.first(where: { $0.name == "token" })?.value else { return nil }
+              ServerURL.parse(url) != nil,
+              let token = items.first(where: { $0.name == "token" })?.value,
+              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !token.contains(where: { $0.isWhitespace || $0.isNewline || $0 == "\0" }) else { return nil }
+        if let ticket = items.first(where: { $0.name == "ticket" }), ticket.value?.isEmpty != false { return nil }
         self.init(url: url, token: token, ticket: items.first(where: { $0.name == "ticket" })?.value)
     }
 }

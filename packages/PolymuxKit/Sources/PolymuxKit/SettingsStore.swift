@@ -10,9 +10,21 @@ public final class SettingsStore {
     @ObservationIgnored private var retryPatch: SettingsPatch?
     public private(set) var isConnected = false
     @ObservationIgnored private let client: APIClient
+    @ObservationIgnored private let cache: LocalCacheActor?
     @ObservationIgnored private var writer: Task<Void, Never>?
+    @ObservationIgnored private var resend: Task<Void, Never>?
 
-    public init(client: APIClient) { self.client = client }
+    /// With a cache, the last settings seen show straight away and while offline.
+    public init(client: APIClient, cache: LocalCacheActor? = nil) {
+        self.client = client
+        self.cache = cache
+    }
+
+    /// Shows the cached settings until the server answers.
+    public func restore() async {
+        guard remote == nil, let cached: Settings = await cache?.snapshot("settings"), remote == nil else { return }
+        remote = cached
+    }
 
     public var value: Settings? {
         guard var value = remote else { return nil }
@@ -31,7 +43,7 @@ public final class SettingsStore {
         } catch {
             if Task.isCancelled { return }
             isConnected = false
-            syncError = error.localizedDescription
+            syncError = error.isOffline ? nil : "Couldn’t load settings."
         }
     }
 
@@ -49,7 +61,8 @@ public final class SettingsStore {
         defer { writer = nil }
         while !pending.isEmpty {
             let batch = pending
-            var patch = SettingsPatch()
+            // A change still waiting to retry rides along, so a later write can't drop it.
+            var patch = retryPatch ?? SettingsPatch()
             for (_, update) in batch { patch.merge(update) }
             do {
                 accept(try await client.updateSettings(patch))
@@ -58,22 +71,24 @@ public final class SettingsStore {
                 retryPatch = nil
             } catch {
                 isConnected = false
-                writeError = error.localizedDescription
-                retryPatch = patch
+                // Only a lost connection retries; a change the server refused would fail again.
+                writeError = error.isTransient ? "Not saved yet. It will try again." : error.reason(or: "Couldn’t save that setting.")
+                if error.isTransient { retryPatch = patch }
+                if error.isTransient { scheduleRetry() }
             }
             let ids = Set(batch.map(\.0))
             pending.removeAll { ids.contains($0.0) }
         }
     }
 
-    public func setKey(_ key: String?, provider: String) async throws {
-        do {
-            accept(try await client.speechKey(provider: provider, key: key))
-            isConnected = true
-            writeError = nil
-        } catch {
-            writeError = error.localizedDescription
-            throw error
+    /// Sends a change that couldn’t get through again after a pause, until it does.
+    private func scheduleRetry() {
+        guard resend == nil else { return }
+        resend = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, !Task.isCancelled else { return }
+            self.resend = nil
+            if self.retryPatch != nil { await self.retry() }
         }
     }
 
@@ -95,33 +110,25 @@ public final class SettingsStore {
     private func accept(_ value: Settings) {
         guard value.revision >= (remote?.revision ?? 0) else { return }
         remote = value
+        if let cache { Task { await cache.saveSnapshot("settings", value) } }
     }
 }
 
 extension SettingsPatch {
+    /// Overlays this patch's set fields on the value. Going through JSON covers every field the contract defines.
     func apply(to value: inout Settings) {
-        if let appearance { value.appearance = appearance }
-        if let sidebarWidth { value.sidebarWidth = sidebarWidth }
-        if let voiceMode { value.voiceMode = voiceMode }
-        if let liveProvider { value.liveProvider = liveProvider }
-        if let liveModel { value.liveModel = liveModel }
-        if let liveVoice { value.liveVoice = liveVoice }
-        if let textProvider { value.textProvider = textProvider }
-        if let textModel { value.textModel = textModel }
-        if let voicePrompt { value.voicePrompt = voicePrompt }
-        if let voiceLanguage { value.voiceLanguage = voiceLanguage }
+        if let applied: Settings = try? Self.overlay(value, self) { value = applied }
     }
 
+    /// Later edits win field by field.
     mutating func merge(_ value: SettingsPatch) {
-        appearance = value.appearance ?? appearance
-        sidebarWidth = value.sidebarWidth ?? sidebarWidth
-        voiceMode = value.voiceMode ?? voiceMode
-        liveProvider = value.liveProvider ?? liveProvider
-        liveModel = value.liveModel ?? liveModel
-        liveVoice = value.liveVoice ?? liveVoice
-        textProvider = value.textProvider ?? textProvider
-        textModel = value.textModel ?? textModel
-        voicePrompt = value.voicePrompt ?? voicePrompt
-        voiceLanguage = value.voiceLanguage ?? voiceLanguage
+        if let merged: SettingsPatch = try? Self.overlay(self, value) { self = merged }
+    }
+
+    private static func overlay<Base: Codable>(_ base: Base, _ patch: SettingsPatch) throws -> Base {
+        var fields = try JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any] ?? [:]
+        let changes = try JSONSerialization.jsonObject(with: JSONEncoder().encode(patch)) as? [String: Any] ?? [:]
+        fields.merge(changes) { _, new in new }
+        return try JSONDecoder().decode(Base.self, from: JSONSerialization.data(withJSONObject: fields))
     }
 }

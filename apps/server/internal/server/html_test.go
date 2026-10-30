@@ -308,16 +308,14 @@ func TestCardIssues(t *testing.T) {
 		source string
 		want   string
 	}{
-		{"button", `<lg-button>Save</lg-button>`, ""},
-		{"controls", `<lg-switch checked>Notify</lg-switch><lg-slider value="40" label="Volume"></lg-slider>`, ""},
-		{"segmented", `<lg-segmented value="day"><button value="day">Day</button><button value="week">Week</button></lg-segmented>`, ""},
-		{"panel", `<lg-panel style="--lg-surface:transparent"><lg-button>Go</lg-button></lg-panel>`, ""},
+		{"controls", `<button class="primary">Save</button><input type="checkbox" class="switch"><input type="range">`, ""},
+		{"segmented", `<div class="segmented"><button value="day">Day</button><button value="week">Week</button></div>`, ""},
+		{"chart", `<div class="chart"><canvas id="c"></canvas></div><script>new Chart(c,{type:'line'})</script>`, ""},
 		{"document", testHTML, ""},
 		{"data image", `<img src="data:image/png;base64,AAAA">`, ""},
 		{"fragment link", `<a href="#part">Details</a>`, ""},
 		{"fragment filter", `<svg><filter id="f"></filter></svg><div style="filter:url(#f)"></div>`, ""},
-		{"unknown component", `<lg-toggle>On</lg-toggle>`, "unknown <lg-toggle>"},
-		{"page component", `<lg-navbar></lg-navbar>`, "<lg-navbar> is page-level"},
+		{"glass component", `<lg-button>Save</lg-button>`, "<lg-button> does not exist"},
 		{"remote image", `<img src="https://example.com/a.png">`, "<img src> must be a data: URL"},
 		{"remote script", `<script src="https://example.com/a.js"></script>`, "<script src> is blocked"},
 		{"data script", `<script src="data:text/javascript,x"></script>`, "<script src> is blocked"},
@@ -327,8 +325,8 @@ func TestCardIssues(t *testing.T) {
 		{"remote css", `<div style="background:url(https://example.com/a.png)"></div>`, "external url()"},
 		{"import", `<style>@import url(data:text/css,x);</style>`, "@import is blocked"},
 		{"duplicate id", `<span id="a"></span><span id="a"></span>`, `duplicate id "a"`},
-		{"segmented text", `<lg-segmented><span>Day</span></lg-segmented>`, "<lg-segmented> options"},
-		{"segmented short", `<lg-segmented><button value="day">Day</button></lg-segmented>`, "two or more"},
+		{"segmented text", `<div class="segmented"><span>Day</span></div>`, ".segmented options"},
+		{"segmented short", `<div class="row segmented"><button value="day">Day</button></div>`, "two or more"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			issues := strings.Join(cardIssues(test.source), "; ")

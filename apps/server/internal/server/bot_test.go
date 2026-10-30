@@ -195,9 +195,10 @@ func TestBotManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	var bot contract.Agent
-	if err := json.Unmarshal([]byte(created.Text()), &bot); err != nil || bot.ID == "" || bot.Name != "New Bot" {
+	if err := json.Unmarshal([]byte(created.Text()), &bot); err != nil || bot.ID == "" {
 		t.Fatal("blank-name hire failed", bot, err)
 	}
+	assertName(t, bot.Name)
 	botReply(t, api, bot.ID, "Hello there")
 	awaitRun(t, api.Store, store.NewRun("initial:"+bot.ID, bot.ID, bot.ID, "message").ID, "completed")
 	if _, err := (&agentTool{server: api, action: "delete"}).Execute(ctx, "remove", json.RawMessage(`{}`), nil); err == nil {

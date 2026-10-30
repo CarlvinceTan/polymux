@@ -1,59 +1,81 @@
 ---
-title: Installation
+title: Install
 slug: installation
-description: Choose between native macOS and iOS builds and older Electron desktop releases.
-section: Getting started
+description: Install the server and client on one Mac, or pair clients on other Macs.
+section: Guides
 sectionOrder: 1
-order: 3
+order: 2
 published: true
 ---
 
-# Installation
+# Install
 
-Polymux has two distinct app generations. These docs cover the native SwiftUI app and Go server in the current repository, not the earlier Electron workspace.
+Native downloads are published on the [Releases page](/releases/). Until a release is available, installation builds from source. Older Electron downloads are a different app.
 
-## Check the build you are installing
+## Requirements
 
-The website's download buttons currently select packages from the **Electron release line**. A newer native build may have a separate release tag. Inspect the assets and notes on [GitHub Releases](https://github.com/CarlvinceTan/polymux/releases) rather than assuming the main download button installs the interface shown here.
+- **Client:** macOS 27 and Xcode 27.
+- **Server:** Go 1.27.3, Git, and a C compiler. Xcode’s command-line tools provide the compiler on macOS.
 
-| App generation | Targets | Interface |
-| --- | --- | --- |
-| Native source | macOS 27 and iOS 27 | Agent conversations, groups, and native settings |
-| Earlier Electron releases | macOS, Windows, and Linux packages | Tabbed workspace with Hub, Drive, and Browser |
+## Get the source
 
-The native Xcode project's version is 0.4.0. That source version is not a promise that a signed installer or iOS distribution is available for every target. Historical release notes describe their own build, not current native feature coverage.
-
-## Connect to a server
-
-The native app needs a running Go agent server. After opening the app, use **Settings → Agent server** to enter its URL. The server must be reachable, authenticated, and configured with model access for agent replies.
-
-For local macOS development with the default server data directory, the app discovers the server's owner-only local credential. The default backend address is `http://127.0.0.1:7337`. Backend routes require Bearer authentication, including history and streams.
-
-Changing the URL alone does not configure remote authentication. The native Settings panel has no general remote chat-token entry field. Remote and iOS deployment require an authenticated client setup beyond this local quickstart.
-
-Use a trusted network and the authentication setup appropriate to your deployment. Do not expose an unauthenticated agent server to the public internet. See [Quickstart](/docs/quickstart/).
-
-## macOS permissions
-
-Notifications, microphone input, and speech recognition have separate permission requirements. Enable only the features you intend to use. The native app does not require the older Hub's iMessage database access to show agent conversations.
-
-A denied permission can be changed in **System Settings → Privacy & Security**. Restart Polymux after enabling access if macOS does not apply it immediately.
-
-## Updates
-
-Check the release notes and distribution channel for the build you installed. The native Settings panel does not have the older **General → Check for updates** screen. Do not treat an Electron updater as a native-app upgrade path.
-
-## Build from source
-
-The [public repository](https://github.com/CarlvinceTan/polymux) contains the app under `apps/Polymux`, the server under `apps/server`, and shared Swift packages under `packages`.
-
-Native builds need Xcode 27 and the matching SDKs. The server module requires Go 1.27.1. Configure [model access](/docs/models-and-agents/) first, then start a local development server from the repository root:
+Clone the native development branch, `dev`, on each Mac you are installing on:
 
 ```sh
-cd apps/server
-go run -tags sqlite_fts5 ./cmd/server -listen 127.0.0.1:7337 -device-listen 127.0.0.1:7339 -no-mdns
+git clone --branch dev https://github.com/CarlvinceTan/polymux.git
+cd polymux
 ```
 
-This example keeps both listeners on loopback. The server reads its process environment; it does not automatically load a `.env` file. Its optional host controller is a separate unauthenticated interface and must stay on loopback.
+Run the following commands from that folder. Client commands use a local development signature.
 
-Build the `Polymux` scheme in `apps/Polymux/Polymux.xcodeproj`. Device installation and signed distribution require suitable Apple signing configuration.
+## One Mac
+
+Install both parts together:
+
+```sh
+POLYMUX_SIGN_IDENTITY="-" POLYMUX_TEAM_ID="" \
+  ./scripts/install.sh both
+```
+
+This installs the app in Applications, starts the server at login, and connects the app to it.
+
+## Server
+
+For a Mac that only needs to run your agents:
+
+```sh
+./scripts/install.sh server
+```
+
+Keep this Mac awake and connected when you want your agents available.
+
+## Client
+
+For another Mac that only needs the chat app:
+
+```sh
+POLYMUX_SIGN_IDENTITY="-" POLYMUX_TEAM_ID="" \
+  ./scripts/install.sh app
+```
+
+Open Polymux, then pair it with your server.
+
+## Pair another Mac
+
+1. On an already connected client, open **Settings → Devices → Add device** and copy its pairing link.
+2. On the new client, open the same screen, paste the link into **Join with a link**, and press **Return**.
+
+For a server-only installation, generate a link on the server Mac instead. Replace `SERVER_ADDRESS` with the address printed by the installer:
+
+```sh
+~/.local/bin/polymux pair --url "SERVER_ADDRESS"
+```
+
+Pairing links contain credentials. Share them privately, and use the complete link rather than just the server address.
+
+## If something is not working
+
+- **Cannot connect:** check that the server is running and try a fresh pairing link. Other devices connect through an encrypted tunnel, or over Tailscale when the server runs with `-tailscale`. If the tunnel is turned off on the server, use Tailscale.
+- **Chats open but replies fail:** check your provider and **Default model** in **Settings → Models**.
+
+To update, pull the source version you want and rerun the relevant install command. Release builds check for updates automatically; use **Polymux → Check for Updates…** to check now. Next, [choose a model](/docs/models-and-agents/) and [start a conversation](/docs/).

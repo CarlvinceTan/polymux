@@ -7,7 +7,40 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/server"
 )
+
+func TestGroupConfig(t *testing.T) {
+	for _, name := range []string{"POLYMUX_GROUP_MAX_DEPTH", "POLYMUX_GROUP_MAX_FANOUT"} {
+		t.Setenv(name, "")
+		os.Unsetenv(name)
+	}
+	if caps, err := loadGroups(); err != nil || caps != server.DefaultGroups() {
+		t.Fatal("group limits require manual configuration", caps, err)
+	}
+	for _, test := range []struct {
+		name, depth, fanout string
+		want                server.GroupCaps
+		invalid             bool
+	}{
+		{name: "custom", depth: "8", fanout: "2", want: server.GroupCaps{MaxDepth: 8, MaxPerRun: 2}},
+		{name: "disabled", depth: "0", fanout: "0"},
+		{name: "negative", depth: "-1", fanout: "3", invalid: true},
+		{name: "fraction", depth: "1.5", fanout: "3", invalid: true},
+		{name: "text", depth: "6", fanout: "two", invalid: true},
+		{name: "empty", depth: "", fanout: "3", invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("POLYMUX_GROUP_MAX_DEPTH", test.depth)
+			t.Setenv("POLYMUX_GROUP_MAX_FANOUT", test.fanout)
+			caps, err := loadGroups()
+			if (err != nil) != test.invalid || !test.invalid && caps != test.want {
+				t.Fatal("group configuration was ignored or silently coerced", caps, err)
+			}
+		})
+	}
+}
 
 func TestDataLockPreventsSecondServer(t *testing.T) {
 	t.Parallel()

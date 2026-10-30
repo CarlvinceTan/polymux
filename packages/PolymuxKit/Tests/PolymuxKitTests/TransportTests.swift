@@ -1,5 +1,7 @@
 import CSQLite
+import CryptoKit
 import Foundation
+import IrohLib
 import Testing
 @testable import PolymuxKit
 @testable import PolymuxAvatar
@@ -59,14 +61,20 @@ private final class ProbeProtocol: URLProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var worker: Task<Void, Never>?
 
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.host?.hasPrefix("probe-") == true }
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host?.hasPrefix("probe-") == true || request.url?.path.hasPrefix("/probe-") == true
+    }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let request = request
         let task = Task { @Sendable [self, request] in
             do {
-                guard let url = request.url, let handler = Self.routes.handler(url.host ?? "") else { throw URLError(.badURL) }
+                // A probe host can also stand in for a Tailscale name, such as probe-….ts.net.
+                let host = request.url?.host ?? ""
+                guard let url = request.url, let handler = Self.routes.handler(host)
+                        ?? Self.routes.handler(String(host.dropLast(".ts.net".count)))
+                        ?? request.url?.path.split(separator: "/").first.flatMap({ Self.routes.handler(String($0)) }) else { throw URLError(.badURL) }
                 let (status, data) = try await handler(request)
                 try Task.checkCancellation()
                 let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
@@ -79,6 +87,107 @@ private final class ProbeProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() { lock.withLock { worker?.cancel() } }
+}
+
+@Suite
+struct RouteTests {
+    /// A tunnel invite from another machine can carry this Mac's loopback address, which mustn't share its key.
+    @Test func foreignLoopbackInviteGetsItsOwnAddress() async throws {
+        func ticket() throws -> String {
+            try EndpointTicket.fromAddr(addr: EndpointAddr(id: SecretKey.generate().public(), relayUrl: nil, addresses: [])).description
+        }
+        let first = try ticket(), second = try ticket()
+        let identity = try #require(Tunnel.identity(first))
+        #expect(identity.count == 16 && identity.allSatisfy(\.isHexDigit))
+        #expect(Tunnel.identity(first) == identity && Tunnel.identity(second) != identity)
+        // Nothing on this port accepts the credential, so the server is elsewhere.
+        let loopback = URL(string: "http://127.0.0.1:9")!
+        let kept = await Tunnel.address(for: loopback, ticket: first, token: "device-token")
+        #expect(kept.absoluteString == "http://\(identity).tunnel.invalid")
+        #expect(Tunnel.trusted(kept) == false)
+        #expect(await Tunnel.address(for: loopback, ticket: first, token: "new-token", knownTicket: first) == loopback)
+        #expect(await Tunnel.address(for: loopback, ticket: second, token: "new-token", knownTicket: first) != loopback)
+        for (url, ticket) in [(loopback, nil), (URL(string: "http://100.70.1.2:7337")!, first), (loopback, "endpointabc")] as [(URL, String?)] {
+            #expect(await Tunnel.address(for: url, ticket: ticket, token: "device-token") == url)
+        }
+    }
+
+    @Test(arguments: [200, 401, 403])
+    func loopbackPairingUsesTheCredentialProbe(status: Int) async throws {
+        let ticket = try EndpointTicket.fromAddr(addr: EndpointAddr(id: SecretKey.generate().public(), relayUrl: nil, addresses: [])).description
+        let host = ProbeProtocol.routes.add { request in
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer device-token")
+            return (status, Data("{}".utf8))
+        }
+        defer { ProbeProtocol.routes.remove(host) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProbeProtocol.self]
+        let loopback = URL(string: "http://localhost/\(host)")!
+        let kept = await Tunnel.address(for: loopback, ticket: ticket, token: "device-token", session: URLSession(configuration: config))
+        #expect((kept == loopback) == (status == 200))
+    }
+
+    @Test(arguments: zip([200, 401, 403], [true, false, false]))
+    func directRouteNeedsAcceptedCredential(status: Int, direct: Bool) async {
+        let host = ProbeProtocol.routes.add { request in
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer device-token")
+            return (status, Data("{}".utf8))
+        }
+        defer { ProbeProtocol.routes.remove(host) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProbeProtocol.self]
+        let url = URL(string: "https://\(host):7337")!
+        #expect(await Tunnel.reachable(url, token: "device-token", session: URLSession(configuration: config)) == direct)
+    }
+
+    /// The credential never goes over plain HTTP on an ordinary network.
+    @Test func lanAddressGetsNoCredential() async throws {
+        let host = ProbeProtocol.routes.add { _ in
+            Issue.record("A LAN address was sent the credential")
+            return (200, Data("{}".utf8))
+        }
+        defer { ProbeProtocol.routes.remove(host) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProbeProtocol.self]
+        #expect(await !Tunnel.reachable(URL(string: "http://\(host):7337")!, token: "device-token", session: URLSession(configuration: config)))
+        for (address, trusted) in [("http://127.0.0.1:7337", true), ("http://[::1]:7337", true), ("https://server.example", true),
+                                   ("http://100.101.1.1:7337", false), ("http://[fd7a:115c:a1e0::9]:7337", false), ("http://mac.tail1234.ts.net", false),
+                                   ("http://192.168.1.20:7337", false), ("http://10.0.0.4:7337", false), ("http://100.128.0.1:7337", false)] {
+            #expect(Tunnel.trusted(URL(string: address)!) == trusted, "\(address)")
+        }
+        await #expect(throws: ClientError.self) { _ = try await Tunnel.route(URL(string: "http://192.168.1.20:7337")!, ticket: nil, token: "device-token") }
+    }
+}
+
+@Suite
+struct DownloadTests {
+    @Test(arguments: ["same", "host", "port", "scheme"])
+    func attachmentCredential(origin: String) async throws {
+        let handler: ProbeRoutes.Handler = { request in
+            #expect(request.value(forHTTPHeaderField: "X-Polymux-Client") == "polymux-kit")
+            #expect(origin == "same")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer attachment-token")
+            return (200, Data("<p>Visual card</p>".utf8))
+        }
+        let host = ProbeProtocol.routes.add(handler)
+        let other = ProbeProtocol.routes.add(handler)
+        defer { ProbeProtocol.routes.remove(host); ProbeProtocol.routes.remove(other) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProbeProtocol.self]
+        let client = APIClient(baseURL: URL(string: "http://\(host):8000")!, session: URLSession(configuration: config), token: "attachment-token")
+        let scheme = origin == "scheme" ? "https" : "http"
+        let target = origin == "host" ? other : host
+        let port = origin == "port" ? 8001 : 8000
+        let url = URL(string: "\(scheme)://\(target):\(port)/attachments/card/content")!
+        guard origin == "same" else {
+            await #expect(throws: ClientError.self) { _ = try await client.download(url) }
+            return
+        }
+        let (file, response) = try await client.download(url)
+        defer { try? FileManager.default.removeItem(at: file) }
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "<p>Visual card</p>")
+    }
 }
 
 private func requestBody(_ request: URLRequest) -> Data {
@@ -162,6 +271,30 @@ struct ActivityReadTests {
         #expect(try await cache.offMain { try $0.cursor(threadID: "one") } >= 1)
         #expect(try await cache.offMain { try $0.threads().first?.unreadCount } == (visible ? 0 : 1))
         #expect((await probe.reads).contains(1) == visible)
+    }
+}
+
+private actor ReactionProbe {
+    var requests: [ReactionRequest] = []
+    let message: Message
+    let fails: Bool
+    private var pending: CheckedContinuation<Void, Never>?
+
+    init(message: Message, fails: Bool) { self.message = message; self.fails = fails }
+
+    func release() { pending?.resume(); pending = nil }
+
+    func handle(_ request: URLRequest) async throws -> (Int, Data) {
+        #expect(request.httpMethod == "PUT")
+        #expect(request.url?.path == "/threads/one/messages/target/reaction")
+        let change = try JSONDecoder().decode(ReactionRequest.self, from: requestBody(request))
+        requests.append(change)
+        await withCheckedContinuation { pending = $0 }
+        if fails { throw URLError(.notConnectedToInternet) }
+        var accepted = message
+        accepted.reactions = (message.reactions ?? []).filter { $0.emoji != change.emoji || $0.agentID != nil }
+        if !change.remove { accepted.reactions?.append(Reaction(emoji: change.emoji)) }
+        return (200, try JSONEncoder().encode(accepted))
     }
 }
 
@@ -328,6 +461,43 @@ private actor ReplayProbe {
     }
 }
 
+private actor HistoryProbe {
+    let messages = (1...150).map {
+        Message(id: "history-\($0)", threadID: "one", role: "assistant", status: "done", seq: Int64($0))
+    }
+    var parked = false
+    private var released = false
+    private var gate: CheckedContinuation<Void, Never>?
+
+    func release() {
+        released = true
+        gate?.resume()
+        gate = nil
+    }
+
+    func handle(_ request: URLRequest) async throws -> (Int, Data) {
+        let path = request.url!.path
+        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        if path.hasSuffix("/events") {
+            let after = Int64(query.first { $0.name == "after" }?.value ?? "0") ?? 0
+            if after == 100, !released {
+                parked = true
+                await withCheckedContinuation { gate = $0 }
+            }
+            let page = messages.filter { $0.seq > after }.prefix(100).map {
+                Event(seq: $0.seq, conversationID: "one", type: "message.done", message: $0)
+            }
+            return (200, try JSONEncoder().encode(page))
+        }
+        if path.hasSuffix("/messages") {
+            let before = Int64(query.first { $0.name == "before" }?.value ?? "") ?? .max
+            return (200, try JSONEncoder().encode(Array(messages.filter { $0.seq < before }.suffix(100))))
+        }
+        if path.hasSuffix("/stream") { try await Task.sleep(for: .seconds(60)) }
+        return (200, Data("[]".utf8))
+    }
+}
+
 private actor VoiceProbe {
     var requests: [SendRequest] = []
 
@@ -364,15 +534,16 @@ private actor VoiceProbe {
 private actor SettingsProbe {
     var value = Settings(revision: 1, appearance: "system", sidebarWidth: 320, voiceMode: "pipeline",
                          liveProvider: "gemini", liveModel: "server-live", liveVoice: "Kore",
-                         textProvider: "gemini", textModel: "server-text", voicePrompt: "Represent {target}.")
+                         voicePrompt: "Represent {target}.", defaultProvider: "server-provider", defaultModel: "server-text")
     var patches: [SettingsPatch] = []
     var failWrites = false
+    var failStatus = 400
     var holdRead = false
     private var held: CheckedContinuation<Void, Never>?
     private var started: CheckedContinuation<Void, Never>?
 
     func holdNext() { holdRead = true }
-    func fail() { failWrites = true }
+    func fail(status: Int = 400) { failWrites = true; failStatus = status }
     func recover() { failWrites = false }
     func waitHeld() async {
         if held != nil { return }
@@ -390,7 +561,7 @@ private actor SettingsProbe {
         }
         let patch = try JSONDecoder().decode(SettingsPatch.self, from: requestBody(request))
         patches.append(patch)
-        if failWrites { return (400, try JSONEncoder().encode(WireError(code: "invalid_settings", message: "Invalid model."))) }
+        if failWrites { return (failStatus, try JSONEncoder().encode(WireError(code: "invalid_settings", message: "Invalid model."))) }
         patch.apply(to: &value)
         value.revision += 1
         return (200, try JSONEncoder().encode(value))
@@ -505,12 +676,12 @@ struct TransportTests {
         for _ in 0..<300 where first.isSaving { try await Task.sleep(for: .milliseconds(5)) }
         #expect(!first.isSaving)
         #expect(await probe.patches == [SettingsPatch(appearance: "dark", liveVoice: "Aoede")])
-        second.edit(SettingsPatch(textModel: "updated-text"))
+        second.edit(SettingsPatch(defaultModel: "updated-text"))
         for _ in 0..<300 where second.isSaving { try await Task.sleep(for: .milliseconds(5)) }
         await first.refresh()
         #expect(first.value?.appearance == "dark")
         #expect(first.value?.liveVoice == "Aoede")
-        #expect(first.value?.textModel == "updated-text")
+        #expect(first.value?.defaultModel == "updated-text")
         #expect(first.value == second.value)
     }
 
@@ -539,11 +710,11 @@ struct TransportTests {
         let store = SettingsStore(client: client(host: host))
         await store.refresh()
         await probe.fail()
-        store.edit(SettingsPatch(textModel: "invalid"))
-        #expect(store.value?.textModel == "invalid")
+        store.edit(SettingsPatch(defaultModel: "invalid"))
+        #expect(store.value?.defaultModel == "invalid")
         for _ in 0..<300 where store.isSaving { try await Task.sleep(for: .milliseconds(5)) }
         #expect(!store.isSaving)
-        #expect(store.value?.textModel == "server-text")
+        #expect(store.value?.defaultModel == "server-text")
         #expect(store.error == "Invalid model.")
         await store.refresh()
         #expect(await probe.patches.count == 1)
@@ -558,7 +729,7 @@ struct TransportTests {
         let api = client(host: host)
         let store = SettingsStore(client: api)
         await store.refresh()
-        await probe.fail()
+        await probe.fail(status: 503)
         store.edit(SettingsPatch(liveVoice: "Aoede"))
         #expect(await store.synchronize() == false)
         #expect(store.value?.liveVoice == "Kore")
@@ -592,7 +763,7 @@ struct TransportTests {
         defer { ProbeProtocol.routes.remove(host) }
         var store: SettingsStore? = SettingsStore(client: client(host: host))
         await store?.refresh()
-        weak var released = store
+        weak let released = store
         store?.edit(SettingsPatch(appearance: "dark"))
         store = nil
         for _ in 0..<300 {
@@ -628,7 +799,7 @@ struct TransportTests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProbeProtocol.self]
         let api = APIClient(baseURL: URL(string: "http://\(host)")!, session: URLSession(configuration: configuration),
-                            token: nil, discover: discovery.resolve)
+                            token: nil, discover: { url, _ in discovery.resolve(url) })
         #expect(await Task.detached { discovery.wait() }.value)
         #expect(discovery.offMain)
         discovery.release()
@@ -649,51 +820,55 @@ struct TransportTests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProbeProtocol.self]
         let api = APIClient(baseURL: URL(string: "http://\(host)")!, session: URLSession(configuration: configuration),
-                            token: "explicit-token", discover: discovery.resolve)
+                            token: "explicit-token", discover: { url, _ in discovery.resolve(url) })
         #expect(try await api.agents().isEmpty)
         #expect(discovery.calls == 0)
     }
 
-    @Test func speechUsesServerTransportWithoutClientCredentials() async throws {
-        let host = ProbeProtocol.routes.add { request in
-            #expect(request.url?.path == "/speech/text")
-            #expect(request.httpMethod == "POST")
-            #expect(request.url?.query == nil)
-            #expect(request.value(forHTTPHeaderField: "x-goog-api-key") == nil)
-            #expect(!String(decoding: requestBody(request), as: UTF8.self).contains("unused-client-key"))
-            return (200, Data(#"{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}"#.utf8))
+    @Test func replacedLocalCredentialRecoversWithoutReopeningClient() async throws {
+        actor Owner {
+            var token = "first-owner-token"
+            var discoveries = 0
+            func discover() -> String { discoveries += 1; return token }
+            func replace() { token = "replacement-owner-token" }
+            func response(_ request: URLRequest) -> (Int, Data) {
+                (request.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)" ? 200 : 401, Data("[]".utf8))
+            }
         }
+        let owner = Owner()
+        let host = ProbeProtocol.routes.add { await owner.response($0) }
         defer { ProbeProtocol.routes.remove(host) }
-        let api = client(host: host)
-        let provider = GeminiText(client: api)
-        let answer = try await provider.generate(turns: [TextTurn(role: .user, text: "Hi")],
-                                                 options: LiveOptions(model: "server-text", voice: "Kore", instructions: "Speak briefly."),
-                                                 key: "unused-client-key")
-        #expect(answer.text == "Hello")
-        let socket = try api.speechSocket()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProbeProtocol.self]
+        let api = APIClient(baseURL: URL(string: "http://\(host)")!, session: URLSession(configuration: configuration),
+                            token: nil, discover: { _, _ in await owner.discover() })
+        #expect(try await api.agents().isEmpty)
+        await owner.replace()
+        #expect(try await api.agents().isEmpty)
+        #expect(await owner.discoveries == 2)
+    }
+
+    @Test func speechSocketUsesServerTransport() async throws {
+        let socket = try await client(host: "speech.test").speechSocket()
         #expect(socket.scheme == "ws")
-        #expect(socket.host == host)
+        #expect(socket.host == "speech.test")
         #expect(socket.path == "/speech/live")
         #expect(socket.query == nil)
     }
 
-    @Test func speechKeysAreWriteOnlyAndRemovedOnServer() async throws {
+    @Test func spokenRepliesStreamFromServer() async throws {
         let host = ProbeProtocol.routes.add { request in
-            #expect(request.url?.path == "/settings/keys/gemini")
-            if request.httpMethod == "PUT" {
-                #expect(try JSONDecoder().decode(SpeechKey.self, from: requestBody(request)).key == "test-only-secret")
-            } else {
-                #expect(request.httpMethod == "DELETE")
-                #expect(requestBody(request).isEmpty)
-            }
-            return (200, try JSONEncoder().encode(Settings(revision: 2, speechKeys: request.httpMethod == "PUT" ? ["gemini"] : [])))
+            #expect(request.url?.path == "/threads/a/voice/stream")
+            #expect(request.httpMethod == "POST")
+            let body = "data: {\"agentID\":\"a\",\"text\":\"Hello. \"}\n\ndata: {\"agentID\":\"a\",\"text\":\"Done.\"}\n\nevent: done\ndata: {}\n\n"
+            return (200, Data(body.utf8))
         }
         defer { ProbeProtocol.routes.remove(host) }
-        let store = SettingsStore(client: client(host: host))
-        try await store.setKey("test-only-secret", provider: "gemini")
-        #expect(store.value?.speechKeys == ["gemini"])
-        try await store.setKey(nil, provider: "gemini")
-        #expect(store.value?.speechKeys.isEmpty == true)
+        var spoken: [VoiceFragment] = []
+        for try await fragment in client(host: host).voiceStream(threadID: "a", request: VoiceRequest(id: "v1", text: "Hi")) {
+            spoken.append(fragment)
+        }
+        #expect(spoken == [VoiceFragment(text: "Hello. ", agentID: "a"), VoiceFragment(text: "Done.", agentID: "a")])
     }
 
     @Test(arguments: ["Planning assistant", ""])
@@ -785,38 +960,6 @@ struct TransportTests {
         #expect(try await api.registerPush(device).available)
     }
 
-    @Test func profileCommitRestoresFailureAndProtectsNewerPrompt() async throws {
-        let host = ProbeProtocol.routes.add { _ in (500, Data()) }
-        defer { ProbeProtocol.routes.remove(host) }
-        let url = cacheURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let api = client(host: host)
-        let sidebar = SidebarStore(client: api, cache: try await CacheWork.open(url))
-        let previous = AgentProfile(agent: Agent(id: "profile", name: "Old"), prompt: "Old prompt")
-        let update = UpdateAgentRequest(name: "New", role: "Role", prompt: "First prompt")
-        var closed = false
-        let first = sidebar.commits.save(previous, request: update, sidebar: sidebar, client: api) {
-            closed = true
-        }
-        #expect(closed)
-        #expect(sidebar.agents.first?.name == "New")
-        #expect(sidebar.commits.profiles["profile"]?.prompt == "First prompt")
-        await first.value
-        #expect(sidebar.agents.first?.name == "Old")
-        #expect(sidebar.commits.profiles["profile"] == previous)
-        #expect(sidebar.commits.notice != nil)
-        let older = sidebar.commits.save(previous, request: update, sidebar: sidebar, client: api, close: {})
-        var newer = update
-        newer.prompt = "Second prompt"
-        let latest = sidebar.commits.save(previous, request: newer, sidebar: sidebar, client: api, close: {})
-        await older.value
-        #expect(sidebar.commits.profiles["profile"]?.prompt != "Old prompt")
-        await latest.value
-        // The newer failure restores the state that existed when it was submitted.
-        #expect(sidebar.commits.profiles["profile"]?.prompt == "First prompt")
-        await sidebar.settled()
-    }
-
     @Test func avatarCommitRestoresFailureAfterClosing() async throws {
         let host = ProbeProtocol.routes.add { _ in (500, Data()) }
         defer { ProbeProtocol.routes.remove(host) }
@@ -838,16 +981,15 @@ struct TransportTests {
         #expect(sidebar.commits.notice != nil)
     }
 
-    @Test func profileCommitReportsAStalledClose() async throws {
+    @Test func avatarCommitReportsAStalledClose() async throws {
         let host = ProbeProtocol.routes.add { _ in (500, Data()) }
         defer { ProbeProtocol.routes.remove(host) }
         let url = cacheURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let api = client(host: host)
         let sidebar = SidebarStore(client: api, cache: try await CacheWork.open(url))
-        let task = sidebar.commits.save(AgentProfile(agent: Agent(id: "slow")),
-                                       request: UpdateAgentRequest(name: "Slow"),
-                                       sidebar: sidebar, client: api) {
+        let task = sidebar.commits.saveAvatar(id: "slow", previous: AvatarDesign(), request: AvatarDesign(),
+                                             sidebar: sidebar, client: api, apply: { _ in }) {
             let clock = ContinuousClock()
             let start = clock.now
             while start.duration(to: clock.now) < .milliseconds(70) {}
@@ -1039,7 +1181,7 @@ struct TransportTests {
         await sidebar.accept(agent)
         #expect(sidebar.agents == [agent])
         #expect(sidebar.thread(for: agent)?.id == agent.id)
-        #expect(sidebar.error == "Couldn’t save this agent. Retry")
+        #expect(sidebar.error == "Couldn’t save this bot on this device.")
         await sidebar.reload()
         #expect(sidebar.agents == [agent])
         #expect(sidebar.thread(for: agent)?.id == agent.id)
@@ -1049,6 +1191,27 @@ struct TransportTests {
         let reopened = try await CacheWork.open(url)
         #expect(try await reopened.offMain { try $0.agents() } == [agent])
         #expect(try await reopened.offMain { try $0.threads() }.first?.id == agent.id)
+    }
+
+    @Test func unsentMessageCanBeDeletedBeforeItGoesOut() async throws {
+        let probe = GroupProbe()
+        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
+        defer { ProbeProtocol.routes.remove(host) }
+        let api = client(host: host)
+        let created = try await api.createThread(agentIDs: ["b", "a"], title: "Trip")
+        let url = cacheURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let cache = try await CacheWork.open(url)
+        let chat = ChatStore(client: api, actor: LocalCacheActor(cache), threadID: created.id)
+        await chat.send(text: "Never mind")
+        let request = try #require((try await cache.offMain { try $0.pending(threadID: created.id) }).first)
+        await chat.discard(messageID: request.id)
+        #expect(chat.messages.isEmpty)
+        #expect(try await cache.offMain { try $0.pending(threadID: created.id) }.isEmpty)
+        // Reconnecting must not send what was deleted.
+        await probe.reconnect()
+        await chat.retry(messageID: request.id)
+        #expect(await probe.sends == [request])
     }
 
     @Test func groupAPIPreservesMentionIdentityAcrossOfflineRetry() async throws {
@@ -1159,49 +1322,7 @@ struct TransportTests {
         #expect(try await cache.offMain { try $0.threadEdits() }.isEmpty)
     }
 
-    @Test func pinSurvivesOfflineRelaunchWithoutRenamingTheChat() async throws {
-        let probe = PinProbe()
-        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
-        defer { ProbeProtocol.routes.remove(host) }
-        let api = client(host: host)
-        let url = cacheURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let cache = try await CacheWork.open(url)
-        let initial = await probe.thread
-        try await cache.offMain { try $0.save(agents: [Agent(id: "a", name: "Current name")], threads: [initial]) }
-        let sidebar = SidebarStore(client: api, cache: cache)
-        await sidebar.load()
-        await sidebar.setPin("a", pinned: true)
-        try? await sidebar.syncEdit("a")
-        #expect(sidebar.threads.first?.pinned == true)
-        #expect(sidebar.pinIssue != nil)
-        #expect(try await cache.offMain { try $0.pinEdits() } == ["a"])
-
-        let reopened = try await CacheWork.open(url)
-        let relaunched = SidebarStore(client: api, cache: reopened)
-        await relaunched.load()
-        #expect(relaunched.threads.first?.pinned == true)
-        #expect(relaunched.threads.first?.unreadCount == 3)
-        await probe.reconnect()
-        await relaunched.refresh()
-        try await relaunched.syncEdit("a")
-        #expect(await probe.applied == 1)
-        #expect(await probe.updates.allSatisfy { $0.title == nil && $0.agentIDs == nil && $0.leadAgentID == nil })
-        #expect(relaunched.threads.first?.title == initial.title)
-        #expect(relaunched.threads.first?.lastReadSeq == 2)
-        #expect(relaunched.threads.first?.lastSeq == 5)
-        #expect(relaunched.pinIssue == nil)
-        #expect(try await reopened.offMain { try $0.threadEdits() }.isEmpty)
-        #expect(try await reopened.offMain { try $0.pinEdits() }.isEmpty)
-
-        await relaunched.setPin("a", pinned: false)
-        try await relaunched.syncEdit("a")
-        #expect(await probe.applied == 2)
-        #expect(relaunched.threads.first?.pinned == false)
-        #expect(relaunched.threads.first?.pinOrder == nil)
-    }
-
-    @Test(arguments: [false, true]) func renameKeepsRemotePinsAndPersistsExplicitPinChanges(combined: Bool) async throws {
+    @Test func renameKeepsRemotePins() async throws {
         let probe = PinProbe()
         let host = ProbeProtocol.routes.add { try await probe.handle($0) }
         defer { ProbeProtocol.routes.remove(host) }
@@ -1216,12 +1337,8 @@ struct TransportTests {
         var renamed = initial
         renamed.title = "Local rename"
         await sidebar.edit(renamed, delay: .seconds(10))
-        if combined { await sidebar.setPin("a", pinned: true) }
         try? await sidebar.syncEdit("a")
-        if combined {
-            #expect(sidebar.pinIssue != nil)
-            #expect(try await cache.offMain { try $0.dirtyPins() } == ["a"])
-        } else { await probe.remotePin() }
+        await probe.remotePin()
         let reopened = try await CacheWork.open(url)
         let relaunched = SidebarStore(client: api, cache: reopened)
         await relaunched.load()
@@ -1229,27 +1346,87 @@ struct TransportTests {
         try await relaunched.syncEdit("a")
         let update = try #require(await probe.updates.last)
         #expect(update.title == "Local rename")
-        #expect(update.pinned == (combined ? true : nil))
-        #expect(update.pinOrder == (combined ? 0 : nil))
+        #expect(update.pinned == nil && update.pinOrder == nil)
         #expect(relaunched.threads.first?.pinned == true)
-        #expect(relaunched.threads.first?.pinOrder == (combined ? 0 : 77))
-        #expect(relaunched.pinIssue == nil)
-        #expect(try await reopened.offMain { try $0.dirtyPins() }.isEmpty)
+        #expect(relaunched.threads.first?.pinOrder == 77)
+        #expect(try await reopened.offMain { try $0.threadEdits() }.isEmpty)
     }
 
-    @Test func pinLimitKeepsTheNextChatUnchanged() async throws {
+    @Test(arguments: [false, true], ["👍", "👩🏽‍💻"]) func reactionsAreOptimisticAndPreserveBotIdentity(fails: Bool, emoji: String) async throws {
+        let original = Message(id: "target", threadID: "one", role: "user", status: "done", seq: 1,
+                               reactions: [Reaction(emoji: emoji, agentID: "bot")])
+        let probe = ReactionProbe(message: original, fails: fails)
+        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
+        defer { ProbeProtocol.routes.remove(host) }
         let url = cacheURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let cache = try await CacheWork.open(url)
-        let threads = (0..<13).map { PolymuxKit.Thread(id: "chat-\($0)", agentID: "chat-\($0)", pinned: $0 < 12) }
-        try await cache.offMain { try $0.save(agents: [], threads: threads) }
-        let sidebar = SidebarStore(client: client(host: "offline.test"), cache: cache)
-        await sidebar.load()
-        await sidebar.setPin("chat-12", pinned: true)
-        #expect(sidebar.threads.filter { $0.pinned == true }.count == 12)
-        #expect(sidebar.threads.first { $0.id == "chat-12" }?.pinned == false)
-        #expect(sidebar.editIssues["chat-12"] == "You can pin up to 12 chats.")
-        #expect(try await cache.offMain { try $0.threadEdits() }.isEmpty)
+        try await cache.offMain { try $0.apply(Event(seq: 1, conversationID: "one", type: "message.start", message: original)) }
+        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
+        await chat.ready()
+        let work = Task { await chat.react(messageID: "target", emoji: emoji) }
+        defer { work.cancel(); Task { await probe.release() } }
+        for _ in 0..<100 {
+            if await probe.requests.count == 1 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(chat.reactions(for: original).count == 2)
+        #expect(chat.messages.first?.reactions == original.reactions)
+        await chat.react(messageID: "target", emoji: emoji)
+        #expect(await probe.requests == [ReactionRequest(emoji: emoji, remove: false)])
+        await probe.release()
+        await work.value
+        #expect(chat.pendingReactions.isEmpty)
+        #expect(chat.messages.first?.reactions?.count == (fails ? 1 : 2))
+        #expect((chat.reactionErrors["target"] != nil) == fails)
+        #expect(chat.messages.first?.reactions?.first == Reaction(emoji: emoji, agentID: "bot"))
+        let reopened = try await CacheWork.open(url)
+        #expect(try await reopened.offMain { try $0.messages(threadID: "one").first?.reactions?.count } == (fails ? 1 : 2))
+    }
+
+    @Test func reactionReplayWinsOverAnOlderHTTPResponse() async throws {
+        let original = Message(id: "target", threadID: "one", role: "user", status: "done", seq: 1)
+        let probe = ReactionProbe(message: original, fails: false)
+        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
+        defer { ProbeProtocol.routes.remove(host) }
+        let url = cacheURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let cache = try await CacheWork.open(url)
+        try await cache.offMain { try $0.apply(Event(seq: 1, conversationID: "one", type: "message.start", message: original)) }
+        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
+        await chat.ready()
+        let work = Task { await chat.react(messageID: "target", emoji: "👍") }
+        defer { work.cancel(); Task { await probe.release() } }
+        for _ in 0..<100 {
+            if await probe.requests.count == 1 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        var newer = original
+        newer.reactions = [Reaction(emoji: "👍"), Reaction(emoji: "🎉", agentID: "bot")]
+        try await chat.receive(Event(seq: 2, conversationID: "one", type: "message.reactions", messageID: original.id, message: newer))
+        await probe.release()
+        await work.value
+        #expect(chat.messages.first == newer)
+        let reopened = try await CacheWork.open(url)
+        #expect(try await reopened.offMain { try $0.messages(threadID: "one") } == [newer])
+    }
+
+    @Test(arguments: [1, 100]) func cachedReplyTargetsLoadOffline(earlier: Int) async throws {
+        let host = ProbeProtocol.routes.add { _ in throw URLError(.notConnectedToInternet) }
+        defer { ProbeProtocol.routes.remove(host) }
+        let url = cacheURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let cache = try await CacheWork.open(url)
+        let history = (1...(100 + earlier)).map { index in
+            Message(id: "message-\(index)", threadID: "one", role: "assistant", status: "done", seq: Int64(index))
+        }
+        try await cache.offMain { try $0.merge(history) }
+        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
+        await chat.ready()
+        #expect(chat.messages.count == 100)
+        #expect(!chat.messages.contains { $0.id == "message-1" })
+        await chat.loadEarlier()
+        #expect(chat.messages == history)
     }
 
     @Test func offlineReplyKeepsQuoteAndIdentityThroughRetryAndReplay() async throws {
@@ -1384,6 +1561,39 @@ struct TransportTests {
         #expect(try await cache.offMain { try $0.messages(threadID: "inactive") }.first?.status == "done")
     }
 
+    @Test(arguments: [false, true]) func replaySnapshot(cached: Bool) async throws {
+        let probe = HistoryProbe()
+        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
+        defer { ProbeProtocol.routes.remove(host) }
+        let url = cacheURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let cache = try await CacheWork.open(url)
+        let history = await probe.messages
+        let initial = cached ? Array(history.suffix(100)) : []
+        try await cache.offMain { try $0.merge(initial) }
+        let chat = ChatStore(client: client(host: host), actor: LocalCacheActor(cache), threadID: "one")
+        defer { chat.stop(); Task { await probe.release() } }
+        await chat.start()
+        for _ in 0..<200 {
+            if await probe.parked { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(await probe.parked)
+        #expect(chat.messages == initial, "Historical replay must not replace the visible transcript one event at a time")
+        await probe.release()
+        for _ in 0..<200 {
+            if chat.isConnected { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(chat.isConnected)
+        #expect(chat.messages == Array(history.suffix(100)))
+        #expect(chat.hasEarlier)
+        #expect(try await cache.offMain { try $0.cursor(threadID: "one") } == 150)
+        await chat.loadEarlier()
+        #expect(chat.messages == history)
+        #expect(!chat.hasEarlier)
+    }
+
     @Test func catchupFetchesEveryPageBeforeLiveDelivery() async throws {
         let probe = ReplayProbe()
         let host = ProbeProtocol.routes.add { try await probe.handle($0) }
@@ -1395,12 +1605,124 @@ struct TransportTests {
         defer { chat.stop() }
         await chat.start()
         for _ in 0..<200 {
-            if try await cache.offMain { try $0.cursor(threadID: "one") } == 2100, await probe.cursors.contains(2100) { break }
+            if try await cache.offMain({ try $0.cursor(threadID: "one") }) == 2100, await probe.cursors.contains(2100) { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(try await cache.offMain { try $0.cursor(threadID: "one") } == 2100)
         let cursors = await probe.cursors
         #expect(cursors.starts(with: [0, 1000, 2000, 2100]))
+    }
+}
+
+private actor ProviderProbe {
+    var answered = false
+    var cancellations = 0
+    var refuse = false
+
+    func rejectAnswer() { refuse = true }
+
+    func handle(_ request: URLRequest) async throws -> (Int, Data) {
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer provider-token")
+        let path = request.url!.path
+        if request.httpMethod == "DELETE" { cancellations += 1; return (204, Data()) }
+        if path.hasSuffix("/answer") {
+            let body = try JSONSerialization.jsonObject(with: requestBody(request)) as! [String: Any]
+            #expect(body["prompt"] as? Int == 1)
+            #expect(body["value"] as? String == "key")
+            if refuse { return (400, Data(#"{"code":"invalid_answer","message":"Enter a valid answer."}"#.utf8)) }
+            answered = true
+            return (204, Data())
+        }
+        if request.httpMethod == "POST" {
+            let body = try JSONSerialization.jsonObject(with: requestBody(request)) as! [String: String]
+            #expect(body["type"] == "openai")
+            #expect(body["auth"] == "api_key")
+            return (200, try JSONEncoder().encode(ProviderLogin(id: "login", revision: 1,
+                prompt: LoginPrompt(id: 1, type: "secret", message: "Enter key"))))
+        }
+        #expect(request.timeoutInterval == 35)
+        #expect(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value == "1")
+        while !answered { try await Task.sleep(for: .milliseconds(10)) }
+        return (200, try JSONEncoder().encode(ProviderLogin(id: "login", revision: 2, done: true,
+            provider: Provider(id: "connected", type: "openai", name: "OpenAI", enabled: true))))
+    }
+}
+
+@Suite @MainActor struct ProviderTests {
+    @Test func savesConnectionOrder() async throws {
+        let host = ProbeProtocol.routes.add { request in
+            #expect(request.url?.path == "/providers/order")
+            #expect(request.httpMethod == "PUT")
+            #expect(try JSONDecoder().decode([String].self, from: requestBody(request)) == ["second", "first"])
+            return (200, try JSONEncoder().encode([Provider(id: "second", order: 0), Provider(id: "first", order: 1)]))
+        }
+        defer { ProbeProtocol.routes.remove(host) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProbeProtocol.self]
+        let client = APIClient(baseURL: URL(string: "http://\(host)")!, session: URLSession(configuration: config), token: "provider-token")
+        let providers = try await client.orderProviders(["second", "first"])
+        #expect(providers.map(\.id) == ["second", "first"])
+    }
+
+    private func setup(_ probe: ProviderProbe) -> (ProviderSignIn, String) {
+        let host = ProbeProtocol.routes.add { try await probe.handle($0) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProbeProtocol.self]
+        let client = APIClient(baseURL: URL(string: "http://\(host)")!, session: URLSession(configuration: config), token: "provider-token")
+        return (ProviderSignIn(client: client), host)
+    }
+
+    @Test func loginAnswersAndPublishesProvider() async throws {
+        let probe = ProviderProbe()
+        let (store, host) = setup(probe)
+        defer { ProbeProtocol.routes.remove(host) }
+        let worker = Task { await store.connect(option: ProviderOption(type: "openai", auth: "api_key")) }
+        for _ in 0..<100 {
+            if store.state?.prompt != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.state?.prompt?.type == "secret")
+        await store.submit("key")
+        await worker.value
+        #expect(store.state?.done == true)
+        #expect(store.state?.provider?.id == "connected")
+        #expect(store.issue == nil)
+        #expect(await probe.cancellations == 0)
+    }
+
+    @Test func cancelledLoginStopsServerSession() async throws {
+        let probe = ProviderProbe()
+        let (store, host) = setup(probe)
+        defer { ProbeProtocol.routes.remove(host) }
+        let worker = Task { await store.connect(option: ProviderOption(type: "openai", auth: "api_key")) }
+        for _ in 0..<100 {
+            if store.state != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        worker.cancel()
+        await worker.value
+        for _ in 0..<100 {
+            if await probe.cancellations == 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await probe.cancellations == 1)
+    }
+
+    @Test func refusedAnswerRestoresPrompt() async throws {
+        let probe = ProviderProbe()
+        await probe.rejectAnswer()
+        let (store, host) = setup(probe)
+        defer { ProbeProtocol.routes.remove(host) }
+        let worker = Task { await store.connect(option: ProviderOption(type: "openai", auth: "api_key")) }
+        for _ in 0..<100 {
+            if store.state?.prompt != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await store.submit("key")
+        #expect(store.state?.prompt?.id == 1)
+        #expect(store.issue == "Enter a valid answer.")
+        worker.cancel()
+        await worker.value
     }
 }
 
@@ -1410,4 +1732,33 @@ struct TransportTests {
     #expect(page.cursor == 7)
     #expect(page.notices.first?.body == nil)
     #expect(page.notices.first?.outcome == nil)
+}
+
+@Suite
+struct LocalProofTests {
+    /// Answers the proof with the given secret, as a server holding it would.
+    private func client(secret: String) -> (URL, URLSession, String) {
+        let host = ProbeProtocol.routes.add { request in
+            #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+            let nonce = (try? JSONDecoder().decode([String: String].self, from: requestBody(request)))?["nonce"] ?? ""
+            let proof = HMAC<SHA256>.authenticationCode(for: Data("polymux-local-proof:\(request.url?.port ?? 80):\(nonce)".utf8), using: SymmetricKey(data: Data(secret.utf8)))
+                .map { String(format: "%02x", $0) }.joined()
+            return (200, try! JSONEncoder().encode(["proof": proof]))
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProbeProtocol.self]
+        return (URL(string: "http://\(host)")!, URLSession(configuration: configuration), host)
+    }
+
+    @Test func realServerProvesOwnerToken() async {
+        let (url, session, host) = client(secret: "owner-token")
+        defer { ProbeProtocol.routes.remove(host) }
+        #expect(await APIClient.proves("owner-token", url: url, session: session))
+    }
+
+    @Test func impostorCannotProve() async {
+        let (url, session, host) = client(secret: "guess")
+        defer { ProbeProtocol.routes.remove(host) }
+        #expect(!(await APIClient.proves("owner-token", url: url, session: session)))
+    }
 }

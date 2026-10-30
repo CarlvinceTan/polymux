@@ -7,9 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"strings"
 	"time"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
 var ErrTask = errors.New("task cannot continue")
@@ -95,19 +96,19 @@ func sealTask(ctx context.Context, tx *sql.Tx, run *contract.Run, checkpoint *Ch
 		if task.Status == "cancelled" {
 			return nil
 		}
-		if task.JobID != run.JobID || task.Status != "running" && (task.Status != "ready" || run.Status == "completed") {
+		if task.JobID != run.JobID || task.Status != "running" && (task.Status != "ready" || run.Status == contract.RunStatusCompleted) {
 			return ErrTask
 		}
-	} else if checkpoint != nil && run.Status == "completed" {
+	} else if checkpoint != nil && run.Status == contract.RunStatusCompleted {
 		task = Task{ID: "task:" + run.ID, AgentID: run.AgentID, ThreadID: run.ConversationID, JobID: run.JobID}
 	} else {
 		return nil
 	}
 	task.Tools += tools
 	task.Output += output
-	if run.Status != "completed" {
+	if run.Status != contract.RunStatusCompleted {
 		task.Status = "needs_review"
-		if run.Status == "cancelled" {
+		if run.Status == contract.RunStatusCancelled {
 			task.Status = "cancelled"
 		}
 		return saveTask(ctx, tx, task, nil)
@@ -201,11 +202,11 @@ func (s *Store) CancelTask(ctx context.Context, owner, thread, id string) (strin
 	if err != nil {
 		return "", err
 	}
-	run := NewRun(task.JobID, thread, owner, "task")
+	run := NewRun(task.JobID, thread, owner, contract.RunTriggerTask)
 	if count, err := result.RowsAffected(); err != nil {
 		return "", err
 	} else if count > 0 {
-		if err := finishRuns(ctx, tx, task.JobID); err != nil {
+		if err := s.finishRuns(ctx, tx, task.JobID); err != nil {
 			return "", err
 		}
 	}
@@ -296,8 +297,8 @@ ORDER BY next_at,id LIMIT 32`, now.Unix())
 		id := fmt.Sprintf("task:%s:%d", task.ID, task.Generation)
 		data, _ := json.Marshal(task)
 		text := "Continue the established task from its sealed checkpoint, not by replaying previous calls. Tool returns are not proof of an external effect; verify its state before repeating anything. Checkpoint data:\n" + string(data)
-		work := Work{Trigger: "task", TaskID: task.ID, Generation: task.Generation, Targets: []string{task.AgentID}, Routing: "explicit", Message: contract.Message{ID: id, ThreadID: task.ThreadID, Role: "system", CreatedAt: Now(), Parts: []contract.Part{{Kind: "text", Text: &text}}}}
-		if err := queueTx(ctx, tx, work, task.AgentID); err != nil {
+		work := Work{Trigger: contract.RunTriggerTask, TaskID: task.ID, Generation: task.Generation, Targets: []string{task.AgentID}, Routing: "explicit", Message: contract.Message{ID: id, ThreadID: task.ThreadID, Role: contract.MessageRoleSystem, CreatedAt: Now(), Parts: []contract.Part{{Kind: contract.PartKindText, Text: &text}}}}
+		if err := s.queueTx(ctx, tx, work, task.AgentID); err != nil {
 			return err
 		}
 		task.JobID = id

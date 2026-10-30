@@ -176,7 +176,7 @@ func (s *Store) CreateRoutine(ctx context.Context, r contract.Routine) (contract
 	at, err := time.Parse(time.RFC3339, r.At)
 	validInterval := r.IntervalSeconds == 0 || r.IntervalSeconds >= 60 && r.IntervalSeconds <= 31536000
 	validPrompt := strings.TrimSpace(r.Prompt) != "" && len(r.Prompt) <= 4096
-	validStatus := r.Status == "pending" || r.Status == "active"
+	validStatus := r.Status == contract.RoutineStatusPending || r.Status == contract.RoutineStatusActive
 	if r.Timezone != nil {
 		zone := strings.TrimSpace(*r.Timezone)
 		r.Timezone = &zone
@@ -214,14 +214,14 @@ func (s *Store) CreateRoutine(ctx context.Context, r contract.Routine) (contract
 	r.At = at.UTC().Format(time.RFC3339)
 	r.NextAt = &r.At
 	r.CreatedAt = Now()
-	r.Trigger = "once"
+	r.Trigger = contract.RoutineTriggerOnce
 	if r.IntervalSeconds > 0 {
-		r.Trigger = "interval"
+		r.Trigger = contract.RoutineTriggerInterval
 	}
 	if len(r.Crons) > 0 {
-		r.Trigger = "cron"
+		r.Trigger = contract.RoutineTriggerCron
 	} else if r.Watch != nil {
-		r.Trigger = "watch"
+		r.Trigger = contract.RoutineTriggerWatch
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -258,7 +258,7 @@ WHERE agent_id=? AND json_extract(data,'$.status') IN('pending','active','paused
 		return r, err
 	}
 	var due any
-	if r.Status == "active" {
+	if r.Status == contract.RoutineStatusActive {
 		due = at.Unix()
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -266,7 +266,7 @@ WHERE agent_id=? AND json_extract(data,'$.status') IN('pending','active','paused
 	); err != nil {
 		return r, err
 	}
-	if err := routineActivity(ctx, tx, r, "routine.created"); err != nil {
+	if err := s.routineActivity(ctx, tx, r, "routine.created"); err != nil {
 		return r, err
 	}
 	if r.Watch != nil {
@@ -290,11 +290,11 @@ func confirmRoutine(ctx context.Context, tx *sql.Tx, agent, id string) error {
 	if err := json.Unmarshal([]byte(data), &r); err != nil {
 		return err
 	}
-	if r.Status == "active" || r.Status == "finished" {
+	if r.Status == contract.RoutineStatusActive || r.Status == contract.RoutineStatusFinished {
 		return nil
 	}
 	created, err := time.Parse(time.RFC3339Nano, r.CreatedAt)
-	if err != nil || r.Status != "pending" || time.Since(created) > 24*time.Hour {
+	if err != nil || r.Status != contract.RoutineStatusPending || time.Since(created) > 24*time.Hour {
 		return ErrSchedule
 	}
 	at, err := time.Parse(time.RFC3339, r.At)
@@ -306,7 +306,7 @@ func confirmRoutine(ctx context.Context, tx *sql.Tx, agent, id string) error {
 	if err != nil {
 		return err
 	}
-	r.Status = "active"
+	r.Status = contract.RoutineStatusActive
 	next := at.UTC().Format(time.RFC3339)
 	r.NextAt = &next
 	dataBytes, err := json.Marshal(r)
@@ -409,19 +409,19 @@ AND json_extract(data,'$.routineID')=? AND status IN('queued','running','waiting
 	ids := []string{}
 	for _, run := range runs {
 		ids = append(ids, run.ID)
-		if run.Status != "queued" {
+		if run.Status != contract.RunStatusQueued {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=? AND state='queued'`, run.JobID); err != nil {
 			return nil, err
 		}
-		run.Status, run.Summary = "cancelled", "Routine cancelled"
-		if err := endRun(ctx, tx, &run); err != nil {
+		run.Status, run.Summary = contract.RunStatusCancelled, "Routine cancelled"
+		if err := s.endRun(ctx, tx, &run); err != nil {
 			return nil, err
 		}
 	}
-	if r.Status != "cancelled" {
-		if err := routineActivity(ctx, tx, r, "routine.deleted"); err != nil {
+	if r.Status != contract.RoutineStatusCancelled {
+		if err := s.routineActivity(ctx, tx, r, "routine.deleted"); err != nil {
 			return nil, err
 		}
 	}
@@ -463,14 +463,14 @@ AND json_extract(data,'$.trigger')='review' AND status IN('queued','running','wa
 	ids := []string{}
 	for _, run := range runs {
 		ids = append(ids, run.ID)
-		if run.Status != "queued" {
+		if run.Status != contract.RunStatusQueued {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=? AND state='queued'`, run.JobID); err != nil {
 			return nil, err
 		}
-		run.Status, run.Summary = "cancelled", "Proactivity paused"
-		if err := endRun(ctx, tx, &run); err != nil {
+		run.Status, run.Summary = contract.RunStatusCancelled, "Proactivity paused"
+		if err := s.endRun(ctx, tx, &run); err != nil {
 			return nil, err
 		}
 	}
@@ -578,7 +578,7 @@ ORDER BY kind='routine' DESC,due,id LIMIT 32`, now.Unix(), now.Unix())
 		text := "Review this conversation and its open work for a useful next step. Do not invent tasks, repeat old suggestions, or chase acknowledgements."
 		work := Work{Trigger: item.kind, Message: contract.Message{
 			ID: scheduleID(item.kind, item.id, item.due), ThreadID: item.agent,
-			Role: "system", CreatedAt: now.UTC().Format(time.RFC3339Nano),
+			Role: contract.MessageRoleSystem, CreatedAt: now.UTC().Format(time.RFC3339Nano),
 		}}
 		var interval int64
 		var data []byte
@@ -590,7 +590,7 @@ ORDER BY kind='routine' DESC,due,id LIMIT 32`, now.Unix(), now.Unix())
 			if err := json.Unmarshal([]byte(item.data), &r); err != nil {
 				return err
 			}
-			if err := routineActivity(ctx, tx, r, "routine.fired"); err != nil {
+			if err := s.routineActivity(ctx, tx, r, "routine.fired"); err != nil {
 				return err
 			}
 			text, interval, work.RoutineID = r.Prompt, r.IntervalSeconds, &r.ID
@@ -615,9 +615,9 @@ ORDER BY kind='routine' DESC,due,id LIMIT 32`, now.Unix(), now.Unix())
 			} else if interval > 0 {
 				t := nextRoutineFire(r, item.due, now.Unix())
 				at := time.Unix(t, 0).UTC().Format(time.RFC3339)
-				r.NextAt, r.Status, next = &at, "active", t
+				r.NextAt, r.Status, next = &at, contract.RoutineStatusActive, t
 			} else {
-				r.NextAt, r.Status = nil, "finished"
+				r.NextAt, r.Status = nil, contract.RoutineStatusFinished
 			}
 			data, err = json.Marshal(r)
 		} else {
@@ -638,8 +638,8 @@ ORDER BY kind='routine' DESC,due,id LIMIT 32`, now.Unix(), now.Unix())
 		if err != nil {
 			return err
 		}
-		work.Message.Parts = []contract.Part{{Kind: "text", Text: &text}}
-		if err := queueTx(ctx, tx, work, item.agent); err != nil {
+		work.Message.Parts = []contract.Part{{Kind: contract.PartKindText, Text: &text}}
+		if err := s.queueTx(ctx, tx, work, item.agent); err != nil {
 			return err
 		}
 		// Table and key are fixed literals, never tool or user input.
@@ -669,7 +669,7 @@ func (s *Store) FinalizeReview(ctx context.Context, m *contract.Message, run *co
 		return nil
 	}
 	text := strings.TrimSpace(Text(*m))
-	if run.Status == "completed" && text != "" {
+	if run.Status == contract.RunStatusCompleted && text != "" {
 		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(strings.Fields(text), " "))))
 		fresh, err := claimNotice(ctx, tx, run.AgentID, hash)
 		if err != nil {
@@ -677,23 +677,23 @@ func (s *Store) FinalizeReview(ctx context.Context, m *contract.Message, run *co
 		}
 		if fresh {
 			run.MessageID, run.Outcome, run.Summary = &m.ID, textPointer("notice"), "Useful next step found"
-			if _, err := appendTx(ctx, tx, contract.Event{
-				ConversationID: m.ThreadID, Type: "message.start", MessageID: &m.ID, AgentID: m.AgentID, RunID: &run.ID,
+			if _, err := s.appendTx(ctx, tx, contract.Event{
+				ConversationID: m.ThreadID, Type: contract.EventTypeMessageStart, MessageID: &m.ID, AgentID: m.AgentID, RunID: &run.ID,
 			}, m); err != nil {
 				return err
 			}
-			if _, err := appendTx(ctx, tx, contract.Event{
-				ConversationID: m.ThreadID, Type: "message.done", MessageID: &m.ID, AgentID: m.AgentID, RunID: &run.ID,
+			if _, err := s.appendTx(ctx, tx, contract.Event{
+				ConversationID: m.ThreadID, Type: contract.EventTypeMessageDone, MessageID: &m.ID, AgentID: m.AgentID, RunID: &run.ID,
 			}, m); err != nil {
 				return err
 			}
 		}
 	}
-	if run.MessageID == nil && run.Status == "completed" {
+	if run.MessageID == nil && run.Status == contract.RunStatusCompleted {
 		run.Outcome, run.Summary = textPointer("quiet"), "Review complete; nothing new to report"
 	}
-	if _, err := appendTx(ctx, tx, contract.Event{
-		ConversationID: run.ConversationID, Type: "run.done", AgentID: &run.AgentID, RunID: &run.ID, Run: run,
+	if _, err := s.appendTx(ctx, tx, contract.Event{
+		ConversationID: run.ConversationID, Type: contract.EventTypeRunDone, AgentID: &run.AgentID, RunID: &run.ID, Run: run,
 	}, nil); err != nil {
 		return err
 	}
@@ -749,12 +749,12 @@ func (s *Store) routineNotice(ctx context.Context, run *contract.Run) error {
 		return err
 	}
 	if fresh {
-		count, err := routineFailure(ctx, tx, run)
+		count, err := s.routineFailure(ctx, tx, run)
 		if err != nil {
 			return err
 		}
 		if count == 1 || count == RoutineFailureLimit {
-			if err := appendRoutineNotice(ctx, tx, run, count == RoutineFailureLimit); err != nil {
+			if err := s.appendRoutineNotice(ctx, tx, run, count == RoutineFailureLimit); err != nil {
 				return err
 			}
 		}
@@ -782,7 +782,7 @@ func (s *Store) routineNotice(ctx context.Context, run *contract.Run) error {
 const RoutineFailureLimit = 10
 
 // routineFailure counts a failure in the routine's current streak, pausing it at the limit.
-func routineFailure(ctx context.Context, tx *sql.Tx, run *contract.Run) (int, error) {
+func (s *Store) routineFailure(ctx context.Context, tx *sql.Tx, run *contract.Run) (int, error) {
 	var count int
 	if err := tx.QueryRowContext(ctx, `INSERT INTO routine_failures(routine_id,count) SELECT id,1 FROM routines WHERE id=? AND agent_id=?
 ON CONFLICT(routine_id) DO UPDATE SET count=count+1 RETURNING count`, *run.RoutineID, run.AgentID).Scan(&count); err != nil {
@@ -795,10 +795,10 @@ ON CONFLICT(routine_id) DO UPDATE SET count=count+1 RETURNING count`, *run.Routi
 		return count, nil
 	}
 	r, err := routineTx(ctx, tx, run.AgentID, *run.RoutineID)
-	if err != nil || r.Status != "active" {
+	if err != nil || r.Status != contract.RoutineStatusActive {
 		return count, err
 	}
-	r.Status, r.NextAt = "paused", nil
+	r.Status, r.NextAt = contract.RoutineStatusPaused, nil
 	data, err := json.Marshal(r)
 	if err != nil {
 		return count, err
@@ -806,10 +806,10 @@ ON CONFLICT(routine_id) DO UPDATE SET count=count+1 RETURNING count`, *run.Routi
 	if _, err := tx.ExecContext(ctx, `UPDATE routines SET data=?,next_at=NULL WHERE id=? AND agent_id=?`, string(data), r.ID, r.AgentID); err != nil {
 		return count, err
 	}
-	return count, routineActivity(ctx, tx, r, "routine.paused")
+	return count, s.routineActivity(ctx, tx, r, "routine.paused")
 }
 
-func appendRoutineNotice(ctx context.Context, tx *sql.Tx, run *contract.Run, paused bool) error {
+func (s *Store) appendRoutineNotice(ctx context.Context, tx *sql.Tx, run *contract.Run, paused bool) error {
 	title := "Routine"
 	var raw string
 	err := tx.QueryRowContext(ctx, `SELECT data FROM routines WHERE agent_id=? AND id=?`, run.AgentID, *run.RoutineID).Scan(&raw)
@@ -834,22 +834,22 @@ func appendRoutineNotice(ctx context.Context, tx *sql.Tx, run *contract.Run, pau
 	}
 	encoded := string(args)
 	m := contract.Message{
-		ID: routineNoticeID(run.ID), ThreadID: agent, Role: "system", Status: "done", AgentID: &agent, RunID: &run.ID, CreatedAt: Now(),
+		ID: routineNoticeID(run.ID), ThreadID: agent, Role: contract.MessageRoleSystem, Status: contract.MessageStatusDone, AgentID: &agent, RunID: &run.ID, CreatedAt: Now(),
 		Parts: []contract.Part{{Kind: "routine_failed", Text: &text, Name: &id, Args: &encoded}},
 	}
-	if _, err := appendTx(ctx, tx, contract.Event{ConversationID: agent, Type: "message.start", MessageID: &m.ID, AgentID: &agent, RunID: &run.ID}, &m); err != nil {
+	if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: agent, Type: contract.EventTypeMessageStart, MessageID: &m.ID, AgentID: &agent, RunID: &run.ID}, &m); err != nil {
 		return err
 	}
 	// Chat row stays system. Push still uses the assistant notice path.
 	pushed := m
-	pushed.Role = "assistant"
-	return noticeTx(ctx, tx, &pushed, contract.Event{Type: "message.start"})
+	pushed.Role = contract.MessageRoleAssistant
+	return noticeTx(ctx, tx, &pushed, contract.Event{Type: contract.EventTypeMessageStart})
 }
 
 // sealRoutineFailure finishes a routine whose failure was committed but whose run
 // was still open, including failures whose notices were suppressed.
 func (s *Store) sealRoutineFailure(ctx context.Context, run *contract.Run) (bool, error) {
-	if run.Trigger != "routine" {
+	if run.Trigger != contract.RunTriggerRoutine {
 		return false, nil
 	}
 	var n int
@@ -865,11 +865,11 @@ OR EXISTS(SELECT 1 FROM proactivity,json_each(recent_notices) WHERE agent_id=? A
 	if run.Error == nil {
 		run.Error = &contract.Error{Code: "provider", Message: "The agent could not complete this reply."}
 	}
-	run.Status, run.Activity, run.Summary, run.FinishedAt = "failed", "", "Routine failed", &now
+	run.Status, run.Activity, run.Summary, run.FinishedAt = contract.RunStatusFailed, "", "Routine failed", &now
 	for i := range run.Tools {
-		if run.Tools[i].Status == "running" {
+		if run.Tools[i].Status == contract.ToolActivityStatusRunning {
 			run.Tools[i].Status = run.Status
-			if _, err := s.Append(ctx, contract.Event{ConversationID: run.ConversationID, Type: "tool.done", RunID: &run.ID, AgentID: &run.AgentID, Tool: &run.Tools[i]}, nil); err != nil {
+			if _, err := s.Append(ctx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeToolDone, RunID: &run.ID, AgentID: &run.AgentID, Tool: &run.Tools[i]}, nil); err != nil {
 				return false, err
 			}
 		}

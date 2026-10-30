@@ -13,10 +13,22 @@ public actor LocalCacheActor {
     private var parkNextEntry = false
     private var parked: CheckedContinuation<Void, Never>?
     private var deliveries: [String: Task<Void, any Error>] = [:]
+    private static let claims = UploadClaims()
+    /// Copies of files waiting to upload, one folder per message.
+    public nonisolated let uploads: URL
 
     public init(_ cache: LocalCache) {
         self.cache = cache
+        uploads = cache.folder.appending(path: "uploads", directoryHint: .isDirectory)
     }
+
+    /// Claims a message's uploads; false when they are already running.
+    public func claim(_ messageID: String) async -> Bool { await Self.claims.claim(uploads.path + "/" + messageID) }
+    public func unclaim(_ messageID: String) async { await Self.claims.remove(uploads.path + "/" + messageID) }
+    public func claimed(_ messageID: String) async -> Bool { await Self.claims.contains(uploads.path + "/" + messageID) }
+
+    public func snapshot<T: Decodable & Sendable>(_ key: String) -> T? { try? cache.snapshot(key) }
+    public func saveSnapshot<T: Encodable & Sendable>(_ key: String, _ value: T) { try? cache.saveSnapshot(key, value) }
 
     public var saveCount: Int { saves }
     public var markCount: Int { marks }
@@ -41,12 +53,12 @@ public actor LocalCacheActor {
         try await enter()
     }
 
-    public func save(agents: [Agent], threads: [Thread], edits: [Thread]? = nil, pinEdits: [String]? = nil, dirtyPins: [String]? = nil) async throws {
+    public func save(agents: [Agent], threads: [Thread], edits: [Thread]? = nil) async throws {
         try await enter()
         saves += 1
         if failing { throw ClientError.cache("forced") }
         if instant { return }
-        if let edits { try cache.saveEdits(edits, pins: pinEdits, dirtyPins: dirtyPins) }
+        if let edits { try cache.saveEdits(edits) }
         try cache.save(agents: agents, threads: threads)
     }
 
@@ -96,4 +108,11 @@ public actor LocalCacheActor {
         // A sleep would yield, so a stall on the main thread would not miss the heartbeat.
         if stall > .zero { block(stall) }
     }
+}
+
+private actor UploadClaims {
+    private var messages: Set<String> = []
+    func claim(_ key: String) -> Bool { messages.insert(key).inserted }
+    func remove(_ key: String) { messages.remove(key) }
+    func contains(_ key: String) -> Bool { messages.contains(key) }
 }

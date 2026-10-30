@@ -1,35 +1,33 @@
 ---
-title: Skills and MCP
+title: Tools
 slug: skills-and-mcp
-description: Extend Polymux with reusable skill instructions and Model Context Protocol servers.
-section: Customising Polymux
-sectionOrder: 3
-order: 2
+description: Choose the tools, browser, and device access your agents can use.
+section: Guides
+sectionOrder: 1
+order: 5
 published: true
 ---
 
-# Skills and MCP
+# Tools
 
-Skills provide instructions for a kind of work. Model Context Protocol (MCP) connections supply external tools. In the native app, both are configured for agents on the **server**, not through the older Electron settings pages.
+Polymux’s core is small. Connect the tools you want your agents to use:
 
-## Skills
+- **MCP connections** let agents use external tools, including browser tools.
+- **Command-line tools** use programs installed on the server or a configured remote device.
+- **Skills** provide saved instructions for a type of work.
 
-An agent definition can reference trusted Markdown skill files using absolute paths on the server. Registering a path from your app device does not copy that file to a remote server.
+## Set up an agent
 
-A skill commonly uses a `SKILL.md` entrypoint with supporting references or scripts. The server loads the configured Markdown instructions with size limits; do not assume that every directory used by another agent app is automatically discovered.
+In a direct chat, tell the agent which trusted tool, service, or skill file you want to connect. Ask it to explain the access needed before making changes.
 
-Only register skills you trust. Their instructions can guide tool use on the server and connected computers. There is no native **Settings → Skills** browser at present.
+Open **Profile → Capabilities** to see its instructions, skills, and tools. Files and programs on a client Mac are not automatically available on the server.
 
-## MCP servers
+## Devices and permissions
 
-The server supports local stdio connections (`command`, `args`, and optional `env`) and remote Streamable HTTP connections. A stdio process runs on the server computer, not on the device displaying the chat.
+Pairing a client lets that Mac chat with your server. It does not give agents unrestricted access to that Mac. **Settings → Connections** controls optional client features such as location.
 
-## Make an integration change
+Only enable access you need, and review approval requests before allowing actions on your accounts or devices.
 
-Ask the agent in a **direct conversation** to inspect or manage its integrations. Its `manage_integrations` tool can persist supported MCP, skill, and CLI configuration. Give it the exact trusted service or file you intend to use, and review the proposed access before authorising setup.
+## Your data
 
-Saved definition changes take effect on the next turn. The startup `POLYMUX_AGENTS` definitions file is not a live settings file, and existing stored definitions take precedence. There is no generic watcher for the older `~/.polymux/mcp.json` configuration.
-
-## Permissions
-
-MCP connections default to consequential-action approval classification unless an operator marks them read-only. That classification is a trust decision, not proof that a tool cannot write. Keep credentials out of prompts and source files, and review an integration's own account and permission requirements.
+Conversations and memory live on the server; clients keep a local cache. Model providers and connected services may receive content needed for a task. Keep keys and pairing links private. See the [privacy policy](/privacy-policy/).

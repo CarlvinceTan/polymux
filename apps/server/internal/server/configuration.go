@@ -12,10 +12,16 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/skills"
 )
 
 func configuration(d agentruntime.Definition) contract.AgentConfiguration {
-	return contract.AgentConfiguration{Workspace: d.Workspace, Tools: append([]string{}, d.Tools...), Skills: append([]string{}, d.Skills...)}
+	return contract.AgentConfiguration{
+		Workspace:     d.Workspace,
+		Tools:         append([]string{}, d.Tools...),
+		Skills:        append([]string{}, d.Skills...),
+		BundledSkills: skills.Names(),
+	}
 }
 
 func (s *Server) agentConfiguration(w http.ResponseWriter, r *http.Request) {

@@ -7,12 +7,12 @@
     "intro": "The native app keeps your conversation list and selected chat close together. Find an agent, send a request, and follow its responses and activity without the older tabbed workspace.",
     "demoTitle": "In a conversation",
     "demoItems": [
-      {"label": "Find", "title": "Your conversation list", "description": "Search names and roles, filter unread chats, or sort by activity."},
+      {"label": "Find", "title": "Your conversation list", "description": "Search conversations and messages, or pin chats you use often."},
       {"label": "Ask", "title": "Messages and attachments", "description": "Send a request with the files it needs."},
       {"label": "Follow", "title": "Replies and activity", "description": "Review responses and answer requests for your approval."}
     ],
     "benefits": [
-      {"title": "Find the right chat", "description": "Use sidebar search, unread and active filters, and name or recent sorting."},
+      {"title": "Find the right chat", "description": "Use Search, pins, and sections to find and organise conversations."},
       {"title": "Keep the reference", "description": "Reply to a message and search within the selected conversation."},
       {"title": "Bring the file", "description": "Attach files from the composer, or drop them into a chat on macOS."}
     ],
@@ -25,11 +25,11 @@
     "menuDescription": "Bring several agents into the same conversation",
     "title": "Give the conversation a team.",
     "description": "Create native Polymux group chats with several agents and a shared name.",
-    "intro": "Choose several agents when starting a chat to create a group. Give it a name, keep the discussion in one place, and edit its membership from the conversation header as the work changes.",
+    "intro": "Ask an agent to create a group with the agents you name. Keep the discussion in one place and edit its membership from the conversation header as the work changes.",
     "demoTitle": "A shared conversation",
     "demoItems": [
-      {"label": "Choose", "title": "Select your agents", "description": "Add recipients in New Chat."},
-      {"label": "Name", "title": "Set a shared purpose", "description": "Give the group an optional chat name."},
+      {"label": "Choose", "title": "Select your agents", "description": "Tell the agent who should join the group."},
+      {"label": "Name", "title": "Set a shared purpose", "description": "Ask for a group name that describes the work."},
       {"label": "Adjust", "title": "Edit the group", "description": "Open the header to change its name and members."}
     ],
     "benefits": [
@@ -37,7 +37,7 @@
       {"title": "Keep it recognisable", "description": "Use a group name to distinguish the discussion from individual chats."},
       {"title": "Change the team", "description": "Edit group membership without creating another workspace."}
     ],
-    "steps": ["Open New Chat and choose more than one agent.", "Add an optional group name and press Create.", "Use the group header when you need to edit its name or membership."],
+    "steps": ["Ask an agent to create a group with the agents you name.", "Describe the group's purpose and desired name.", "Use the group header when you need to edit its name or membership."],
     "example": {"title": "Discuss a project", "description": "Bring a planning agent and a writing agent into a group to discuss a brief. Group membership is distinct from delegating a bounded child task."},
     "docsPath": "/docs/workspace/"
   },
@@ -45,8 +45,8 @@
     "group": "app", "slug": "profiles", "name": "Agent profiles", "icon": "models",
     "menuDescription": "Shape each agent's identity and instructions",
     "title": "Make each agent recognisable.",
-    "description": "Edit an agent's name, role, role description, avatar, and schedule controls.",
-    "intro": "An agent profile gives your conversation a recognisable identity and purpose. Edit its name, role, instructions, and avatar in the native app, with schedule controls alongside the profile.",
+    "description": "Change an agent's name, role, and avatar, and review its capabilities and scheduled work.",
+    "intro": "An agent profile gives your conversation a recognisable identity and purpose. Name and role changes save automatically. Review its instructions in Capabilities, or ask the agent in chat to change how it works.",
     "demoTitle": "An agent's profile",
     "demoItems": [
       {"label": "Identity", "title": "Name and avatar", "description": "Recognise the agent in the list and chat header."},
@@ -58,20 +58,20 @@
       {"title": "Choose its look", "description": "Customise the avatar from the profile editor."},
       {"title": "Review its routines", "description": "See scheduled work and cancel routines from the same panel."}
     ],
-    "steps": ["Open an individual agent conversation.", "Click the agent's header to open Edit profile.", "Edit its details and press Save; use the avatar control for appearance."],
+    "steps": ["Open an individual agent conversation.", "Click the agent's name or avatar to open its profile.", "Change its name or role, customise its avatar, or review Capabilities and Work."],
     "example": {"title": "A writing partner", "description": "Give an agent a writing role and describe the tone and review process you want. Model configuration remains a separate server setting."},
-    "docsPath": "/docs/models-and-agents/"
+    "docsPath": "/docs/workspace/#profiles"
   },
   {
     "group": "app", "slug": "voice", "name": "Voice", "icon": "hub",
     "menuDescription": "Configure voice separately from text-agent models",
     "title": "Choose how you use voice.",
-    "description": "Configure Cascaded or Full Duplex voice, Gemini models, and voice credentials in native Settings.",
-    "intro": "The native Settings panel offers Cascaded and Full Duplex voice modes. Configure the applicable Gemini model and credentials there, separately from the text model used by the Go agent server.",
+    "description": "Choose device-based Cascaded voice or configure Gemini or OpenAI Full Duplex voice in native Settings.",
+    "intro": "Cascaded voice uses speech recognition and speech synthesis on your device. Full Duplex voice uses a separately configured Gemini or OpenAI connection. Neither replaces the text-agent model on your server.",
     "demoTitle": "Voice settings",
     "demoItems": [
       {"label": "Mode", "title": "Cascaded or Full Duplex", "description": "Choose the voice mode in Settings."},
-      {"label": "Provider", "title": "Gemini configuration", "description": "Set the applicable model, voice, and API key."},
+      {"label": "Provider", "title": "Full Duplex connection", "description": "Choose Gemini or OpenAI and configure its model, voice, and credentials."},
       {"label": "Permission", "title": "Microphone access", "description": "Approve the operating-system access required by the feature."}
     ],
     "benefits": [
@@ -79,7 +79,7 @@
       {"title": "Keep models separate", "description": "Voice settings do not replace the server's text-agent model configuration."},
       {"title": "Grant access deliberately", "description": "Microphone and speech permissions are optional and apply only when using voice."}
     ],
-    "steps": ["Connect the app to your server and open Settings.", "Choose a voice mode and configure its Gemini model and key.", "Check the feature's status and required system permissions before using voice."],
+    "steps": ["Connect the app to your server and open Settings.", "Choose Cascaded voice, or configure a Gemini or OpenAI Full Duplex connection.", "Check the feature's status and required system permissions before using voice."],
     "example": {"title": "Choose your voice setup", "description": "Set up a voice mode without changing the model endpoint used for text conversations. Keep API keys out of chat messages."},
     "docsPath": "/docs/models-and-agents/"
   },
@@ -87,8 +87,8 @@
     "group": "agent", "slug": "memory", "name": "Memory", "icon": "memory",
     "menuDescription": "Save useful notes within an agent conversation",
     "title": "Keep useful context for later.",
-    "description": "Agents can save, recall, and forget conversation-scoped memory on the server.",
-    "intro": "The Go server provides explicit memory tools for useful notes. Memory is scoped to an agent and conversation, stored in SQLite on the server, and kept separate from the app's conversation cache.",
+    "description": "Agents can save, recall, and forget useful notes on the server.",
+    "intro": "Ask agents to remember useful notes and preferences. Memory lives on the server and can be private or shared, depending on how it was saved. It is separate from the app's conversation cache.",
     "demoTitle": "Memory boundaries",
     "demoItems": [
       {"label": "Save", "title": "A useful preference", "description": "Ask the agent to remember something for this conversation."},
@@ -102,14 +102,14 @@
     ],
     "steps": ["Ask an agent to save a useful note in your conversation.", "Check that the memory operation succeeded.", "Ask it to recall or forget the note when needed."],
     "example": {"title": "Keep a working preference", "description": "Ask an agent to remember your preferred review format for this conversation, rather than assuming every new chat shares the same memory."},
-    "docsPath": "/docs/memory/"
+    "docsPath": "/docs/workspace/#memory"
   },
   {
     "group": "agent", "slug": "tasks-and-schedules", "name": "Tasks & schedules", "icon": "tasks",
     "menuDescription": "Schedule routines and delegate bounded work",
     "title": "Give work a time and a scope.",
-    "description": "Ask agents for one-shot or interval routines and bounded delegated tasks on the server.",
-    "intro": "Agents can schedule one-shot or interval routines and queue bounded child tasks. Review schedules in an agent's profile and follow work in the conversation, rather than looking for the older Tasks board.",
+    "description": "Ask agents for one-time or recurring work and bounded delegated tasks on the server.",
+    "intro": "Agents can schedule work and queue bounded child tasks. Review schedules under Profile, Work, and Schedule, and follow results in the conversation.",
     "demoTitle": "Ways work runs",
     "demoItems": [
       {"label": "Routine", "title": "A time to run", "description": "Specify the task, start time, timezone, and interval."},
@@ -117,33 +117,33 @@
       {"label": "Delegate", "title": "A bounded child task", "description": "A child receives its explicit task, not the whole parent chat."}
     ],
     "benefits": [
-      {"title": "Check the timing", "description": "Confirm the next run instead of assuming a calendar rule became a supported interval."},
-      {"title": "Control background work", "description": "Toggle background reviews or cancel a routine in Edit profile."},
+      {"title": "Check the timing", "description": "Confirm the saved time, timezone, and next run."},
+      {"title": "Control background work", "description": "Toggle background reviews or cancel a routine under Profile, Work, and Schedule."},
       {"title": "Keep delegation bounded", "description": "Children cannot recursively delegate and do not automatically receive private parent memory."}
     ],
     "steps": ["Describe the work and its timing or delegation boundary in chat.", "Review any approval and the confirmed schedule or task state.", "Keep the server and required connections running, then check the result."],
     "example": {"title": "Review a brief later", "description": "Ask for a one-time reminder with an explicit time and timezone. Confirm the saved routine and cancel it from the agent profile if plans change."},
-    "docsPath": "/docs/schedules-and-tasks/"
+    "docsPath": "/docs/workspace/#scheduled-work"
   },
   {
     "group": "agent", "slug": "models-and-agents", "name": "Models & agents", "icon": "models",
     "menuDescription": "Configure model access on your agent server",
     "title": "The model runs behind your server.",
-    "description": "Configure the Go server's OpenAI-compatible model endpoint separately from agent profiles and voice.",
-    "intro": "The app displays conversations while the Go server runs agents. Configure the text model's compatible endpoint and credentials on that server; agent profiles and native voice settings are separate controls.",
+    "description": "Add model providers and choose your agents' default model from native Settings.",
+    "intro": "Open Settings and choose Models to add a provider and select a default model. The server keeps that setup for all your clients. Agent instructions and voice settings remain separate controls.",
     "demoTitle": "Three separate controls",
     "demoItems": [
-      {"label": "Server", "title": "Text model", "description": "Startup model.json or environment configuration."},
-      {"label": "Agent", "title": "Role and instructions", "description": "Edit the agent's profile in the app."},
-      {"label": "Voice", "title": "Gemini voice settings", "description": "Configure the applicable voice model in Settings."}
+      {"label": "Server", "title": "Text model", "description": "Choose a provider and default model in Settings."},
+      {"label": "Agent", "title": "Role and instructions", "description": "Review Capabilities and ask the agent to change its working instructions."},
+      {"label": "Voice", "title": "Separate voice settings", "description": "Choose device-based Cascaded voice or configure Gemini or OpenAI Full Duplex."}
     ],
     "benefits": [
       {"title": "Keep configuration clear", "description": "Know whether a problem belongs to the app connection, model endpoint, or agent instructions."},
-      {"title": "Keep secrets out of chat", "description": "Use server-side secret injection or an owner-only credential file."},
-      {"title": "Use current guidance", "description": "The native app has no general Providers, Models, or ACP settings page."}
+      {"title": "Keep secrets out of chat", "description": "Enter provider keys through the provider settings."},
+      {"title": "Use your own setup", "description": "Sign in, add an API key, or connect a compatible local endpoint."}
     ],
-    "steps": ["Configure a compatible model endpoint and model identifier on the server.", "Supply its credential through the server's supported secret configuration.", "Connect the app and send a small request to verify a reply."],
-    "example": {"title": "Diagnose the right connection", "description": "If conversations load but replies fail, inspect the server's model setup rather than searching the native app for an older Providers page."},
+    "steps": ["Open Settings, choose Models, and press Add provider in the Providers section.", "Connect your provider and select a Default model.", "Send a small request to verify a reply."],
+    "example": {"title": "Diagnose the right connection", "description": "If conversations load but replies fail, check the provider and Default model in Settings, Models."},
     "docsPath": "/docs/models-and-agents/"
   },
   {

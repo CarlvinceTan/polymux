@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,7 +18,11 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-type Store struct{ DB *sql.DB }
+type Store struct {
+	DB     *sql.DB
+	events hub
+	jobs   hub
+}
 
 func Open(ctx context.Context, path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -28,6 +33,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One connection serializes writes; the wake hub (wake.go) also relies on it.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	s := &Store{DB: db}
@@ -60,7 +66,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(message_id UNINDEXED,
 CREATE TABLE IF NOT EXISTS media_index(message_id TEXT PRIMARY KEY REFERENCES messages(id), text TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS media_vectors(message_id TEXT PRIMARY KEY REFERENCES messages(id), thread_id TEXT NOT NULL, embedding BLOB NOT NULL, model TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS vectors_scope ON media_vectors(thread_id);
-CREATE TABLE IF NOT EXISTS search_entities(id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE, body TEXT NOT NULL, embedding BLOB NOT NULL, model TEXT NOT NULL);`)
+CREATE TABLE IF NOT EXISTS search_entities(id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE, body TEXT NOT NULL, embedding BLOB NOT NULL, model TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS run_submissions(run_id TEXT PRIMARY KEY, submission_id INTEGER NOT NULL);`)
 	if err != nil {
 		return err
 	}
@@ -103,20 +110,43 @@ PRAGMA user_version=2;`)
 	if err := s.migrateProjects(ctx); err != nil {
 		return err
 	}
-	return s.migrateSidebar(ctx)
+	if err := s.migrateSidebar(ctx); err != nil {
+		return err
+	}
+	// Background loops look these up every few seconds.
+	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS messages_pending ON messages(status) WHERE indexing_state='pending';
+CREATE INDEX IF NOT EXISTS messages_failed ON messages(id) WHERE indexing_state='error';
+CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id,status);`); err != nil {
+		return err
+	}
+	return s.closeFocusCards(ctx)
 }
 
 func Now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 func (s *Store) SaveDefinition(ctx context.Context, a contract.Agent, definition json.RawMessage) error {
-	return s.saveDefinition(ctx, a, definition, false, nil, nil)
+	return s.saveDefinition(ctx, a, definition, false, nil, nil, contract.Agent{})
 }
 
-func (s *Store) CreateDefinition(ctx context.Context, a contract.Agent, definition json.RawMessage, task, section *string) error {
-	return s.saveDefinition(ctx, a, definition, true, task, section)
+// CreateDefinition saves a new agent and queues its first turn: the task when one is given,
+// otherwise an introduction. creator is the bot that asked for it; its zero value means the user.
+func (s *Store) CreateDefinition(ctx context.Context, a contract.Agent, definition json.RawMessage, task, section *string, creator contract.Agent) error {
+	return s.saveDefinition(ctx, a, definition, true, task, section, creator)
 }
 
-func (s *Store) saveDefinition(ctx context.Context, a contract.Agent, definition json.RawMessage, intro bool, task, section *string) error {
+// introText asks for a first message drawn from the agent's context rather than a fixed greeting.
+func introText(creator contract.Agent) string {
+	origin := "The user created you."
+	if creator.ID != "" {
+		origin = "The bot " + strconv.Quote(creator.Name) + " created you; the user can see this chat."
+	}
+	return "You were just created. " + origin + " Write your first message to the user, drawing on your role and instructions and any memory about the user above. " +
+		"If no role or purpose has been established, greet briefly and ask what the user would like your role to be; do not invent a role or list assumed responsibilities. " +
+		"Otherwise, if something specific clearly needs doing, say what you will do or ask the one question that unblocks it; otherwise greet briefly in line with your established role. " +
+		"Keep it to one to three short sentences. Use ask_user only when a few concrete options would help the user choose. Do not start the work yet."
+}
+
+func (s *Store) saveDefinition(ctx context.Context, a contract.Agent, definition json.RawMessage, intro bool, task, section *string, creator contract.Agent) error {
 	if !json.Valid(definition) {
 		return fmt.Errorf("invalid agent definition")
 	}
@@ -172,17 +202,22 @@ func (s *Store) saveDefinition(ctx context.Context, a contract.Agent, definition
 		if _, err := tx.ExecContext(ctx, `UPDATE threads SET section_id=?,section_order=(SELECT COALESCE(max(section_order)+1,0) FROM threads WHERE section_id IS ?) WHERE id=?`, section, section, a.ID); err != nil {
 			return err
 		}
-		text := "You were just created. Greet the user in one or two short sentences. If a role is configured, briefly say what you can help with; otherwise ask what they want help with first. A focus card handles setup separately. Do not list setup questions or discuss tool configuration. Do not perform work or use tools."
-		work := Work{Trigger: "created", Message: contract.Message{ID: "created:" + a.ID, ThreadID: a.ID, Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}}, CreatedAt: Now()}}
-		if err := queueTx(ctx, tx, work, a.ID); err != nil {
-			return err
-		}
-		if task != nil && strings.TrimSpace(*task) != "" {
-			m := contract.Message{ID: "initial:" + a.ID, ThreadID: a.ID, Role: "user", Parts: []contract.Part{{Kind: "text", Text: task}}, Status: "done", CreatedAt: Now()}
-			if _, err := appendTx(ctx, tx, contract.Event{ConversationID: a.ID, Type: "message.start", MessageID: &m.ID}, &m); err != nil {
+		if task == nil || strings.TrimSpace(*task) == "" {
+			text := introText(creator)
+			work := Work{Trigger: contract.RunTriggerCreated, Message: contract.Message{ID: "created:" + a.ID, ThreadID: a.ID, Role: contract.MessageRoleUser, Parts: []contract.Part{{Kind: contract.PartKindText, Text: &text}}, CreatedAt: Now()}}
+			if err := s.queueTx(ctx, tx, work, a.ID); err != nil {
 				return err
 			}
-			if err := queueTx(ctx, tx, Work{Trigger: "message", Message: m}, a.ID); err != nil {
+		} else {
+			m := contract.Message{ID: "initial:" + a.ID, ThreadID: a.ID, Role: contract.MessageRoleUser, Parts: []contract.Part{{Kind: contract.PartKindText, Text: task}}, Status: contract.MessageStatusDone, CreatedAt: Now()}
+			if creator.ID != "" {
+				// The task comes from the creating bot, so the chat shows it as that bot's message.
+				m.AgentID = &creator.ID
+			}
+			if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: a.ID, Type: contract.EventTypeMessageStart, MessageID: &m.ID}, &m); err != nil {
+				return err
+			}
+			if err := s.queueTx(ctx, tx, Work{Trigger: contract.RunTriggerMessage, Message: m}, a.ID); err != nil {
 				return err
 			}
 			if err := activateReviews(ctx, tx, a.ID, ""); err != nil {
@@ -191,7 +226,7 @@ func (s *Store) saveDefinition(ctx context.Context, a contract.Agent, definition
 		}
 	}
 	if intro {
-		return sidebarCommit(ctx, tx, before, "Created "+a.Name, nil, nil)
+		return s.sidebarCommit(ctx, tx, before, "Created "+a.Name, nil, nil)
 	}
 	return tx.Commit()
 }
@@ -216,7 +251,7 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) ([]string, bool, err
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM agents WHERE id=?`, id).Scan(&exists); err != nil {
 		return nil, false, err
 	}
-	if _, err := closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE (source_agent=? OR target_agent=?) AND json_extract(data,'$.status')='queued'`, id, id); err != nil {
+	if _, err := s.closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE (source_agent=? OR target_agent=?) AND json_extract(data,'$.status')='queued'`, id, id); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM group_sessions WHERE agent_id=?`, id); err != nil {
@@ -226,9 +261,6 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) ([]string, bool, err
 		return nil, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE threads SET agent_id=(SELECT agent_id FROM thread_members WHERE thread_id=threads.id ORDER BY position LIMIT 1) WHERE id<>agent_id AND agent_id=? AND EXISTS(SELECT 1 FROM thread_members WHERE thread_id=threads.id)`, id); err != nil {
-		return nil, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE threads SET lead_agent_id=agent_id WHERE lead_agent_id=?`, id); err != nil {
 		return nil, false, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.path FROM attachments a
@@ -282,7 +314,7 @@ AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.t
 			return nil, false, err
 		}
 	}
-	return files, exists != 0, sidebarCommit(ctx, tx, before, "Deleted agent", nil, nil)
+	return files, exists != 0, s.sidebarCommit(ctx, tx, before, "Deleted agent", nil, nil)
 }
 
 func (s *Store) Definitions(ctx context.Context) ([]json.RawMessage, error) {
@@ -340,7 +372,10 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	if count == 0 {
 		return a, sql.ErrNoRows
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?) WHERE id=?`, a.Name, a.Role, a.ID); err != nil {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?) WHERE id=?`,
+		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, a.ID,
+	); err != nil {
 		return a, err
 	}
 	var data string
@@ -455,9 +490,7 @@ func (s *Store) Agents(ctx context.Context) ([]contract.Agent, error) {
 
 func (s *Store) Threads(ctx context.Context) ([]contract.Thread, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT t.id,t.agent_id,t.last_read_seq,t.last_seq,
- (SELECT count(*) FROM messages m WHERE m.thread_id=t.id AND m.status!='silent' AND m.role='assistant' AND m.seq>t.last_read_seq
-  AND NOT EXISTS(SELECT 1 FROM events e,json_each(e.data,'$.payload.messageIDs') hidden
-   WHERE e.thread_id=t.id AND json_extract(e.data,'$.type')='activity' AND hidden.value=m.id))
+ (SELECT count(*) FROM messages m WHERE m.thread_id=t.id AND m.status!='silent' AND m.role='assistant' AND m.seq>t.last_read_seq)
  + (SELECT count(*) FROM events e WHERE e.thread_id=t.id AND e.seq>t.last_read_seq
     AND json_extract(e.data,'$.type')='activity'
     AND json_extract(e.data,'$.payload.kind') IN ('agent.messaged','subagent.finished')),
@@ -496,42 +529,61 @@ func (s *Store) Threads(ctx context.Context) ([]contract.Thread, error) {
 	if err != nil {
 		return nil, err
 	}
+	runs, err := s.threadRuns(ctx, "")
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
-		var lead string
-		if err := s.DB.QueryRowContext(ctx, `SELECT lead_agent_id FROM threads WHERE id=?`, out[i].ID).Scan(&lead); err != nil {
-			return nil, err
-		}
-		if lead == "" {
-			lead = out[i].AgentID
-		}
-		out[i].LeadAgentID = &lead
-		out[i].Runs, err = s.Runs(ctx, out[i].ID)
-		if err != nil {
-			return nil, err
+		out[i].Runs = runs[out[i].ID]
+		if out[i].Runs == nil {
+			out[i].Runs = []contract.Run{}
 		}
 	}
 	return out, nil
 }
 
-func (s *Store) Thread(ctx context.Context, id string) (contract.Thread, error) {
+const threadSelect = `SELECT t.id,t.agent_id,t.last_read_seq,t.last_seq,COALESCE(NULLIF(t.title,''),json_extract(a.data,'$.name')),(SELECT json_group_array(agent_id) FROM (SELECT agent_id FROM thread_members WHERE thread_id=t.id ORDER BY position)),t.pinned,t.pin_order,t.section_id,t.section_order FROM threads t JOIN agents a ON a.id=t.agent_id`
+
+func threadScan(row interface{ Scan(...any) error }) (contract.Thread, error) {
 	var t contract.Thread
 	var members string
-	err := s.DB.QueryRowContext(ctx, `SELECT t.id,t.agent_id,t.last_read_seq,t.last_seq,COALESCE(NULLIF(t.title,''),json_extract(a.data,'$.name')),(SELECT json_group_array(agent_id) FROM (SELECT agent_id FROM thread_members WHERE thread_id=t.id ORDER BY position)),t.pinned,t.pin_order,t.section_id,t.section_order FROM threads t JOIN agents a ON a.id=t.agent_id WHERE t.id=?`, id).Scan(&t.ID, &t.AgentID, &t.LastReadSeq, &t.LastSeq, &t.Title, &members, &t.Pinned, &t.PinOrder, &t.SectionID, &t.SectionOrder)
+	err := row.Scan(&t.ID, &t.AgentID, &t.LastReadSeq, &t.LastSeq, &t.Title, &members, &t.Pinned, &t.PinOrder, &t.SectionID, &t.SectionOrder)
 	if err == nil {
 		err = json.Unmarshal([]byte(members), &t.AgentIDs)
 	}
-	if err == nil {
-		var lead string
-		err = s.DB.QueryRowContext(ctx, `SELECT lead_agent_id FROM threads WHERE id=?`, id).Scan(&lead)
-		if lead == "" {
-			lead = t.AgentID
-		}
-		t.LeadAgentID = &lead
-	}
+	return t, err
+}
+
+func (s *Store) Thread(ctx context.Context, id string) (contract.Thread, error) {
+	t, err := threadScan(s.DB.QueryRowContext(ctx, threadSelect+` WHERE t.id=?`, id))
 	if err == nil {
 		t.Runs, err = s.Runs(ctx, id)
 	}
 	return t, err
+}
+
+// ThreadTitles lists threads with their titles and members, without unread counts, messages or runs.
+func (s *Store) ThreadTitles(ctx context.Context) ([]contract.Thread, error) {
+	rows, err := s.DB.QueryContext(ctx, threadSelect+` ORDER BY t.pinned DESC,t.pin_order,CASE t.id WHEN 'assistant' THEN 0 ELSE 1 END,t.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []contract.Thread{}
+	for rows.Next() {
+		t, err := threadScan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) HasThread(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM threads WHERE id=?)`, id).Scan(&exists)
+	return exists, err
 }
 
 func (s *Store) Read(ctx context.Context, id string, seq int64) error {
@@ -539,9 +591,9 @@ func (s *Store) Read(ctx context.Context, id string, seq int64) error {
 	return err
 }
 
-func appendTx(ctx context.Context, tx *sql.Tx, event contract.Event, message *contract.Message) (contract.Event, error) {
+func (s *Store) appendTx(ctx context.Context, tx *sql.Tx, event contract.Event, message *contract.Message) (contract.Event, error) {
 	newRun := false
-	if message != nil && message.Status == "streaming" && event.RunID != nil {
+	if message != nil && message.Status == contract.MessageStatusStreaming && event.RunID != nil {
 		var status string
 		err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE id=?`, *event.RunID).Scan(&status)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -575,12 +627,12 @@ func appendTx(ctx context.Context, tx *sql.Tx, event contract.Event, message *co
 				return event, nil
 			}
 		}
-		if event.Run.Status == "completed" {
-			if err := resolvePeers(ctx, tx, event.Run); err != nil {
+		if event.Run.Status == contract.RunStatusCompleted {
+			if err := s.resolvePeers(ctx, tx, event.Run); err != nil {
 				return event, err
 			}
-			if event.Run.Status == "waiting_peer" || event.Run.Status == "waiting_input" {
-				event.Type = "run.update"
+			if event.Run.Status == contract.RunStatusWaitingPeer || event.Run.Status == contract.RunStatusWaitingInput {
+				event.Type = contract.EventTypeRunUpdate
 			}
 		}
 	}
@@ -605,9 +657,14 @@ func appendTx(ctx context.Context, tx *sql.Tx, event contract.Event, message *co
 		if err != nil {
 			return event, err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO messages(id,thread_id,seq,role,status,data) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,data=excluded.data,indexing_state='pending'`, message.ID, message.ThreadID, message.Seq, message.Role, message.Status, string(data))
+		// An update never moves a message to another chat or role.
+		result, err := tx.ExecContext(ctx, `INSERT INTO messages(id,thread_id,seq,role,status,data) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,data=excluded.data,indexing_state='pending'
+WHERE messages.thread_id=excluded.thread_id AND messages.role=excluded.role`, message.ID, message.ThreadID, message.Seq, message.Role, message.Status, string(data))
 		if err != nil {
 			return event, err
+		}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			return event, fmt.Errorf("message %s belongs to another chat", message.ID)
 		}
 	}
 	if event.Run != nil {
@@ -627,16 +684,17 @@ func appendTx(ctx context.Context, tx *sql.Tx, event contract.Event, message *co
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO events(thread_id,seq,data) VALUES(?,?,?)`, event.ConversationID, event.Seq, string(data))
 	if err == nil {
+		s.events.wake(event.ConversationID)
 		err = noticeTx(ctx, tx, message, event)
 	}
-	if err == nil && event.Run != nil && event.Run.ParentRunID != nil && event.Run.Trigger == "child" && (event.Type == "run.start" && newRun || event.Type == "run.done") {
-		err = childActivity(ctx, tx, event)
+	if err == nil && event.Run != nil && event.Run.ParentRunID != nil && event.Run.Trigger == contract.RunTriggerChild && (event.Type == contract.EventTypeRunStart && newRun || event.Type == contract.EventTypeRunDone) {
+		err = s.childActivity(ctx, tx, event)
 	}
 	if err == nil && event.Run != nil && endsChildren(event.Run.Status) {
-		err = cancelDescendants(ctx, tx, event.Run.ID)
+		err = s.cancelDescendants(ctx, tx, event.Run.ID)
 	}
 	if err == nil && event.Run != nil && Terminal(event.Run.Status) {
-		err = releaseSteers(ctx, tx, event.Run.ID)
+		err = s.releaseSteers(ctx, tx, event.Run.ID)
 	}
 	return event, err
 }
@@ -647,7 +705,7 @@ func (s *Store) Append(ctx context.Context, event contract.Event, message *contr
 		return event, err
 	}
 	defer tx.Rollback()
-	event, err = appendTx(ctx, tx, event, message)
+	event, err = s.appendTx(ctx, tx, event, message)
 	if err != nil {
 		return event, err
 	}
@@ -695,7 +753,7 @@ func (s *Store) Presence(ctx context.Context, id string, active bool) error {
 		return err
 	}
 	for _, thread := range threads {
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: "agent.presence", AgentID: &id, Active: &active}, nil); err != nil {
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeAgentPresence, AgentID: &id, Active: &active}, nil); err != nil {
 			return err
 		}
 	}
@@ -837,12 +895,12 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 			part := target.Parts[index]
 			reply.PartIndex = &index
 			switch part.Kind {
-			case "text":
+			case contract.PartKindText:
 				if part.Text == nil || *part.Text == "" {
 					return m, false, ErrReply
 				}
 				reply.Text = *part.Text
-			case "attachment":
+			case contract.PartKindAttachment:
 				if part.Attachment == nil {
 					return m, false, ErrReply
 				}
@@ -863,15 +921,15 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 			reply.Text = strings.Join(texts, "\n")
 		}
 	}
-	m = contract.Message{ID: request.ID, ThreadID: thread, Role: "user", Parts: parts, CreatedAt: Now(), Status: "done", ReplyToID: request.ReplyToID, Reply: reply, Mentions: request.Mentions}
-	if _, err := appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: "message.start", MessageID: &m.ID}, &m); err != nil {
+	m = contract.Message{ID: request.ID, ThreadID: thread, Role: contract.MessageRoleUser, Parts: parts, CreatedAt: Now(), Status: contract.MessageStatusDone, ReplyToID: request.ReplyToID, Reply: reply, Mentions: request.Mentions}
+	if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeMessageStart, MessageID: &m.ID}, &m); err != nil {
 		return m, false, err
 	}
-	if _, err := appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: "message.done", MessageID: &m.ID}, &m); err != nil {
+	if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeMessageDone, MessageID: &m.ID}, &m); err != nil {
 		return m, false, err
 	}
 	var parent *string
-	if len(targets) == 1 {
+	if len(targets) == 1 && !input.QueueOnly {
 		var id string
 		err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE thread_id=? AND agent_id=? AND status='running' AND json_extract(data,'$.trigger')!='created' ORDER BY rowid DESC LIMIT 1`, thread, targets[0]).Scan(&id)
 		if err == nil {
@@ -880,12 +938,19 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 			return m, false, err
 		}
 	}
-	work, err := json.Marshal(Work{Trigger: "message", Message: m, Targets: targets, Routing: input.Routing, ParentRunID: parent})
+	work, err := json.Marshal(Work{Trigger: contract.RunTriggerMessage, Message: m, Targets: targets, Routing: input.Routing, ParentRunID: parent, DeviceID: input.DeviceID})
 	if err != nil {
 		return m, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,thread_id,request,input) VALUES(?,?,?,?)`, request.ID, thread, string(encoded), string(work)); err != nil {
 		return m, false, err
+	}
+	s.jobs.wake(thread)
+	// Review commands apply whether the message starts a run or steers one.
+	if len(targets) == 1 && targets[0] == thread {
+		if err := activateReviews(ctx, tx, thread, request.Text); err != nil {
+			return m, false, err
+		}
 	}
 	if parent != nil {
 		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='steer' WHERE id=?`, request.ID); err != nil {
@@ -894,14 +959,9 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 		return m, true, tx.Commit()
 	}
 	for _, target := range targets {
-		run := NewRun(request.ID, thread, target, "message")
+		run := NewRun(request.ID, thread, target, contract.RunTriggerMessage)
 		run.SourceMessageID = &m.ID
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: "run.start", AgentID: &target, RunID: &run.ID, Run: &run}, nil); err != nil {
-			return m, false, err
-		}
-	}
-	if thread == m.ThreadID && len(targets) == 1 && targets[0] == thread {
-		if err := activateReviews(ctx, tx, thread, request.Text); err != nil {
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeRunStart, AgentID: &target, RunID: &run.ID, Run: &run}, nil); err != nil {
 			return m, false, err
 		}
 	}
@@ -923,13 +983,13 @@ func (s *Store) Finish(ctx context.Context, id string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='done' WHERE id=?`, id); err != nil {
 		return err
 	}
-	if err := finishRuns(ctx, tx, id); err != nil {
+	if err := s.finishRuns(ctx, tx, id); err != nil {
 		return err
 	}
-	if err := finishHandoffs(ctx, tx, id); err != nil {
+	if err := s.finishHandoffs(ctx, tx, id); err != nil {
 		return err
 	}
-	if err := finishPeer(ctx, tx, id); err != nil {
+	if err := s.finishPeer(ctx, tx, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -962,9 +1022,17 @@ func (s *Store) Recover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	resuming, err := s.resumingRuns(ctx)
+	if err != nil {
+		return err
+	}
 	for _, m := range interrupted {
-		m.Status = "error"
-		if _, err := s.Append(ctx, contract.Event{ConversationID: m.ThreadID, Type: "message.error", MessageID: &m.ID, Error: &contract.Error{Code: "interrupted", Message: "The server restarted during this reply. Send another message to continue."}}, &m); err != nil {
+		// A reply that will resume keeps streaming instead of reporting the restart.
+		if m.RunID != nil && resuming[*m.RunID] {
+			continue
+		}
+		m.Status = contract.MessageStatusError
+		if _, err := s.Append(ctx, contract.Event{ConversationID: m.ThreadID, Type: contract.EventTypeMessageError, MessageID: &m.ID, Error: &contract.Error{Code: "interrupted", Message: "The server restarted during this reply. Send another message to continue."}}, &m); err != nil {
 			return err
 		}
 	}

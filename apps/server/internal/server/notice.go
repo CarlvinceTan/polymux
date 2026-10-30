@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
 
 type PushSender interface {
@@ -43,6 +44,9 @@ func (s *Server) registerPush(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "device", "Invalid push registration.")
 		return
 	}
+	if err == nil {
+		err = s.Store.BindPush(r.Context(), device.ID, clientID(r.Context()))
+	}
 	s.respond(w, map[string]bool{"registered": err == nil, "available": s.config.Push != nil}, err)
 }
 func (s *Server) sendNotices(ctx context.Context) {
@@ -50,24 +54,35 @@ func (s *Server) sendNotices(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
-		for n := 0; n < 32 && ctx.Err() == nil; n++ {
-			item, err := s.Store.ClaimPush(ctx)
-			if errors.Is(err, sql.ErrNoRows) {
-				break
-			}
-			if err != nil {
-				if ctx.Err() == nil {
-					s.config.Log.Error("claim push notification")
+		if s.admission.start() {
+			for n := 0; n < 32 && ctx.Err() == nil; n++ {
+				item, err := s.Store.ClaimPush(ctx)
+				if errors.Is(err, sql.ErrNoRows) {
+					break
 				}
-				break
+				if err != nil {
+					if ctx.Err() == nil {
+						s.config.Log.Error("claim push notification")
+					}
+					break
+				}
+				// A revoked device, possibly revoked by another process, gets no more previews.
+				if s.config.Devices != nil && !s.config.Devices.Paired(ctx, item.Pairing) {
+					err := errors.Join(s.Store.FinishPush(ctx, item, store.PushResult{State: "rejected"}), s.Store.RevokePush(ctx, item.Pairing))
+					if err != nil {
+						s.config.Log.Error("cancel revoked push notifications")
+					}
+					continue
+				}
+				result := s.config.Push.Send(ctx, item)
+				writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				err = s.Store.FinishPush(writeCtx, item, result)
+				cancel()
+				if err != nil {
+					s.config.Log.Error("save push notification outcome")
+				}
 			}
-			result := s.config.Push.Send(ctx, item)
-			writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			err = s.Store.FinishPush(writeCtx, item, result)
-			cancel()
-			if err != nil {
-				s.config.Log.Error("save push notification outcome")
-			}
+			s.admission.done()
 		}
 		select {
 		case <-ctx.Done():

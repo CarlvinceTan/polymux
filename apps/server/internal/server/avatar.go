@@ -14,6 +14,28 @@ var shapes = map[string]bool{
 	"triangle": true, "hexagone": true, "nuage": true, "goutte": true,
 	"star": true, "clover": true, "flower": true, "burst": true, "pentagon": true,
 	"square": true, "sparkle": true, "heart": true, "tablet": true, "wedge": true, "house": true,
+	"pumpkin": true, "apple": true, "pear": true, "strawberry": true,
+	"bun": true, "toast": true, "cupcake": true,
+	"cat": true, "dog": true, "bear": true, "rabbit": true,
+	"fox": true, "hamster": true, "capybara": true, "otter": true, "pig": true,
+	"deer": true, "sheep": true, "alpaca": true, "cow": true, "squirrel": true,
+	"tiger": true, "lion": true, "hedgehog": true, "seal": true, "beaver": true,
+	"guinea_pig": true, "chinchilla": true, "ferret": true, "monkey": true,
+	"chick": true, "duck": true, "penguin": true, "owl": true, "parrot": true, "goose": true,
+	"whale": true, "bull": true, "moon": true, "wave": true, "blossom": true,
+	"gumdrop": true, "peanut": true, "saucer": true, "beacon": true, "plus": true,
+	"magnet": true, "acorn": true, "pebbles": true, "cushion": true, "ring": true, "gem": true,
+	"banana": true, "carrot": true, "pizza": true, "sushi": true, "ice_cream": true,
+	"sun": true, "leaf": true, "tree": true, "cactus": true, "mushroom": true,
+	"mountain": true, "volcano": true, "rainbow": true, "snowflake": true,
+	"rocket": true, "robot": true, "camera": true, "clock": true, "key": true,
+	"bell": true, "book": true, "teapot": true,
+	"lemon": true, "orange_fruit": true, "watermelon": true, "avocado": true, "cherry": true,
+	"cookie": true, "cheese": true, "egg": true, "candy": true, "donut": true,
+	"tulip": true, "rose": true, "sprout": true, "fern": true, "pinecone": true,
+	"shell": true, "coral": true, "crystal": true, "comet": true, "planet": true,
+	"mug": true, "lantern": true, "gift": true, "pencil": true, "paintbrush": true,
+	"umbrella": true, "backpack": true, "headphones": true, "guitar": true, "telescope": true,
 }
 var colors = map[string]bool{
 	"encre": true, "brun": true, "rouge": true, "orange": true,
@@ -34,7 +56,7 @@ var durations = map[string]float64{
 }
 
 func defaultAvatar() contract.AvatarDesign {
-	v := contract.AvatarDesign{Shape: "cercle", Color: "encre", Expression: "neutre", FollowCursor: true, Animates: true, Blocks: []contract.AnimationBlock{}}
+	v := contract.AvatarDesign{Shape: contract.AvatarDesignShapeCercle, Color: contract.AvatarDesignColorEncre, Expression: contract.AvatarDesignExpressionNeutre, FollowCursor: true, Animates: true, Blocks: []contract.AnimationBlock{}}
 	for i, block := range []struct {
 		state    string
 		duration float64

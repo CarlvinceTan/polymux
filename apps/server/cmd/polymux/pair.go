@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -53,7 +52,7 @@ func pair(args []string) error {
 		qrterminal.GenerateHalfBlock(link, qrterminal.L, os.Stdout)
 	}
 	fmt.Println()
-	fmt.Println("Scan with Polymux, or copy the link into Settings > Devices.")
+	fmt.Println("Scan with Polymux, or copy the link into Settings > Connections > Add device.")
 	return nil
 }
 
@@ -116,26 +115,10 @@ func connectLink(value invite) string {
 	return parts.String()
 }
 
+// defaultPairURL is where this Mac's server listens: its Tailscale address, else loopback.
 func defaultPairURL() string {
-	addresses, err := net.InterfaceAddrs()
-	if err == nil {
-		tailnet := netip.MustParsePrefix("100.64.0.0/10")
-		var candidates []net.IP
-		for _, address := range addresses {
-			ip, _, splitErr := net.ParseCIDR(address.String())
-			if splitErr != nil || ip.IsLoopback() || ip.To4() == nil {
-				continue
-			}
-			if addr, ok := netip.AddrFromSlice(ip.To4()); ok && tailnet.Contains(addr) {
-				return "http://" + ip.String() + ":7337"
-			}
-			if ip.IsPrivate() {
-				candidates = append(candidates, ip)
-			}
-		}
-		if len(candidates) > 0 {
-			return "http://" + candidates[0].String() + ":7337"
-		}
+	if ip, err := tailnet(); err == nil {
+		return "http://" + net.JoinHostPort(ip, "7337")
 	}
 	return "http://127.0.0.1:7337"
 }

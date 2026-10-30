@@ -27,15 +27,14 @@ func (*groupEdit) Name() string                           { return "update_group
 func (*groupEdit) Label() string                          { return "Update group chat" }
 func (*groupEdit) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (*groupEdit) Description() string {
-	return "Update a group chat's title, member list or lead bot. chat_id defaults to the current conversation. agent_ids replaces the members; use existing stable bot IDs."
+	return "Update a group chat's title or member list. chat_id defaults to the current conversation. agent_ids replaces the members; use existing stable bot IDs."
 }
 func (t *groupEdit) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{
 		"type": "object", "additionalProperties": false, "properties": map[string]any{
-			"chat_id":       map[string]any{"type": "string", "maxLength": 128},
-			"title":         map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
-			"agent_ids":     map[string]any{"type": "array", "minItems": 1, "maxItems": 16, "items": map[string]any{"type": "string"}},
-			"lead_agent_id": map[string]any{"type": "string", "maxLength": 128},
+			"chat_id":   map[string]any{"type": "string", "maxLength": 128},
+			"title":     map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
+			"agent_ids": map[string]any{"type": "array", "minItems": 1, "maxItems": 16, "items": map[string]any{"type": "string"}},
 		},
 	}}
 }
@@ -48,7 +47,6 @@ func (t *groupEdit) Execute(ctx context.Context, _ string, args json.RawMessage,
 		ChatID   string   `json:"chat_id"`
 		Title    *string  `json:"title"`
 		AgentIDs []string `json:"agent_ids"`
-		Lead     *string  `json:"lead_agent_id"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
@@ -56,7 +54,7 @@ func (t *groupEdit) Execute(ctx context.Context, _ string, args json.RawMessage,
 	if input.ChatID == "" {
 		input.ChatID = state.run.ConversationID
 	}
-	if input.Title == nil && input.AgentIDs == nil && input.Lead == nil {
+	if input.Title == nil && input.AgentIDs == nil {
 		return agent.AgentToolResult{}, errors.New("choose a group field to update")
 	}
 	if input.Title != nil {
@@ -79,7 +77,7 @@ func (t *groupEdit) Execute(ctx context.Context, _ string, args json.RawMessage,
 			return agent.AgentToolResult{}, errUnknownMember
 		}
 	}
-	if err := t.server.Store.UpdateThread(ctx, input.ChatID, contract.UpdateThreadRequest{Title: input.Title, AgentIDs: input.AgentIDs, LeadAgentID: input.Lead}); err != nil {
+	if err := t.server.Store.UpdateThread(ctx, input.ChatID, contract.UpdateThreadRequest{Title: input.Title, AgentIDs: input.AgentIDs}); err != nil {
 		return agent.AgentToolResult{}, err
 	}
 	thread, err := t.server.Store.Thread(ctx, input.ChatID)
@@ -112,7 +110,7 @@ func (t *groupTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 		return agent.AgentToolResult{}, err
 	}
 	state.mu.Lock()
-	allowed := state.work.Trigger != "created" && state.handoff == nil && state.checkpoint == nil
+	allowed := state.work.Trigger != contract.RunTriggerCreated && state.handoff == nil && state.checkpoint == nil
 	owner := state.run.AgentID
 	state.mu.Unlock()
 	if !allowed {

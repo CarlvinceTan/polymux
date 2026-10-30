@@ -5,6 +5,7 @@ struct ChatHeader: View {
     let title: String
     let subtitle: String
     let members: [Agent]
+    var isGroup = false
     var conversationID = ""
     var runs: [Run] = []
     var activity: ActivityStore?
@@ -15,14 +16,15 @@ struct ChatHeader: View {
     var body: some View {
         Button(action: edit) {
             VStack(spacing: -4) {
-                AvatarStack(members: members, size: 80, height: 46, conversationID: conversationID,
-                            runs: runs, activity: activity, connected: connected, speakingID: speakingID)
+                AvatarStack(members: members, isGroup: isGroup, size: 80, height: 46, conversationID: conversationID,
+                            runs: runs, activity: activity, connected: connected, showsMarker: false,
+                            speakingID: speakingID)
                 .zIndex(1)
                 .accessibilityHidden(true)
                 VStack(spacing: 2) {
                     Text(title).font(.headline).lineLimit(1)
                     if !subtitle.isEmpty {
-                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                        Text(subtitle).font(.caption).foregroundStyle(.muted)
                             .lineLimit(1).truncationMode(.tail)
                     }
                 }

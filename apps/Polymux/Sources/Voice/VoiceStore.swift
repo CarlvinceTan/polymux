@@ -350,7 +350,7 @@ final class VoiceStore: VoiceSession {
         output.stop()
         phase = .failed
         agentID = nil
-        issue = error.localizedDescription
+        issue = error.voiceIssue
     }
 
     static func sentence(from text: inout String) -> String? {

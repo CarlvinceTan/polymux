@@ -1,35 +1,12 @@
 import CoreGraphics
 import Foundation
 
-// The avatar body never leaves the screen: activity motifs are corner badges in the
-// same top-right direction as the notification dot.
+// Attention marks share the notification dot's top-right direction.
 public let BADGE_ANGLE = -42.0 * Double.pi / 180
 public let BADGE_FAR = 1.25
 
 public func badgePoint(_ distance: Double) -> Point {
     Point(x: cos(BADGE_ANGLE) * distance, y: sin(BADGE_ANGLE) * distance)
-}
-
-func dotPulse(_ t: Double, _ index: Int) -> Double {
-    let raw = ((t - Double(index) * 0.5) / 1.5).truncatingRemainder(dividingBy: 1)
-    let p = (raw + 1).truncatingRemainder(dividingBy: 1)
-    let k = p < 0.5 ? 0.5 - 0.5 * cos(p * TAU) : 0
-    return clamp(k * 2)
-}
-
-// Thinking: three dots in a level row trailing out of the corner, pulsing left to right.
-public let BADGE_DOT = 0.09
-public let BADGE_ROW = 1.25
-public let BADGE_STEP = 0.185
-
-public func thinkingMarks(_ t: Double) -> [DotRender] {
-    let center = badgePoint(BADGE_ROW)
-    return (0..<3).map { i in
-        let x = center.x + (Double(i) - 1) * BADGE_STEP
-        let k = dotPulse(t, i)
-        return DotRender(x: x, y: center.y, r: BADGE_DOT * (1 + (DOT_PEAK - 1) * k),
-                         opacity: 0.6 + 0.4 * k)
-    }
 }
 
 // Exclamation: bar and dot, leaning with the corner like the upstream alert mark.

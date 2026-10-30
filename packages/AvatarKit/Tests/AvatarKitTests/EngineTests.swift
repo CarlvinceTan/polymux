@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import XCTest
+import Testing
 @testable import AvatarKit
 
 private struct EngineReference: Decodable {
@@ -46,7 +46,7 @@ private struct EngineReference: Decodable {
 }
 
 private func engineReference() throws -> EngineReference {
-    let url = try XCTUnwrap(Bundle.module.url(forResource: "upstream", withExtension: "json", subdirectory: "Fixtures"))
+    let url = try #require(Bundle.module.url(forResource: "upstream", withExtension: "json", subdirectory: "Fixtures"))
     return try JSONDecoder().decode(EngineReference.self, from: Data(contentsOf: url))
 }
 
@@ -66,42 +66,42 @@ private func coordinates(_ path: CGPath) -> [Double] {
     return result
 }
 
-final class EngineTests: XCTestCase {
-    func testRepeatedMotifKeepsTransitionContinuous() {
+@Suite struct EngineTests {
+    @Test func repeatedMotifKeepsTransitionContinuous() {
         for state in [StateID.swirl, .orbit, .play, .notify, .comet, .wink] {
             let engine = BotEngine(initial: state)
             let at = STATE_BY_ID[state]!.duration
             let before = engine.sample(at)
             engine.setState(state, at, restart: true)
             let after = engine.sample(at)
-            XCTAssertEqual(before.bodyPath, after.bodyPath)
-            XCTAssertEqual(before.bodyAlpha, after.bodyAlpha)
-            XCTAssertEqual(before.dots.count, after.dots.count)
-            XCTAssertEqual(engine.state, state)
+            #expect(before.bodyPath == after.bodyPath)
+            #expect(before.bodyAlpha == after.bodyAlpha)
+            #expect(before.dots.count == after.dots.count)
+            #expect(engine.state == state)
         }
     }
     private func numbers(_ actual: [Double], _ expected: [Double], _ label: String,
-                         file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertEqual(actual.count, expected.count, label, file: file, line: line)
+                         sourceLocation: SourceLocation = #_sourceLocation) {
+        #expect(actual.count == expected.count, "\(label)", sourceLocation: sourceLocation)
         for (a, b) in zip(actual, expected) {
-            XCTAssertEqual(a, b, accuracy: 1e-8, label, file: file, line: line)
+            #expect(abs(a - b) <= 1e-8, "\(label)", sourceLocation: sourceLocation)
         }
     }
 
     private func dot(_ actual: FrameDot?, _ expected: EngineReference.Dot?, _ label: String) {
-        XCTAssertEqual(actual == nil, expected == nil, label)
+        #expect((actual == nil) == (expected == nil), "\(label)")
         if let a = actual, let b = expected { numbers([a.x, a.y, a.r], [b.x, b.y, b.r], label) }
     }
 
     private func particles(_ actual: [DotRender], _ expected: [EngineReference.Dot], _ label: String) {
-        XCTAssertEqual(actual.count, expected.count, label)
+        #expect(actual.count == expected.count, "\(label)")
         for (a, b) in zip(actual, expected) {
             numbers([a.x, a.y, a.r, a.opacity], [b.x, b.y, b.r, b.opacity!], label)
-            XCTAssertEqual(a.depth == nil, b.depth == nil, label)
+            #expect((a.depth == nil) == (b.depth == nil), "\(label)")
             if let depth = a.depth, let other = b.depth { numbers([depth], [other], label) }
-            XCTAssertEqual(a.rot, b.rot, label)
-            XCTAssertEqual(a.color, b.color, label)
-            XCTAssertEqual(a.d == nil, b.d == nil, label)
+            #expect(a.rot == b.rot, "\(label)")
+            #expect(a.color == b.color, "\(label)")
+            #expect((a.d == nil) == (b.d == nil), "\(label)")
             if let path = a.d, let other = b.d { numbers(coordinates(path), other, label) }
         }
     }
@@ -109,37 +109,38 @@ final class EngineTests: XCTestCase {
     private func frame(_ actual: BotFrame, _ expected: EngineReference.Frame, _ label: String) {
         numbers(coordinates(actual.bodyPath), expected.body, label + " body")
         numbers([actual.bodyAlpha], [expected.bodyAlpha], label + " alpha")
-        XCTAssertEqual(actual.eyes.count, expected.eyes.count, label + " eyes")
+        #expect(actual.eyes.count == expected.eyes.count, "\(label + " eyes")")
         for (a, b) in zip(actual.eyes, expected.eyes) {
             let m = a.matrix
             numbers([m.a, m.b, m.c, m.d, m.tx, m.ty], b.matrix, label + " eye matrix")
             numbers([a.alpha], [b.alpha], label + " eye alpha")
-            XCTAssertFalse(a.d.isEmpty)
+            #expect(!a.d.isEmpty)
         }
         particles(actual.dots, expected.dots, label + " dots")
-        XCTAssertEqual(actual.dotsBehind, expected.dotsBehind, label + " depth")
-        XCTAssertEqual(actual.arcs.count, expected.arcs.count, label + " arcs")
+        #expect(actual.dotsBehind == expected.dotsBehind, "\(label + " depth")")
+        #expect(actual.arcs.count == expected.arcs.count, "\(label + " arcs")")
         for (a, b) in zip(actual.arcs, expected.arcs) {
-            XCTAssertEqual(a.id, b.id, label)
+            #expect(a.id == b.id, "\(label)")
             numbers(coordinates(a.front), b.front, label + " front arc")
             numbers(coordinates(a.back), b.back, label + " back arc")
             numbers([a.width, a.opacity, a.grad.x1, a.grad.y1, a.grad.x2, a.grad.y2],
                     [b.width, b.opacity, b.grad.x1, b.grad.y1, b.grad.x2, b.grad.y2], label + " gradient")
-            XCTAssertEqual(a.grad.stops, b.grad.stops, label + " colors")
+            #expect(a.grad.stops == b.grad.stops, "\(label + " colors")")
         }
         dot(actual.notif, expected.notif, label + " notification")
         dot(actual.notch, expected.notch, label + " notch")
     }
 
-    func testEveryStateAndCustomFaceMatchesPinnedUpstream() throws {
+    @Test func everyStateAndCustomFaceMatchesPinnedUpstream() throws {
         let reference = try engineReference()
-        XCTAssertEqual(reference.commit, "b4bb3c1b5f93c7b87a2e8d620f667c4093d97749")
-        XCTAssertEqual(STATES.count, 15)
-        XCTAssertEqual(SEQUENCE.count, 14)
+        #expect(reference.commit == "b4bb3c1b5f93c7b87a2e8d620f667c4093d97749")
+        #expect(STATES.count == 15)
+        #expect(SEQUENCE.count == 14)
         for sample in reference.frames {
-            let initial = try XCTUnwrap(StateID(rawValue: sample.initial!))
-            // thinking/alert/exclaim/sleep are Polymux badge motifs; BadgeStatesTests covers them.
+            let initial = try #require(StateID(rawValue: sample.initial!))
+            // Thinking and attention motifs have separate coverage from the pinned upstream.
             if [.thinking, .alert, .exclaim, .sleep].contains(initial) { continue }
+            if let shape = sample.shape, grokShapes.contains(shape) { continue }
             let engine = BotEngine(initial: initial,
                                    shape: sample.shape.flatMap { SHAPE_BY_ID[$0]?.radii },
                                    expression: sample.expression.flatMap { EXPRESSION_BY_ID[$0] })
@@ -147,7 +148,7 @@ final class EngineTests: XCTestCase {
         }
     }
 
-    func testInterruptedTransitionFreezesCompositeAndSamplingIsPure() throws {
+    @Test func interruptedTransitionFreezesCompositeAndSamplingIsPure() throws {
         let engine = BotEngine()
         engine.setState(.wide, 0.5)
         engine.setState(.idle, 0.6)
@@ -156,7 +157,7 @@ final class EngineTests: XCTestCase {
         for sample in expected.reversed() { frame(engine.sample(sample.at), sample.frame, "replay \(sample.at)") }
     }
 
-    func testShapeExpressionAndAbsoluteLookMorphsMatchUpstream() throws {
+    @Test func shapeExpressionAndAbsoluteLookMorphsMatchUpstream() throws {
         let reference = try engineReference()
         let engine = BotEngine(shape: SHAPE_BY_ID["cercle"]!.radii, expression: EXPRESSION_BY_ID["neutre"]!)
         engine.setShape(SHAPE_BY_ID["capsule"]!.radii, 1)
@@ -167,16 +168,16 @@ final class EngineTests: XCTestCase {
         for sample in reference.look { frame(look.sample(sample.at), sample.frame, "look \(sample.at)") }
     }
 
-    func testSeededDecorAndDurationsMatchUpstream() throws {
+    @Test func seededDecorAndDurationsMatchUpstream() throws {
         let reference = try engineReference()
         for (actual, expected) in [(RINGS, reference.rings), (COMET_RIBBONS, reference.comet)] {
-            XCTAssertEqual(actual.count, expected.count)
+            #expect(actual.count == expected.count)
             for (a, b) in zip(actual, expected) {
                 numbers([a.a, a.k, a.tilt, a.speed, a.phase, a.sweep, a.hue, a.hueSpan, a.width, a.cx, a.cy],
                         [b.a, b.k, b.tilt, b.speed, b.phase, b.sweep, b.hue, b.hueSpan, b.width, b.cx, b.cy], "seed")
             }
         }
         for sample in reference.particles { particles(AvatarKit.particles(sample.at, 1), sample.dots, "particles") }
-        for sample in reference.cycle.clamps { XCTAssertEqual(clampDuration(sample.state, 0.1), sample.duration) }
+        for sample in reference.cycle.clamps { #expect(clampDuration(sample.state, 0.1) == sample.duration) }
     }
 }

@@ -1,0 +1,12 @@
+.legal-page { width: min(900px, calc(100% - 40px)); margin-inline: auto; padding: 88px 0 112px; }
+.legal-page .title-block { padding-bottom: var(--space-12); border-bottom: 1px solid var(--line); }
+.legal-page .effective { margin-top: var(--space-5); color: var(--muted); font-size: 13px; }
+.legal-page article { max-width: 680px; padding-top: var(--space-4); }
+.legal-page section { padding-block: var(--space-8); border-bottom: 1px solid var(--line); }
+.legal-page section:last-child { border-bottom: 0; }
+.legal-page section h2 { margin-top: 0; }
+
+@media (max-width: 640px) {
+  .legal-page { width: calc(100% - 28px); padding: var(--space-16) 0 82px; }
+  .legal-page .title-block { padding-bottom: var(--space-8); }
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "atlas", "name": "Atlas", "shape": "cercle", "color": "bleu",
+    "at": "2026-10-23T14:33:00Z",
+    "title": "A little room for what matters.",
+    "description": "Turn a loose request into a plan. Keep refining it in the same conversation.",
+    "prompt": "Help me plan my afternoon: review the website, write release notes, and leave time for a walk.",
+    "reply": "Here’s a plan with a little breathing room:\n\n14:30 · Review the website\n15:30 · Write release notes\n16:30 · Take a walk, phone away\n\nCome back with changes. We can keep refining the plan here.",
+    "guide": "/docs/workspace/"
+  },
+  {
+    "id": "nova", "name": "Nova", "shape": "sparkle", "color": "violet",
+    "at": "2026-10-23T14:32:00Z",
+    "title": "Less explaining yourself. More doing.",
+    "description": "Give an agent a useful preference to remember for the next time you work together.",
+    "prompt": "Remember how I like release notes: short, changes first, no marketing language.",
+    "reply": "Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing language.\n\nI’ll use that format when we work on your next release.",
+    "guide": "/docs/workspace/#memory"
+  },
+  {
+    "id": "fern", "name": "Fern", "shape": "clover", "color": "vert",
+    "at": "2026-10-23T14:31:00Z",
+    "title": "Give the next step a time.",
+    "description": "Ask for a recurring check-in. Review its schedule in the agent’s profile.",
+    "prompt": "Every Friday at 4 pm, remind me to review the week. Use my local timezone.",
+    "reply": "Scheduled for Fridays at 16:00 in your local timezone. I’ll check in here so we can look back at what shipped and decide what comes next.\n\nYour server needs to stay running for scheduled work. You can review or cancel this routine in my profile.",
+    "guide": "/docs/workspace/#scheduled-work"
+  }
+]

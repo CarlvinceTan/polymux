@@ -3,15 +3,22 @@ package device
 import (
 	"bufio"
 	"context"
+	"database/sql"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Require protects API routes, including streams and upgraded connections.
 func (b *Broker) Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/network/pair" {
+			b.pair(w, r)
+			return
+		}
 		header := r.Header.Get("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
 			http.Error(w, "device unauthorized", http.StatusUnauthorized)
@@ -38,8 +45,28 @@ func (b *Broker) Require(next http.Handler) http.Handler {
 			delete(b.store.requests, guard)
 			b.store.access.Unlock()
 		}()
+		go b.store.watch(ctx, guard, pair.ID)
 		next.ServeHTTP(guard, r.WithContext(context.WithValue(ctx, selfKey{}, pair.ID)))
 	})
+}
+
+// Store-owned timing keeps one test/server's streams independent of another's.
+func (s *Store) watch(ctx context.Context, guard *responseGuard, id string) {
+	ticker := time.NewTicker(s.recheck)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var revoked bool
+			err := s.db.QueryRowContext(ctx, `SELECT revoked FROM devices WHERE id=?`, id).Scan(&revoked)
+			if errors.Is(err, sql.ErrNoRows) || err == nil && revoked {
+				guard.revoke()
+				return
+			}
+		}
+	}
 }
 
 type selfKey struct{}

@@ -79,7 +79,7 @@ func (s *Server) diffCard(d agentruntime.Definition, run contract.Run) {
 	if err != nil || body == "" {
 		return
 	}
-	m := contract.Message{ID: ID(), ThreadID: run.ConversationID, Role: "assistant", AgentID: &run.AgentID, RunID: &run.ID, Status: "done", CreatedAt: store.Now()}
+	m := contract.Message{ID: ID(), ThreadID: run.ConversationID, Role: contract.MessageRoleAssistant, AgentID: &run.AgentID, RunID: &run.ID, Status: contract.MessageStatusDone, CreatedAt: store.Now()}
 	s.refreshCard(ctx, &m, body)
 }
 
@@ -91,9 +91,9 @@ func (s *Server) refreshCard(ctx context.Context, m *contract.Message, body stri
 		return
 	}
 	text := htmlText(source)
-	a := contract.Attachment{ID: id, Kind: "html", Name: "Changes.html", MimeType: "text/html", Size: int64(len(source)), URL: "/attachments/" + id + "/content", IndexingState: "ready", ExtractedText: &text}
-	m.Parts = []contract.Part{{Kind: "attachment", Attachment: &a}}
-	event := contract.Event{ConversationID: m.ThreadID, Type: "message.done", MessageID: &m.ID, AgentID: m.AgentID, RunID: m.RunID, Message: m}
+	a := contract.Attachment{ID: id, Kind: contract.AttachmentKindHTML, Name: "Changes.html", MimeType: "text/html", Size: int64(len(source)), URL: "/attachments/" + id + "/content", IndexingState: contract.AttachmentIndexingStateReady, ExtractedText: &text}
+	m.Parts = []contract.Part{{Kind: contract.PartKindAttachment, Attachment: &a}}
+	event := contract.Event{ConversationID: m.ThreadID, Type: contract.EventTypeMessageDone, MessageID: &m.ID, AgentID: m.AgentID, RunID: m.RunID, Message: m}
 	if _, err := s.Store.PublishAttachment(ctx, a, path, event, m); err != nil {
 		os.Remove(path)
 	}

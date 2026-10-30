@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -9,7 +10,7 @@ import (
 )
 
 func TestChoiceAnswer(t *testing.T) {
-	for _, option := range []string{"one", "_text", FocusDismissed} {
+	for _, option := range []string{"one", "_text", ChoiceDismissed} {
 		t.Run(option, func(t *testing.T) {
 			s := runStore(t)
 			allow := true
@@ -49,7 +50,7 @@ func TestChoiceAnswer(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := 1
-			if option == FocusDismissed {
+			if option == ChoiceDismissed {
 				want = 0
 			}
 			if jobs != want || replies != want {
@@ -62,5 +63,49 @@ func TestChoiceAnswer(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRetiredFocusCardsCloseOnOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "db")
+	s, err := Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Register(t.Context(), []contract.Agent{{ID: "a", Name: "A"}}); err != nil {
+		t.Fatal(err)
+	}
+	card := contract.Message{ID: "focus:a", ThreadID: "a", Role: "assistant", Status: "done", Parts: []contract.Part{{Kind: "choice", Question: ptr("What do you want me on first?"), Options: []contract.ChoiceOption{{ID: "day", Label: "Day-to-day tasks"}}}}}
+	if _, err := s.PostMessage(t.Context(), card); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	for range 2 {
+		if s, err = Open(t.Context(), path); err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}
+	s, err = Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	closed, err := s.Message(t.Context(), "focus:a")
+	if err != nil || closed.Parts[0].AnswerID == nil || *closed.Parts[0].AnswerID != ChoiceDismissed {
+		t.Fatalf("card was not skipped: %+v %v", closed, err)
+	}
+	events, err := s.Events(t.Context(), "a", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates := 0
+	for _, event := range events {
+		if event.Message != nil && event.Message.ID == "focus:a" && event.Message.Parts[0].AnswerID != nil {
+			updates++
+		}
+	}
+	if updates != 1 {
+		t.Fatalf("clients should see one skip, got %d", updates)
 	}
 }

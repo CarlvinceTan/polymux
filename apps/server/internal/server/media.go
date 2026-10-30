@@ -253,7 +253,7 @@ func (t *mediaTool) selection() (settings.Provider, string, error) {
 }
 
 func mediaAdapter(provider, kind string) error {
-	if provider == "gemini" || (provider == "openai" && kind == "image") {
+	if slices.Contains(providers.Generates[provider], kind+"-gen") {
 		return nil
 	}
 	return fmt.Errorf("native %s generation is not supported for provider type %s", kind, provider)
@@ -363,7 +363,7 @@ func (t *mediaTool) image(ctx context.Context, job mediaJob, headers http.Header
 	if err != nil {
 		return nil, "", err
 	}
-	var encoded, mediaType string
+	var encoded string
 	if job.Type == "openai" {
 		var response struct {
 			Data []struct {
@@ -373,7 +373,7 @@ func (t *mediaTool) image(ctx context.Context, job mediaJob, headers http.Header
 		if json.Unmarshal(data, &response) != nil || len(response.Data) == 0 {
 			return nil, "", errors.New("image provider returned no image")
 		}
-		encoded, mediaType = response.Data[0].Base64, "image/png"
+		encoded = response.Data[0].Base64
 	} else {
 		var response struct {
 			Candidates []struct {
@@ -394,7 +394,7 @@ func (t *mediaTool) image(ctx context.Context, job mediaJob, headers http.Header
 		for _, candidate := range response.Candidates {
 			for _, part := range candidate.Content.Parts {
 				if !part.Thought && strings.HasPrefix(part.Inline.Mime, "image/") && part.Inline.Data != "" {
-					encoded, mediaType = part.Inline.Data, part.Inline.Mime
+					encoded = part.Inline.Data
 					break
 				}
 			}
@@ -407,8 +407,7 @@ func (t *mediaTool) image(ctx context.Context, job mediaJob, headers http.Header
 	if err != nil || len(image) == 0 || len(image) > outputLimit || !strings.HasPrefix(http.DetectContentType(image), "image/") {
 		return nil, "", errors.New("image provider returned no valid image bytes")
 	}
-	mediaType = strings.Split(http.DetectContentType(image), ";")[0]
-	return image, mediaType, nil
+	return image, strings.Split(http.DetectContentType(image), ";")[0], nil
 }
 
 func (t *mediaTool) submitVideo(ctx context.Context, job mediaJob, headers http.Header) (string, error) {

@@ -6,197 +6,499 @@ struct ProfileView: View {
     let session: AppSession
     var threadID: String? = nil
     var attachments: [Attachment] = []
+    /// The chat's runs, live, for the Work tab's tasks.
+    var runs: [Run] = []
     var jump: (String) -> Void = { _ in }
-    @State private var tab = ProfileTab.instructions
-    @State private var query = ""
+    var locate: (Attachment) -> Void = { _ in }
+    /// Embedded beside the chat or on its own navigation page, with avatar editing and search as modals.
+    var inspector = false
+    var onBack: (() -> Void)? = nil
+    @State private var editingAvatar = false
+    @State private var searching = false
+    @State private var tab: ProfileTab
+    @State private var page = ProfilePage.profile
     @Environment(\.panelClose) private var dismiss
     @State private var name: String
     @State private var role: String
+    /// The agent's instructions, saved with the name and role.
     @State private var prompt = ""
-    @State private var loaded = false
-    @State private var loading = true
-    @State private var saving = false
+    /// The model this agent runs on, as the server reports it.
+    @State private var model: String
+    @State private var provider: String
+    @State private var reasoning: String
+    private var providers: [Provider] { session.providers.providers ?? [] }
+    private var providersLoaded: Bool { session.providers.providers != nil }
+    @State private var choosingModel = false
+    @State private var modelSaving = false
+    @State private var modelIssue: String?
+    @State private var saved: ProfileValues
+    @State private var store: ProfileStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var issue: String?
-    @State private var showAvatar = false
     @State private var avatarHovered = false
-    @State private var promptHeight: CGFloat = 72
-    @State private var reviews: Proactivity?
-    @State private var routines: [Routine] = []
-    @State private var scheduleBusy = false
+    private var routines: [Routine] { store.routines ?? [] }
+    private var configuration: AgentConfiguration? { store.configuration }
+    private var connections: [MCPConnection] { store.connections ?? [] }
+    private var loaded: Bool { store.agent != nil }
+    /// Whether each MCP connection answered the server's probe.
+    @State private var statuses: [String: Bool] = [:]
+    @State private var mcpTools: [String: [String]] = [:]
+    @State private var notificationNote: Bool?
+    @State private var retries = 0
+    /// Whether an unsaved edit kept from last time has been put back.
+    @State private var restored = false
 
-    init(agent: Agent, session: AppSession, threadID: String? = nil,
-         attachments: [Attachment] = [], jump: @escaping (String) -> Void = { _ in }) {
+    init(agent: Agent, session: AppSession, threadID: String? = nil, attachments: [Attachment] = [],
+         runs: [Run] = [], inspector: Bool = false, onBack: (() -> Void)? = nil, locate: @escaping (Attachment) -> Void = { _ in },
+         jump: @escaping (String) -> Void = { _ in }) {
         self.agent = agent
         self.session = session
         self.threadID = threadID
         self.attachments = attachments
+        self.runs = runs
+        self.inspector = inspector
+        self.onBack = onBack
+        self.locate = locate
         self.jump = jump
+        _tab = State(initialValue: inspector ? .work : .capabilities)
         _name = State(initialValue: agent.name)
+        _model = State(initialValue: agent.model)
+        _provider = State(initialValue: agent.provider ?? "")
+        _reasoning = State(initialValue: agent.reasoning ?? "off")
         _role = State(initialValue: agent.role)
+        let store = session.profile(agent.id)
+        _store = State(initialValue: store)
+        _prompt = State(initialValue: store.prompt ?? "")
+        _saved = State(initialValue: ProfileValues(name: agent.name, role: agent.role, prompt: store.prompt ?? ""))
     }
 
     private var cleanName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var cleanRole: String { role.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var cleanPrompt: String { prompt.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var cleanValues: ProfileValues { ProfileValues(name: cleanName, role: cleanRole, prompt: cleanPrompt) }
 
-    private var showsEdit: Bool {
+    private var tabs: [ProfileTab] { threadID == nil ? [.work, .capabilities] : ProfileTab.allCases }
+
+    private var compactTabs: Bool {
         #if os(macOS)
-        avatarHovered
+        inspector
         #else
-        true
+        false
         #endif
     }
 
     var body: some View {
-        PanelView("Profile", enabled: !saving && !showAvatar, onClose: { dismiss() }) {
-            Form {
-                Section {
-                    VStack(spacing: 8) {
-                        Button { showAvatar = true } label: {
-                            AvatarView(options: session.avatars.options(for: agent.id))
-                                .frame(width: 100, height: 100)
-                                .colorMultiply(showsEdit ? Color(white: 0.55) : .white)
-                                .overlay {
-                                    Image(systemName: "pencil")
-                                        .font(.title2.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                        .opacity(showsEdit ? 1 : 0)
-                                        .allowsHitTesting(false)
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Edit avatar")
-                        .onHover { avatarHovered = $0 }
-                        InlineText(text: $name, prompt: "Name", font: .title2.weight(.semibold))
-                            .autocorrectionDisabled()
-                        InlineText(text: $role, prompt: "Role", font: .body, tint: .secondary)
-                        if threadID != nil {
-                            PillPicker("Section", selection: $tab,
-                                       options: ProfileTab.allCases.map { ($0.rawValue, $0) })
-                            .padding(.top, 8)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .disabled(saving)
-                }
-                .panelRow()
-                switch tab {
-                case .instructions: instructions
-                case .media: gallery(media)
-                case .files: gallery(files)
-                case .search: search
-                }
-            }
-            .formStyle(.grouped)
-        } actions: {
-            Button { Task { await save() } } label: {
-                if saving { ProgressView().controlSize(.small) }
-                else { Text("Save") }
-            }
-            .disabled(!loaded || loading || saving || cleanName.isEmpty)
+        Group {
+            if inspector { sidePanel } else { modal }
         }
-        .panel(isPresented: $showAvatar) {
-            AvatarEditor(agentID: agent.id, name: cleanName.isEmpty ? agent.name : cleanName,
-                         client: session.client, store: session.avatars)
+        .onChange(of: serverValues, initial: true) { _, _ in applyProfile() }
+        .onChange(of: store.agent) { _, fresh in
+            guard let fresh, !modelSaving else { return }
+            model = fresh.model
+            provider = fresh.provider ?? ""
+            reasoning = fresh.reasoning ?? "off"
         }
-        .interactiveDismissDisabled(saving)
-        .panelDismiss(enabled: !saving && !showAvatar, onClose: { dismiss() })
-        .task { await load() }
+        .task(id: scenePhase == .background) {
+            while !Task.isCancelled {
+                await store.refresh()
+                do { try await Task.sleep(for: .seconds(scenePhase == .background ? 30 : 5)) }
+                catch { break }
+            }
+        }
+        .task { await loadProviders() }
+        .task { await loadStatuses() }
+        .task {
+            await store.restore()
+            if let tools: [String: [String]] = await session.sidebar.cacheActor.snapshot("mcp-tools/" + agent.id) {
+                mcpTools = tools
+            }
+            if let edit: ProfileValues = await session.sidebar.cacheActor.snapshot(editKey) {
+                name = edit.name
+                role = edit.role
+                prompt = edit.prompt
+            }
+            restored = true
+        }
+        // Name, role and instructions save shortly after each edit, once the profile loads, and again after a failed save.
+        .task(id: [cleanName, cleanRole, cleanPrompt, "\(retries)\(restored)\(loaded)"]) {
+            guard restored else { return }
+            // Kept on this device until saved, so a crash or quit doesn't lose it.
+            let edit = cleanValues == saved ? nil : ProfileValues(name: name, role: role, prompt: prompt)
+            await session.sidebar.cacheActor.saveSnapshot(editKey, edit)
+            try? await Task.sleep(for: .milliseconds(retries == 0 ? 700 : 5000))
+            guard !Task.isCancelled else { return }
+            await save()
+        }
+        .onChange(of: agent) { _, agent in
+            let update = ProfileValues(name: agent.name, role: agent.role, prompt: saved.prompt)
+            let edit = ProfileValues(name: name, role: role, prompt: prompt).merging(update, saved: saved)
+            name = edit.name
+            role = edit.role
+            prompt = edit.prompt
+            saved = update
+            if !modelSaving {
+                model = agent.model
+                provider = agent.provider ?? ""
+                reasoning = agent.reasoning ?? "off"
+            }
+        }
+        .task(id: choosingModel) {
+            if choosingModel { await loadProviders() }
+        }
+        // Closing the panel or switching chats mustn't drop an edit still waiting to save.
+        .onDisappear { flush() }
     }
 
-    @ViewBuilder private var instructions: some View {
-        Section {
-            roleEditor
-        } header: {
-            Text("Role description")
-        } footer: {
-            Text("Describe what this agent should do and how it should respond.")
-                .font(.footnote).foregroundStyle(.secondary)
-        }
-        .disabled(!loaded || saving)
-        .panelRow()
-        if loading {
-            Section { ProgressView("Loading profile…") }
-                .panelRow()
-        }
-        if let issue {
-            Section {
-                Text(issue).foregroundStyle(.secondary).textSelection(.enabled)
-                if !loaded {
-                    Button("Try again") { Task { await load() } }
-                        .disabled(loading)
+    /// The right-hand panel on macOS, its own page on iPhone; search sits in its bar.
+    private var sidePanel: some View {
+        details
+            #if os(macOS)
+            .panelBar(value: BarState(muted: Notifications.shared.isMuted(agent.id),
+                                     notice: notificationNote, back: onBack != nil, search: threadID != nil)) {
+                HStack(spacing: 8) {
+                    if let onBack { PanelNavButton(symbol: "chevron.left", label: "Back", action: onBack) }
+                    notificationButton
+                    Spacer(minLength: 0)
+                    if threadID != nil {
+                        PanelNavButton(symbol: "magnifyingglass", label: "Search this chat") { searching = true }
+                    }
+                    if threadID != nil || onBack != nil {
+                        PanelNavButton(symbol: "xmark", label: "Close side panel") { dismiss() }
+                    }
                 }
             }
-            .panelRow()
+            #else
+            .navigationTitle("Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { notificationButton }
+                    .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .primaryAction) {
+                    if threadID != nil {
+                        Button("Search this chat", systemImage: "magnifyingglass") { searching = true }
+                    }
+                }
+            }
+            #endif
+            .panel(isPresented: $editingAvatar) {
+                AvatarEditor(agentID: agent.id, name: cleanName.isEmpty ? agent.name : cleanName,
+                             client: session.client, store: session.avatars)
+            }
+            .panel(isPresented: $searching) {
+                if let threadID {
+                    SearchPanel(session: session, scope: threadID, close: { searching = false }) { result in
+                        searching = false
+                        jump(result.messageID ?? result.threadID)
+                    }
+                }
+            }
+    }
+
+    // One panel at a time: sub-pages replace the profile, Back returns, close leaves entirely.
+    private var modal: some View {
+        ZStack {
+            switch page {
+            case .avatar:
+                AvatarEditor(agentID: agent.id, name: cleanName.isEmpty ? agent.name : cleanName,
+                             client: session.client, store: session.avatars, onBack: { page = .profile })
+            case .search:
+                if let threadID {
+                    SearchPanel(session: session, scope: threadID, onBack: { page = .profile },
+                                close: { dismiss() }) { result in
+                        dismiss()
+                        jump(result.messageID ?? result.threadID)
+                    }
+                    .preference(key: PanelWidth.self, value: ProfileSize.width)
+                    .preference(key: PanelHeight.self, value: ProfileSize.height)
+                }
+            case .profile:
+                profile
+            }
         }
-        if loaded { scheduleSection }
+    }
+
+    private var profile: some View {
+        PanelView("Profile", onClose: { dismiss() },
+                  accessory: threadID == nil ? nil : PanelAccessory(symbol: "magnifyingglass", label: "Search this chat") { page = .search },
+                  width: ProfileSize.width, height: ProfileSize.height) {
+            details
+        }
+        .panelDismiss(onClose: { dismiss() })
+    }
+
+    private var notificationButton: some View {
+        let muted = Notifications.shared.isMuted(agent.id)
+        return HStack(spacing: 8) {
+            PanelNavButton(symbol: muted ? "bell.slash" : "bell", label: muted ? "Unmute notifications" : "Mute notifications") {
+                Notifications.shared.setMuted(!muted, agent: agent.id)
+                notificationNote = !muted
+            }
+            if let notificationNote {
+                Text(notificationNote ? "Notifications turned off" : "Notifications turned on")
+                    .font(.caption).foregroundStyle(.muted).lineLimit(1)
+                    .task(id: notificationNote) {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        if !Task.isCancelled { self.notificationNote = nil }
+                    }
+            }
+        }
+    }
+
+    private var details: some View {
+        VStack(spacing: PanelStyle.sectionGap) {
+            VStack(spacing: 8) {
+                Button { if inspector { editingAvatar = true } else { page = .avatar } } label: {
+                    AvatarView(options: session.avatars.options(for: agent.id))
+                        .allowsHitTesting(false)
+                        .frame(width: 100, height: 100)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(AvatarEditStyle(hovered: $avatarHovered))
+                .accessibilityLabel("Edit avatar")
+                .onHover { avatarHovered = $0 }
+                InlineText(text: $name, prompt: "Name", font: .title2.weight(.semibold))
+                    .autocorrectionDisabled()
+                InlineText(text: $role, prompt: "Role", font: .body, tint: .secondary)
+                if let issue = issue ?? store.cancelIssue ?? store.issue {
+                    Text(issue).font(.footnote).foregroundStyle(.muted)
+                }
+                PillPicker("Section", selection: $tab, options: tabs.map { ($0.rawValue, $0) }, compact: compactTabs)
+                    .padding(.top, 8)
+            }
+            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: false, vertical: true)
+            .overlay(alignment: .topLeading) { if !inspector { notificationButton } }
+            Group {
+                switch tab {
+                case .capabilities: capabilities
+                case .work: work
+                case .media: mediaGallery
+                case .files: gallery(files, empty: "No files yet")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(.horizontal, PanelStyle.contentInset)
+        .padding(.bottom, PanelStyle.sectionGap)
+    }
+
+    private var work: some View { workSection }
+
+    /// What shapes how the bot works: its instructions, MCP connections, skills and tools.
+    private var capabilities: some View {
+        VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
+            PanelSection("Model") {
+                Button { choosingModel = true } label: {
+                    HStack {
+                        Label {
+                            ModelLabel(name: modelName)
+                        } icon: {
+                            Image(systemName: "cpu")
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .sectionRow()
+                .accessibilityLabel("Model")
+                .accessibilityValue(modelName.title)
+                .disabled(!loaded || modelSaving)
+                .dropdown(isPresented: $choosingModel, width: 280) {
+                    ModelPicker(providers: providers, provider: provider, model: model, choose: remap)
+                }
+                Divider().padding(.horizontal, PanelStyle.rowInset)
+                ReasoningPicker(selection: Binding(get: { reasoning }, set: {
+                    saveModel(UpdateAgentRequest(reasoning: $0))
+                }), inset: true)
+                .disabled(!loaded || modelSaving)
+                if let modelIssue {
+                    Text(modelIssue).font(.footnote).foregroundStyle(.muted)
+                } else if providersLoaded, !provider.isEmpty, !providers.contains(where: { $0.id == provider && $0.enabled }) {
+                    Text("Provider unavailable. Choose another model.").font(.footnote).foregroundStyle(.muted)
+                }
+            }
+            VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
+                instructions
+                sectionCard("Skills", count: configuration == nil ? nil : skillNames.count, empty: skillNames.isEmpty) {
+                    if skillNames.isEmpty { Text(configuration == nil ? "Loading" : "No skills").foregroundStyle(.muted) }
+                    ForEach(skillNames, id: \.self) { Label($0, systemImage: "sparkles").sectionRow() }
+                }
+                sectionCard("Tools", count: toolCount, empty: configuration?.tools.isEmpty != false && activeConnections.isEmpty) {
+                    ForEach(activeConnections, id: \.name) { connection in mcpRow(connection) }
+                    if configuration == nil { Text("Loading").foregroundStyle(.muted) }
+                    else if configuration?.tools.isEmpty == true { Text("Standard").foregroundStyle(.muted) }
+                    ForEach(configuration?.tools ?? [], id: \.self) { Label($0, systemImage: "wrench.and.screwdriver").sectionRow() }
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Edits in place, with its hint where the first line starts.
+    private var instructions: some View {
+        PanelSection("Instructions", fills: true) {
+            TextEditor(text: $prompt)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.hidden)
+                // AppKit draws scrolled text past the editor's bounds otherwise.
+                .clipped()
+                .overlay(alignment: .topLeading) {
+                    if prompt.isEmpty, store.prompt != nil {
+                        Text("Add instructions").foregroundStyle(.muted)
+                            .padding(.leading, Self.editorInset.leading)
+                            .padding(.top, Self.editorInset.top)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .padding(.horizontal, PanelStyle.rowInset - Self.editorInset.leading)
+                .padding(.vertical, max(0, PanelStyle.rowPadding - Self.editorInset.top))
+                .accessibilityLabel("Instructions")
+                .disabled(store.prompt == nil)
+                .overlay {
+                    if store.prompt == nil, prompt.isEmpty { Text("Loading").foregroundStyle(.muted) }
+                }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Where TextEditor's own text container starts the first line.
+    #if os(macOS)
+    private static let editorInset = EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5)
+    #else
+    private static let editorInset = EdgeInsets(top: 8, leading: 5, bottom: 8, trailing: 5)
+    #endif
+
+    private var activeConnections: [MCPConnection] { connections.filter { $0.enabled && !$0.hidden } }
+
+    private var skillNames: [String] {
+        var seen: Set<String> = []
+        let names = ((configuration?.bundledSkills ?? []) + (configuration?.skills ?? [])).map(Self.skillName)
+        return names.filter { seen.insert($0).inserted }
+    }
+
+    private var toolCount: Int? {
+        guard configuration != nil, store.connections != nil,
+              activeConnections.allSatisfy({ mcpTools[$0.name] != nil }) else { return nil }
+        return (configuration?.tools.count ?? 0) + activeConnections.reduce(0) { $0 + (mcpTools[$1.name]?.count ?? 0) }
+    }
+
+    private func mcpRow(_ connection: MCPConnection) -> some View {
+        DisclosureGroup {
+            if let tools = mcpTools[connection.name] {
+                if tools.isEmpty { Text("No tools").foregroundStyle(.muted).sectionRow() }
+                ForEach(tools, id: \.self) { Label($0, systemImage: "wrench.and.screwdriver").sectionRow() }
+            } else {
+                Text(statuses[connection.name] == nil ? "Checking" : "Unavailable")
+                    .foregroundStyle(.muted).sectionRow()
+            }
+        } label: {
+            HStack {
+                Label(connection.name, systemImage: "network").lineLimit(1)
+                Spacer(minLength: 8)
+                if let tools = mcpTools[connection.name] { Text(tools.count, format: .number).monospacedDigit() }
+                StatusDot(state: statuses[connection.name].map { $0 ? .online : .offline } ?? .checking)
+            }
+        }
+        .sectionRow()
+    }
+
+    /// A skill is configured by its path; its folder or file name reads as its name.
+    private static func skillName(_ path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let name = url.lastPathComponent == "SKILL.md"
+            ? url.deletingLastPathComponent().lastPathComponent : url.deletingPathExtension().lastPathComponent
+        return name.split(whereSeparator: { $0 == "-" || $0 == "_" || $0.isWhitespace })
+            .map { word in word.lowercased() == "html" ? "HTML" : word.prefix(1).uppercased() + word.dropFirst() }
+            .joined(separator: " ")
     }
 
     private var media: [Attachment] { attachments.filter { ["image", "video", "audio"].contains($0.kind) } }
     private var files: [Attachment] { attachments.filter { !["image", "video", "audio"].contains($0.kind) } }
 
-    @ViewBuilder private func gallery(_ items: [Attachment]) -> some View {
-        Section {
+    private var mediaGallery: some View {
+        sectionCard("Media", count: media.count, label: "Media gallery", empty: media.isEmpty) {
+            if media.isEmpty {
+                Text("No media yet").foregroundStyle(.muted)
+            } else {
+                MediaGrid(attachments: media.filter { $0.kind != AttachmentKind.audio }, client: session.client, choose: locate)
+                ForEach(media.filter { $0.kind == AttachmentKind.audio }, id: \.id) {
+                    MediaView(attachment: $0, client: session.client, compact: true).sectionRow()
+                }
+            }
+        }
+    }
+
+    private func gallery(_ items: [Attachment], empty: String) -> some View {
+        sectionCard("Files", count: items.count, label: "Files list", empty: items.isEmpty) {
             if items.isEmpty {
-                Text("Nothing shared yet.").foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                Text(empty).foregroundStyle(.muted)
             } else {
                 ForEach(items, id: \.id) { item in
-                    MediaView(attachment: item, client: session.client)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MediaView(attachment: item, client: session.client, compact: true).sectionRow()
                 }
             }
         }
-        .frame(minHeight: 360, alignment: items.isEmpty ? .center : .top)
-        .panelRow()
     }
 
-    @ViewBuilder private var search: some View {
-        if let threadID {
-            Section {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search this conversation", text: $query).textFieldStyle(.plain)
+    private func sectionCard<Content: View>(_ title: String?, count: Int? = nil, label: String? = nil,
+                                          empty: Bool = false, @ViewBuilder content: @escaping () -> Content) -> some View {
+        PanelSection(title, count: count, fills: true) {
+            GeometryReader { geometry in
+                ScrollView {
+                    LazyVStack(alignment: empty ? .center : .leading, spacing: 0, content: content)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height,
+                               alignment: empty ? .center : .topLeading)
+                        .multilineTextAlignment(empty ? .center : .leading)
                 }
-                SearchView(session: session, threadID: threadID, agentName: agent.name, query: $query,
-                           close: {}) { id in
-                    dismiss()
-                    jump(id)
-                }
-                .frame(height: 360)
+                .scrollIndicators(.hidden)
+                .accessibilityLabel(label ?? title ?? "")
             }
-            .panelRow()
+            .clipShape(.rect(cornerRadius: PanelStyle.cardRadius))
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // What this agent does on its own: its review cadence and the routines it scheduled.
-    @ViewBuilder private var scheduleSection: some View {
-        Section {
-            Toggle("Background reviews", isOn: Binding(
-                get: { reviews?.enabled ?? false },
-                set: { enabled in Task { await setReviews(enabled) } }))
-                .disabled(reviews == nil || scheduleBusy)
-            ForEach(routines, id: \.id) { routine in
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(routine.prompt).lineLimit(2)
-                        Text(routine.status == "pending" ? "Waiting for your approval" : nextFire(routine))
-                            .font(.caption).foregroundStyle(.secondary)
+    /// What the bot does on its own (its schedule) and what it has been working on (its tasks).
+    @ViewBuilder private var workSection: some View {
+        VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
+            sectionCard("Schedule", count: store.routines?.count, empty: routines.isEmpty) {
+                if routines.isEmpty { Text(store.routines == nil ? "Loading" : "No scheduled work").foregroundStyle(.muted) }
+                ForEach(routines, id: \.id) { routine in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(routine.prompt).lineLimit(2)
+                            Text(routine.status == RoutineStatus.pending ? "Waiting for your approval" : nextFire(routine))
+                                .font(.caption).foregroundStyle(.muted)
+                        }
+                        Spacer(minLength: 8)
+                        Button("Cancel", role: .destructive) { Task { await store.cancel(routine) } }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(.muted)
+                            .accessibilityLabel("Cancel \(routine.prompt)")
                     }
-                    Spacer(minLength: 8)
-                    Button("Cancel", role: .destructive) { Task { await cancel(routine) } }
-                        .buttonStyle(.plain)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .disabled(scheduleBusy)
-                        .accessibilityLabel("Cancel \(routine.prompt)")
+                    .sectionRow()
                 }
             }
-            if routines.isEmpty && reviews == nil {
-                Text("Nothing scheduled yet.").foregroundStyle(.secondary)
+            sectionCard("Tasks", count: tasks.count, empty: tasks.isEmpty) {
+                if tasks.isEmpty { Text("No tasks yet").foregroundStyle(.muted) }
+                ForEach(tasks, id: \.id) { run in TaskRow(run: run).sectionRow() }
             }
-        } header: {
-            Text("Schedule")
         }
-        .panelRow()
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Delegated work only, active first and then newest.
+    private var tasks: [Run] {
+        runs.filter { $0.agentID == agent.id && $0.trigger == RunTrigger.child }.sorted { lhs, rhs in
+            if TaskRow.active(lhs) != TaskRow.active(rhs) { return TaskRow.active(lhs) }
+            return lhs.createdAt > rhs.createdAt
+        }
     }
 
     private func nextFire(_ routine: Routine) -> String {
@@ -204,103 +506,143 @@ struct ProfileView: View {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
-    private func setReviews(_ enabled: Bool) async {
-        guard !scheduleBusy else { return }
-        scheduleBusy = true
-        defer { scheduleBusy = false }
-        let current = reviews
-        reviews = try? await session.client.setProactivity(
-            agentID: agent.id,
-            settings: Proactivity(enabled: enabled, intervalSeconds: current?.intervalSeconds ?? 14400))
+    private var serverValues: ProfileValues? {
+        guard let prompt = store.prompt else { return nil }
+        let fresh = store.agent ?? agent
+        return ProfileValues(name: fresh.name, role: fresh.role, prompt: prompt)
     }
 
-    private func cancel(_ routine: Routine) async {
-        guard !scheduleBusy else { return }
-        scheduleBusy = true
-        defer { scheduleBusy = false }
-        _ = try? await session.client.deleteRoutine(agentID: agent.id, routineID: routine.id)
-        routines = (try? await session.client.routines(agentID: agent.id)) ?? routines
+    private func applyProfile() {
+        guard let update = serverValues else { return }
+        let edit = ProfileValues(name: name, role: role, prompt: prompt).merging(update, saved: saved)
+        name = edit.name
+        role = edit.role
+        prompt = edit.prompt
+        saved = update
     }
 
-    private var roleEditor: some View {
-        TextEditor(text: $prompt)
-            .font(.body)
-            .scrollContentBackground(.hidden)
-            .scrollIndicators(.hidden)
-            .background(Color.clear)
-            .frame(height: promptHeight)
-            .background(alignment: .topLeading) {
-                if prompt.isEmpty {
-                    TextEditor(text: .constant("Add a role description…"))
-                        .font(.body).foregroundStyle(.tertiary)
-                        .scrollContentBackground(.hidden)
-                        .scrollIndicators(.hidden)
-                        .scrollDisabled(true)
-                        .disabled(true)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
-            .background(alignment: .topLeading) {
-                Text(prompt.isEmpty ? " " : prompt + "\n")
-                    .font(.body)
-                    .padding(.horizontal, 5).padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
-                        promptHeight = min(220, max(72, height))
-                    }
-                    .hidden()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            .accessibilityLabel("Role description")
-    }
-
-    private func load() async {
-        guard !loaded else { return }
-        loading = true
-        issue = nil
-        defer { loading = false }
+    /// Saves the name, role and instructions when they differ from what the server has.
+    private func save() async {
+        guard let update = pendingUpdate else { return }
         do {
-            let profile = try await session.client.agentProfile(id: agent.id)
-            try Task.checkCancellation()
-            if name == agent.name { name = profile.agent.name }
-            if role == agent.role { role = profile.agent.role }
-            prompt = profile.prompt
-            loaded = true
-            async let schedule = session.client.proactivity(agentID: agent.id)
-            async let scheduled = session.client.routines(agentID: agent.id)
-            reviews = try? await schedule
-            routines = (try? await scheduled) ?? []
+            let profile = try await session.client.updateAgent(id: agent.id, request: update)
+            saved = ProfileValues(name: profile.agent.name, role: profile.agent.role, prompt: profile.prompt)
+            issue = nil
+            retries = 0
+            if cleanValues == saved { await session.sidebar.cacheActor.saveSnapshot(editKey, ProfileValues?.none) }
+            await store.accept(profile)
+            await session.sidebar.accept(profile.agent)
+            await session.sidebar.refresh()
         } catch is CancellationError {
         } catch {
-            issue = "Couldn’t load this profile. \(error.localizedDescription)"
+            issue = error.isOffline ? "Not saved yet." : error.reason(or: "Couldn’t save this change.")
+            if error.isTransient { retries += 1 }
         }
     }
 
-    private func save() async {
-        guard loaded, !saving, !cleanName.isEmpty else { return }
-        saving = true
-        issue = nil
-        defer { saving = false }
-        do {
-            let update = UpdateAgentRequest(name: cleanName,
-                                            role: role.trimmingCharacters(in: .whitespacesAndNewlines),
-                                            prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines))
-            let profile = try await session.client.updateAgent(id: agent.id, request: update)
-            await session.sidebar.accept(profile.agent)
-            await session.sidebar.refresh()
-            dismiss()
-        } catch {
-            issue = "Couldn’t save this profile. \(error.localizedDescription)"
+    private var pendingUpdate: UpdateAgentRequest? {
+        guard loaded, !cleanName.isEmpty, cleanValues != saved else { return nil }
+        return UpdateAgentRequest(name: cleanName, role: cleanRole, prompt: cleanPrompt)
+    }
+
+    /// Sends an unsaved edit on its own, since the view and its debounce are going away.
+    private func flush() {
+        guard let update = pendingUpdate else { return }
+        let client = session.client, sidebar = session.sidebar, store = store, id = agent.id, key = editKey
+        Task {
+            guard let profile = try? await client.updateAgent(id: id, request: update) else { return }
+            await sidebar.cacheActor.saveSnapshot(key, ProfileValues?.none)
+            await store.accept(profile)
+            await sidebar.accept(profile.agent)
+        }
+    }
+
+    private var editKey: String { "profile-edit/" + agent.id }
+
+    private var modelName: ModelName {
+        let name = providers.first(where: { $0.id == provider })?.name ?? (providersLoaded && !provider.isEmpty ? "Unavailable" : "")
+        return ModelName(model: model, provider: name)
+    }
+
+    private func loadProviders() async { await session.providers.refreshProviders() }
+
+    /// Asks the server to probe each MCP connection; the dots fill in when it answers.
+    private func loadStatuses() async {
+        guard let list = try? await session.client.mcpStatus(agentID: agent.id), !Task.isCancelled else { return }
+        statuses = Dictionary(uniqueKeysWithValues: list.map { ($0.name, $0.connected) })
+        for status in list where status.connected { mcpTools[status.name] = status.tools }
+        await session.sidebar.cacheActor.saveSnapshot("mcp-tools/" + agent.id, mcpTools)
+    }
+
+    private func remap(_ nextProvider: String, _ nextModel: String) {
+        choosingModel = false
+        saveModel(UpdateAgentRequest(provider: nextProvider, model: nextModel))
+    }
+
+    private func saveModel(_ patch: UpdateAgentRequest) {
+        guard !modelSaving else { return }
+        let previous = (provider, model, reasoning)
+        if let value = patch.provider { provider = value }
+        if let value = patch.model { model = value }
+        if let value = patch.reasoning { reasoning = value }
+        modelSaving = true
+        modelIssue = nil
+        Task {
+            defer { modelSaving = false }
+            do {
+                let profile = try await session.client.updateAgent(id: agent.id,
+                    request: patch)
+                provider = profile.agent.provider ?? ""
+                model = profile.agent.model
+                reasoning = profile.agent.reasoning ?? "off"
+                await store.accept(profile)
+                await session.sidebar.accept(profile.agent)
+            } catch {
+                (provider, model, reasoning) = previous
+                modelIssue = error.isOffline ? "Not saved. Connect before changing model settings." : error.reason(or: "Couldn’t save model settings.")
+            }
         }
     }
 }
 
+private struct BarState: Hashable {
+    let muted: Bool
+    let notice: Bool?
+    let back: Bool
+    let search: Bool
+}
+
 enum ProfileTab: String, CaseIterable, Identifiable {
-    case instructions = "Instructions", media = "Media", files = "Files", search = "Search"
+    case work = "Work", media = "Media", files = "Files", capabilities = "Capabilities"
     var id: String { rawValue }
+}
+
+/// What the profile panel is showing; it never stacks a second panel.
+private enum ProfilePage { case profile, avatar, search }
+
+/// The profile shares the avatar editor's proportions, so moving between them doesn't jump.
+enum ProfileSize {
+    static let width: CGFloat = 460
+    static let height: CGFloat = 560
+}
+
+/// A labelled block of a side panel: a heading over its rows.
+struct SetupGroup<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.muted)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 /// Centred text that highlights on hover and edits in place when clicked.
@@ -308,9 +650,14 @@ struct InlineText: View {
     @Binding var text: String
     let prompt: String
     let font: Font
-    var tint: HierarchicalShapeStyle = .primary
+    var tint: Color = .primary
     @State private var hovered = false
+    #if os(macOS)
+    @State private var focused = false
+    #else
+    @State private var selection: TextSelection?
     @FocusState private var focused: Bool
+    #endif
 
     var body: some View {
         Text(text.isEmpty ? prompt : text)
@@ -318,17 +665,84 @@ struct InlineText: View {
             .hidden()
             .padding(.horizontal, 10).padding(.vertical, 4)
             .overlay {
-                TextField("", text: $text, prompt: Text(prompt))
-                    .labelsHidden()
-                    .textFieldStyle(.plain)
-                    .foregroundStyle(tint)
-                    .focused($focused)
-                    .onSubmit { focused = false }
-                    .accessibilityLabel(prompt)
-                    .multilineTextAlignment(.center)
+                Group {
+                    #if os(macOS)
+                    InlineInput(text: $text, focused: $focused, prompt: prompt, font: font, tint: tint)
+                    #else
+                    TextField("", text: $text, selection: $selection)
+                        .labelsHidden()
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(focused || text.isEmpty ? tint : .clear)
+                        .focused($focused)
+                        .onSubmit { focused = false }
+                        .accessibilityLabel(prompt)
+                        .multilineTextAlignment(.center)
+                    #endif
+                }
+                .overlay {
+                    if text.isEmpty && !focused {
+                        Text(prompt).foregroundStyle(.muted)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                if !focused && !text.isEmpty {
+                    Text(text).font(font).foregroundStyle(tint)
+                        .lineLimit(1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                #if os(iOS)
+                if !focused {
+                    Color.clear.contentShape(Rectangle())
+                        .onTapGesture {
+                            selection = TextSelection(range: text.startIndex..<text.endIndex)
+                            focused = true
+                        }
+                        .accessibilityHidden(true)
+                }
+                #endif
             }
             .font(font)
             .background(.quaternary.opacity(hovered && !focused ? 1 : 0), in: RoundedRectangle(cornerRadius: 8))
             .onHover { hovered = $0 }
+    }
+}
+
+/// Hovering with a pointer, or pressing on touch, darkens the face and centres a pencil on it.
+private struct AvatarEditStyle: ButtonStyle {
+    @Binding var hovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let showing = hovered || configuration.isPressed
+        return configuration.label
+            .colorMultiply(showing ? Color(white: 0.55) : .white)
+            .overlay {
+                Image(systemName: "pencil")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .opacity(showing ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+
+private struct TaskRow: View {
+    let run: Run
+
+    static func active(_ run: Run) -> Bool {
+        [RunStatus.queued, RunStatus.running, RunStatus.waitingPeer, RunStatus.resuming].contains(run.status)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if Self.active(run) {
+                ProgressView().controlSize(.small).accessibilityLabel("Active")
+            }
+            Text(Self.active(run) && !run.activity.isEmpty ? run.activity : run.summary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
     }
 }

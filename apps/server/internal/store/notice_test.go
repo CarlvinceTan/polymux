@@ -3,9 +3,10 @@ package store
 import (
 	"database/sql"
 	"errors"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"strings"
 	"testing"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
 func TestNoticesCommitDeduplicateAndRecoverPush(t *testing.T) {
@@ -180,6 +181,58 @@ func TestNoticesRejectDevicesAndQuietReplies(t *testing.T) {
 	}
 }
 
+func TestNoticeMutedAgentSkipsPush(t *testing.T) {
+	t.Parallel()
+	s := runStore(t)
+	quiet := contract.PushDevice{ID: "fixture-installation-quiet", Token: strings.Repeat("ab", 32), Environment: "sandbox", Server: "http://server.test:7337", Enabled: true, Muted: []string{"a"}}
+	alerted := contract.PushDevice{ID: "fixture-installation-alert", Token: strings.Repeat("cd", 32), Environment: "sandbox", Server: "http://server.test:7337", Enabled: true}
+	for _, device := range []contract.PushDevice{quiet, alerted} {
+		if err := s.RegisterPush(t.Context(), device); err != nil {
+			t.Fatal(err)
+		}
+	}
+	text := "Fixture notice"
+	m := contract.Message{ID: "reply", ThreadID: "a", AgentID: ptr("a"), Role: "assistant", Status: "done", CreatedAt: Now(), Parts: []contract.Part{{Kind: "text", Text: &text}}}
+	if _, err := s.Append(t.Context(), contract.Event{ConversationID: "a", Type: "message.start"}, &m); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	page, err := s.Notices(t.Context(), &zero)
+	if err != nil || len(page.Notices) != 1 || page.Notices[0].AgentID != "a" {
+		t.Fatalf("page %+v %v", page, err)
+	}
+	push, err := s.ClaimPush(t.Context())
+	if err != nil || push.Device.ID != alerted.ID {
+		t.Fatalf("push %+v %v", push, err)
+	}
+	if err := s.FinishPush(t.Context(), push, PushResult{State: "sent"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimPush(t.Context()); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("muted device still queued")
+	}
+	// Unmuting restores the queue for later notices.
+	quiet.Muted = nil
+	if err := s.RegisterPush(t.Context(), quiet); err != nil {
+		t.Fatal(err)
+	}
+	m = contract.Message{ID: "again", ThreadID: "a", AgentID: ptr("a"), Role: "assistant", Status: "done", CreatedAt: Now(), Parts: []contract.Part{{Kind: "text", Text: &text}}}
+	if _, err := s.Append(t.Context(), contract.Event{ConversationID: "a", Type: "message.start"}, &m); err != nil {
+		t.Fatal(err)
+	}
+	claimed := map[string]bool{}
+	for range 2 {
+		push, err = s.ClaimPush(t.Context())
+		if err != nil {
+			t.Fatalf("unmuted push %v", err)
+		}
+		claimed[push.Device.ID] = true
+	}
+	if !claimed[quiet.ID] || !claimed[alerted.ID] {
+		t.Fatalf("unmuted claims %+v", claimed)
+	}
+}
+
 func TestNoticeOncePerTurn(t *testing.T) {
 	s := runStore(t)
 	run := NewRun("turn", "a", "a", "message")
@@ -301,7 +354,7 @@ func TestNoticeMigrationPendingPush(t *testing.T) {
 	_, err := s.DB.ExecContext(ctx, `DROP TABLE push_queue; DROP TABLE notices;
 CREATE TABLE notices(seq INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE, message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE, data TEXT NOT NULL);
 CREATE TABLE push_queue(notice_seq INTEGER NOT NULL REFERENCES notices(seq) ON DELETE CASCADE, device_id TEXT NOT NULL REFERENCES push_devices(id) ON DELETE CASCADE, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, retry_at INTEGER, PRIMARY KEY(notice_seq,device_id));
-INSERT INTO push_devices VALUES('legacy-device','token','sandbox','server',1);
+INSERT INTO push_devices(id,token,environment,server,enabled) VALUES('legacy-device','token','sandbox','server',1);
 INSERT INTO notices VALUES(7,'a','legacy',json_object('seq',7,'conversationID','a','messageID','legacy','title','Polymux','createdAt',strftime('%Y-%m-%dT%H:%M:%SZ','now')));
 INSERT INTO push_queue VALUES(7,'legacy-device','pending',1,123);`)
 	if err != nil {

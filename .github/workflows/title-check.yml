@@ -4,7 +4,7 @@ on:
   issues:
     types: [opened, edited, reopened]
   pull_request:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   issues: write
@@ -19,7 +19,7 @@ jobs:
   title-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9
         with:
           script: |
             const item = context.payload.issue
@@ -27,7 +27,7 @@ jobs:
                   ...context.repo, issue_number: context.payload.issue.number
                 })).data
               : context.payload.pull_request;
-            const bad = /^(\[[^\]]+\]|#+|[A-Za-z-]+:)\s/.test(item.title);
+            const bad = /\x1b|^(?:#|\[|lane|agent:|[A-Z]+[0-9]+:|[A-Za-z-]+:\s)/.test(item.title);
             const rule = 'Use plain English; put the area in labels.';
             if (context.eventName === 'pull_request') {
               if (bad) core.setFailed(`Title starts with a code prefix. ${rule}`);

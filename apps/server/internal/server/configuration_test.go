@@ -2,9 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -14,6 +11,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
 
 func TestAgentConfiguration(t *testing.T) {
@@ -59,7 +60,7 @@ func TestAgentConfiguration(t *testing.T) {
 	turn := func(id string) {
 		t.Helper()
 		message := contract.Message{ID: id, ThreadID: "a", Role: "user", Parts: []contract.Part{{Kind: "text", Text: new("Hello")}}}
-		result := api.execute(t.Context(), api.actors["a"], store.Work{Trigger: "message", Message: message})
+		result := api.execute(t.Context(), t.Context(), api.actors["a"], store.Work{Trigger: "message", Message: message})
 		if result.Status != "done" {
 			t.Fatal("fixture turn failed", result.Status)
 		}
@@ -80,8 +81,11 @@ func TestAgentConfiguration(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil || !slices.Equal(config.Tools, []string{"read", "ls"}) || !slices.Equal(config.Skills, []string{path}) {
 		t.Fatal(config, err)
 	}
+	if !slices.Equal(config.BundledSkills, []string{"polymux", "report", "html-cards"}) {
+		t.Fatal("configuration omitted bundled skills", config.BundledSkills)
+	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil || len(fields) != 3 {
+	if err := json.Unmarshal(data, &fields); err != nil || len(fields) != 4 {
 		t.Fatal("configuration inventory exposed unrelated profile data")
 	}
 	turn("after")
@@ -114,6 +118,9 @@ func TestAgentConfiguration(t *testing.T) {
 	call("PATCH", `{"tools":[],"skills":[],"workspace":""}`, 200)
 	if err := json.Unmarshal(call("GET", "", 200), &config); err != nil || len(config.Tools) != 0 || len(config.Skills) != 0 || config.Workspace != "" {
 		t.Fatal(config, err)
+	}
+	if !slices.Equal(config.BundledSkills, []string{"polymux", "report", "html-cards"}) {
+		t.Fatal("clearing configured skills removed bundled skills", config.BundledSkills)
 	}
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, httptest.NewRequest("PATCH", "/agents/missing/configuration", strings.NewReader(`{"tools":[]}`)))

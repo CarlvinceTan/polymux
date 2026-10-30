@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
@@ -73,16 +72,8 @@ func (s *Store) CreateThread(ctx context.Context, id string, request contract.Cr
 	if request.Title != nil && strings.TrimSpace(*request.Title) != "" {
 		title = strings.TrimSpace(*request.Title)
 	}
-	thread = contract.Thread{ID: id, AgentID: request.AgentIDs[0], AgentIDs: request.AgentIDs, Title: title}
-	lead := thread.AgentID
-	if request.LeadAgentID != nil {
-		lead = *request.LeadAgentID
-	}
-	if !slices.Contains(request.AgentIDs, lead) {
-		return thread, ErrMembers
-	}
-	thread.LeadAgentID = &lead
-	if _, err := tx.ExecContext(ctx, `INSERT INTO threads(id,agent_id,title,lead_agent_id) VALUES(?,?,?,?)`, thread.ID, thread.AgentID, title, lead); err != nil {
+	thread = contract.Thread{ID: id, AgentID: request.AgentIDs[0], AgentIDs: request.AgentIDs, Title: title, Runs: []contract.Run{}}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO threads(id,agent_id,title) VALUES(?,?,?)`, thread.ID, thread.AgentID, title); err != nil {
 		return thread, err
 	}
 	for position, agentID := range request.AgentIDs {
@@ -98,7 +89,7 @@ func (s *Store) CreateThread(ctx context.Context, id string, request contract.Cr
 		return thread, err
 	}
 	thread.Pinned = new(false)
-	return thread, sidebarCommit(ctx, tx, before, "Created "+thread.Title, nil, nil)
+	return thread, s.sidebarCommit(ctx, tx, before, "Created "+thread.Title, nil, nil)
 }
 
 func (s *Store) UpdateThread(ctx context.Context, id string, request contract.UpdateThreadRequest) error {
@@ -111,8 +102,8 @@ func (s *Store) UpdateThread(ctx context.Context, id string, request contract.Up
 	if err != nil {
 		return err
 	}
-	var primary, lead, title string
-	if err := tx.QueryRowContext(ctx, `SELECT agent_id,lead_agent_id,title FROM threads WHERE id=?`, id).Scan(&primary, &lead, &title); err != nil {
+	var primary, title string
+	if err := tx.QueryRowContext(ctx, `SELECT agent_id,title FROM threads WHERE id=?`, id).Scan(&primary, &title); err != nil {
 		return err
 	}
 	if request.Title != nil {
@@ -126,9 +117,6 @@ func (s *Store) UpdateThread(ctx context.Context, id string, request contract.Up
 			return err
 		}
 		primary = request.AgentIDs[0]
-		if !slices.Contains(request.AgentIDs, lead) {
-			lead = primary
-		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM thread_members WHERE thread_id=?`, id); err != nil {
 			return err
 		}
@@ -138,26 +126,13 @@ func (s *Store) UpdateThread(ctx context.Context, id string, request contract.Up
 			}
 		}
 	}
-	if request.LeadAgentID != nil {
-		lead = *request.LeadAgentID
-	}
-	if lead == "" {
-		lead = primary
-	}
-	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM thread_members WHERE thread_id=? AND agent_id=?`, id, lead).Scan(&exists); err != nil {
-		return err
-	}
-	if exists != 1 {
-		return ErrMembers
-	}
 	if err := updatePin(ctx, tx, id, request.Pinned, request.PinOrder); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE threads SET title=?,agent_id=?,lead_agent_id=? WHERE id=?`, title, primary, lead, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE threads SET title=?,agent_id=? WHERE id=?`, title, primary, id); err != nil {
 		return err
 	}
-	return sidebarCommit(ctx, tx, before, "Updated chat placement", nil, nil)
+	return s.sidebarCommit(ctx, tx, before, "Updated chat placement", nil, nil)
 }
 
 func memberNames(ctx context.Context, tx *sql.Tx, ids []string, minimum int) ([]string, error) {
@@ -203,4 +178,132 @@ func (s *Store) Request(ctx context.Context, id string) (contract.SendRequest, e
 	}
 	err = json.Unmarshal([]byte(data), &request)
 	return request, err
+}
+
+// GroupMessages includes immediate posts, but not silent passes or unfinished replies.
+func (s *Store) GroupMessages(ctx context.Context, job string) ([]contract.Message, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.data FROM messages m
+JOIN runs r ON r.id=json_extract(m.data,'$.runID')
+WHERE r.job_id=? AND m.role='assistant' AND m.status='done' ORDER BY m.seq`, job)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	messages := []contract.Message{}
+	for rows.Next() {
+		var data string
+		var message contract.Message
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(data), &message); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+type GroupWork struct {
+	Delivery contract.PeerDelivery
+	Work     Work
+}
+
+// GroupQueue returns FIFO invitations whose source stage completed successfully.
+func (s *Store) GroupQueue(ctx context.Context, thread, job string) ([]GroupWork, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT d.data,d.input FROM deliveries d
+JOIN runs parent ON parent.id=json_extract(d.data,'$.parentRunID')
+WHERE d.thread_id=? AND parent.status='completed'
+AND json_extract(d.data,'$.intent')='handoff' AND json_extract(d.data,'$.status')='queued'
+AND (json_extract(d.input,'$.message.replyToID')=? OR json_extract(d.input,'$.message.id')=?)
+ORDER BY d.rowid`, thread, job, job)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	queue := []GroupWork{}
+	for rows.Next() {
+		var data, input string
+		var item GroupWork
+		if err := rows.Scan(&data, &input); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(data), &item.Delivery); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(input), &item.Work); err != nil {
+			return nil, err
+		}
+		queue = append(queue, item)
+	}
+	return queue, rows.Err()
+}
+
+// ErrNotGroup rejects deleting a bot's own chat as a group; delete the bot instead.
+var ErrNotGroup = errors.New("not a group chat")
+
+// DeleteGroup removes a group chat and the attachments only it references, returning their
+// files. Its members keep their own chats.
+func (s *Store) DeleteGroup(ctx context.Context, id string) ([]string, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	before, err := sidebarSnapshot(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	var agent string
+	if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM threads WHERE id=?`, id).Scan(&agent); err != nil {
+		return nil, err
+	}
+	if agent == id {
+		return nil, ErrNotGroup
+	}
+	if _, err := s.closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE thread_id=? AND json_extract(data,'$.status')='queued'`, id); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.path FROM attachments a
+WHERE EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.thread_id=? AND json_extract(p.value,'$.attachment.id')=a.id)
+AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.thread_id<>? AND json_extract(p.value,'$.attachment.id')=a.id)`, id, id)
+	if err != nil {
+		return nil, err
+	}
+	var files, attachments []string
+	for rows.Next() {
+		var attachment, path string
+		if err := rows.Scan(&attachment, &path); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		attachments = append(attachments, attachment)
+		files = append(files, path)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	// Members, sessions, notices, deliveries and search entries cascade with the thread.
+	for _, query := range []string{
+		`DELETE FROM runs WHERE thread_id=?`,
+		`DELETE FROM jobs WHERE thread_id=?`,
+		`DELETE FROM media_vectors WHERE thread_id=?`,
+		`DELETE FROM media_index WHERE message_id IN(SELECT id FROM messages WHERE thread_id=?)`,
+		`DELETE FROM messages_fts WHERE thread_id=?`,
+		`DELETE FROM events WHERE thread_id=?`,
+		`DELETE FROM messages WHERE thread_id=?`,
+		`DELETE FROM threads WHERE id=?`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, id); err != nil {
+			return nil, err
+		}
+	}
+	for _, attachment := range attachments {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM attachments WHERE id=?`, attachment); err != nil {
+			return nil, err
+		}
+	}
+	return files, s.sidebarCommit(ctx, tx, before, "Deleted chat", nil, nil)
 }

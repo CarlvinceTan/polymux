@@ -1,0 +1,7 @@
+{
+  "home": {"title": "Polymux — Personal agents. Your setup.", "description": "Personal AI agents with your choice of models, browser, and tools. Run the server on one Mac and connect from the native macOS client. Install both from source.", "updated": "2026-10-24"},
+  "blog": {"title": "Polymux Blog — Notes on personal software", "description": "Product thinking, comparisons, and notes from building Polymux.", "updated": "2026-10-24"},
+  "product": {"title": "Product — Polymux", "description": "Explore native Polymux conversations, groups, profiles, and the capabilities of its agent server.", "updated": "2026-10-24"},
+  "releases": {"title": "Polymux Releases", "description": "Release notes for Polymux. Historical releases describe the earlier Electron app, not the current native app.", "updated": "2026-10-24"},
+  "privacy-policy": {"title": "Privacy Policy — Polymux", "description": "How the native Polymux app, your agent server, and earlier desktop integrations handle information.", "updated": "2026-10-16"}
+}

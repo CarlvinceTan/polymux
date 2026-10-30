@@ -9,7 +9,7 @@ struct SSETests {
         let one = String(decoding: try JSONEncoder().encode(first), as: UTF8.self)
         let two = String(decoding: try JSONEncoder().encode(second), as: UTF8.self)
         let wire = ": keepalive\r\n\r\nid: 1\r\nevent: message.delta\r\ndata: \(one)\r\n\r\nid: 2\nevent: message.done\ndata: \(two)\n\n"
-        var parser = SSEParser()
+        var parser = SSEParser<Event>()
         var received: [Event] = []
         for byte in wire.utf8 {
             if let event = try parser.feed(byte) { received.append(event) }
@@ -24,7 +24,7 @@ struct SSETests {
         encoder.outputFormatting = .prettyPrinted
         let json = String(decoding: try encoder.encode(event), as: UTF8.self)
         let wire = json.split(separator: "\n").map { "data: \($0)" }.joined(separator: "\n")
-        var parser = SSEParser()
+        var parser = SSEParser<Event>()
         for byte in wire.utf8 { #expect(try parser.feed(byte) == nil) }
         #expect(try parser.finish() == event)
     }

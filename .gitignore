@@ -1,12 +1,6 @@
 node_modules/
 .DS_Store
 
-# Generated site routes
-/apps/site/blog/*/
-/apps/site/docs/*/
-/apps/site/releases/*/
-/apps/site/product/*/
-
 # Local tool settings and experiments
 .claude/
 .cursor/
@@ -39,9 +33,6 @@ dist/
 DerivedData/
 xcuserdata/
 *.xcuserstate
-
-# Bundled native dependencies staged for local builds
-/.vendor/
 
 # Machine-specific agent rules
 /AGENTS.local.md

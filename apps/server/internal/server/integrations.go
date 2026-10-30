@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -36,7 +37,9 @@ func (t *integrationTool) Schema() ai.ToolSchema {
 			"native_only": map[string]any{"type": "boolean", "description": "Exclude browser tools from this MCP connection"},
 			"name":        map[string]any{"type": "string", "description": "MCP connection name"},
 			"url":         map[string]any{"type": "string", "description": "HTTP(S) MCP endpoint without inline credentials"},
+			"headers":     map[string]any{"type": "object", "maxProperties": 16, "additionalProperties": map[string]any{"type": "string"}, "description": "HTTP MCP headers; put saved secrets in as {{secret:name}} or {{vault:id:field}}, filled in at connect time for the URL's origin"},
 			"command":     map[string]any{"type": "string", "description": "Stdio executable, not a shell expression"},
+			"env":         map[string]any{"type": "object", "maxProperties": 32, "additionalProperties": map[string]any{"type": "string"}, "description": "Stdio MCP environment; give saved secrets as {{secret:name}} or {{vault:id:field}}, filled in on the wire for their bound origin"},
 			"args":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 32},
 			"path":        map[string]any{"type": "string", "description": "Absolute path to an existing trusted .md skill"},
 		}, "required": []string{"action"},
@@ -51,20 +54,22 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 		return agent.AgentToolResult{}, err
 	}
 	// Introductions stay tool-free.
-	if state.work.Trigger == "created" {
+	if state.work.Trigger == contract.RunTriggerCreated {
 		return agent.AgentToolResult{}, errors.New("integration setup requires a working turn")
 	}
 	var input struct {
-		Action     string   `json:"action"`
-		Name       string   `json:"name"`
-		URL        string   `json:"url"`
-		Command    string   `json:"command"`
-		Args       []string `json:"args"`
-		Path       string   `json:"path"`
-		Host       string   `json:"host"`
-		CuaBinary  string   `json:"cua_binary"`
-		CuaSocket  string   `json:"cua_socket"`
-		NativeOnly *bool    `json:"native_only"`
+		Action     string            `json:"action"`
+		Name       string            `json:"name"`
+		URL        string            `json:"url"`
+		Headers    map[string]string `json:"headers"`
+		Command    string            `json:"command"`
+		Env        map[string]string `json:"env"`
+		Args       []string          `json:"args"`
+		Path       string            `json:"path"`
+		Host       string            `json:"host"`
+		CuaBinary  string            `json:"cua_binary"`
+		CuaSocket  string            `json:"cua_socket"`
+		NativeOnly *bool             `json:"native_only"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
@@ -164,14 +169,17 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 				return agent.AgentToolResult{}, errors.New("use an HTTP(S) MCP URL without inline credentials or query parameters")
 			}
 		}
-		config := agentruntime.MCPServer{Name: input.Name, URL: input.URL, Command: input.Command, Args: input.Args}
+		config := agentruntime.MCPServer{Name: input.Name, URL: input.URL, Headers: input.Headers, Command: input.Command, Args: input.Args, Env: input.Env}
 		index := slices.IndexFunc(d.MCP, func(server agentruntime.MCPServer) bool { return server.Name == input.Name })
 		if index < 0 {
 			d.MCP = append(d.MCP, config)
 		} else {
 			config.NativeOnly = d.MCP[index].NativeOnly
-			if config.Command == d.MCP[index].Command {
+			if config.Command == d.MCP[index].Command && config.Env == nil {
 				config.Env = d.MCP[index].Env
+			}
+			if config.URL != "" && config.URL == d.MCP[index].URL && config.Headers == nil {
+				config.Headers = d.MCP[index].Headers
 			}
 			d.MCP[index] = config
 		}

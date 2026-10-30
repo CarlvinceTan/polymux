@@ -23,13 +23,7 @@ type chainState struct {
 	seen    map[string]bool
 	output  int
 	mu      sync.Mutex
-	next    *handoffWork
 	pending map[string]string
-}
-
-type handoffWork struct {
-	work   store.Work
-	target string
 }
 
 type turnState struct {
@@ -50,6 +44,7 @@ type turnState struct {
 	cancel     context.CancelFunc
 	removals   []string
 	posts      int
+	status     func(string) error
 }
 
 func beforeTool(ctx context.Context, call, name string, args json.RawMessage) agent.ToolCallHookResult {
@@ -62,11 +57,11 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.handoff != nil || state.checkpoint != nil || state.notice != nil || state.hookErr != nil || state.work.Trigger == "created" {
+	if state.handoff != nil || state.checkpoint != nil || state.notice != nil || state.hookErr != nil || state.work.Trigger == contract.RunTriggerCreated && name != "ask_user" {
 		return agent.ToolCallHookResult{Block: true, Terminate: true, Reason: "This stage cannot execute tools"}
 	}
 	state.tools++
-	if state.work.Trigger == "child" && (name == "spawn_task" || name == "message_agent" || name == "handoff_agent" || name == "manage_tasks") {
+	if state.work.Trigger == contract.RunTriggerChild && (name == "task" || name == "message_agent" || name == "handoff_agent" || name == "manage_tasks") {
 		return agent.ToolCallHookResult{Block: true, Reason: "Child tasks cannot delegate or schedule continuations"}
 	}
 	if state.store != nil && externalTool(state, name) {
@@ -76,6 +71,22 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 		}
 	}
 	return agent.ToolCallHookResult{}
+}
+
+// afterInner settles the effect receipt of a tool called from inside codemode.
+func afterInner(ctx context.Context, call, name string, failed bool) {
+	state, _ := ctx.Value(turnKey{}).(*turnState)
+	if state == nil || state.store == nil {
+		return
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !externalTool(state, name) {
+		return
+	}
+	if err := state.store.EndEffect(context.WithoutCancel(ctx), state.run.ID, call, failed); err != nil && state.hookErr == nil {
+		state.hookErr = err
+	}
 }
 
 func externalTool(state *turnState, name string) bool {
@@ -131,7 +142,7 @@ func (t *peerTool) Description() string {
 			"Share relevant task context without copying unrelated private history."
 	}
 	if t.handoff {
-		return "Pass a task to a group member by stable ID and end your stage. Members can speak again later; do not hand straight back to the sender. Chains allow up to six hops. Plain @mentions never hand off."
+		return "Pass a task to a group member by stable ID and end your stage. Members can speak again when invited; do not hand straight back to the sender. Group delegation limits apply. An @Name in your final reply also invites that member to respond."
 	}
 	return "Message a bot by stable ID. request/question/result/status wake it in its own chat with its existing history; fyi only records a note. Messages appear in both chats. Results are returned automatically; chains allow up to six hops. Share relevant task context without copying unrelated private history."
 }
@@ -156,7 +167,7 @@ func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMess
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.handoff != nil || state.work.Trigger == "created" {
+	if state.handoff != nil || state.work.Trigger == contract.RunTriggerCreated {
 		return agent.AgentToolResult{}, errors.New("stage has ended")
 	}
 	if input.AgentID == state.run.AgentID {
@@ -170,10 +181,13 @@ func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMess
 	if t.handoff != inGroup {
 		return agent.AgentToolResult{}, errors.New("use a group handoff for group work; private peer delivery is direct-chat only")
 	}
-	if state.work.Hops >= 6 && input.Intent != "fyi" {
+	if !inGroup && state.work.Hops >= 6 && input.Intent != "fyi" {
 		return agent.AgentToolResult{}, errors.New("peer chain reached six hops; use fyi for a final note")
 	}
 	if t.handoff {
+		if state.work.Hops >= t.server.config.GroupCaps.MaxDepth || t.server.config.GroupCaps.MaxPerRun == 0 {
+			return agent.AgentToolResult{}, errors.New("group delegation limit reached; finish this stage in the group")
+		}
 		if !slices.Contains(thread.AgentIDs, input.AgentID) {
 			return agent.AgentToolResult{}, store.ErrMembers
 		}
@@ -181,12 +195,16 @@ func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMess
 		if chain == nil {
 			return agent.AgentToolResult{}, errors.New("missing group turn")
 		}
-		chain.mu.Lock()
-		reserved := chain.pending[input.AgentID]
-		chain.mu.Unlock()
 		if input.AgentID == state.work.FromAgentID {
 			return agent.AgentToolResult{}, errors.New("cannot hand straight back to the sender")
 		}
+		// Reserve the target before persisting the handoff.
+		chain.mu.Lock()
+		reserved := chain.pending[input.AgentID]
+		if reserved == "" {
+			chain.pending[input.AgentID] = "reserving"
+		}
+		chain.mu.Unlock()
 		if reserved != "" {
 			return agent.AgentToolResult{}, errors.New("member already has a pending handoff for this turn")
 		}
@@ -200,15 +218,17 @@ func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMess
 		targetThread = thread.ID
 	}
 	text := input.Message
-	work := store.Work{Trigger: "peer", Message: contract.Message{ID: id, ThreadID: targetThread, Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}}, CreatedAt: store.Now()}, ParentRunID: &state.run.ID, DeliveryID: id, Task: text, Hops: min(6, state.work.Hops+1), FromAgentID: state.run.AgentID}
+	work := store.Work{Trigger: contract.RunTriggerPeer, Message: contract.Message{ID: id, ThreadID: targetThread, Role: contract.MessageRoleUser, Parts: []contract.Part{{Kind: contract.PartKindText, Text: &text}}, CreatedAt: store.Now()}, ParentRunID: &state.run.ID, DeliveryID: id, Task: text, Hops: min(6, state.work.Hops+1), FromAgentID: state.run.AgentID}
 	if t.handoff {
 		work = state.work
-		work.Trigger = "handoff"
+		work.Trigger = contract.RunTriggerHandoff
+		work.Routing = "explicit"
+		work.Targets = []string{input.AgentID}
 		work.ParentRunID = &state.run.ID
 		work.DeliveryID = id
 		work.Task = text
 		root := work.Message.ID
-		if state.work.Trigger == "handoff" && work.Message.ReplyToID != nil {
+		if state.work.Trigger == contract.RunTriggerHandoff && work.Message.ReplyToID != nil {
 			root = *work.Message.ReplyToID
 		}
 		work.Message.ReplyToID = &root
@@ -216,29 +236,35 @@ func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMess
 		work.Hops = state.work.Hops + 1
 		work.FromAgentID = state.run.AgentID
 	}
-	delivery := contract.PeerDelivery{ID: id, SourceAgentID: state.run.AgentID, TargetAgentID: input.AgentID, ConversationID: thread.ID, ParentRunID: state.run.ID, Intent: input.Intent, Status: "queued", CreatedAt: store.Now()}
+	delivery := contract.PeerDelivery{ID: id, SourceAgentID: state.run.AgentID, TargetAgentID: input.AgentID, ConversationID: thread.ID, ParentRunID: state.run.ID, Intent: input.Intent, Status: contract.PeerDeliveryStatusQueued, CreatedAt: store.Now()}
 	hops := int64(work.Hops)
 	delivery.Hops = &hops
 	wake := !t.handoff && input.Intent != "fyi"
 	if !wake && !t.handoff {
-		delivery.Status = "delivered"
+		delivery.Status = contract.PeerDeliveryStatusDelivered
 	}
 	t.server.actorsMu.RLock()
 	if t.server.closing || t.server.deletes[delivery.SourceAgentID] != nil || t.server.deletes[delivery.TargetAgentID] != nil {
-		t.server.actorsMu.RUnlock()
-		return agent.AgentToolResult{}, errors.New("peer is being removed or the server is stopping")
+		err = errors.New("peer is being removed or the server is stopping")
+	} else {
+		delivery, err = t.server.Store.Deliver(ctx, delivery, work, wake)
 	}
-	delivery, err = t.server.Store.Deliver(ctx, delivery, work, wake)
 	t.server.actorsMu.RUnlock()
+	if t.handoff {
+		chain := ctx.Value(chainKey{}).(*chainState)
+		chain.mu.Lock()
+		if err != nil {
+			delete(chain.pending, input.AgentID)
+		} else {
+			chain.pending[input.AgentID] = delivery.ID
+		}
+		chain.mu.Unlock()
+	}
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
 	if t.handoff {
 		state.handoff, state.target = &work, input.AgentID
-		chain := ctx.Value(chainKey{}).(*chainState)
-		chain.mu.Lock()
-		chain.pending[input.AgentID] = delivery.ID
-		chain.mu.Unlock()
 	}
 	data, err := json.Marshal(delivery)
 	if err != nil {
@@ -249,7 +275,7 @@ func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMess
 
 func (s *Server) peerContext(ctx context.Context, work store.Work) (contract.Message, error) {
 	m := work.Message
-	if work.Trigger == "peer" {
+	if work.Trigger == contract.RunTriggerPeer {
 		m = peerMessage(m, work.FromAgentID)
 	}
 	agents, err := s.Store.Agents(ctx)
@@ -272,13 +298,13 @@ func (s *Server) peerContext(ctx context.Context, work store.Work) (contract.Mes
 	if len(agents) > len(peers) {
 		text += "\nPeer roster truncated to 64 entries. Do not guess unlisted IDs."
 	}
-	if work.Trigger == "peer" {
+	if work.Trigger == contract.RunTriggerPeer {
 		text += fmt.Sprintf("\nMessage from bot %s, delivery %s, hop %d of 6. Use your existing conversation context to address the task. You can consult another bot if needed. Your final result returns to the sender automatically; use fyi when no reply is needed.", work.FromAgentID, work.DeliveryID, work.Hops)
 	}
-	if work.Trigger == "child" {
+	if work.Trigger == contract.RunTriggerChild {
 		text += fmt.Sprintf("\nChild task, parent run %s. Complete only the explicit task in this fresh session; do not delegate or schedule continuations.", value(work.ParentRunID))
 	}
-	m.Parts = append([]contract.Part{{Kind: "text", Text: &text}}, m.Parts...)
+	m.Parts = append([]contract.Part{{Kind: contract.PartKindText, Text: &text}}, m.Parts...)
 	return m, nil
 }
 

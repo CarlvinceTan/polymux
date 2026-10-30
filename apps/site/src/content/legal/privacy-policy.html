@@ -1,0 +1,70 @@
+<section>
+  <h2>Overview</h2>
+  <p>Current Polymux source is a native app backed by an agent server you configure. This policy also retains descriptions of the earlier Electron app's Personal Host, Connect relay, and browser extension. Those historical integration descriptions do not mean the native app exposes the same features or setup screens.</p>
+</section>
+<section>
+  <h2>Native app and agent server</h2>
+  <p>The app caches conversations on its device and sends messages and attachments to your configured server. That server stores authoritative history and agent memory and executes tools. A server on another computer is a separate data destination, not storage confined to the app device. Hosted model providers and connected tools can receive task content under their own configuration and terms. Forgetting active memory does not delete conversation history or backups.</p>
+  <p>Microphone, speech, and notifications have separate access requirements. Review system permissions and task approvals. Native setup and current limitations are described in <a href="/docs/skills-and-mcp/#your-data">Tools and data</a>. The browser-extension and Connect-specific sections below describe the earlier integrations, not a native browser workspace or relay setup.</p>
+</section>
+<section>
+  <h2>Information handled by earlier integrations</h2>
+  <h3>Browser tab information</h3>
+  <p>The browser extension makes a local inventory of open-tab metadata, including tab titles, URLs, window identifiers, active or pinned state, audible state, and last-accessed time. This inventory does not include page contents.</p>
+  <h3>Assigned-tab content and activity</h3>
+  <p>When you ask Polymux to work in a specific browser tab, it may read page content and perform or observe interactions needed for that task. This can include accessibility information, screenshots, navigation, clicks, typing, scrolling, console or network information, dialogs, and task results. Polymux limits this access to the tab assigned to the task.</p>
+  <h3>Connected services</h3>
+  <p>If you connect a service or AI provider through the desktop app, Polymux handles the information required to complete the actions you request. The connected provider's own privacy policy also applies to information sent to that provider.</p>
+  <h3>Personal Host relay traffic</h3>
+  <p>When you connect Polymux Phone or a remote Desktop to a Personal Host, Polymux Connect relays the requests and responses needed for pairing, conversations, Team actions, and run updates. The relay stores the Host's opaque identifier and a hash of its relay authentication secret. Request and response bodies are forwarded in memory and are not stored by Polymux Connect.</p>
+</section>
+<section>
+  <h2>How information is used</h2>
+  <p>Polymux uses information only to:</p>
+  <ul>
+    <li>identify the app, window, file, conversation, or browser tab you mean;</li>
+    <li>complete tasks you request and return their results;</li>
+    <li>maintain secure local connections between the extension and desktop app; and</li>
+    <li>diagnose errors and protect the reliability and security of the product.</li>
+  </ul>
+</section>
+<section>
+  <h2>Local browser-extension communication</h2>
+  <p>The extension communicates with the locally installed Polymux desktop app through a native-messaging host and a loopback-only service on your computer. Open-tab metadata, assigned-tab commands, cursor status, and task results stay on your device through these channels. The extension does not send browsing data to a hosted Polymux service.</p>
+</section>
+<section>
+  <h2>Polymux Connect</h2>
+  <p>A Personal Host keeps its service on the local computer and opens an authenticated outbound connection to Polymux Connect. Remote traffic is encrypted with HTTPS and secure WebSockets on the phone-to-relay and Host-to-relay connections. Cloudflare provides the relay infrastructure and processes this traffic to deliver the service; Cloudflare's privacy terms also apply to that processing.</p>
+</section>
+<section>
+  <h2>Browser permissions</h2>
+  <p>The extension uses browser permissions to:</p>
+  <ul>
+    <li>list tabs and identify the exact tab assigned to Polymux;</li>
+    <li>communicate with the locally installed desktop app;</li>
+    <li>refresh its local connection after the browser suspends it;</li>
+    <li>read and interact with an assigned tab through browser debugging tools; and</li>
+    <li>display the Polymux badge and cursor on ordinary HTTP and HTTPS pages.</li>
+  </ul>
+</section>
+<section>
+  <h2>Sharing and sale of data</h2>
+  <p>Polymux does not host public conversation links or sell user data. It does not use or transfer user data for advertising, creditworthiness, lending, or purposes unrelated to the product's disclosed function. Information is shared with Cloudflare to operate Polymux Connect, or with another service provider only when needed to use a connection you configured or complete an action you requested.</p>
+</section>
+<section>
+  <h2>Storage, retention, and control</h2>
+  <p>Browser-tab inventory and connection state are stored locally for the desktop app to use. Access to an assigned tab ends when the task releases it, the tab closes, the desktop app disconnects, or you disable the extension. You can also remove locally stored Polymux data by uninstalling the extension or desktop app and deleting its application data.</p>
+  <p>Polymux Connect retains a Personal Host's opaque identifier and relay secret hash so it can reject impersonated Host connections. It does not retain relayed request or response bodies.</p>
+</section>
+<section>
+  <h2>Security</h2>
+  <p>Polymux limits browser control to an identified assigned tab and uses local-only communication for the extension-to-desktop connection, authenticated Host relay connections, short-lived pairing codes, and encrypted network transport. No system can guarantee absolute security, but Polymux is designed to minimise access and keep you in control of connected services.</p>
+</section>
+<section>
+  <h2>Changes to this policy</h2>
+  <p>This policy may change as Polymux develops. The effective date above will be updated when material changes are published.</p>
+</section>
+<section>
+  <h2>Contact</h2>
+  <p>For privacy questions, email <a href="mailto:carlvince@polymux.com">carlvince@polymux.com</a>.</p>
+</section>

@@ -84,14 +84,14 @@ enum VoiceFailure: LocalizedError {
     case locale
     case audio
     case speech
-    case echo(String)
+    case echo
 
     var errorDescription: String? {
         switch self {
         case .microphone:
-            "Allow Polymux to use the microphone in System Settings."
+            "Allow Polymux to use the microphone in \(Self.settings)."
         case .recognition:
-            "Allow Polymux to use speech recognition in System Settings."
+            "Allow Polymux to use speech recognition in \(Self.settings)."
         case .unavailable:
             "Speech recognition isn’t available on this device right now."
         case .locale:
@@ -100,8 +100,26 @@ enum VoiceFailure: LocalizedError {
             "No working microphone or speaker was found. Check the selected audio devices."
         case .speech:
             "Speech recognition stopped. Try again."
-        case .echo(let detail):
-            "This audio route cannot enable echo cancellation. Change the microphone or speaker and retry. \(detail)"
+        case .echo:
+            "This audio route cannot cancel echo. Change the microphone or speaker."
         }
+    }
+
+    /// Where each platform grants permissions.
+    private static var settings: String {
+        #if os(macOS)
+        "System Settings"
+        #else
+        "Settings"
+        #endif
+    }
+}
+
+extension Error {
+    /// Words for a failed voice session: voice failures explain themselves, anything else never shows system text.
+    var voiceIssue: String {
+        if self is VoiceFailure || self is LiveFailure { return localizedDescription }
+        if isOffline { return "Voice stopped because Polymux is offline." }
+        return reason(or: "Voice stopped unexpectedly.")
     }
 }

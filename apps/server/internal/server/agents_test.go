@@ -90,7 +90,7 @@ func TestCreateAgentSurvivesRestart(t *testing.T) {
 	var created contract.Agent
 	err = json.NewDecoder(response.Body).Decode(&created)
 	response.Body.Close()
-	if err != nil || response.StatusCode != 201 || created.ID == "" || created.ID == "assistant" || created.Name != "Coach" || created.Model != config.Model || created.Active {
+	if err != nil || response.StatusCode != 201 || created.ID == "" || created.ID == "assistant" || created.Name != "Coach" || created.Model != "" || created.Active {
 		t.Fatalf("create response %+v status=%d err=%v", created, response.StatusCode, err)
 	}
 	avatar := defaultAvatar()
@@ -120,8 +120,8 @@ func TestCreateAgentSurvivesRestart(t *testing.T) {
 	}
 	send("first")
 	first := <-factory.opened
-	if !first.definition.Intro || len(first.definition.ExtraTools) != 0 || len(first.definition.MCP) != 0 {
-		t.Fatalf("creation was not tool-free: %+v", first)
+	if !first.definition.Intro || len(first.definition.ExtraTools) != 1 || first.definition.ExtraTools[0].Name() != "ask_user" || len(first.definition.MCP) != 0 {
+		t.Fatalf("creation may only ask the user: %+v", first)
 	}
 	ordinary := <-factory.opened
 	if ordinary.definition.Intro || ordinary.path != "test.jsonl" || len(ordinary.definition.Tools) != 6 {
@@ -161,6 +161,114 @@ func TestCreateAgentSurvivesRestart(t *testing.T) {
 	agents, err := api.Store.Agents(t.Context())
 	if err != nil || len(agents) != 2 || agents[0].ID != "assistant" || agents[0].Name != "Assistant" {
 		t.Fatalf("defaults not preserved %+v %v", agents, err)
+	}
+}
+
+// keylessFactory is a runtime whose own endpoint has no URL or key.
+type keylessFactory struct{ definitionFactory }
+
+func (*keylessFactory) Fallback() bool { return false }
+
+func TestNotSetBotsFollowProviders(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(t.Context(), filepath.Join(dir, "polymux.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// Chief was created before any provider, pinned to the keyless endpoint.
+	chief := agentruntime.Definition{Agent: contract.Agent{ID: "chief", Name: "Chief", Model: "openai/gpt-5.5"}}
+	data, err := json.Marshal(chief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateDefinition(t.Context(), chief.Agent, data, nil, nil, contract.Agent{}); err != nil {
+		t.Fatal(err)
+	}
+	factory := &keylessFactory{definitionFactory{opened: make(chan openedAgent, 4)}}
+	api, err := New(t.Context(), db, Config{DataDir: dir, Model: "openai/gpt-5.5", Factory: factory, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), VaultKeys: &vaultKeys{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	endpoint := httptest.NewServer(api)
+	defer endpoint.Close()
+	if profile, err := db.Profile(t.Context(), "chief"); err != nil || profile.Agent.Model != "" || profile.Agent.Provider != "" {
+		t.Fatalf("keyless bot is not Not set: %+v %v", profile.Agent, err)
+	}
+	failed := false
+	for deadline := time.Now().Add(3 * time.Second); !failed && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		messages, err := db.Messages(t.Context(), "chief", 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range messages {
+			failed = failed || m.Error != nil && m.Error.Code == "no_provider" && m.Error.Message == "No provider is set up. Add one in Settings."
+		}
+	}
+	if !failed {
+		t.Fatal("introduction without providers did not explain the missing provider")
+	}
+	post := func(body string) int {
+		t.Helper()
+		response, err := http.Post(endpoint.URL+"/agents", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	if status := post(`{"name":"Pinned","role":"","prompt":"","model":"openai/gpt-5.5"}`); status != http.StatusBadRequest {
+		t.Fatalf("keyless endpoint model accepted: %d", status)
+	}
+	// Connecting a provider is enough: the next turn runs on pi's preferred model, not the first listed.
+	if err := api.settings.SetProviders([]contract.Provider{{ID: "work", Type: "openai", Name: "Work", BaseURL: "https://example.com/v1", Enabled: true,
+		Models: []contract.ProviderModel{{ID: "gpt-4", Tags: []string{"text"}, Enabled: true}, {ID: "gpt-5.5", Tags: []string{"text"}, Enabled: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.Post(endpoint.URL+"/threads/chief/messages", "application/json", strings.NewReader(`{"id":"next","text":"hello","attachmentIDs":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if opened := <-factory.opened; opened.definition.Agent.Provider != "work" || opened.definition.Agent.Model != "gpt-5.5" {
+		t.Fatalf("Not set bot ran on %q/%q", opened.definition.Agent.Provider, opened.definition.Agent.Model)
+	}
+	awaitReply(t, api, "chief", "next")
+}
+
+func TestCreateAgentNames(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "omitted", body: `{}`},
+		{name: "empty", body: `{"name":""}`},
+		{name: "whitespace", body: `{"name":"  \t "}`},
+		{name: "custom", body: `{"name":"  My research assistant  "}`, want: "My research assistant"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			api.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(tc.body)))
+			if recorder.Code != http.StatusCreated {
+				t.Fatal(recorder.Code, recorder.Body.String())
+			}
+			var created contract.Agent
+			if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == "" {
+				assertName(t, created.Name)
+			} else if created.Name != tc.want {
+				t.Fatalf("name = %q, want %q", created.Name, tc.want)
+			}
+			profile := profileRequest(t, api, http.MethodGet, "/agents/"+created.ID, "", http.StatusOK)
+			if profile.Agent.Name != created.Name {
+				t.Fatalf("saved name = %q, want %q", profile.Agent.Name, created.Name)
+			}
+		})
 	}
 }
 

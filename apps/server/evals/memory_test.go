@@ -15,7 +15,7 @@ import (
 
 func TestMEM1MemoryAfterRestart(t *testing.T) {
 	const fact = "My preferred report format is three concise paragraphs."
-	h := Start(t, Options{ID: "MEM1", Summary: func(*ChatRequest) Response {
+	h := Start(t, Options{ID: "MEM1", Window: compactWindow, Summary: func(*ChatRequest) Response {
 		return TextReply("The user saved a report-format preference and asks to retrieve it. Use recall_memory to recover the preference and its source.")
 	}, Steps: []Step{
 		Fixed(nil, ToolReply("mem1-save", "save_memory", map[string]any{"name": "report-format", "text": fact, "revision": ""})),
@@ -60,7 +60,7 @@ func TestVOICE1PrivateRecall(t *testing.T) {
 	const history = "The Kestrel project review is on Thursday."
 	const preference = "For Kestrel reviews, use a short checklist."
 	const spoken = "My private voice note is to bring the blue folder."
-	h := Start(t, Options{ID: "VOICE1", Summary: func(*ChatRequest) Response {
+	h := Start(t, Options{ID: "VOICE1", Window: compactWindow, Summary: func(*ChatRequest) Response {
 		return TextReply("The user discussed the Kestrel review and asks about a remembered folder. Use saved memory for the answer; private consultations do not belong in typed chat.")
 	}, Agents: []agentruntime.Definition{{
 		Agent: contract.Agent{ID: agentID, Name: "Assistant", Model: evalModel}, Tools: []string{},

@@ -109,7 +109,7 @@ public enum LiveFailure: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .missingKey: "Add an API key in Settings → Voice."
+        case .missingKey: "Add a Gemini or OpenAI provider with an API key in Settings."
         case .configuration: "Check the Live provider, model, and voice in Settings."
         case .connection: "Could not connect to the Live API. Check your connection and API key, then retry."
         case .rejected: "The Live API rejected this session. Check the API key, model access, and quota."

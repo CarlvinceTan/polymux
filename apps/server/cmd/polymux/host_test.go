@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"net"
+	"testing"
+)
 
 func TestHostDefaults(t *testing.T) {
 	for _, mode := range []string{"run", "install"} {
@@ -32,5 +35,17 @@ func TestHostListeners(t *testing.T) {
 				t.Errorf("controller = %q, want %q", control, test.want)
 			}
 		})
+	}
+}
+
+func TestTailscaleControllerStaysLocal(t *testing.T) {
+	old := interfaceAddrs
+	interfaceAddrs = func() ([]net.Addr, error) {
+		return []net.Addr{&net.IPNet{IP: net.ParseIP("100.64.0.23"), Mask: net.CIDRMask(32, 32)}}, nil
+	}
+	defer func() { interfaceAddrs = old }()
+	listen, control, err := hostListeners("", "", true)
+	if err != nil || listen != "100.64.0.23:7337" || control != "127.0.0.1:7338" {
+		t.Fatalf("listen %q control %q: %v", listen, control, err)
 	}
 }

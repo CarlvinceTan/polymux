@@ -6,6 +6,7 @@ import Speech
 final class DictationInput {
     private(set) var active = false
     private(set) var stopping = false
+    private(set) var ready = false
     private(set) var level: Float = 0
     private(set) var denied = false
     private let permission: @Sendable () -> Bool
@@ -19,11 +20,17 @@ final class DictationInput {
     private var input: (any SpeechInput)?
     private var task: Task<Void, Never>?
     private var final = false
-    private var ready = false
     private var session = UUID()
     private var stopTask: Task<Void, Never>?
 
     init() {
+        #if DEBUG
+        if VerifyFixture.enabled, CommandLine.arguments.contains("--verify-dictation") {
+            permission = { false }
+            makeInput = { (DictationFixture(), {}) }
+            return
+        }
+        #endif
         permission = Self.isDenied
         makeInput = {
             let audio = VoiceAudio(duplex: false)
@@ -122,3 +129,41 @@ final class DictationInput {
         level = 0
     }
 }
+
+#if DEBUG
+@MainActor
+private final class DictationFixture: SpeechInput {
+    private var events: AsyncThrowingStream<VoiceEvent, Error>.Continuation?
+    private var task: Task<Void, Never>?
+
+    func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
+        try await Task.sleep(for: .seconds(3))
+        let stream = AsyncThrowingStream<VoiceEvent, Error>.makeStream()
+        events = stream.continuation
+        task = Task {
+            let levels: [Float] = [0, 0, 0.03, 0.08, 0.2, 0.5, 0.3, 0.1, 0.04, 0, 0.05, 0.15, 0.4, 0.8, 0.2, 0]
+            var index = 0
+            while !Task.isCancelled {
+                stream.continuation.yield(.level(levels[index % levels.count]))
+                index += 1
+                do { try await Task.sleep(for: .milliseconds(120)) }
+                catch { break }
+            }
+        }
+        return stream.stream
+    }
+
+    func finalize() async throws {
+        events?.yield(.transcript(.init(text: "", start: 0, end: 0, final: true)))
+    }
+
+    func stop() async {
+        task?.cancel()
+        task = nil
+        events?.finish()
+        events = nil
+    }
+
+    func setMuted(_ muted: Bool) {}
+}
+#endif

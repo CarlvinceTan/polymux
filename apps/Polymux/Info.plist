@@ -3,10 +3,19 @@
 <plist version="1.0"><dict>
   <key>PolymuxVerifyProtocol</key><integer>1</integer>
   <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>com.flarehq.polymux.connect</string><key>CFBundleURLSchemes</key><array><string>polymux</string></array></dict></array>
+  <key>UTExportedTypeDeclarations</key><array><dict><key>UTTypeIdentifier</key><string>com.flarehq.polymux.sidebar-item</string><key>UTTypeConformsTo</key><array><string>public.data</string></array></dict></array>
   <key>NSMicrophoneUsageDescription</key><string>Polymux listens while you use voice conversation.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Polymux turns your speech into messages for your agent.</string>
   <key>NSCameraUsageDescription</key><string>Polymux uses the camera when you attach a photo.</string>
   <key>NSPhotoLibraryUsageDescription</key><string>Polymux attaches the photos and videos you select.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>Polymux shares your location with your bots when they ask and you allowed it.</string>
+  <key>NSLocationUsageDescription</key><string>Polymux shares your location with your bots when they ask and you allowed it.</string>
+  <key>NSHomeKitUsageDescription</key><string>Polymux lets your bots check and control your Home accessories.</string>
+  <key>NSAlarmKitUsageDescription</key><string>Polymux lets your bots set alarms for you.</string>
   <key>NSLocalNetworkUsageDescription</key><string>Polymux connects to your private agent server.</string>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+  <key>SUFeedURL</key><string>https://polymux.com/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>0R035FKyyBKGGt0CxlZBElZI37gPCXH3WBiwFDELK0g=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>86400</integer>
 </dict></plist>

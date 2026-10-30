@@ -36,6 +36,8 @@ type Pairing struct {
 	Agent        string   `json:"agent"`
 	Capabilities []string `json:"capabilities"`
 	Revoked      bool     `json:"revoked"`
+	// Paired is false until the device first connects with its credential.
+	Paired bool `json:"paired"`
 }
 
 type Enrollment struct {
@@ -52,6 +54,7 @@ type Store struct {
 	issuer   *x509.Certificate
 	key      *ecdsa.PrivateKey
 	clock    func() time.Time
+	recheck  time.Duration
 }
 
 func Open(ctx context.Context, dir, hostname string) (*Store, error) {
@@ -79,13 +82,17 @@ func Open(ctx context.Context, dir, hostname string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, recheck: 2 * time.Second}
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS identity(id INTEGER PRIMARY KEY CHECK(id=1), certificate BLOB NOT NULL, key BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS tickets(hash TEXT PRIMARY KEY, agent TEXT NOT NULL, capabilities TEXT NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, name TEXT NOT NULL, agent TEXT NOT NULL, capabilities TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS app_lock(caller TEXT PRIMARY KEY, fails INTEGER NOT NULL, until INTEGER NOT NULL);`)
+CREATE TABLE IF NOT EXISTS app_lock(caller TEXT PRIMARY KEY, fails INTEGER NOT NULL, until INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS invitations(hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, claim TEXT NOT NULL DEFAULT '', device TEXT NOT NULL DEFAULT '');`)
 	if err == nil {
 		err = s.addLabel(ctx)
+	}
+	if err == nil {
+		err = s.addPaired(ctx)
 	}
 	if err == nil {
 		err = s.identity(ctx, hostname)
@@ -104,6 +111,19 @@ func (s *Store) addLabel(ctx context.Context) error {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN label TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// addPaired records whether a device has connected yet; devices from before it count as paired.
+func (s *Store) addPaired(ctx context.Context) error {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('devices') WHERE name='paired'`).Scan(&exists); err != nil || exists > 0 {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN paired INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET paired=1`)
 	return err
 }
 
@@ -222,12 +242,16 @@ func (s *Store) Authenticate(ctx context.Context, token string) (Pairing, error)
 	if err != nil {
 		return Pairing{}, errors.New("device revoked or unknown")
 	}
-	err = json.Unmarshal([]byte(caps), &p.Capabilities)
+	if err = json.Unmarshal([]byte(caps), &p.Capabilities); err != nil {
+		return p, err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE devices SET paired=1 WHERE id=? AND paired=0`, p.ID)
+	p.Paired = true
 	return p, err
 }
 
 func (s *Store) List(ctx context.Context) ([]Pairing, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,label,agent,capabilities,revoked FROM devices ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,label,agent,capabilities,revoked,paired FROM devices ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +260,7 @@ func (s *Store) List(ctx context.Context) ([]Pairing, error) {
 	for rows.Next() {
 		var p Pairing
 		var caps string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Agent, &caps, &p.Revoked); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Agent, &caps, &p.Revoked, &p.Paired); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(caps), &p.Capabilities); err != nil {

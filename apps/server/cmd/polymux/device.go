@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,7 +133,7 @@ func servePair(w http.ResponseWriter, r *http.Request, dir, port string, tailsca
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
 	ip := net.ParseIP(host)
-	if r.Method != http.MethodPost || splitErr != nil || ip == nil || !ip.IsLoopback() || r.Header.Get("Origin") != "" {
+	if r.Method != http.MethodPost || splitErr != nil || ip == nil || !ip.IsLoopback() || r.Header.Get("Origin") != "" || !owner(r, dir) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -175,6 +177,15 @@ func servePair(w http.ResponseWriter, r *http.Request, dir, port string, tailsca
 	_ = json.NewEncoder(w).Encode(struct {
 		URL string `json:"url"`
 	}{URL: uri})
+}
+
+// owner reports whether a request carries the server owner's token; loopback alone
+// doesn't identify the caller, since any local process or user can connect.
+func owner(r *http.Request, dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "devices", "local-token"))
+	token := strings.TrimSpace(string(data))
+	given, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return err == nil && token != "" && ok && subtle.ConstantTimeCompare([]byte(given), []byte(token)) == 1
 }
 
 func pairText(code string) string {

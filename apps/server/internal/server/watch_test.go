@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,5 +105,39 @@ func TestRoutineNativeModes(t *testing.T) {
 				t.Fatal(action, err)
 			}
 		}
+	}
+}
+
+func TestWatchRedirectsStayPublic(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("internal")) }))
+	defer local.Close()
+	client := watchClient()
+	// A public watch (here simulated by the context mark) never connects to a local address.
+	request, _ := http.NewRequestWithContext(context.WithValue(t.Context(), publicOnly{}, true), "GET", local.URL, nil)
+	if response, err := client.Do(request); err == nil {
+		response.Body.Close()
+		t.Fatal("public watch reached a loopback address")
+	}
+	// A local watch works, but can't redirect to another host.
+	moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, strings.Replace(local.URL, "127.0.0.1", "localhost", 1), http.StatusFound)
+	}))
+	defer moved.Close()
+	if _, err := readWatch(t.Context(), client, &contract.RoutineWatch{URL: local.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readWatch(t.Context(), client, &contract.RoutineWatch{URL: moved.URL}); err == nil {
+		t.Fatal("local watch redirected to another host")
+	}
+}
+
+func TestTailnetIsNotPublic(t *testing.T) {
+	for _, address := range []string{"100.64.0.1", "100.101.2.3", "127.0.0.1", "10.0.0.1", "169.254.1.1"} {
+		if publicIP(net.ParseIP(address)) {
+			t.Fatalf("%s counted as public", address)
+		}
+	}
+	if !publicIP(net.ParseIP("8.8.8.8")) {
+		t.Fatal("public address rejected")
 	}
 }

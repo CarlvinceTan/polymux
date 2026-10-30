@@ -21,7 +21,7 @@ func TestSEC1CredentialRestart(t *testing.T) {
 		fmt.Fprint(w, `{"connected":true}`)
 	}))
 	defer provider.Close()
-	h := Start(t, Options{ID: "SEC1", Summary: func(req *ChatRequest) Response {
+	h := Start(t, Options{ID: "SEC1", Window: compactWindow, Summary: func(req *ChatRequest) Response {
 		if strings.Contains(requestText(req), key) {
 			t.Error("credential leaked into a summary request")
 		}

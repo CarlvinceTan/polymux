@@ -60,11 +60,11 @@ func TestGroupToolCreatesGroup(t *testing.T) {
 	}
 	state := &turnState{run: contract.Run{AgentID: "a", ConversationID: thread.ID}, work: store.Work{Trigger: "message"}}
 	ctx := context.WithValue(t.Context(), turnKey{}, state)
-	if _, err := (&groupEdit{server: api}).Execute(ctx, "edit", json.RawMessage(`{"title":"Research","agent_ids":["a","b"],"lead_agent_id":"b"}`), nil); err != nil {
+	if _, err := (&groupEdit{server: api}).Execute(ctx, "edit", json.RawMessage(`{"title":"Research","agent_ids":["a","b"]}`), nil); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := db.Thread(t.Context(), thread.ID)
-	if err != nil || updated.Title != "Research" || !slices.Equal(updated.AgentIDs, []string{"a", "b"}) || (updated.LeadAgentID == nil || *updated.LeadAgentID != "b") {
+	if err != nil || updated.Title != "Research" || !slices.Equal(updated.AgentIDs, []string{"a", "b"}) {
 		t.Fatal("group edits did not persist", updated, err)
 	}
 

@@ -5,6 +5,7 @@ import SwiftUI
 struct SearchFocus: NSViewRepresentable {
     var sidebar = false
     var prompt: String?
+    var autofocus = false
     var blurred: (() -> Void)?
 
     func makeNSView(context: Context) -> SearchAnchor {
@@ -16,6 +17,7 @@ struct SearchFocus: NSViewRepresentable {
     func updateNSView(_ view: SearchAnchor, context: Context) {
         view.sidebar = sidebar
         view.prompt = prompt
+        view.autofocus = autofocus
         view.blurred = blurred
         view.schedule()
     }
@@ -26,8 +28,10 @@ struct SearchFocus: NSViewRepresentable {
 final class SearchAnchor: NSView {
     var sidebar = false
     var prompt: String?
+    var autofocus = false
     var blurred: (() -> Void)?
     private var scheduled = false
+    private var focused = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -75,7 +79,8 @@ final class SearchAnchor: NSView {
     }
 
     private func configure() {
-        for field in fields() {
+        let fields = fields()
+        for field in fields {
             if field.focusRingType != .none {
                 field.focusRingType = .none
                 field.noteFocusRingMaskChanged()
@@ -84,6 +89,9 @@ final class SearchAnchor: NSView {
                 cell.focusRingType = .none
                 field.needsDisplay = true
             }
+        }
+        if autofocus, !focused, let field = fields.first, field.isEnabled, let window {
+            focused = window.makeFirstResponder(field)
         }
     }
 

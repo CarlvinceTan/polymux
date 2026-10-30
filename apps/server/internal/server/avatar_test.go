@@ -45,7 +45,21 @@ func avatarRequest(t *testing.T, api *Server, path string, avatar contract.Avata
 
 func TestCreationAvatars(t *testing.T) {
 	api, _ := startTest(t, &testFactory{})
-	for _, shape := range []string{"square", "sparkle", "heart", "tablet", "wedge", "house"} {
+	for _, shape := range []string{
+		"square", "sparkle", "heart", "tablet", "wedge", "house",
+		"pumpkin", "apple", "pear", "strawberry", "bun", "toast", "cupcake", "cat", "dog", "bear", "rabbit",
+		"fox", "hamster", "capybara", "otter", "pig", "deer", "sheep", "alpaca", "cow", "squirrel",
+		"tiger", "lion", "hedgehog", "seal", "beaver", "guinea_pig", "chinchilla", "ferret", "monkey",
+		"chick", "duck", "penguin", "owl", "parrot", "goose",
+		"whale", "bull", "moon", "wave", "blossom", "gumdrop", "peanut", "saucer", "beacon",
+		"plus", "magnet", "acorn", "pebbles", "cushion", "ring", "gem",
+		"banana", "carrot", "pizza", "sushi", "ice_cream",
+		"sun", "leaf", "tree", "cactus", "mushroom", "mountain", "volcano", "rainbow", "snowflake",
+		"rocket", "robot", "camera", "clock", "key", "bell", "book", "teapot",
+		"lemon", "orange_fruit", "watermelon", "avocado", "cherry", "cookie", "cheese", "egg", "candy", "donut",
+		"tulip", "rose", "sprout", "fern", "pinecone", "shell", "coral", "crystal", "comet", "planet",
+		"mug", "lantern", "gift", "pencil", "paintbrush", "umbrella", "backpack", "headphones", "guitar", "telescope",
+	} {
 		t.Run(shape, func(t *testing.T) {
 			avatar := avatarDesign()
 			avatar.Shape = shape

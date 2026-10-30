@@ -1,45 +1,33 @@
 ---
-title: Models and agents
+title: Models
 slug: models-and-agents
-description: Edit agent profiles in the app and configure the Go server's model separately.
-section: Customising Polymux
-sectionOrder: 3
-order: 1
+description: Connect a model provider and choose the model your agents use.
+section: Guides
+sectionOrder: 1
+order: 4
 published: true
 ---
 
-# Models and agents
+# Models
 
-Agent profiles and model configuration are different things. The native app lets you edit an agent's identity and instructions. The Go server configures the model used for its agent runs.
+Choose your own provider, such as OpenAI, Anthropic, Google Gemini, xAI, or OpenRouter. You can also connect local models.
 
-## Edit an agent
+## Add a provider
 
-Click the agent's header in a direct conversation to open **Edit profile**. You can change its name, role, role description, and avatar. Press **Save** for profile changes. Schedule controls appear in the same panel.
+Open **Settings → Models**, find **Providers**, and press **Add provider**.
 
-Create another agent from the plus button inside **New Chat**. Agents can participate in individual or group conversations; an agent profile is not an ACP runtime selector or an operating-system security boundary.
+- **Sign in** where the provider supports it.
+- **API key** to use your own provider key.
+- **Manual** for Ollama, LM Studio, or a compatible custom endpoint.
 
-## Configure the text model on the server
+Enter keys in provider settings, not chat messages. Provider access and usage charges depend on the service you choose.
 
-The current durable runtime uses an OpenAI-compatible provider. Its startup configuration is `model.json` in the server data directory, which defaults to `~/.polymux/data`.
+## Choose a model
 
-For example, the file can reference a key supplied to the server process without containing the key itself:
+Select a **Default model** under **Models**. Set a reasoning level if your model supports it.
 
-```json
-{
-  "url": "https://your-model-endpoint.example/v1",
-  "model": "your-model-id",
-  "keyEnv": "MODEL_API_KEY"
-}
-```
+Provider settings belong to the server, so your other clients use the same setup. A local model endpoint must be reachable from the **server Mac**, not only the client Mac.
 
-Use the endpoint and model identifier required by your compatible service. The URL above is a placeholder, not a working provider. Supply credentials through your process or service's secret-injection mechanism, not a chat message.
+## Voice
 
-`POLYMUX_MODEL_URL` and `POLYMUX_MODEL` override the file's URL and model. `POLYMUX_MODEL_KEY` takes precedence over the named `keyEnv`. An absolute `keyFile` is also supported, but must be readable only by its owner. Configuration is read at server startup; do not assume editing the file changes an active session.
-
-The provider registry API is separate from this runtime configuration. Saving an entry in that registry does not by itself select the model used for durable agent runs.
-
-## Voice is separate
-
-**Settings → Voice** offers Cascaded and Full Duplex modes, with Gemini provider, model, voice, and API-key controls as applicable. Those settings do not replace the text agent's server model configuration.
-
-The native app has no general **Providers**, **Models**, or **ACP** settings page. Older instructions for those pages describe the Electron app.
+**Settings → Voice** chooses how voice works. **Cascaded** speaks with your agent directly, using the device's speech recognition and voice. **Full Duplex** uses Gemini Live or OpenAI Realtime, with the API key of your connected Gemini or OpenAI provider. Voice settings don't change the default text model.

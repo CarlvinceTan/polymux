@@ -11,6 +11,7 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	engine "github.com/CarlvinceTan/polymux/packages/search"
 )
 
 type delayedEmbedding struct {
@@ -18,7 +19,7 @@ type delayedEmbedding struct {
 	release chan struct{}
 }
 
-func (e delayedEmbedding) Embed(context.Context, Input) ([]float32, string, error) {
+func (e delayedEmbedding) Embed(context.Context, engine.Input) ([]float32, string, error) {
 	close(e.started)
 	<-e.release
 	return []float32{1, 0, 0}, "test", nil
@@ -79,7 +80,7 @@ func TestDeletedAttachmentCannotReturnAfterExtraction(t *testing.T) {
 	index := &Index{
 		Store: s,
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Extractor: ExtractorFunc(func(context.Context, Asset) (string, error) {
+		Extractor: engine.ExtractorFunc(func(context.Context, engine.Asset) (string, error) {
 			close(started)
 			<-release
 			return "late extraction", nil

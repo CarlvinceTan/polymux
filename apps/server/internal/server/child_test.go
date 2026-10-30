@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,9 +22,9 @@ type childFactory struct {
 }
 
 func (f *childFactory) Open(_ context.Context, d agentruntime.Definition, _ string) (agentruntime.Session, error) {
-	var spawn *spawnTool
+	var spawn *delegateTool
 	for _, tool := range d.ExtraTools {
-		if candidate, ok := tool.(*spawnTool); ok {
+		if candidate, ok := tool.(*delegateTool); ok {
 			spawn = candidate
 		}
 	}
@@ -32,7 +33,7 @@ func (f *childFactory) Open(_ context.Context, d agentruntime.Definition, _ stri
 
 type childSession struct {
 	factory *childFactory
-	spawn   *spawnTool
+	spawn   *delegateTool
 	child   bool
 }
 
@@ -53,11 +54,11 @@ func (s *childSession) Send(ctx context.Context, message contract.Message, _ fun
 	if s.spawn == nil {
 		return agentruntime.Result{}, fmt.Errorf("spawn tool missing")
 	}
-	args, err := json.Marshal(map[string]string{"agent_id": s.factory.target, "task": "Bounded child task"})
+	args, err := json.Marshal(map[string]string{"action": "run", "agent_id": s.factory.target, "prompt": "Bounded child task"})
 	if err != nil {
 		return agentruntime.Result{}, err
 	}
-	if hook := beforeTool(ctx, "spawn", "spawn_task", args); hook.Block {
+	if hook := beforeTool(ctx, "spawn", "task", args); hook.Block {
 		return agentruntime.Result{}, fmt.Errorf("spawn blocked: %s", hook.Reason)
 	}
 	result, err := s.spawn.Execute(ctx, "spawn", args, nil)
@@ -121,5 +122,73 @@ func TestSpawnContinues(t *testing.T) {
 			}
 			t.Fatal("parent waited for child completion")
 		})
+	}
+}
+
+func TestDelegationPreference(t *testing.T) {
+	var api *Server
+	enabled := true
+	calls := 0
+	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		calls++
+		var task *delegateTool
+		for _, tool := range d.ExtraTools {
+			if tool.Name() == "spawn_task" || tool.Name() == "manage_subagents" {
+				return agentruntime.Result{}, fmt.Errorf("legacy delegation tool %s", tool.Name())
+			}
+			if candidate, ok := tool.(*delegateTool); ok {
+				task = candidate
+			}
+		}
+		if task == nil {
+			return agentruntime.Result{}, fmt.Errorf("task tool missing")
+		}
+		actions := task.Schema().Parameters["properties"].(map[string]any)["action"].(map[string]any)["enum"].([]string)
+		if slices.Contains(actions, "run") != enabled {
+			return agentruntime.Result{}, fmt.Errorf("task schema does not reflect settings")
+		}
+		if _, err := task.Execute(ctx, "list", json.RawMessage(`{"action":"list"}`), nil); err != nil {
+			return agentruntime.Result{}, err
+		}
+		if !enabled {
+			if _, err := task.Execute(ctx, "run", json.RawMessage(`{"action":"run","prompt":"Do not start"}`), nil); err == nil || !strings.Contains(err.Error(), "disabled") {
+				return agentruntime.Result{}, fmt.Errorf("disabled delegation was not enforced: %v", err)
+			}
+		}
+		return agentruntime.Result{Text: "Checked delegation"}, nil
+	}}
+	api, _ = startTest(t, factory)
+	for index, value := range []bool{true, false, true} {
+		enabled = value
+		args, err := json.Marshal(map[string]bool{"task_delegation": enabled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.WithValue(t.Context(), turnKey{}, &turnState{run: contract.Run{AgentID: "assistant"}})
+		if _, err := (&agentTool{server: api, action: "update"}).Execute(ctx, "preference", args, nil); err != nil {
+			t.Fatal(err)
+		}
+		data, err := api.Store.Definition(t.Context(), "assistant")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved agentruntime.Definition
+		if err := json.Unmarshal(data, &saved); err != nil {
+			t.Fatal(err)
+		}
+		if saved.DelegationDisabled == enabled {
+			t.Fatal("delegation preference was not persisted")
+		}
+
+		text := "Check delegation"
+		result := api.execute(t.Context(), t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
+			ID: fmt.Sprintf("delegation-%d", index), ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}},
+		}})
+		if result.Status != "done" {
+			t.Fatalf("delegation turn failed: %+v", result)
+		}
+	}
+	if calls != 3 || len(factory.opened) != 3 {
+		t.Fatalf("setting changes did not rebuild existing sessions: calls=%d opens=%d", calls, len(factory.opened))
 	}
 }

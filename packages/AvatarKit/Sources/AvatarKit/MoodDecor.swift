@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-func spawnPath(_ path: CGPath, center: Point, radius: Double, amount: Double) -> CGPath {
+func spawnPath(_ path: CGPath, center: Point, radius: Double, amount: Double, hub: Double = 19 / 114.5) -> CGPath {
     var edges: [(CGPoint, CGPoint)] = []
     var first = CGPoint.zero, current = CGPoint.zero
     path.applyWithBlock { item in
@@ -18,7 +18,7 @@ func spawnPath(_ path: CGPath, center: Point, radius: Double, amount: Double) ->
         edges.append((current, next)); current = next
     }
     let round = easings.easeInOutCubic(clamp(amount / 0.62))
-    let size = lerp(1, 19 / 114.5, amount)
+    let size = lerp(1, hub, amount)
     let points = (0..<PROFILE_SAMPLES).map { index in
         let angle = Double(index) / Double(PROFILE_SAMPLES) * TAU
         let dx = cos(angle), dy = sin(angle)
@@ -75,10 +75,6 @@ func moodMarks(_ mood: MoodID, _ t: Double) -> [DotRender] {
         let distance = mood == .sending ? 0.95 + phase * 0.4 : 1.35 - phase * 0.4
         return [DotRender(x: distance, y: -0.5, r: 0.055,
                           opacity: sin(phase * .pi))]
-    case .thinking: return thinkingMarks(t)
-    case .blocked:
-        let point = badgePoint(QUESTION_FAR)
-        return questionMarks(x: point.x, y: point.y, opacity: 1, tilt: BADGE_TILT + sin(t * 2) * 3)
     case .failed, .interrupted:
         let point = badgePoint(BADGE_FAR)
         return exclaimMarks(x: point.x, y: point.y, opacity: 1)

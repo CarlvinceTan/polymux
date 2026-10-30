@@ -1,32 +1,32 @@
 # Polymux UI
 
-Core requirements for all UI work. Apply unless instructed otherwise.
+Polymux-specific requirements for all UI work. Apply unless instructed otherwise.
+Read and follow the [cdesign skill](.agents/skills/cdesign/SKILL.md) for general UI rules before any component, style, layout, colour, or motion work. The rules below take precedence where they differ.
 
 ## Responsiveness
 
-- Every interaction responds immediately: visible feedback in the same frame, state change in under 50 ms.
-- Update the UI optimistically. Run backend work in the background; on failure, roll back and show a clear, specific message (with retry where it makes sense).
-- No network or disk calls on the main thread.
-- Use spinners only for work that is expected to take long. Never block the UI on one.
+- Update the UI optimistically. Run backend work in the background; on failure, roll back and follow Status and errors.
 
 ## Data
 
 - Cache aggressively; show cached content first, then refresh.
 - Everything previously loaded stays viewable offline.
 
+## Status and errors
+
+- Status and error wording must be true on every platform. Name what the user sees (chats, not sidebar).
+- A lost connection shows one quiet app-wide status, not an error per screen. Keep cached content visible; reconnect and refresh automatically.
+- A failed action rolls back and shows one short, quiet line beside what failed. Retry automatically when safe; the line clears itself once resolved.
+- No retry buttons, and no alerts for recoverable failures.
+- Placeholders and empty states are centred.
+- Placeholders and empty states name the state only ("No providers yet."); they don't explain it.
+
 ## Components
 
 - Prefer native SwiftUI components over custom ones, unless instructed otherwise.
-- Reuse shared app components; don't add screen-specific interaction patterns.
-- Placeholders and empty states are centred.
+- Visible button labels are one word ("Send", "Save"). Use two only when one word would be ambiguous.
 
-## Consistency
+## Text
 
-- Use one solid theme and style across the app: shared tokens for colour, type, spacing, and radius. No one-off values.
-
-## Contrast
-
-- Meet WCAG AA: text at least 4.5:1; large text (18pt, or 14pt bold) and meaningful non-text elements (icons, indicators, control outlines) at least 3:1.
-- Verify in both light and dark mode, in every state (resting, selected, focused, hovered, disabled, placeholder, secondary).
-- Content on an accent or filled surface uses that surface's paired on-colour.
-- Verify from the rendered result (screenshot sampling or Accessibility Inspector), not token values.
+- Settings use clear labels without extra descriptions or explanatory text unless the user explicitly asks for them.
+- No `fixedSize` on text inside a flexible row or panel.

@@ -122,7 +122,7 @@ func TestDegradedSessionReopensWithItsTranscript(t *testing.T) {
 	api, _ := startTest(t, factory)
 	for _, id := range []string{"first", "second", "third"} {
 		text := "User task"
-		m := api.execute(t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
+		m := api.execute(t.Context(), t.Context(), api.actors["assistant"], store.Work{Trigger: "message", Message: contract.Message{
 			ID: id, ThreadID: "assistant", Role: "user", Parts: []contract.Part{{Kind: "text", Text: &text}},
 		}})
 		if m.Status != "done" {

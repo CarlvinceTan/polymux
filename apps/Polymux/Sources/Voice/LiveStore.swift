@@ -124,7 +124,7 @@ final class LiveStore: VoiceSession {
             sound.stop()
             await provider?.stop()
             closed = true
-            if !Task.isCancelled { phase = .failed; issue = error.localizedDescription }
+            if !Task.isCancelled { phase = .failed; issue = error.voiceIssue }
         }
     }
 
@@ -276,7 +276,7 @@ final class LiveStore: VoiceSession {
 
     private func fail(_ error: Error) async {
         phase = .failed
-        issue = error.localizedDescription
+        issue = error.voiceIssue
         await stop()
     }
 

@@ -1,33 +1,40 @@
 name: Site
 
 on:
+  pull_request:
+    paths:
+      - "apps/site/**"
+      - ".github/workflows/**"
+      - "apps/Polymux/Polymux.xcodeproj/project.pbxproj"
   push:
     branches: [main, dev]
     paths:
       - "apps/site/**"
-      - ".github/workflows/site.yml"
+      - ".github/workflows/**"
+      - "apps/Polymux/Polymux.xcodeproj/project.pbxproj"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: polymux-site-${{ github.ref_name }}
+  group: polymux-site-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/site/package-lock.json
 
       - run: npm ci --prefix apps/site
-      - run: npm test --prefix apps/site
-      - run: npm run check --prefix apps/site
-      - run: npm run build --prefix apps/site
+      - run: npm run verify --prefix apps/site
+      - run: npm exec --prefix apps/site -- playwright install --with-deps webkit chromium
+      - run: npm run test:responsive --prefix apps/site

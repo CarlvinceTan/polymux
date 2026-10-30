@@ -267,10 +267,10 @@ private func call(_ id: String = "one", name: String = "ask_agent") -> LiveCall 
 
 @Test @MainActor func voicePreferencesComeFromServer() throws {
     var settings = Settings(voiceMode: "pipeline", liveProvider: "gemini", liveModel: "server-live",
-                            liveVoice: "Kore", textProvider: "gemini", textModel: "server-text",
+                            liveVoice: "Kore",
                             voicePrompt: "Represent {target}.", speechKeys: ["gemini"])
     #expect(VoiceConfig(settings: settings).mode == .pipeline)
-    #expect(VoiceConfig(settings: settings).model == "server-text")
+    #expect(VoiceConfig(settings: settings).model.isEmpty)
     settings.voiceMode = "live"
     let config = VoiceConfig(settings: settings)
     #expect(config.mode == .live)

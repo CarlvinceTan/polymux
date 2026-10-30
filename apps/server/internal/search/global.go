@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	engine "github.com/CarlvinceTan/polymux/packages/search"
 	vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 )
 
@@ -43,7 +44,7 @@ func (i *Index) entities(ctx context.Context) ([]entity, error) {
 	if err != nil {
 		return nil, err
 	}
-	threads, err := i.Store.Threads(ctx)
+	threads, err := i.Store.ThreadTitles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -88,16 +89,15 @@ func (i *Index) indexEntities(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	bodies, err := i.entityBodies(ctx)
+	if err != nil {
+		return err
+	}
 	for _, e := range entities {
-		var body string
-		err := i.Store.DB.QueryRowContext(ctx, `SELECT body FROM search_entities WHERE id=?`, e.result.ID).Scan(&body)
-		if err == nil && body == e.body {
+		if body, ok := bodies[e.result.ID]; ok && body == e.body {
 			continue
 		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		vector, model, err := i.Embedder.Embed(ctx, Input{Text: e.body})
+		vector, model, err := i.Embedder.Embed(ctx, engine.Input{Text: e.body})
 		if err != nil {
 			return err
 		}
@@ -115,6 +115,23 @@ func (i *Index) indexEntities(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (i *Index) entityBodies(ctx context.Context) (map[string]string, error) {
+	rows, err := i.Store.DB.QueryContext(ctx, `SELECT id,body FROM search_entities`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, err
+		}
+		out[id] = body
+	}
+	return out, rows.Err()
 }
 
 func (i *Index) entityRanks(ctx context.Context, entities []entity, model string, blob []byte) ([]ranked, error) {
@@ -146,12 +163,13 @@ func media(mime string) bool {
 	return strings.HasPrefix(mime, "image/") || strings.HasPrefix(mime, "video/") || strings.HasPrefix(mime, "audio/")
 }
 
-func (i *Index) Global(ctx context.Context, query, kind string) ([]contract.SearchResult, bool, error) {
+// Global searches everything, or only one chat's messages and attachments when thread is set.
+func (i *Index) Global(ctx context.Context, query, kind, thread string) ([]contract.SearchResult, bool, error) {
 	entities, err := i.entities(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	scope := searchScope{kind: kind, entities: []entity{}}
+	scope := searchScope{thread: thread, kind: kind, entities: []entity{}}
 	metadata := map[string]contract.SearchResult{}
 	titles := map[string]string{}
 	botThreads := map[string]bool{}
@@ -167,7 +185,8 @@ func (i *Index) Global(ctx context.Context, query, kind string) ([]contract.Sear
 		if kind == "all" && e.result.Kind == "conversations" && botThreads[e.result.ThreadID] {
 			continue
 		}
-		if kind == "all" || kind == e.result.Kind {
+		// A chat-scoped search has no chats or bots to list, only what was said and shared.
+		if thread == "" && (kind == "all" || kind == e.result.Kind) {
 			scope.entities = append(scope.entities, e)
 			metadata[e.result.ID] = e.result
 		}

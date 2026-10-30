@@ -18,8 +18,8 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/CarlvinceTan/polymux/packages/memory"
 	"github.com/MichaelKinsy/PiG/agent"
 )
 
@@ -28,6 +28,8 @@ type voiceFactory struct {
 	opened []agentruntime.Definition
 	paths  []string
 	script func(context.Context, agentruntime.Definition, contract.Message) (agentruntime.Result, error)
+	// deltas stream before the script's result.
+	deltas []string
 }
 
 func (f *voiceFactory) Open(_ context.Context, d agentruntime.Definition, path string) (agentruntime.Session, error) {
@@ -44,6 +46,11 @@ type voiceSession struct {
 }
 
 func (s *voiceSession) Send(ctx context.Context, m contract.Message, emit func(agentruntime.Delta) error) (agentruntime.Result, error) {
+	for _, text := range s.factory.deltas {
+		if err := emit(agentruntime.Delta{Text: text}); err != nil {
+			return agentruntime.Result{}, err
+		}
+	}
 	if s.factory.script != nil {
 		return s.factory.script(ctx, s.definition, m)
 	}
@@ -302,8 +309,7 @@ func TestVoicePrivatePeerAndGroupHandoff(t *testing.T) {
 			api, web := voiceTest(t, factory, func(config *Config) { config.Devices = broker })
 			thread := "a"
 			if group {
-				lead := "a"
-				created, err := api.Store.CreateThread(t.Context(), "team", contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}, LeadAgentID: &lead})
+				created, err := api.Store.CreateThread(t.Context(), "team", contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
 				if err != nil {
 					t.Fatal(err)
 				}

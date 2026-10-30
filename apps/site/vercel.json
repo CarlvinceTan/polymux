@@ -5,6 +5,22 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "cleanUrls": true,
+  "rewrites": [
+    {"source": "/appcast.xml", "destination": "/api/appcast"},
+    {"source": "/install.sh", "destination": "/api/install"}
+  ],
+  "redirects": [
+    {"source": "/privacy", "destination": "/privacy-policy/", "permanent": true},
+    {"source": "/docs/browser", "destination": "/docs/skills-and-mcp/#set-up-an-agent", "permanent": true},
+    {"source": "/docs/drive", "destination": "/docs/workspace/#files-and-replies", "permanent": true},
+    {"source": "/docs/hub", "destination": "/docs/skills-and-mcp/#set-up-an-agent", "permanent": true},
+    {"source": "/docs/memory", "destination": "/docs/workspace/#memory", "permanent": true},
+    {"source": "/docs/privacy-and-permissions", "destination": "/docs/skills-and-mcp/#devices-and-permissions", "permanent": true},
+    {"source": "/docs/quickstart", "destination": "/docs/#your-first-conversation", "permanent": true},
+    {"source": "/docs/schedules-and-tasks", "destination": "/docs/workspace/#scheduled-work", "permanent": true},
+    {"source": "/docs/troubleshooting", "destination": "/docs/installation/#if-something-is-not-working", "permanent": true},
+    {"source": "/docs/introduction", "destination": "/docs/", "permanent": true}
+  ],
   "headers": [
     {
       "source": "/(.*)",

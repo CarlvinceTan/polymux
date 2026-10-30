@@ -89,7 +89,9 @@ private final class CameraStore {
             try await driver.start()
             guard !closed, !Task.isCancelled else { driver.stop(); return }
             ready = true
-        } catch is CancellationError {} catch { issue = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            issue = (error as? CameraError)?.errorDescription ?? "Couldn’t open the camera."
+        }
     }
 
     func photo() async -> URL? {
@@ -103,7 +105,9 @@ private final class CameraStore {
                 return nil
             }
             return url
-        } catch is CancellationError {} catch { issue = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            issue = (error as? CameraError)?.errorDescription ?? "Couldn’t take the photo."
+        }
         return nil
     }
 
@@ -219,17 +223,16 @@ private final class CameraCapture: NSObject, AVCapturePhotoCaptureDelegate, @unc
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let id = photo.resolvedSettings.uniqueID
         let result: Result<Data, CameraError>
-        if let error { result = .failure(.failed(error.localizedDescription)) }
+        if error != nil { result = .failure(.failed("Couldn’t take the photo.")) }
         else if let data = photo.fileDataRepresentation() { result = .success(data) }
-        else { result = .failure(.failed("The photo could not be captured. Try again.")) }
+        else { result = .failure(.failed("Couldn’t take the photo.")) }
         queue.async { self.finish(id, result: result) }
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor settings: AVCaptureResolvedPhotoSettings, error: Error?) {
-        guard let error else { return }
+        guard error != nil else { return }
         let id = settings.uniqueID
-        let message = error.localizedDescription
-        queue.async { self.finish(id, result: .failure(.failed(message))) }
+        queue.async { self.finish(id, result: .failure(.failed("Couldn’t take the photo."))) }
     }
 
     private func finish(_ id: Int64, result: Result<Data, CameraError>) {

@@ -29,8 +29,11 @@ struct MigrationTests {
         guard sqlite3_open(url.path, &pointer) == SQLITE_OK, let pointer else { throw ClientError.cache("Test database did not open.") }
         defer { sqlite3_close(pointer) }
         #expect(sqlite3_exec(pointer, "DELETE FROM metadata WHERE key IN ('cacheVersion','seqRepair')", nil, nil, nil) == SQLITE_OK)
-        if removeStarts {
-            #expect(sqlite3_exec(pointer, "DELETE FROM events WHERE json_extract(json,'$.type')='message.start'", nil, nil, nil) == SQLITE_OK)
+        // Versions before 1 kept each event; the repair reads the message's start unless it was pruned.
+        if !removeStarts {
+            let start = Event(seq: 1, conversationID: "one", type: "message.start", messageID: "reply", createdAt: "2026-10-09T10:00:00Z")
+            let json = String(decoding: try JSONEncoder().encode(start), as: UTF8.self)
+            #expect(sqlite3_exec(pointer, "INSERT INTO events(thread_id,seq,json) VALUES('one',1,'\(json)')", nil, nil, nil) == SQLITE_OK)
         }
     }
 

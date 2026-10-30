@@ -2,6 +2,7 @@ package skills
 
 import (
 	"io/fs"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -63,8 +64,25 @@ func TestFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"polymux/SKILL.md", "report/SKILL.md"}
+	want := []string{"html-cards/SKILL.md", "polymux/SKILL.md", "report/SKILL.md"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("embedded files = %v, want %v", paths, want)
+	}
+}
+
+func TestInstallListsSkills(t *testing.T) {
+	dir := t.TempDir()
+	installed, err := Install(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installed) != 3 {
+		t.Fatalf("installed %d skills", len(installed))
+	}
+	for _, skill := range installed {
+		body, err := os.ReadFile(skill.Path)
+		if err != nil || skill.Name == "" || skill.Description == "" || !strings.Contains(string(body), "name: "+skill.Name) {
+			t.Fatalf("skill %+v unreadable or undescribed: %v", skill, err)
+		}
 	}
 }

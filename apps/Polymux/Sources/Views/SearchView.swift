@@ -33,9 +33,9 @@ struct SearchView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text(hit.message.role == "user" ? "You" : agentName).font(.subheadline.weight(.medium))
+                                Text(hit.message.role == MessageRole.user ? "You" : agentName).font(.subheadline.weight(.medium))
                                 Spacer()
-                                Text(hit.message.date, format: ProgressiveTime()).font(.caption).foregroundStyle(.secondary)
+                                Text(hit.message.date, format: ProgressiveTime()).font(.caption).foregroundStyle(.muted)
                             }
                             Text(highlight(hit.snippet)).lineLimit(4).font(.subheadline)
                             if !hit.message.parts.compactMap(\.attachment).isEmpty {
@@ -48,8 +48,8 @@ struct SearchView: View {
                                 }
                                 .scrollIndicators(.hidden)
                             }
-                            if hit.indexingState == "pending" {
-                                Text("Media still indexing").font(.caption2).foregroundStyle(.secondary)
+                            if hit.indexingState == SearchHitIndexingState.pending {
+                                Text("Media still indexing").font(.caption2).foregroundStyle(.muted)
                             }
                         }
                         .padding(.vertical, 14)
@@ -69,20 +69,17 @@ struct SearchView: View {
             .contentMargins(.bottom, bottomInset, for: .scrollContent)
             .frame(maxWidth: 720).frame(maxWidth: .infinity)
             .overlay {
-                if store.isSearching {
-                    ProgressView()
+                if store.results.isEmpty && store.isSearching {
+                    Text("Searching…").foregroundStyle(.muted)
                 } else if store.results.isEmpty {
                     ContentUnavailableView {
                         Label(query.isEmpty ? "Find a message" : "No messages found", systemImage: "magnifyingglass")
-                    } description: {
-                        Text(query.isEmpty ? "Search what you discussed with \(agentName)." : "Try another word or phrase.")
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: query) {
-            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             store.query = query
             await store.search()
         }
@@ -91,9 +88,18 @@ struct SearchView: View {
 
     private func highlight(_ text: String) -> AttributedString {
         var result = AttributedString(text.replacingOccurrences(of: "<b>", with: "").replacingOccurrences(of: "</b>", with: ""))
+        let plain = String(result.characters) as NSString
         for term in query.split(separator: " ") {
-            if let range = result.range(of: String(term), options: .caseInsensitive) {
-                result[range].backgroundColor = Color.accentColor.opacity(0.18)
+            let raw = String(term)
+            var location = 0
+            while location <= plain.length {
+                let found = plain.range(of: raw, options: [.caseInsensitive],
+                                        range: NSRange(location: location, length: plain.length - location))
+                guard found.location != NSNotFound, found.length > 0 else { break }
+                if let range = Range(found, in: result) {
+                    result[range].backgroundColor = Color.accentColor.opacity(0.18)
+                }
+                location = found.location + found.length
             }
         }
         return result

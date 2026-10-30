@@ -7,7 +7,7 @@ struct ReplyPreview: View {
     let client: APIClient
     var jump: (() -> Void)? = nil
 
-    private var author: String { reply.role == "user" ? "You" : agentName }
+    private var author: String { reply.role == ReplyContextRole.user ? "You" : agentName }
     private var text: String { reply.text.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var summary: String {
         if !text.isEmpty { return text }
@@ -63,8 +63,8 @@ struct ReplyBubble: View {
                     if let attachment = reply.attachment {
                         AttachmentPreview(attachment: attachment, client: client, showsName: false, square: 48)
                     } else {
-                        Text(reply.text.split(whereSeparator: \.isWhitespace).joined(separator: " "))
-                            .lineLimit(1).truncationMode(.tail)
+                        Text(reply.text)
+                            .multilineTextAlignment(.leading)
                     }
                 }
                 .font(.body).foregroundStyle(.secondary)

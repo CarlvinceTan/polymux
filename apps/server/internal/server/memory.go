@@ -13,16 +13,16 @@ import (
 	"unicode/utf8"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/CarlvinceTan/polymux/packages/memory"
+	"github.com/CarlvinceTan/polymux/packages/search"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
 )
 
 func scopedTurn(ctx context.Context, s *store.Store) (*turnState, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
-	if state == nil || state.work.Trigger == "created" {
+	if state == nil || state.work.Trigger == contract.RunTriggerCreated {
 		return nil, errors.New("private context is unavailable in this turn")
 	}
 	member, err := s.Member(ctx, state.run.AgentID, state.run.ConversationID)
@@ -71,7 +71,7 @@ func (s *Server) memoryContext(ctx context.Context, run contract.Run, m contract
 				names = append(names, other.Slug)
 			}
 			text := "You are also a member of these projects; use recall_memory with project=<slug> for their memory: " + strings.Join(names, ", ")
-			m.Parts = append([]contract.Part{{Kind: "text", Text: &text}}, m.Parts...)
+			m.Parts = append([]contract.Part{{Kind: contract.PartKindText, Text: &text}}, m.Parts...)
 			break
 		}
 		documents, err := pooledMemory(ctx, s.Store, s.memory, projectScope(p.Slug))
@@ -94,9 +94,34 @@ func (s *Server) memoryContext(ctx context.Context, run contract.Run, m contract
 			continue
 		}
 		text := b.header + string(data)
-		m.Parts = append([]contract.Part{{Kind: "text", Text: &text}}, m.Parts...)
+		m.Parts = append([]contract.Part{{Kind: contract.PartKindText, Text: &text}}, m.Parts...)
 	}
 	return m, nil
+}
+
+// memoryUnavailable stands in for memory that couldn't be read, so the model doesn't take it as empty.
+const memoryUnavailable = "Your durable memory couldn't be read for this step. Don't claim to remember, save or forget anything until it can; say so if the answer depends on it."
+
+// freshMemory builds a turn's memory context for each model request. The request hook can't fail a turn, so a
+// failed read is stated instead of looking like no memory.
+func (s *Server) freshMemory(run contract.Run, query string) func(context.Context) ([]string, error) {
+	return func(ctx context.Context) ([]string, error) {
+		m, err := s.memoryContext(ctx, run, contract.Message{}, query)
+		if err != nil {
+			s.config.Log.Warn("read memory", "error", err)
+			return []string{memoryUnavailable}, nil
+		}
+		texts := []string{}
+		if s.admission.snapshot().State != "running" {
+			texts = append(texts, "A server update is pending. Finish the current work normally; do not wait for the update or start the installer synchronously. New independent jobs are queued until after the update.")
+		}
+		for _, part := range m.Parts {
+			if part.Text != nil {
+				texts = append(texts, *part.Text)
+			}
+		}
+		return texts, nil
+	}
 }
 
 // tierMemory orders profile facts first and notes last, dropping notes that have faded.

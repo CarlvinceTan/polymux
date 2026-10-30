@@ -31,14 +31,18 @@ type Work struct {
 	Generation  int              `json:"generation,omitempty"`
 	Hops        int              `json:"hops,omitempty"`
 	FromAgentID string           `json:"fromAgentID,omitempty"`
+	// DeviceID is the paired device the user sent the message from.
+	DeviceID string `json:"deviceID,omitempty"`
 }
 
 type SendInput struct {
-	ThreadID string
-	Request  contract.SendRequest
-	Parts    []contract.Part
-	Targets  []string
-	Routing  string
+	QueueOnly bool
+	ThreadID  string
+	Request   contract.SendRequest
+	Parts     []contract.Part
+	Targets   []string
+	Routing   string
+	DeviceID  string
 }
 
 func (s *Store) migrateRuns(ctx context.Context) error {
@@ -77,10 +81,10 @@ func NewRun(job, thread, agent, trigger string) contract.Run {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")
 	key, _ := json.Marshal([]string{job, thread, agent})
 	id := fmt.Sprintf("run:%x", sha256.Sum256(key))
-	return contract.Run{ID: id, JobID: job, ConversationID: thread, AgentID: agent, Trigger: trigger, Status: "queued", Activity: "", Attempt: 1, CreatedAt: now, UpdatedAt: now, Summary: "Queued"}
+	return contract.Run{ID: id, JobID: job, ConversationID: thread, AgentID: agent, Trigger: trigger, Status: contract.RunStatusQueued, Activity: "", Attempt: 1, CreatedAt: now, UpdatedAt: now, Summary: "Queued"}
 }
 
-func queueTx(ctx context.Context, tx *sql.Tx, work Work, target string) error {
+func (s *Store) queueTx(ctx context.Context, tx *sql.Tx, work Work, target string) error {
 	data, err := json.Marshal(work)
 	if err != nil {
 		return err
@@ -88,8 +92,9 @@ func queueTx(ctx context.Context, tx *sql.Tx, work Work, target string) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,thread_id,request,input) VALUES(?,?,'{}',?)`, work.Message.ID, work.Message.ThreadID, string(data)); err != nil {
 		return err
 	}
+	s.jobs.wake(work.Message.ThreadID)
 	run := NewRun(work.Message.ID, work.Message.ThreadID, target, work.Trigger)
-	if work.Trigger == "message" {
+	if work.Trigger == contract.RunTriggerMessage {
 		run.SourceMessageID = &work.Message.ID
 	}
 	run.ParentRunID = work.ParentRunID
@@ -97,7 +102,7 @@ func queueTx(ctx context.Context, tx *sql.Tx, work Work, target string) error {
 	if work.TaskID != "" {
 		run.TaskID = &work.TaskID
 	}
-	_, err = appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: "run.start", AgentID: &target, RunID: &run.ID, Run: &run}, nil)
+	_, err = s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeRunStart, AgentID: &target, RunID: &run.ID, Run: &run}, nil)
 	return err
 }
 
@@ -112,7 +117,7 @@ func (s *Store) Work(ctx context.Context, id string) (Work, error) {
 		return work, err
 	}
 	m, err := s.Message(ctx, id)
-	return Work{Trigger: "message", Message: m}, err
+	return Work{Trigger: contract.RunTriggerMessage, Message: m}, err
 }
 
 func (s *Store) Run(ctx context.Context, id string) (contract.Run, error) {
@@ -125,32 +130,42 @@ func (s *Store) Run(ctx context.Context, id string) (contract.Run, error) {
 	return run, err
 }
 
+// Runs lists the thread's active runs and each agent's latest run, active first, then newest.
 func (s *Store) Runs(ctx context.Context, thread string) ([]contract.Run, error) {
-	const query = `SELECT r.data FROM runs r WHERE r.thread_id=? AND
-(r.status IN('queued','running','waiting_input','waiting_peer') OR NOT EXISTS(
-SELECT 1 FROM runs newer WHERE newer.thread_id=r.thread_id AND newer.agent_id=r.agent_id AND
-(json_extract(newer.data,'$.createdAt')>json_extract(r.data,'$.createdAt') OR
-(json_extract(newer.data,'$.createdAt')=json_extract(r.data,'$.createdAt') AND
- json_extract(newer.data,'$.seq')>json_extract(r.data,'$.seq')))))
-ORDER BY CASE r.status WHEN 'running' THEN 0 WHEN 'waiting_input' THEN 0 WHEN 'waiting_peer' THEN 0
-WHEN 'queued' THEN 1 ELSE 2 END,json_extract(r.data,'$.createdAt') DESC`
-	rows, err := s.DB.QueryContext(ctx, query, thread)
+	runs, err := s.threadRuns(ctx, thread)
+	if out := runs[thread]; out != nil {
+		return out, err
+	}
+	return []contract.Run{}, err
+}
+
+// threadRuns does Runs for one thread, or for every thread when thread is empty.
+func (s *Store) threadRuns(ctx context.Context, thread string) (map[string][]contract.Run, error) {
+	scope, args := "", []any{}
+	if thread != "" {
+		scope, args = "WHERE thread_id=?", []any{thread}
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT thread_id,data FROM (SELECT thread_id,data,status,json_extract(data,'$.createdAt') created,
+row_number() OVER(PARTITION BY thread_id,agent_id ORDER BY json_extract(data,'$.createdAt') DESC,json_extract(data,'$.seq') DESC) latest
+FROM runs `+scope+`) WHERE latest=1 OR status IN('queued','running','waiting_input','waiting_peer')
+ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'waiting_input' THEN 0 WHEN 'waiting_peer' THEN 0
+WHEN 'queued' THEN 1 ELSE 2 END,created DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []contract.Run{}
+	out := map[string][]contract.Run{}
 	for rows.Next() {
-		var data string
+		var id, data string
 		var run contract.Run
-		if err := rows.Scan(&data); err != nil {
+		if err := rows.Scan(&id, &data); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(data), &run); err != nil {
 			return nil, err
 		}
 		run.Tools = []contract.ToolActivity{}
-		out = append(out, run)
+		out[id] = append(out[id], run)
 	}
 	return out, rows.Err()
 }
@@ -188,7 +203,7 @@ func (s *Store) Finalize(ctx context.Context, event contract.Event, message *con
 func (s *Store) FinalizeTask(ctx context.Context, event contract.Event, message *contract.Message, run *contract.Run, tool *contract.ToolActivity, checkpoint *Checkpoint, tools, output int) error {
 	// Commit the chat notice before the run is sealed. A crash in between is
 	// finished by recovery without a second notice.
-	if run != nil && run.Trigger == "routine" && run.Status == "failed" {
+	if run != nil && run.Trigger == contract.RunTriggerRoutine && run.Status == contract.RunStatusFailed {
 		if err := s.routineNotice(ctx, run); err != nil {
 			return err
 		}
@@ -208,48 +223,48 @@ func (s *Store) FinalizeTask(ctx context.Context, event contract.Event, message 
 	if err := sealTask(ctx, tx, run, checkpoint, tools, output); err != nil {
 		return err
 	}
-	if run.Trigger == "routine" && run.Status == "completed" && run.RoutineID != nil {
+	if run.Trigger == contract.RunTriggerRoutine && run.Status == contract.RunStatusCompleted && run.RoutineID != nil {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM routine_failures WHERE routine_id=?`, *run.RoutineID); err != nil {
 			return err
 		}
 	}
-	if message != nil && message.Status != "silent" {
+	if message != nil && message.Status != contract.MessageStatusSilent {
 		// Progress posts precede the final reply, even when its placeholder was opened first.
 		if _, err := tx.ExecContext(ctx, `UPDATE messages SET seq=(SELECT last_seq+1 FROM threads WHERE id=?) WHERE id=? AND EXISTS(SELECT 1 FROM messages later WHERE later.thread_id=? AND later.seq>messages.seq AND json_extract(later.data,'$.runID')=?)`, message.ThreadID, message.ID, message.ThreadID, run.ID); err != nil {
 			return err
 		}
 	}
-	if _, err := appendTx(ctx, tx, event, message); err != nil {
+	if _, err := s.appendTx(ctx, tx, event, message); err != nil {
 		return err
 	}
-	if _, err := appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: "run.done", RunID: &run.ID, AgentID: &run.AgentID, Run: run, Tool: tool}, nil); err != nil {
+	if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeRunDone, RunID: &run.ID, AgentID: &run.AgentID, Run: run, Tool: tool}, nil); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func resolvePeers(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
+func (s *Store) resolvePeers(ctx context.Context, tx *sql.Tx, run *contract.Run) error {
 	var pending, failed, total int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FILTER(WHERE json_extract(data,'$.status')='queued'),count(*) FILTER(WHERE json_extract(data,'$.status') IN('failed','cancelled','interrupted')),count(*) FROM deliveries WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.intent') IN('request','question')`, run.ID).Scan(&pending, &failed, &total); err != nil {
 		return err
 	}
 	if pending > 0 {
-		run.Status, run.Activity, run.Summary, run.FinishedAt = "waiting_peer", "", "Waiting for peer results", nil
+		run.Status, run.Activity, run.Summary, run.FinishedAt = contract.RunStatusWaitingPeer, "", "Waiting for peer results", nil
 	} else if failed > 0 {
-		run.Status, run.Summary = "failed", "Peer work did not complete"
+		run.Status, run.Summary = contract.RunStatusFailed, "Peer work did not complete"
 		run.Error = &contract.Error{Code: "peer_failed", Message: "A delegated request did not complete. Review the peer result before retrying."}
 	}
-	if total > 0 && pending == 0 && run.Trigger != "handoff" {
-		return followupTx(ctx, tx, *run)
+	if total > 0 && pending == 0 && run.Trigger != contract.RunTriggerHandoff {
+		return s.followupTx(ctx, tx, *run)
 	}
 	return nil
 }
 
 func Terminal(status string) bool {
-	return status == "completed" || status == "failed" || status == "cancelled" || status == "interrupted"
+	return status == contract.RunStatusCompleted || status == contract.RunStatusFailed || status == contract.RunStatusCancelled || status == contract.RunStatusInterrupted
 }
 
-func finishRuns(ctx context.Context, tx *sql.Tx, job string) error {
+func (s *Store) finishRuns(ctx context.Context, tx *sql.Tx, job string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET status='needs_review',next_at=NULL WHERE json_extract(data,'$.jobID')=? AND status IN('running','ready')`, job); err != nil {
 		return err
 	}
@@ -278,20 +293,21 @@ func finishRuns(ctx context.Context, tx *sql.Tx, job string) error {
 		return err
 	}
 	for _, run := range runs {
-		if run.Status == "running" && resumeReady(ctx, tx, run) {
+		if run.Status == contract.RunStatusRunning && resumeReady(ctx, tx, run) {
 			// The tool result is durable. Requeue so recovery can resume instead of interrupting.
 			if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='queued' WHERE id=?`, job); err != nil {
 				return err
 			}
+			s.jobs.wake(run.ConversationID)
 			continue
 		}
-		if run.Status == "queued" {
-			run.Status, run.Summary = "cancelled", "Not dispatched"
+		if run.Status == contract.RunStatusQueued {
+			run.Status, run.Summary = contract.RunStatusCancelled, "Not dispatched"
 		} else {
-			run.Status, run.Summary = "interrupted", "Outcome could not be saved"
+			run.Status, run.Summary = contract.RunStatusInterrupted, "Outcome could not be saved"
 			run.Error = &contract.Error{Code: "interrupted", Message: "Execution ended without a durable outcome. Tool effects may be incomplete; review before retrying."}
 		}
-		if err := endRun(ctx, tx, &run); err != nil {
+		if err := s.endRun(ctx, tx, &run); err != nil {
 			return err
 		}
 		var input sql.NullString
@@ -305,7 +321,7 @@ func finishRuns(ctx context.Context, tx *sql.Tx, job string) error {
 			}
 		}
 		if work.DeliveryID != "" {
-			if err := receiptTx(ctx, tx, work.DeliveryID, run, contract.Message{}); err != nil {
+			if err := s.receiptTx(ctx, tx, work.DeliveryID, run, contract.Message{}); err != nil {
 				return err
 			}
 		}
@@ -341,10 +357,10 @@ func (s *Store) Withdraw(ctx context.Context, thread string) error {
 		return err
 	}
 	for _, id := range ids {
-		if err := finishRuns(ctx, tx, id); err != nil {
+		if err := s.finishRuns(ctx, tx, id); err != nil {
 			return err
 		}
-		if err := finishHandoffs(ctx, tx, id); err != nil {
+		if err := s.finishHandoffs(ctx, tx, id); err != nil {
 			return err
 		}
 	}
@@ -388,7 +404,7 @@ func (s *Store) recoverRuns(ctx context.Context) error {
 		} else if sealed {
 			continue
 		}
-		if run.Status == "waiting_peer" && run.MessageID != nil {
+		if run.Status == contract.RunStatusWaitingPeer && run.MessageID != nil {
 			var durable int
 			if err := s.DB.QueryRowContext(ctx,
 				`SELECT count(*) FROM messages WHERE id=? AND status='done'`, *run.MessageID,
@@ -399,8 +415,8 @@ func (s *Store) recoverRuns(ctx context.Context) error {
 				continue
 			}
 		}
-		if run.Status == "running" && resumeReady(ctx, s.DB, run) {
-			run.Status, run.Activity, run.Summary = "resuming", "", "Resuming from the saved tool result"
+		if run.Status == contract.RunStatusRunning && resumeReady(ctx, s.DB, run) {
+			run.Status, run.Activity, run.Summary = contract.RunStatusResuming, "", "Resuming from the saved tool result"
 			run.Attempt++
 			run.Error, run.FinishedAt = nil, nil
 			if err := s.RunEvent(ctx, "run.update", &run, nil); err != nil {
@@ -409,6 +425,7 @@ func (s *Store) recoverRuns(ctx context.Context) error {
 			if _, err := s.DB.ExecContext(ctx, `UPDATE jobs SET state='queued' WHERE id=?`, run.JobID); err != nil {
 				return err
 			}
+			s.jobs.wake(run.ConversationID)
 			continue
 		}
 		now := Now()
@@ -416,15 +433,15 @@ func (s *Store) recoverRuns(ctx context.Context) error {
 		if run.Attempt > 1 {
 			message = "The server restarted again during resume. Review before retrying."
 		}
-		run.Status, run.Activity, run.Summary, run.FinishedAt = "interrupted", "", "Execution interrupted", &now
+		run.Status, run.Activity, run.Summary, run.FinishedAt = contract.RunStatusInterrupted, "", "Execution interrupted", &now
 		run.Error = &contract.Error{Code: "interrupted", Message: message}
 		if len(run.Tools) == 0 && run.ToolID != nil {
-			run.Tools = []contract.ToolActivity{{ID: *run.ToolID, RunID: run.ID, Name: "tool", Status: "running"}}
+			run.Tools = []contract.ToolActivity{{ID: *run.ToolID, RunID: run.ID, Name: "tool", Status: contract.ToolActivityStatusRunning}}
 		}
 		for i := range run.Tools {
-			if run.Tools[i].Status == "running" {
-				run.Tools[i].Status = "interrupted"
-				if _, err := s.Append(ctx, contract.Event{ConversationID: run.ConversationID, Type: "tool.done", RunID: &run.ID, AgentID: &run.AgentID, Tool: &run.Tools[i]}, nil); err != nil {
+			if run.Tools[i].Status == contract.ToolActivityStatusRunning {
+				run.Tools[i].Status = contract.ToolActivityStatusInterrupted
+				if _, err := s.Append(ctx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeToolDone, RunID: &run.ID, AgentID: &run.AgentID, Tool: &run.Tools[i]}, nil); err != nil {
 					return err
 				}
 			}
@@ -511,14 +528,14 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 		return delivery, ErrMembers
 	}
 	kind := "peer.delivery"
-	if delivery.Intent == "handoff" {
+	if delivery.Intent == contract.PeerDeliveryIntentHandoff {
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM thread_members WHERE thread_id=? AND agent_id=?`, delivery.ConversationID, delivery.TargetAgentID).Scan(&exists); err != nil {
 			return delivery, err
 		}
 		if exists != 1 {
 			return delivery, ErrMembers
 		}
-		run := NewRun(work.Message.ID, work.Message.ThreadID, delivery.TargetAgentID, "handoff")
+		run := NewRun(work.Message.ID, work.Message.ThreadID, delivery.TargetAgentID, contract.RunTriggerHandoff)
 		run.ParentRunID, run.SourceMessageID = work.ParentRunID, &work.Message.ID
 		if work.Message.ReplyToID != nil {
 			run.JobID, run.SourceMessageID = *work.Message.ReplyToID, work.Message.ReplyToID
@@ -533,17 +550,17 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 			if err := json.Unmarshal([]byte(previous), &stored); err != nil {
 				return delivery, err
 			}
-			if stored.Status != "queued" {
+			if stored.Status != contract.RunStatusQueued {
 				return delivery, ErrConflict
 			}
 			run.CreatedAt = stored.CreatedAt
 		}
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: "run.start", AgentID: &run.AgentID, RunID: &run.ID, Run: &run}, nil); err != nil {
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeRunStart, AgentID: &run.AgentID, RunID: &run.ID, Run: &run}, nil); err != nil {
 			return delivery, err
 		}
 		kind = "group.handoff"
 	}
-	if delivery.Intent != "handoff" {
+	if delivery.Intent != contract.PeerDeliveryIntentHandoff {
 		var queued int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM jobs WHERE thread_id=? AND state='queued'`, work.Message.ThreadID).Scan(&queued); err != nil {
 			return delivery, err
@@ -552,22 +569,22 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 			return delivery, errors.New("peer queue is full")
 		}
 		incoming := work.Message
-		incoming.Role, incoming.Status, incoming.AgentID = "assistant", "done", &delivery.SourceAgentID
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: incoming.ThreadID, Type: "message.start", MessageID: &incoming.ID, AgentID: incoming.AgentID}, &incoming); err != nil {
+		incoming.Role, incoming.Status, incoming.AgentID = contract.MessageRoleAssistant, contract.MessageStatusDone, &delivery.SourceAgentID
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: incoming.ThreadID, Type: contract.EventTypeMessageStart, MessageID: &incoming.ID, AgentID: incoming.AgentID}, &incoming); err != nil {
 			return delivery, err
 		}
 		outgoing := incoming
 		outgoing.ID, outgoing.ThreadID = "sent:"+delivery.ID, delivery.ConversationID
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: outgoing.ThreadID, Type: "message.start", MessageID: &outgoing.ID, AgentID: outgoing.AgentID}, &outgoing); err != nil {
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: outgoing.ThreadID, Type: contract.EventTypeMessageStart, MessageID: &outgoing.ID, AgentID: outgoing.AgentID}, &outgoing); err != nil {
 			return delivery, err
 		}
 	}
 	if wake {
-		if err := queueTx(ctx, tx, work, delivery.TargetAgentID); err != nil {
+		if err := s.queueTx(ctx, tx, work, delivery.TargetAgentID); err != nil {
 			return delivery, err
 		}
 	}
-	if wake || delivery.Intent == "handoff" {
+	if wake || delivery.Intent == contract.PeerDeliveryIntentHandoff {
 		id := NewRun(work.Message.ID, work.Message.ThreadID, delivery.TargetAgentID, work.Trigger).ID
 		delivery.RunID = &id
 	}
@@ -578,10 +595,10 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 	if _, err := tx.ExecContext(ctx, `INSERT INTO deliveries(id,source_agent,target_agent,thread_id,data,input) VALUES(?,?,?,?,?,?)`, delivery.ID, delivery.SourceAgentID, delivery.TargetAgentID, delivery.ConversationID, string(data), string(input)); err != nil {
 		return delivery, err
 	}
-	if _, err := appendTx(ctx, tx, contract.Event{ConversationID: delivery.ConversationID, Type: kind, AgentID: &delivery.SourceAgentID, RunID: &delivery.ParentRunID, Delivery: &delivery}, nil); err != nil {
+	if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: delivery.ConversationID, Type: kind, AgentID: &delivery.SourceAgentID, RunID: &delivery.ParentRunID, Delivery: &delivery}, nil); err != nil {
 		return delivery, err
 	}
-	if delivery.Intent == "handoff" {
+	if delivery.Intent == contract.PeerDeliveryIntentHandoff {
 		return delivery, tx.Commit()
 	}
 	payload, err := NewActivity("agent.messaged", delivery.ID, "")
@@ -590,12 +607,12 @@ func (s *Store) Deliver(ctx context.Context, delivery contract.PeerDelivery, wor
 	}
 	payload.AgentIDs = []string{delivery.SourceAgentID, delivery.TargetAgentID}
 	payload.IconOrAgentID = delivery.TargetAgentID
-	if err := activityTx(ctx, tx, delivery.ConversationID, delivery.SourceAgentID, payload); err != nil {
+	if err := s.activityTx(ctx, tx, delivery.ConversationID, delivery.SourceAgentID, payload); err != nil {
 		return delivery, err
 	}
 	if delivery.TargetAgentID != delivery.ConversationID {
 		payload.IconOrAgentID = delivery.SourceAgentID
-		if err := activityTx(ctx, tx, delivery.TargetAgentID, delivery.SourceAgentID, payload); err != nil {
+		if err := s.activityTx(ctx, tx, delivery.TargetAgentID, delivery.SourceAgentID, payload); err != nil {
 			return delivery, err
 		}
 	}
@@ -608,13 +625,13 @@ func (s *Store) Receipt(ctx context.Context, id string, run contract.Run, result
 		return err
 	}
 	defer tx.Rollback()
-	if err := receiptTx(ctx, tx, id, run, result); err != nil {
+	if err := s.receiptTx(ctx, tx, id, run, result); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, result contract.Message) error {
+func (s *Store) receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, result contract.Message) error {
 	var data string
 	if err := tx.QueryRowContext(ctx, `SELECT data FROM deliveries WHERE id=?`, id).Scan(&data); err != nil {
 		return err
@@ -653,16 +670,16 @@ func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, res
 	}
 	// 1:1 timeouts stay off the thread; the parent follow-up explains them.
 	timedOut := run.Error != nil && run.Error.Code == "timeout"
-	if delivery.Intent != "handoff" && !timedOut {
+	if delivery.Intent != contract.PeerDeliveryIntentHandoff && !timedOut {
 		text := Text(result)
-		if run.Status != "completed" {
+		if run.Status != contract.RunStatusCompleted {
 			text = "Peer work " + run.Status + ". Review before retrying."
 		}
 		if text == "" {
 			text = "Peer work completed without a text result."
 		}
 		text = boundedText(text, 8192)
-		m := contract.Message{ID: "receipt:" + id, ThreadID: delivery.ConversationID, Role: "assistant", AgentID: &delivery.TargetAgentID, CreatedAt: Now(), Status: "done", Parts: []contract.Part{{Kind: "text", Text: &text}}}
+		m := contract.Message{ID: "receipt:" + id, ThreadID: delivery.ConversationID, Role: contract.MessageRoleAssistant, AgentID: &delivery.TargetAgentID, CreatedAt: Now(), Status: contract.MessageStatusDone, Parts: []contract.Part{{Kind: contract.PartKindText, Text: &text}}}
 		var parent string
 		if err := tx.QueryRowContext(ctx, `SELECT data FROM runs WHERE id=?`, delivery.ParentRunID).Scan(&parent); err != nil {
 			return err
@@ -672,7 +689,7 @@ func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, res
 			return err
 		}
 		m.ReplyToID = origin.SourceMessageID
-		if _, err := appendTx(ctx, tx, contract.Event{ConversationID: m.ThreadID, Type: "message.start", MessageID: &m.ID, AgentID: m.AgentID}, &m); err != nil {
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: m.ThreadID, Type: contract.EventTypeMessageStart, MessageID: &m.ID, AgentID: m.AgentID}, &m); err != nil {
 			return err
 		}
 		payload, err := NewActivity("agent.messaged", id, "")
@@ -681,12 +698,12 @@ func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, res
 		}
 		payload.AgentIDs = []string{delivery.SourceAgentID, delivery.TargetAgentID}
 		payload.IconOrAgentID = delivery.TargetAgentID
-		if err := activityTx(ctx, tx, delivery.ConversationID, delivery.TargetAgentID, payload); err != nil {
+		if err := s.activityTx(ctx, tx, delivery.ConversationID, delivery.TargetAgentID, payload); err != nil {
 			return err
 		}
 		if delivery.TargetAgentID != delivery.ConversationID {
 			payload.IconOrAgentID = delivery.SourceAgentID
-			if err := activityTx(ctx, tx, delivery.TargetAgentID, delivery.TargetAgentID, payload); err != nil {
+			if err := s.activityTx(ctx, tx, delivery.TargetAgentID, delivery.TargetAgentID, payload); err != nil {
 				return err
 			}
 		}
@@ -698,7 +715,7 @@ func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, res
 	if _, err := tx.ExecContext(ctx, `UPDATE deliveries SET data=? WHERE id=?`, string(encoded), id); err != nil {
 		return err
 	}
-	if delivery.Intent != "handoff" {
+	if delivery.Intent != contract.PeerDeliveryIntentHandoff {
 		var data string
 		if err := tx.QueryRowContext(ctx, `SELECT data FROM runs WHERE id=?`, delivery.ParentRunID).Scan(&data); err != nil {
 			return err
@@ -709,33 +726,33 @@ func receiptTx(ctx context.Context, tx *sql.Tx, id string, run contract.Run, res
 		}
 		// Groups have no parent follow-up, so the source agent says the timeout in chat.
 		if timedOut && parent.ConversationID != parent.AgentID {
-			if err := timeoutChat(ctx, tx, delivery, parent, run); err != nil {
+			if err := s.timeoutChat(ctx, tx, delivery, parent, run); err != nil {
 				return err
 			}
 		}
-		if parent.Status == "waiting_peer" {
-			parent.Status, parent.Summary = "completed", "Peer results received"
+		if parent.Status == contract.RunStatusWaitingPeer {
+			parent.Status, parent.Summary = contract.RunStatusCompleted, "Peer results received"
 			now := Now()
 			parent.FinishedAt = &now
-			if err := resolvePeers(ctx, tx, &parent); err != nil {
+			if err := s.resolvePeers(ctx, tx, &parent); err != nil {
 				return err
 			}
 			kind := "run.done"
-			if parent.Status == "waiting_peer" {
+			if parent.Status == contract.RunStatusWaitingPeer {
 				kind = "run.update"
 			}
-			if _, err := appendTx(ctx, tx, contract.Event{ConversationID: parent.ConversationID, Type: kind, RunID: &parent.ID, AgentID: &parent.AgentID, Run: &parent}, nil); err != nil {
+			if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: parent.ConversationID, Type: kind, RunID: &parent.ID, AgentID: &parent.AgentID, Run: &parent}, nil); err != nil {
 				return err
 			}
 		}
 	}
-	if _, err := appendTx(ctx, tx, contract.Event{ConversationID: delivery.ConversationID, Type: "peer.delivery", Delivery: &delivery, RunID: &delivery.ParentRunID, AgentID: &delivery.TargetAgentID}, nil); err != nil {
+	if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: delivery.ConversationID, Type: contract.EventTypePeerDelivery, Delivery: &delivery, RunID: &delivery.ParentRunID, AgentID: &delivery.TargetAgentID}, nil); err != nil {
 		return err
 	}
 	return nil
 }
 
-func timeoutChat(ctx context.Context, tx *sql.Tx, delivery contract.PeerDelivery, parent, child contract.Run) error {
+func (s *Store) timeoutChat(ctx context.Context, tx *sql.Tx, delivery contract.PeerDelivery, parent, child contract.Run) error {
 	text := "The background task timed out and was stopped."
 	if child.Error != nil && child.Error.Message != "" {
 		text = child.Error.Message
@@ -743,15 +760,15 @@ func timeoutChat(ctx context.Context, tx *sql.Tx, delivery contract.PeerDelivery
 	text = boundedText(text, 8192)
 	agent := delivery.SourceAgentID
 	m := contract.Message{
-		ID: "timeout:" + delivery.ID, ThreadID: delivery.ConversationID, Role: "assistant", AgentID: &agent,
-		CreatedAt: Now(), Status: "done", ReplyToID: parent.SourceMessageID,
-		Parts: []contract.Part{{Kind: "text", Text: &text}},
+		ID: "timeout:" + delivery.ID, ThreadID: delivery.ConversationID, Role: contract.MessageRoleAssistant, AgentID: &agent,
+		CreatedAt: Now(), Status: contract.MessageStatusDone, ReplyToID: parent.SourceMessageID,
+		Parts: []contract.Part{{Kind: contract.PartKindText, Text: &text}},
 	}
-	_, err := appendTx(ctx, tx, contract.Event{ConversationID: m.ThreadID, Type: "message.start", MessageID: &m.ID, AgentID: m.AgentID}, &m)
+	_, err := s.appendTx(ctx, tx, contract.Event{ConversationID: m.ThreadID, Type: contract.EventTypeMessageStart, MessageID: &m.ID, AgentID: m.AgentID}, &m)
 	return err
 }
 
-func finishPeer(ctx context.Context, tx *sql.Tx, job string) error {
+func (s *Store) finishPeer(ctx context.Context, tx *sql.Tx, job string) error {
 	var input sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT input FROM jobs WHERE id=?`, job).Scan(&input); err != nil {
 		return err
@@ -763,7 +780,7 @@ func finishPeer(ctx context.Context, tx *sql.Tx, job string) error {
 	if err := json.Unmarshal([]byte(input.String), &work); err != nil {
 		return err
 	}
-	if (work.Trigger != "peer" && work.Trigger != "follow_up") || work.DeliveryID == "" {
+	if (work.Trigger != contract.RunTriggerPeer && work.Trigger != contract.RunTriggerFollowUp) || work.DeliveryID == "" {
 		return nil
 	}
 	var exists int
@@ -796,7 +813,7 @@ func finishPeer(ctx context.Context, tx *sql.Tx, job string) error {
 			}
 		}
 	}
-	return receiptTx(ctx, tx, work.DeliveryID, run, result)
+	return s.receiptTx(ctx, tx, work.DeliveryID, run, result)
 }
 
 func boundedText(text string, size int) string {
@@ -857,7 +874,7 @@ func (s *Store) reconcilePeers(ctx context.Context) error {
 		if err == nil {
 			run = stored
 		} else {
-			run.Status = "interrupted"
+			run.Status = contract.RunStatusInterrupted
 			run.Summary = "Handoff interrupted before dispatch"
 			if err := s.RunEvent(ctx, "run.done", &run, nil); err != nil {
 				return err
@@ -877,7 +894,7 @@ func (s *Store) reconcilePeers(ctx context.Context) error {
 	return nil
 }
 
-func finishHandoffs(ctx context.Context, tx *sql.Tx, job string) error {
+func (s *Store) finishHandoffs(ctx context.Context, tx *sql.Tx, job string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT data,input FROM deliveries WHERE json_extract(data,'$.intent')='handoff' AND json_extract(data,'$.status')='queued' AND (json_extract(input,'$.message.replyToID')=? OR json_extract(input,'$.message.id')=?)`, job, job)
 	if err != nil {
 		return err
@@ -910,7 +927,7 @@ func finishHandoffs(ctx context.Context, tx *sql.Tx, job string) error {
 	}
 	for i, delivery := range deliveries {
 		work := works[i]
-		run := NewRun(work.Message.ID, work.Message.ThreadID, delivery.TargetAgentID, "handoff")
+		run := NewRun(work.Message.ID, work.Message.ThreadID, delivery.TargetAgentID, contract.RunTriggerHandoff)
 		var data string
 		err := tx.QueryRowContext(ctx, `SELECT data FROM runs WHERE id=?`, run.ID).Scan(&data)
 		var stored contract.Run
@@ -923,14 +940,14 @@ func finishHandoffs(ctx context.Context, tx *sql.Tx, job string) error {
 		if err == nil && Terminal(stored.Status) {
 			run = stored
 		} else {
-			run.ParentRunID, run.Status, run.Summary = work.ParentRunID, "cancelled", "Handoff not dispatched"
+			run.ParentRunID, run.Status, run.Summary = work.ParentRunID, contract.RunStatusCancelled, "Handoff not dispatched"
 			now := Now()
 			run.FinishedAt = &now
-			if _, err := appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: "run.done", RunID: &run.ID, AgentID: &run.AgentID, Run: &run}, nil); err != nil {
+			if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeRunDone, RunID: &run.ID, AgentID: &run.AgentID, Run: &run}, nil); err != nil {
 				return err
 			}
 		}
-		if err := receiptTx(ctx, tx, delivery.ID, run, contract.Message{}); err != nil {
+		if err := s.receiptTx(ctx, tx, delivery.ID, run, contract.Message{}); err != nil {
 			return err
 		}
 	}
@@ -950,7 +967,42 @@ func (s *Store) ResumeReady(ctx context.Context, run contract.Run) bool {
 // runningTool reports an in-flight call. Finished rows stay on the run, so history alone
 // must not block a resume.
 func runningTool(tools []contract.ToolActivity) bool {
-	return slices.ContainsFunc(tools, func(tool contract.ToolActivity) bool { return tool.Status == "running" })
+	return slices.ContainsFunc(tools, func(tool contract.ToolActivity) bool { return tool.Status == contract.ToolActivityStatusRunning })
+}
+
+// resumingRuns lists the interrupted runs that recovery will resume.
+func (s *Store) resumingRuns(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT data FROM runs WHERE status='running'`)
+	if err != nil {
+		return nil, err
+	}
+	var runs []contract.Run
+	for rows.Next() {
+		var data string
+		var run contract.Run
+		if err := rows.Scan(&data); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(data), &run); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	resuming := map[string]bool{}
+	for _, run := range runs {
+		// Recovery may seal a routine run instead, so only other runs keep their reply streaming.
+		if run.Trigger != contract.RunTriggerRoutine && resumeReady(ctx, s.DB, run) {
+			resuming[run.ID] = true
+		}
+	}
+	return resuming, nil
 }
 
 func resumeReady(ctx context.Context, q rowQuery, run contract.Run) bool {
@@ -980,7 +1032,10 @@ func resumeReady(ctx context.Context, q rowQuery, run contract.Run) bool {
 	var kind string
 	var isError int
 	err = db.QueryRowContext(ctx, `SELECT json_extract(record,'$.kind'), ifnull(json_extract(record,'$.model[0].isError'), 0) FROM entries WHERE conversation_id=? ORDER BY id DESC LIMIT 1`, id).Scan(&kind, &isError)
-	if err != nil || kind != "pi.tool-result" || isError != 0 {
+	// A saved tool result, or a reply cut off before it used any tool, replays without repeating an effect.
+	toolResult := kind == "pi.tool-result" && isError == 0
+	unanswered := kind == "pi.user" && len(run.Tools) == 0
+	if err != nil || !toolResult && !unanswered {
 		return false
 	}
 	var live int
@@ -1016,25 +1071,14 @@ func openDurable(ctx context.Context, q rowQuery) (*sql.DB, bool) {
 }
 
 func (s *Store) SaveSubmission(ctx context.Context, runID string, id int64) error {
-	if err := s.ensureSubmissions(ctx); err != nil {
-		return err
-	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO run_submissions(run_id, submission_id) VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET submission_id=excluded.submission_id`, runID, id)
 	return err
 }
 
 func (s *Store) Submission(ctx context.Context, runID string) (int64, bool) {
-	if err := s.ensureSubmissions(ctx); err != nil {
-		return 0, false
-	}
 	var id int64
 	err := s.DB.QueryRowContext(ctx, `SELECT submission_id FROM run_submissions WHERE run_id=?`, runID).Scan(&id)
 	return id, err == nil
-}
-
-func (s *Store) ensureSubmissions(ctx context.Context) error {
-	_, err := s.DB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS run_submissions(run_id TEXT PRIMARY KEY, submission_id INTEGER NOT NULL)`)
-	return err
 }
 
 // PutPrivateRun saves a voice run without publishing chat events.

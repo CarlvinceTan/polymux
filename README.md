@@ -8,9 +8,10 @@
   <strong>Native conversations with your AI agents on macOS and iOS.</strong>
 </p>
 
-Polymux is a SwiftUI app for individual and group conversations with agents
-running on your own Go server. You create each agent yourself and give it its own
-profile, instructions, skills and MCP connections.
+Polymux is an extensible personal assistant with a native SwiftUI app and your
+own Go server. You create each agent yourself and give it its own profile,
+instructions, skills and MCP connections. Its backend capabilities are being
+separated into Go packages that other projects can use without running Polymux.
 
 - **Conversations:** chats, groups, attachments, message search and voice.
 - **Agents:** custom profiles and avatars; nothing is prebuilt.
@@ -25,8 +26,25 @@ the app with it, and start talking.
 - `apps/Polymux`: the SwiftUI app (macOS 27 and iOS 27).
 - `apps/server`: the Go agent server and CLI.
 - `apps/site`: the website at [polymux.com](https://polymux.com).
-- `packages`: Swift libraries used by the app.
-- `docs`: specs and roadmap.
+- `packages`: reusable Go backend modules and shared Swift app code.
+- `docs`: [developer guides](docs/README.md).
+
+## Backend packages
+
+The standalone Go modules below can be imported by another backend. They do not
+import the Polymux server or its private API types; Polymux uses the same public
+APIs as other consumers.
+
+| Go package | Purpose |
+| --- | --- |
+| [`runtime`](packages/runtime/) | Persistent agent sessions, streaming, tools, skills, MCP and model providers, built on PiG. |
+| [`memory`](packages/memory/) | Persistent documents isolated by owner and scope, with revision-safe updates and deletion. |
+| [`vault`](packages/vault/) | Encrypted SQLite vault, credential imports, TOTP and origin-bound credential use. |
+| [`search`](packages/search/) | Hybrid ranking, pluggable embeddings, FTS5 query escaping and media extraction. |
+
+See [backend package usage and boundaries](docs/packages.md) for imports and
+executable examples. The server supplies Polymux's API, policy and product tools
+around these packages.
 
 ## Requirements
 

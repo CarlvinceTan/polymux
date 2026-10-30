@@ -2,6 +2,7 @@ package settings
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -17,37 +19,29 @@ import (
 
 var ErrInvalid = errors.New("invalid settings")
 
-type Model struct {
-	ID      string   `json:"id"`
-	Tags    []string `json:"tags"`
-	Enabled bool     `json:"enabled"`
-}
-
-type Provider struct {
-	ID            string            `json:"id"`
-	Type          string            `json:"type"`
-	Name          string            `json:"name"`
-	BaseURL       string            `json:"baseURL"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	SessionHeader string            `json:"sessionHeader,omitempty"`
-	Status        string            `json:"status"`
-	Enabled       bool              `json:"enabled"`
-	Order         int               `json:"order"`
-	Models        []Model           `json:"models"`
-}
+type Model = contract.ProviderModel
+type Provider = contract.Provider
 
 // cloneProviders copies through JSON, so callers never alias stored or caller state.
 func cloneProviders(providers []Provider) []Provider {
 	data, _ := json.Marshal(providers)
 	var cloned []Provider
 	_ = json.Unmarshal(data, &cloned)
+	if cloned == nil {
+		// Clients decode a list, so none must be [] rather than null.
+		return []Provider{}
+	}
 	return cloned
 }
 
 func (s *Store) Providers() []Provider {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return cloneProviders(s.data.Providers)
+	providers := cloneProviders(s.data.Providers)
+	slices.SortStableFunc(providers, func(a, b Provider) int {
+		return cmp.Compare(a.Order, b.Order)
+	})
+	return providers
 }
 
 func (s *Store) SetProviders(providers []Provider) error {
@@ -131,7 +125,6 @@ type document struct {
 	Capabilities map[string]Capability `json:"capabilities"`
 	Providers    []Provider            `json:"providers,omitempty"`
 	Settings     contract.Settings     `json:"settings"`
-	GeminiKey    string                `json:"geminiKey,omitempty"`
 }
 
 type Store struct {
@@ -160,13 +153,29 @@ func Open(path string) (*Store, error) {
 	if err := os.Chmod(path, 0600); err != nil {
 		return nil, err
 	}
+	// Voice keys now come from the Keychain; rewriting drops the old plaintext one.
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) == nil && raw["geminiKey"] != nil {
+		if err := s.save(s.data); err != nil {
+			return nil, err
+		}
+	}
 	return s, nil
 }
+
+// LiveVoices are the voices each live speech provider offers.
+var LiveVoices = map[string][]string{
+	"gemini": {"Aoede", "Kore", "Puck", "Charon", "Fenrir", "Leda", "Orus", "Zephyr"},
+	"openai": {"marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"},
+}
+
+// LiveDefaults is each live speech provider's starting model and voice.
+var LiveDefaults = map[string][2]string{"gemini": {"gemini-3.8-live", "Aoede"}, "openai": {"gpt-realtime", "marin"}}
 
 func defaults() contract.Settings {
 	return contract.Settings{Revision: 1, Appearance: "system", SidebarWidth: 320, VoiceMode: "pipeline",
 		LiveProvider: "gemini", LiveModel: "gemini-3.8-live", LiveVoice: "Aoede",
-		TextProvider: "gemini", TextModel: "gemini-3.8-flash", SpeechKeys: []string{}, VoicePrompt: `You are Polymux, a spokesperson agent representing {target}, not one of the workers themselves.
+		SpeechKeys: []string{}, VoicePrompt: `You are Polymux, a spokesperson agent representing {target}, not one of the workers themselves.
 The user is speaking privately with you. Their typed conversation is a separate direct channel.
 Speak naturally and briefly, using an Australian accent. Handle casual conversation yourself.
 Consult your agents using ask_agent for tasks, research, account data, or actions. Include the full
@@ -187,10 +196,10 @@ func (s *Store) Snapshot() contract.Settings {
 
 func snapshot(d document) contract.Settings {
 	v := d.Settings
-	v.SpeechKeys = []string{}
-	if d.GeminiKey != "" {
-		v.SpeechKeys = append(v.SpeechKeys, "gemini")
+	if v.DefaultReasoning == "" {
+		v.DefaultReasoning = contract.SettingsDefaultReasoningOff
 	}
+	v.SpeechKeys = []string{}
 	return v
 }
 
@@ -208,8 +217,12 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	if p.VoiceMode != nil {
 		v.VoiceMode = *p.VoiceMode
 	}
-	if p.LiveProvider != nil {
+	if p.LiveProvider != nil && *p.LiveProvider != v.LiveProvider {
+		// Each provider has its own models and voices; switching starts from its defaults.
 		v.LiveProvider = *p.LiveProvider
+		if model, ok := LiveDefaults[v.LiveProvider]; ok {
+			v.LiveModel, v.LiveVoice = model[0], model[1]
+		}
 	}
 	if p.LiveModel != nil {
 		v.LiveModel = strings.TrimSpace(*p.LiveModel)
@@ -217,20 +230,33 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	if p.LiveVoice != nil {
 		v.LiveVoice = *p.LiveVoice
 	}
-	if p.TextProvider != nil {
-		v.TextProvider = *p.TextProvider
-	}
-	if p.TextModel != nil {
-		v.TextModel = strings.TrimSpace(*p.TextModel)
-	}
 	if p.VoiceLanguage != nil {
 		v.VoiceLanguage = strings.TrimSpace(*p.VoiceLanguage)
 	}
 	if p.VoicePrompt != nil {
 		v.VoicePrompt = *p.VoicePrompt
 	}
+	if p.DefaultProvider != nil {
+		v.DefaultProvider = strings.TrimSpace(*p.DefaultProvider)
+	}
+	if p.DefaultModel != nil {
+		v.DefaultModel = strings.TrimSpace(*p.DefaultModel)
+	}
+	if p.DefaultReasoning != nil {
+		v.DefaultReasoning = *p.DefaultReasoning
+	}
 	if !valid(*v) {
 		return contract.Settings{}, ErrInvalid
+	}
+	if (p.DefaultProvider != nil || p.DefaultModel != nil) && v.DefaultProvider != "" {
+		available := slices.ContainsFunc(d.Providers, func(provider Provider) bool {
+			return provider.ID == v.DefaultProvider && provider.Enabled && slices.ContainsFunc(provider.Models, func(model Model) bool {
+				return model.ID == v.DefaultModel && model.Enabled && (len(model.Tags) == 0 || slices.Contains(model.Tags, "text"))
+			})
+		})
+		if !available {
+			return contract.Settings{}, ErrInvalid
+		}
 	}
 	v.Revision++
 	if err := s.save(d); err != nil {
@@ -238,29 +264,6 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	}
 	s.data = d
 	return snapshot(d), nil
-}
-
-func (s *Store) SetKey(key string) (contract.Settings, error) {
-	key = strings.TrimSpace(key)
-	if len(key) > 4096 || strings.ContainsAny(key, "\r\n") {
-		return contract.Settings{}, ErrInvalid
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d := s.data
-	d.GeminiKey = key
-	d.Settings.Revision++
-	if err := s.save(d); err != nil {
-		return contract.Settings{}, err
-	}
-	s.data = d
-	return snapshot(d), nil
-}
-
-func (s *Store) Speech() (contract.Settings, string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return snapshot(s.data), s.data.GeminiKey
 }
 
 func valid(v contract.Settings) bool {
@@ -273,18 +276,14 @@ func valid(v contract.Settings) bool {
 	if v.VoiceMode != "pipeline" && v.VoiceMode != "live" {
 		return false
 	}
-	if v.LiveProvider != "gemini" || v.TextProvider != "gemini" {
-		return false
-	}
-	if !ValidModel(v.LiveModel) || !ValidModel(v.TextModel) {
-		return false
-	}
-	switch v.LiveVoice {
-	case "Aoede", "Kore", "Puck", "Charon", "Fenrir", "Leda", "Orus", "Zephyr":
-	default:
+	if !slices.Contains(LiveVoices[v.LiveProvider], v.LiveVoice) || !ValidModel(v.LiveModel) {
 		return false
 	}
 	if v.VoiceLanguage != "" && !languageCode.MatchString(v.VoiceLanguage) {
+		return false
+	}
+	if !ValidReasoning(v.DefaultReasoning) || v.DefaultModel != "" && !chatModel.MatchString(v.DefaultModel) ||
+		len(v.DefaultProvider) > 128 || v.DefaultProvider != "" && v.DefaultModel == "" {
 		return false
 	}
 	return strings.TrimSpace(v.VoicePrompt) != "" && len(v.VoicePrompt) <= 16000
@@ -332,4 +331,19 @@ func (s *Store) save(d document) error {
 		return err
 	}
 	return os.Rename(f.Name(), s.path)
+}
+
+// chatModel matches provider model IDs such as "gpt-5", "openai/gpt-5" or "llama3:8b".
+var chatModel = regexp.MustCompile(`^[A-Za-z0-9._/:-]{1,256}$`)
+
+// ValidReasoning accepts the reasoning levels a bot can run with; empty means off.
+func ValidReasoning(level string) bool {
+	switch level {
+	case "", contract.SettingsDefaultReasoningOff, contract.SettingsDefaultReasoningMinimal,
+		contract.SettingsDefaultReasoningLow, contract.SettingsDefaultReasoningMedium,
+		contract.SettingsDefaultReasoningHigh, contract.SettingsDefaultReasoningXhigh,
+		contract.SettingsDefaultReasoningMax:
+		return true
+	}
+	return false
 }

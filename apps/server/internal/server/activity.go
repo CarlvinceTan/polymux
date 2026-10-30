@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
 
@@ -61,7 +62,7 @@ func (s *Server) activityObject(w http.ResponseWriter, r *http.Request) {
 		s.respond(w, nil, err)
 		return
 	}
-	if len(events) != 1 || events[0].Seq != seq || events[0].Payload == nil || events[0].Type != "activity" {
+	if len(events) != 1 || events[0].Seq != seq || events[0].Payload == nil || events[0].Type != contract.EventTypeActivity {
 		fail(w, 404, "not_found", "Activity is no longer available.")
 		return
 	}

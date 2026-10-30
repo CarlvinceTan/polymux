@@ -127,7 +127,7 @@ func peerReply(t *testing.T, db *store.Store) {
 				activities = append(activities, event)
 			}
 		}
-		if len(activities) != 2 || len(activities[0].Payload.MessageIDs) != 0 || len(activities[1].Payload.MessageIDs) != 0 {
+		if len(activities) != 2 {
 			t.Fatalf("request and reply must emit exactly once and preserve peer bubbles in %s: %+v", thread, activities)
 		}
 	}

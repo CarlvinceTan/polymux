@@ -1,0 +1,44 @@
+// The compact model menu searches, groups providers, selects with the keyboard and marks the current model.
+let app = await cua.getApp(APP);
+const host = await app.getState({ query: "Settings", include_screenshot: false });
+await app.click({ role: "button", name: "Settings" });
+await app.click({ role: "button", name: "Models" });
+await app.click({ role: "button", name: "Add provider" });
+await app.click({ role: "button", name: "Add custom provider" });
+await app.setValue({ role: "textfield", name: "Name" }, "Menu QA");
+await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL" });
+for (const model of ["alpha", "beta"]) {
+    await app.typeText(model, { role: "textfield", name: "Model ID" });
+    await app.click({ role: "button", name: "Add" });
+}
+await app.click({ role: "button", name: "Save" });
+await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Default model" });
+await app.waitFor({ role: "button", name: "Not set", value: "Selected", timeout_ms: 5000 });
+await app.typeText("no-such-model", { role: "textfield", name: "Search models" });
+await app.waitFor({ text: "No models found.", timeout_ms: 5000 });
+if ((await app.query({ role: "button", name: "Alpha Custom" })).length) throw new Error("Unmatched model stayed visible");
+await app.setValue({ role: "textfield", name: "Search models" }, "custom");
+await app.waitFor({ role: "button", name: "Alpha Custom", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Beta Custom", timeout_ms: 5000 });
+await app.pressKey("down", { role: "textfield", name: "Search models" });
+await app.pressKey("down", { role: "textfield", name: "Search models" });
+await app.pressKey("return", { role: "textfield", name: "Search models" });
+app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
+await app.waitFor({ role: "button", name: "Default model", value: "Beta Custom", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Default model" });
+await app.waitFor({ role: "button", name: "Beta Custom", value: "Selected", timeout_ms: 5000 });
+await app.pressKey("escape", { role: "textfield", name: "Search models" });
+await app.waitFor({ role: "button", name: "Default model", value: "Beta Custom", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Default model" });
+await app.waitFor({ role: "button", name: "Beta Custom", value: "Selected", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Dismiss menu" });
+await app.waitFor({ role: "button", name: "Default model", value: "Beta Custom", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Default model" });
+await app.click({ role: "button", name: "Not set" });
+app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
+await app.waitFor({ role: "button", name: "Default model", value: "Server default", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Edit Custom" });
+await app.click({ role: "button", name: "Delete" });
+await app.click({ role: "button", name: "Close Settings" });
+return "ok";

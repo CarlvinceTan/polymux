@@ -76,7 +76,7 @@ func (s *Store) CheckWatch(ctx context.Context, selected contract.Routine, conte
 	if err != nil {
 		return err
 	}
-	if r.Status != "active" || r.Watch == nil || valueStringWatch(r.NextAt) != valueStringWatch(selected.NextAt) {
+	if r.Status != contract.RoutineStatusActive || r.Watch == nil || valueStringWatch(r.NextAt) != valueStringWatch(selected.NextAt) {
 		return nil
 	}
 	var previous, fingerprint string

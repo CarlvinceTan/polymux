@@ -1,287 +1,40 @@
 package search
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
-	"io"
 	"log/slog"
-	"math"
-	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	engine "github.com/CarlvinceTan/polymux/packages/search"
 	vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 )
 
-type Asset struct {
-	Path     string `json:"path"`
-	MimeType string `json:"mimeType"`
-}
-type Input struct {
-	Text        string  `json:"text"`
-	Attachments []Asset `json:"attachments"`
-	Model       string  `json:"model,omitempty"`
-	Query       bool    `json:"query"`
-}
-type Embedder interface {
-	Embed(context.Context, Input) ([]float32, string, error)
-}
-
-// EmbeddingGemma steers retrieval with a task prefix on text. Omitting it still
-// embeds, but the model card reports lower retrieval precision, so queries and
-// documents are kept apart. Media input is never prefixed.
-const (
-	queryPrefix    = "task: search result | query: "
-	documentPrefix = "title: none | text: "
-)
-
-// taskText is the text an EmbeddingGemma input is embedded as.
-func taskText(in Input) string {
-	if in.Query {
-		return queryPrefix + in.Text
-	}
-	return documentPrefix + in.Text
-}
-
-// mediaPart encodes one attachment as a content part llama-server can embed.
-// It reports false for anything it cannot carry, because a non-media
-// attachment's text already reached the input through extraction.
-func mediaPart(asset Asset) (map[string]any, bool) {
-	if strings.HasPrefix(asset.MimeType, "video/") {
-		return nil, false
-	}
-	data, err := os.ReadFile(asset.Path)
-	if err != nil {
-		return nil, false
-	}
-	encoded := base64.StdEncoding.EncodeToString(data)
-	switch {
-	case strings.HasPrefix(asset.MimeType, "image/"):
-		return map[string]any{"type": "image_url", "image_url": map[string]any{
-			"url": "data:" + asset.MimeType + ";base64," + encoded,
-		}}, true
-	case strings.HasPrefix(asset.MimeType, "audio/"):
-		return map[string]any{"type": "input_audio", "input_audio": map[string]any{
-			"data": encoded, "format": strings.TrimPrefix(asset.MimeType, "audio/"),
-		}}, true
-	}
-	return nil, false
-}
-
-type HTTPEmbedder struct {
-	URL    string
-	Model  string
-	Dims   int
-	Client *http.Client
-	// Media sends attachments to the endpoint as media rather than text alone.
-	// It stays off unless a multimodal projector was loaded and CheckMedia
-	// proved the endpoint honours media input.
-	Media bool
-}
-
-// embedInput is what llama-server is asked to embed: a plain string for text,
-// or typed content parts when media has to travel with the text. It reports
-// whether media is carried, since that form is the one worth retrying without.
-// The two framings produce identical embeddings, so text alone keeps the
-// simpler one.
-func (e *HTTPEmbedder) embedInput(in Input) (any, bool) {
-	if !e.Media {
-		return in.Text, false
-	}
-	parts := []any{map[string]any{"type": "text", "text": in.Text}}
-	for _, asset := range in.Attachments {
-		if strings.HasPrefix(asset.MimeType, "video/") {
-			for _, frame := range videoFrames(asset.Path) {
-				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{
-					"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(frame),
-				}})
-			}
-			if sound := videoAudio(asset.Path); sound != nil {
-				parts = append(parts, map[string]any{"type": "input_audio", "input_audio": map[string]any{
-					"data": base64.StdEncoding.EncodeToString(sound), "format": "wav",
-				}})
-			}
-		} else if part, ok := mediaPart(asset); ok {
-			parts = append(parts, part)
-		}
-	}
-	if len(parts) == 1 {
-		return in.Text, false
-	}
-	return []any{map[string]any{"content": parts}}, true
-}
-
-// CheckMedia proves the endpoint embeds images instead of accepting them and
-// returning a text-only vector. Distinct images collapsing onto the same
-// vector is the failure mode the server cannot report, since it answers HTTP
-// 200 with a plausible embedding either way.
-func (e *HTTPEmbedder) CheckMedia(ctx context.Context) error {
-	if !e.Media {
-		return fmt.Errorf("media embedding is not enabled")
-	}
-	dir, err := os.MkdirTemp("", "polymux-media-check")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	var vectors [][]float32
-	for _, c := range []struct {
-		name string
-		fill color.RGBA
-	}{{"red.png", color.RGBA{R: 220, A: 255}}, {"blue.png", color.RGBA{B: 220, A: 255}}} {
-		path := filepath.Join(dir, c.name)
-		if err := writeSolidPNG(path, c.fill); err != nil {
-			return err
-		}
-		v, _, err := e.Embed(ctx, Input{Attachments: []Asset{{Path: path, MimeType: "image/png"}}})
-		if err != nil {
-			return err
-		}
-		vectors = append(vectors, v)
-	}
-	if got := cosine(vectors[0], vectors[1]); got > 0.99 {
-		return fmt.Errorf("distinct images embed identically (cosine %.4f), so image input is being ignored", got)
-	}
-	return nil
-}
-
-func writeSolidPNG(path string, fill color.RGBA) error {
-	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
-	for x := range 16 {
-		for y := range 16 {
-			img.SetRGBA(x, y, fill)
-		}
-	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return err
-	}
-	return os.WriteFile(path, buf.Bytes(), 0o600)
-}
-
-func cosine(a, b []float32) float64 {
-	var dot, na, nb float64
-	for n := range a {
-		dot += float64(a[n]) * float64(b[n])
-		na += float64(a[n]) * float64(a[n])
-		nb += float64(b[n]) * float64(b[n])
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(na) * math.Sqrt(nb))
-}
-
-func (e *HTTPEmbedder) Embed(ctx context.Context, input Input) ([]float32, string, error) {
-	if e.URL == "" {
-		return nil, "", fmt.Errorf("semantic search provider is not configured")
-	}
-	input.Text = taskText(input)
-	payload, media := e.embedInput(input)
-	v, model, err := e.ask(ctx, input, payload)
-	if err != nil && media {
-		// One attachment the server cannot decode must not cost the message its
-		// text embedding, so the text-only form is the fallback.
-		return e.ask(ctx, input, input.Text)
-	}
-	return v, model, err
-}
-
-func (e *HTTPEmbedder) ask(ctx context.Context, input Input, payload any) ([]float32, string, error) {
-	var request any = input
-	if strings.HasSuffix(e.URL, "/embeddings") {
-		request = map[string]any{"input": payload, "model": e.Model, "dimensions": e.Dims}
-	}
-	var response struct {
-		Embedding []float32 `json:"embedding"`
-		Model     string    `json:"model"`
-		Data      []struct {
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
-	}
-	if err := post(ctx, e.Client, e.URL, request, &response); err != nil {
-		return nil, "", err
-	}
-	v := response.Embedding
-	if len(v) == 0 && len(response.Data) > 0 {
-		v = response.Data[0].Embedding
-	}
-	if len(v) < e.Dims {
-		return nil, "", fmt.Errorf("embedding has %d dimensions, need %d", len(v), e.Dims)
-	}
-	v = v[:e.Dims]
-	norm := float64(0)
-	for _, x := range v {
-		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
-			return nil, "", fmt.Errorf("invalid embedding")
-		}
-		norm += float64(x) * float64(x)
-	}
-	if norm == 0 {
-		return nil, "", fmt.Errorf("empty embedding")
-	}
-	norm = math.Sqrt(norm)
-	for i := range v {
-		v[i] /= float32(norm)
-	}
-	// The server names the model it actually ran, which is what stored vectors
-	// are keyed on, so a swapped GGUF cannot be scored against older vectors.
-	model := response.Model
-	if model == "" {
-		model = e.Model
-	}
-	// Vectors of another size cannot be compared, so the size is part of the key.
-	return v, fmt.Sprintf("%s@%d", model, e.Dims), nil
-}
-
-func post(ctx context.Context, client *http.Client, url string, input, output any) error {
-	data, err := json.Marshal(input)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode/100 != 2 {
-		return fmt.Errorf("index provider returned HTTP %d", res.StatusCode)
-	}
-	return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(output)
-}
-
 type Index struct {
 	Store       *store.Store
-	Embedder    Embedder
-	Extractor   Extractor
+	Embedder    engine.Embedder
+	Extractor   engine.Extractor
 	Log         *slog.Logger
 	extractOnce sync.Once
 	extractGate chan struct{}
 	modelMu     sync.Mutex
 	model       string
 	retryAt     time.Time
+	// failures counts extraction attempts per attachment, so a transient failure is retried a few times.
+	failures map[string]int
 	// unavailableOnce keeps a missing FTS5 build from logging once per message.
 	unavailableOnce sync.Once
 }
+
+// maxExtractions bounds how often one attachment's extraction is attempted per server run.
+const maxExtractions = 3
 
 func (i *Index) Prepare(ctx context.Context, m contract.Message) (contract.Message, error) {
 	for n, p := range m.Parts {
@@ -296,14 +49,20 @@ func (i *Index) Prepare(ctx context.Context, m contract.Message) (contract.Messa
 		}
 		a, path, err := i.Store.Attachment(ctx, p.Attachment.ID)
 		changed := false
-		if err == nil && a.IndexingState == "pending" {
-			text, extractErr := i.extract(ctx, Asset{Path: path, MimeType: a.MimeType})
+		retry := a.IndexingState == contract.AttachmentIndexingStateError && i.failures[a.ID] < maxExtractions
+		if err == nil && (a.IndexingState == contract.AttachmentIndexingStatePending || retry) {
+			text, extractErr := engine.Extract(ctx, engine.Asset{Path: path, MimeType: a.MimeType}, i.Extractor)
 			if extractErr != nil {
-				a.IndexingState = "error"
+				if i.failures == nil {
+					i.failures = map[string]int{}
+				}
+				i.failures[a.ID]++
+				a.IndexingState = contract.AttachmentIndexingStateError
 				i.Log.Warn("extract attachment", "id", a.ID, "error", extractErr)
 			} else {
+				delete(i.failures, a.ID)
 				a.ExtractedText = &text
-				a.IndexingState = "ready"
+				a.IndexingState = contract.AttachmentIndexingStateReady
 			}
 			err = i.Store.UpdateAttachment(ctx, a)
 			changed = true
@@ -314,7 +73,7 @@ func (i *Index) Prepare(ctx context.Context, m contract.Message) (contract.Messa
 		}
 		m.Parts[n].Attachment = &a
 		if changed {
-			_, err := i.Store.Append(ctx, contract.Event{ConversationID: m.ThreadID, Type: "message.attachment", MessageID: &m.ID, Attachment: &a}, &m)
+			_, err := i.Store.Append(ctx, contract.Event{ConversationID: m.ThreadID, Type: contract.EventTypeMessageAttachment, MessageID: &m.ID, Attachment: &a}, &m)
 			if err != nil {
 				return m, err
 			}
@@ -340,7 +99,7 @@ func (i *Index) reindex(ctx context.Context, force bool) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_, model, err := i.Embedder.Embed(ctx, Input{Text: "Polymux search index"})
+	_, model, err := i.Embedder.Embed(ctx, engine.Input{Text: "Polymux search index"})
 	if err != nil {
 		return fmt.Errorf("identify embedding model: %w", err)
 	}
@@ -363,12 +122,15 @@ func (i *Index) reindex(ctx context.Context, force bool) error {
 	return nil
 }
 
-func (i *Index) Run(ctx context.Context) {
+func (i *Index) Run(ctx context.Context, admit func() bool, done func()) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		if err := i.Batch(ctx); err != nil && ctx.Err() == nil {
-			i.Log.Warn("index batch", "error", err)
+		if admit() {
+			if err := i.Batch(ctx); err != nil && ctx.Err() == nil {
+				i.Log.Warn("index batch", "error", err)
+			}
+			done()
 		}
 		select {
 		case <-ctx.Done():
@@ -458,7 +220,7 @@ func (i *Index) Ingest(ctx context.Context, m contract.Message) error {
 	if err != nil {
 		return err
 	}
-	input := Input{Text: store.Text(m), Attachments: []Asset{}}
+	input := engine.Input{Text: store.Text(m), Attachments: []engine.Asset{}}
 	for _, p := range m.Parts {
 		if p.Attachment == nil {
 			continue
@@ -467,7 +229,7 @@ func (i *Index) Ingest(ctx context.Context, m contract.Message) error {
 		if err != nil {
 			return err
 		}
-		asset := Asset{Path: path, MimeType: a.MimeType}
+		asset := engine.Asset{Path: path, MimeType: a.MimeType}
 		input.Attachments = append(input.Attachments, asset)
 		_ = a
 	}
@@ -526,36 +288,6 @@ func (i *Index) Ingest(ctx context.Context, m contract.Message) error {
 	return tx.Commit()
 }
 
-func (i *Index) extract(ctx context.Context, asset Asset) (string, error) {
-	if strings.HasPrefix(asset.MimeType, "text/") || asset.MimeType == "application/json" || asset.MimeType == "application/xml" {
-		f, err := os.Open(asset.Path)
-		if err != nil {
-			return "", err
-		}
-		defer f.Close()
-		b, err := io.ReadAll(io.LimitReader(f, 1<<20))
-		return string(b), err
-	}
-	if i.Extractor == nil {
-		return "", fmt.Errorf("media extraction tool is not configured")
-	}
-	return i.Extractor.Extract(ctx, asset)
-}
-
-func Query(text string) string {
-	words := strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	if len(words) > 32 {
-		words = words[:32]
-	}
-	for n := range words {
-		words[n] = "\"" + strings.ReplaceAll(words[n], "\"", "\"\"") + "\""
-		if n == len(words)-1 {
-			words[n] += "*"
-		}
-	}
-	return strings.Join(words, " OR ")
-}
-
 type ranked struct {
 	ID       string
 	Snippet  string
@@ -582,14 +314,7 @@ func (i *Index) lexical(ctx context.Context, scope searchScope, query string) ([
 	return out, rows.Err()
 }
 
-func (i *Index) semantic(ctx context.Context, scope searchScope, query string) ([]ranked, error) {
-	if i.Embedder == nil {
-		return nil, fmt.Errorf("semantic provider unavailable")
-	}
-	v, model, err := i.Embedder.Embed(ctx, Input{Text: query, Attachments: []Asset{}, Query: true})
-	if err != nil {
-		return nil, err
-	}
+func (i *Index) vector(ctx context.Context, scope searchScope, v []float32, model string) ([]ranked, error) {
 	blob, err := vec.SerializeFloat32(v)
 	if err != nil {
 		return nil, err
@@ -633,34 +358,17 @@ func (i *Index) Search(ctx context.Context, thread, query string) ([]contract.Se
 }
 
 func (i *Index) ranks(ctx context.Context, scope searchScope, query string) (map[string]float64, map[string]string, bool, error) {
-	type found struct {
-		rows []ranked
-		err  error
-	}
-	lexCh := make(chan found, 1)
-	semCh := make(chan found, 1)
-	go func() { rows, err := i.lexical(ctx, scope, Query(query)); lexCh <- found{rows, err} }()
-	go func() { rows, err := i.semantic(ctx, scope, query); semCh <- found{rows, err} }()
-	lex, sem := <-lexCh, <-semCh
-	if lex.err != nil {
-		return nil, nil, false, lex.err
-	}
-	for _, e := range scope.entities {
-		if strings.Contains(strings.ToLower(e.body), strings.ToLower(query)) {
-			lex.rows = append([]ranked{{ID: e.result.ID}}, lex.rows...)
-		}
+	hits, semantic, err := (engine.Engine{Embedder: i.Embedder}).Search(ctx, query, corpus{index: i, scope: scope})
+	if err != nil {
+		return nil, nil, false, err
 	}
 	scores := map[string]float64{}
 	snippets := map[string]string{}
-	for _, list := range [][]ranked{lex.rows, sem.rows} {
-		for rank, r := range list {
-			scores[r.ID] += 1 / float64(60+rank+1)
-			if r.Snippet != "" {
-				snippets[r.ID] = r.Snippet
-			}
-		}
+	for _, hit := range hits {
+		scores[hit.ID] = hit.Score
+		snippets[hit.ID] = hit.Snippet
 	}
-	return scores, snippets, sem.err == nil, nil
+	return scores, snippets, semantic, nil
 }
 
 func rankedIDs(scores map[string]float64) []string {

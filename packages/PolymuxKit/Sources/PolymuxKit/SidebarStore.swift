@@ -66,6 +66,41 @@ public final class SidebarStore {
     }
 
 
+    public func createAgent(_ request: CreateAgentRequest, completed: @escaping @MainActor () -> Void = {}) -> Thread {
+        let id = "local-" + UUID().uuidString
+        let agent = Agent(id: id, name: request.name.isEmpty ? "New Bot" : request.name, role: request.role,
+                          model: request.model ?? "", active: true, avatar: request.avatar, provider: request.provider)
+        reveal(agent)
+        let thread = Thread(id: id, agentID: id, title: agent.name, agentIDs: [id], sectionID: request.sectionID)
+        reveal(thread)
+        Task {
+            do {
+                let created = try await client.createAgent(request)
+                await replaceStaged(created, local: id)
+                completed()
+            } catch {
+                dropStaged(agent: id, notice: "Couldn’t create this bot. Your draft is kept.")
+            }
+        }
+        return thread
+    }
+
+    public func createThread(agentIDs: [String], title: String?, completed: @escaping @MainActor () -> Void = {}) -> Thread {
+        let thread = Thread(id: "local-" + UUID().uuidString, agentID: agentIDs.first ?? "",
+                            title: title ?? "New Group Chat", agentIDs: agentIDs)
+        reveal(thread)
+        Task {
+            do {
+                let created = try await client.createThread(agentIDs: agentIDs, title: title)
+                await replaceStaged(created, local: thread.id)
+                completed()
+            } catch {
+                dropStaged(thread: thread.id, notice: "Couldn’t create this chat. Your draft is kept.")
+            }
+        }
+        return thread
+    }
+
     public func clearNotice() {
         noticeTask?.cancel()
         noticeTask = nil
@@ -76,6 +111,7 @@ public final class SidebarStore {
         guard stagedThreads.removeValue(forKey: id) != nil else { return }
         revision &+= 1
         acceptedThreads[id] = nil
+        lastFinished[id] = nil
         threads.removeAll { $0.id == id }
         resumeResolvers(id, with: nil)
         notice = message
@@ -96,6 +132,7 @@ public final class SidebarStore {
         if agentChats.remove(id) != nil {
             stagedThreads[id] = nil
             acceptedThreads[id] = nil
+            lastFinished[id] = nil
             threads.removeAll { $0.id == id }
             resumeResolvers(id, with: nil)
         }
@@ -117,6 +154,7 @@ public final class SidebarStore {
         let dropLocal = id != thread.id
         if dropLocal {
             acceptedThreads[id] = nil
+            lastFinished[id] = nil
             threads.removeAll { $0.id == id }
         }
         acceptedThreads[thread.id] = thread
@@ -126,6 +164,7 @@ public final class SidebarStore {
     }
 
     func replaceStaged(_ agent: Agent, local id: String) async {
+        aliases[id] = agent.id
         revision &+= 1
         stagedAgents[id] = nil
         acceptedAgents[id] = nil
@@ -133,6 +172,7 @@ public final class SidebarStore {
         if agentChats.remove(id) != nil {
             stagedThreads[id] = nil
             acceptedThreads[id] = nil
+            lastFinished[id] = nil
             threads.removeAll { $0.id == id }
             resumeResolvers(id, with: agent.id)
         }
@@ -151,6 +191,8 @@ public final class SidebarStore {
     public let commits = ProfileCommit()
     public private(set) var agents: [Agent] = []
     public private(set) var threads: [Thread] = []
+    /// The last finished message per chat, kept while a newer reply is still streaming.
+    public private(set) var lastFinished: [String: Message] = [:]
     public private(set) var isConnected = false
     public private(set) var error: String?
     public private(set) var editIssues: [String: String] = [:]
@@ -167,8 +209,6 @@ public final class SidebarStore {
     @ObservationIgnored private var committedAgents: [Agent] = []
     @ObservationIgnored private var committedThreads: [Thread] = []
     @ObservationIgnored private var committedEdits: [String: Thread] = [:]
-    @ObservationIgnored private var committedPinEdits: Set<String> = []
-    @ObservationIgnored private var committedDirtyPins: Set<String> = []
     @ObservationIgnored private var staged: [SaveFault] = []
     @ObservationIgnored private var epoch: UInt64 = 0
     /// Coalesces disk writes. Tests set this to zero to prove the cap can fail.
@@ -178,11 +218,11 @@ public final class SidebarStore {
     @ObservationIgnored private var acceptedAgents: [String: Agent] = [:]
     @ObservationIgnored private var acceptedThreads: [String: Thread] = [:]
     @ObservationIgnored private var pendingThreads: [String: Thread] = [:]
-    @ObservationIgnored private var pinEdits: Set<String> = []
-    @ObservationIgnored private var dirtyPins: Set<String> = []
     @ObservationIgnored private var editTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var editDates: [String: Date] = [:]
     @ObservationIgnored private var editWorkers: [String: Task<Bool, Never>] = [:]
+    /// The last server state a refresh applied, so an unchanged poll skips the disk work.
+    @ObservationIgnored private var applied: (agents: [Agent], threads: [Thread], revision: UInt64, epoch: UInt64)?
 
     public init(client: APIClient, cache: LocalCache) {
         self.client = client
@@ -247,18 +287,12 @@ public final class SidebarStore {
         scheduleSave()
     }
 
-    public func edit(_ thread: Thread, delay: Duration = .milliseconds(550), pinOnly: Bool = false, pinChanged: Bool = false) async {
+    public func edit(_ thread: Thread, delay: Duration = .milliseconds(550)) async {
         var thread = thread
-        if !pinChanged, dirtyPins.contains(thread.id), let pending = pendingThreads[thread.id] {
-            thread.pinned = pending.pinned
-            thread.pinOrder = pending.pinOrder
-        }
-        if pinChanged { dirtyPins.insert(thread.id) }
         thread.runs = []
         revision &+= 1
         epoch &+= 1
         pendingThreads[thread.id] = thread
-        if pinOnly { pinEdits.insert(thread.id) } else { pinEdits.remove(thread.id) }
         acceptedThreads[thread.id] = thread
         editIssues[thread.id] = nil
         merge(thread, into: &threads)
@@ -266,24 +300,6 @@ public final class SidebarStore {
         scheduleEdit(thread.id, delay: delay)
         scheduleSave()
         await settled()
-    }
-
-    public func setPin(_ id: String, pinned: Bool) async {
-        guard var thread = threads.first(where: { $0.id == id }), (thread.pinned == true) != pinned else { return }
-        guard !pinned || threads.filter({ $0.pinned == true }).count < 12 else {
-            editIssues[id] = "You can pin up to 12 chats."
-            return
-        }
-        thread.pinned = pinned
-        thread.pinOrder = pinned ? (threads.compactMap(\.pinOrder).max() ?? -1) + 1 : nil
-        let pinOnly = pendingThreads[id] == nil || pinEdits.contains(id)
-        await edit(thread, delay: .zero, pinOnly: pinOnly, pinChanged: true)
-    }
-
-    public var pinIssue: String? { dirtyPins.sorted().compactMap { editIssues[$0] }.first }
-
-    public func retryPins() {
-        for id in dirtyPins { retryEdit(id) }
     }
 
     public func retryEdit(_ id: String) { scheduleEdit(id, delay: .zero) }
@@ -325,17 +341,10 @@ public final class SidebarStore {
         while let pending = pendingThreads[id] {
             guard (editDates[id] ?? .distantPast) <= Date() else { return false }
             do {
-                let onlyPin = pinEdits.contains(id)
-                let updated = try await client.updateThread(id: id, title: onlyPin ? nil : pending.title,
-                                                           agentIDs: onlyPin ? nil : pending.agentIDs,
-                                                           leadAgentID: onlyPin ? nil : pending.leadAgentID,
-                                                           pinned: dirtyPins.contains(id) ? pending.pinned : nil,
-                                                           pinOrder: dirtyPins.contains(id) ? pending.pinOrder : nil)
+                let updated = try await client.updateThread(id: id, title: pending.title, agentIDs: pending.agentIDs)
                 if pendingThreads[id] == pending {
                     revision &+= 1
                     pendingThreads[id] = nil
-                    pinEdits.remove(id)
-                    dirtyPins.remove(id)
                     editDates[id] = nil
                     editIssues[id] = nil
                     acceptedThreads[id] = updated
@@ -357,8 +366,8 @@ public final class SidebarStore {
         await settled()
     }
 
-    private func persist(agents: [Agent], threads: [Thread], edits: [Thread], pinEdits: [String], dirtyPins: [String]) async throws {
-        try await cacheActor.save(agents: agents, threads: threads, edits: edits, pinEdits: pinEdits, dirtyPins: dirtyPins)
+    private func persist(agents: [Agent], threads: [Thread], edits: [Thread]) async throws {
+        try await cacheActor.save(agents: agents, threads: threads, edits: edits)
     }
 
     private func merge(_ agent: Agent, into agents: inout [Agent]) {
@@ -381,6 +390,19 @@ public final class SidebarStore {
             accepted.unreadCount = previous.unreadCount
         }
         threads[index] = accepted
+        keepFinished(accepted)
+    }
+
+    private func keepFinished(_ thread: Thread) {
+        guard let message = thread.lastMessage, message.status != MessageStatus.streaming else { return }
+        lastFinished[thread.id] = message
+    }
+
+    /// Drops previews for chats that are gone and seeds them from each row's last finished message.
+    private func syncFinished() {
+        let ids = Set(threads.map(\.id))
+        lastFinished = lastFinished.filter { ids.contains($0.key) }
+        for thread in threads { keepFinished(thread) }
     }
 
     public func refresh() async {
@@ -394,6 +416,14 @@ public final class SidebarStore {
             var values = try await (agents, threads)
             guard generation == self.generation, revision == self.revision else { return }
             let snapshots = values.1
+            if let applied, applied.agents == values.0, applied.threads == snapshots,
+               applied.revision == revision, applied.epoch == epoch {
+                isConnected = true
+                error = nil
+                for id in pendingThreads.keys where editTasks[id] == nil && editWorkers[id] == nil { retryEdit(id) }
+                await flush()
+                return
+            }
             for pending in pendingThreads.values { merge(pending, into: &values.1) }
             let savedAgents = values.0
             let savedThreads = values.1
@@ -402,26 +432,30 @@ public final class SidebarStore {
             activity.retain(Set(self.threads.map(\.id)))
             for thread in self.threads { activity.reconcile(thread) }
             do {
-                try await cacheActor.save(agents: savedAgents, threads: savedThreads, edits: Array(pendingThreads.values), pinEdits: Array(pinEdits), dirtyPins: Array(dirtyPins))
+                try await cacheActor.save(agents: savedAgents, threads: savedThreads, edits: Array(pendingThreads.values))
             } catch {
                 self.agents = committedAgents
                 self.threads = committedThreads
-                self.error = "Couldn’t save this conversation. Retry"
+                syncFinished()
+                self.error = "Couldn’t save this chat on this device."
                 return
             }
             remember()
-            for thread in snapshots {
-                try await cacheActor.call { try $0.reconcile(thread) }
+            self.threads = try await cacheActor.call { cache in
+                for thread in snapshots { try cache.reconcile(thread) }
+                return try cache.threads()
             }
-            self.threads = try await cacheActor.call { try $0.threads() }
             for agent in stagedAgents.values { merge(agent, into: &self.agents) }
             for thread in stagedThreads.values { merge(thread, into: &self.threads) }
+            orderThreads()
+            syncFinished()
             remember()
             activity.retain(Set(self.threads.map(\.id)))
             for thread in self.threads { activity.reconcile(thread) }
             acceptedAgents.removeAll()
             acceptedThreads.removeAll()
             acceptedThreads = pendingThreads
+            applied = (values.0, snapshots, revision, epoch)
             isConnected = true
             error = nil
             for id in pendingThreads.keys where editTasks[id] == nil && editWorkers[id] == nil { retryEdit(id) }
@@ -445,7 +479,7 @@ public final class SidebarStore {
                     blocked.insert(queued.threadID)
                     for pending in try await cacheActor.call({ try $0.queued() }) where pending.threadID == queued.threadID {
                         let id = pending.request.id
-                        try await cacheActor.call { try $0.setStatus(id: id, status: "failed") }
+                        try await cacheActor.call { try $0.setStatus(id: id, status: MessageStatus.failed) }
                     }
                     continue
                 }
@@ -458,12 +492,12 @@ public final class SidebarStore {
                         continue
                     }
                     if case let ClientError.response(code, _) = error, (400..<500).contains(code), code != 408, code != 429 {
-                        try await cacheActor.call { try $0.setStatus(id: id, status: "error") }
+                        try await cacheActor.call { try $0.setStatus(id: id, status: MessageStatus.error) }
                         continue
                     }
                     for pending in try await cacheActor.call({ try $0.queued() }) {
                         let id = pending.request.id
-                        try await cacheActor.call { try $0.setStatus(id: id, status: "failed") }
+                        try await cacheActor.call { try $0.setStatus(id: id, status: MessageStatus.failed) }
                     }
                     isConnected = false
                     self.error = error.localizedDescription
@@ -479,14 +513,11 @@ public final class SidebarStore {
             let nextAgents = try await cacheActor.call { try $0.agents() }
             let nextThreads = try await cacheActor.call { try $0.threads() }
             let edits = try await cacheActor.call { try $0.threadEdits() }
-            let nextPinEdits = try await cacheActor.call { try $0.pinEdits() }
-            let nextDirtyPins = try await cacheActor.call { try $0.dirtyPins() }
             epoch &+= 1
+            applied = nil
             agents = nextAgents
             threads = nextThreads
             pendingThreads = Dictionary(uniqueKeysWithValues: edits.map { ($0.id, $0) })
-            pinEdits = Set(nextPinEdits).intersection(pendingThreads.keys)
-            dirtyPins = Set(nextDirtyPins).intersection(pendingThreads.keys)
             for thread in edits {
                 acceptedThreads[thread.id] = thread
                 merge(thread, into: &threads)
@@ -494,10 +525,12 @@ public final class SidebarStore {
             // A failed accept is still only in memory. Reloading disk must not drop that row.
             for agent in acceptedAgents.values { merge(agent, into: &agents) }
             for thread in acceptedThreads.values { merge(thread, into: &threads) }
+            orderThreads()
             for thread in threads { activity.reconcile(thread) }
+            syncFinished()
             remember()
         } catch {
-            self.error = "Couldn’t reload conversations. Retry"
+            self.error = "Couldn’t load saved chats."
         }
     }
 
@@ -510,7 +543,8 @@ public final class SidebarStore {
         }
         if changed {
             epoch &+= 1
-            scheduleSave()
+            // Streamed text is saved with the message's next event, not per delta.
+            if event.type != EventType.messageDelta { scheduleSave() }
         }
         return changed
     }
@@ -542,33 +576,50 @@ public final class SidebarStore {
         await saving?.value
     }
 
+    /// Takes a deleted, never-sent message out of its chat's preview, showing the one before it.
+    public func withdraw(_ messageID: String, in threadID: String, previous: Message?) {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }), threads[index].lastMessage?.id == messageID else { return }
+        threads[index].lastMessage = previous
+        if let previous {
+            if previous.status != MessageStatus.streaming { lastFinished[threadID] = previous }
+        } else {
+            lastFinished[threadID] = nil
+        }
+        scheduleSave()
+    }
+
     private func patch(_ event: Event) -> Bool {
-        if event.type == "message.read" {
+        if event.type == EventType.messageRead {
             clearUnread(event.conversationID, seq: event.seq)
             return false
         }
         guard let index = threads.firstIndex(where: { $0.id == event.conversationID }) else { return false }
         var thread = threads[index]
+        let placed = (thread.pinRank, thread.lastMessage?.createdAt)
         let incoming = event.seq > thread.lastSeq
-        let localSend = event.seq == 0 && event.message?.role == "user"
+        let localSend = event.seq == 0 && event.message?.role == MessageRole.user
         guard incoming || localSend else { return false }
         if incoming { thread.lastSeq = event.seq }
-        if event.message?.status == "silent" {
+        if event.message?.status == MessageStatus.silent {
             if thread.lastMessage?.id == event.message?.id { thread.lastMessage = nil }
             if event.seq > thread.lastReadSeq { thread.unreadCount = max(0, thread.unreadCount - 1) }
         } else if let message = project(event, onto: thread),
            message.seq >= (thread.lastMessage?.seq ?? 0) || localSend {
+            keepFinished(thread)
             thread.lastMessage = message
+            if message.status != MessageStatus.streaming {
+                lastFinished[thread.id] = message
+            }
         }
-        if incoming, event.type == "message.start", (event.message?.role == "assistant"), event.seq > thread.lastReadSeq {
+        if incoming, event.type == EventType.messageStart, (event.message?.role == MessageRole.assistant), event.seq > thread.lastReadSeq {
             thread.unreadCount += 1
         }
-        if incoming, event.type == "activity", event.seq > thread.lastReadSeq,
+        if incoming, event.type == EventType.activity, event.seq > thread.lastReadSeq,
            event.payload?.countsUnread == true {
             thread.unreadCount += 1
         }
         threads[index] = thread
-        orderThreads()
+        if placed != (thread.pinRank, thread.lastMessage?.createdAt) { orderThreads() }
         return true
     }
 
@@ -579,24 +630,25 @@ public final class SidebarStore {
         }
         guard let id = event.messageID, var message = thread.lastMessage, message.id == id else { return nil }
         switch event.type {
-        case "message.delta":
+        case EventType.messageDelta:
             let text = event.text ?? ""
-            if let index = message.parts.firstIndex(where: { $0.kind == "text" }) {
+            if let index = message.parts.firstIndex(where: { $0.kind == PartKind.text }) {
                 message.parts[index].text = (message.parts[index].text ?? "") + text
             } else {
-                message.parts.append(Part(kind: "text", text: text))
+                message.parts.append(Part(kind: PartKind.text, text: text))
             }
-            message.status = "streaming"
-        case "message.done":
-            message.status = "done"
-        case "message.error":
-            message.status = "error"
+            message.status = MessageStatus.streaming
+        case EventType.messageDone:
+            message.status = MessageStatus.done
+        case EventType.messageError:
+            message.status = MessageStatus.error
         default:
             break
         }
         return message
     }
 
+    /// Keeps chats pinned first, then newest message first; `patch` relies on this order.
     private func orderThreads() {
         threads.sort { lhs, rhs in
             switch (lhs.pinRank, rhs.pinRank) {
@@ -634,10 +686,8 @@ public final class SidebarStore {
             let faults = staged
             staged.removeAll()
             let edits = Array(pendingThreads.values)
-            let pinEdits = Array(self.pinEdits)
-            let dirtyPins = Array(self.dirtyPins)
             do {
-                try await persist(agents: agents, threads: threads, edits: edits, pinEdits: pinEdits, dirtyPins: dirtyPins)
+                try await persist(agents: agents, threads: threads, edits: edits)
                 lastSaveAt = ContinuousClock().now
                 if epoch == savedEpoch {
                     remember()
@@ -645,8 +695,6 @@ public final class SidebarStore {
                     committedAgents = agents
                     committedThreads = threads
                     committedEdits = Dictionary(uniqueKeysWithValues: edits.map { ($0.id, $0) })
-                    committedPinEdits = Set(pinEdits)
-                    committedDirtyPins = Set(dirtyPins)
                 }
                 for (id, previous) in pending where renames[id] == previous {
                     if self.threads.first(where: { $0.id == id })?.title != previous {
@@ -680,8 +728,6 @@ public final class SidebarStore {
         committedAgents = agents
         committedThreads = threads
         committedEdits = pendingThreads
-        committedPinEdits = pinEdits
-        committedDirtyPins = dirtyPins
     }
 
     private func keepsRows(_ faults: [SaveFault]) -> Bool {
@@ -703,30 +749,30 @@ public final class SidebarStore {
     }
 
     private func restore() {
+        applied = nil
         agents = committedAgents
         threads = committedThreads
         pendingThreads = committedEdits
-        pinEdits = committedPinEdits
-        dirtyPins = committedDirtyPins
         acceptedAgents = Dictionary(uniqueKeysWithValues: committedAgents.map { ($0.id, $0) })
         acceptedThreads = Dictionary(uniqueKeysWithValues: committedThreads.map { ($0.id, $0) })
         for edit in committedEdits.values { merge(edit, into: &threads) }
+        syncFinished()
         renames.removeAll()
     }
 
     private func report(_ faults: [SaveFault]) {
         if faults.isEmpty {
-            error = "Couldn’t save this conversation. Retry"
+            error = "Couldn’t save this chat on this device."
             return
         }
         for fault in faults {
             switch fault {
             case .rename(let id):
-                editIssues[id] = "Couldn’t save the new name. Retry"
+                editIssues[id] = "Couldn’t save the new name on this device."
             case .agent:
-                error = "Couldn’t save this agent. Retry"
+                error = "Couldn’t save this bot on this device."
             case .chat:
-                error = "Couldn’t save this chat. Retry"
+                error = "Couldn’t save this chat on this device."
             case .edit(let id):
                 editIssues[id] = "Changes couldn’t be saved on this device."
             }

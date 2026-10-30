@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -60,7 +61,7 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
 	}
-	part := contract.Part{Kind: "text", Text: &input.Text}
+	part := contract.Part{Kind: contract.PartKindText, Text: &input.Text}
 	if t.question {
 		input.Question = strings.TrimSpace(input.Question)
 		if input.Question == "" || len(input.Question) > 4096 || len(input.Options) < 2 || len(input.Options) > 8 {
@@ -74,17 +75,41 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 			seen[option.ID] = true
 		}
 		allow := input.AllowText == nil || *input.AllowText
-		part = contract.Part{Kind: "choice", Question: &input.Question, Options: input.Options, AllowText: &allow}
+		part = contract.Part{Kind: contract.PartKindChoice, Question: &input.Question, Options: input.Options, AllowText: &allow}
 	} else if strings.TrimSpace(input.Text) == "" || len(input.Text) > 8192 {
 		return agent.AgentToolResult{}, errors.New("provide a short nonempty message")
 	}
-	message, err := t.store.PostMessage(ctx, contract.Message{ID: t.Name() + ":" + state.run.ID + ":" + call, ThreadID: state.run.ConversationID, Role: "assistant", Status: "done", CreatedAt: store.Now(), AgentID: &state.run.AgentID, RunID: &state.run.ID, Parts: []contract.Part{part}})
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	chain, _ := ctx.Value(chainKey{}).(*chainState)
+	id := t.Name() + ":" + state.run.ID + ":" + call
+	var source *string
+	if chain != nil {
+		old, err := t.store.Message(ctx, id)
+		if err == nil {
+			if old.ThreadID != state.run.ConversationID || value(old.AgentID) != state.run.AgentID {
+				return agent.AgentToolResult{}, store.ErrConflict
+			}
+			return toolResult(map[string]any{"message_id": old.ID, "posted": true})
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return agent.AgentToolResult{}, err
+		}
+		encoded, err := json.Marshal(part)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		if chain.spend(len(encoded)) {
+			state.hookErr = errGroupBudget
+			return agent.AgentToolResult{}, errGroupBudget
+		}
+		source = state.run.SourceMessageID
+	}
+	message, err := t.store.PostMessage(ctx, contract.Message{ID: id, ThreadID: state.run.ConversationID, Role: contract.MessageRoleAssistant, Status: contract.MessageStatusDone, CreatedAt: store.Now(), AgentID: &state.run.AgentID, RunID: &state.run.ID, ReplyToID: source, Parts: []contract.Part{part}})
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
-	state.mu.Lock()
 	state.posts++
-	state.mu.Unlock()
 	return toolResult(map[string]any{"message_id": message.ID, "posted": true})
 }
 

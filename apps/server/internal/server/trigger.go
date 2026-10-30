@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -44,7 +45,7 @@ func (t *triggerTool) Schema() ai.ToolSchema {
 }
 func (t *triggerTool) Execute(ctx context.Context, call string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
-	if state == nil || state.work.Trigger == "created" {
+	if state == nil || state.work.Trigger == contract.RunTriggerCreated {
 		return agent.AgentToolResult{}, errors.New("trigger management requires an active bot turn")
 	}
 	var input struct {

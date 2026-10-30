@@ -1,9 +1,37 @@
 import Foundation
 
 extension Agent: Identifiable {}
+extension Provider: Identifiable {}
 extension Thread: Identifiable {
     public var isGroup: Bool { id != agentID }
     public var participantIDs: [String] { agentIDs.isEmpty ? [agentID] : agentIDs }
+}
+extension MessageStatus {
+    /// Client-only: a send the outbox stopped retrying.
+    public static let failed = "failed"
+}
+extension Reaction {
+    public static let emojis = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
+    /// Apple's starting recents, minus the fixed tapbacks; fills the row until there is history.
+    public static let defaultRecents = ["😍", "😒", "👌", "😊", "😘"]
+
+    public static func isEmoji(_ text: String) -> Bool {
+        guard text.utf8.count <= 128, text.count == 1,
+              let first = text.unicodeScalars.first, first.properties.isEmoji else { return false }
+        guard first.value > 127 || text.unicodeScalars.contains(where: { $0.value == 0x20E3 }) else { return false }
+        return text.unicodeScalars.allSatisfy {
+            $0.properties.isEmoji || [0x200D, 0x20E3, 0xFE0E, 0xFE0F].contains($0.value) || (0xE0020...0xE007F).contains($0.value)
+        }
+    }
+
+    public static func suggestions(recent: [String]) -> [String] {
+        var choices: [String] = []
+        for emoji in recent where isEmoji(emoji) && !emojis.contains(emoji) {
+            if !choices.contains(emoji) { choices.append(emoji) }
+            if choices.count == 5 { break }
+        }
+        return choices
+    }
 }
 extension Message: Identifiable {
     public var text: String { parts.compactMap(\.text).joined() }
@@ -17,10 +45,10 @@ extension Message: Identifiable {
         guard parts.indices.contains(index) else { return nil }
         let part = parts[index]
         switch part.kind {
-        case "text":
+        case PartKind.text:
             guard let text = part.text, !text.isEmpty else { return nil }
             return ReplyContext(messageID: id, role: role, text: text, agentID: agentID, partIndex: Int64(index))
-        case "attachment":
+        case PartKind.attachment:
             guard let attachment = part.attachment else { return nil }
             return ReplyContext(messageID: id, role: role, attachment: attachment, agentID: agentID, partIndex: Int64(index))
         default:
@@ -40,8 +68,8 @@ extension SearchHit: Identifiable {
     public var id: String { message.id }
 }
 
-extension FocusAnswer {
-    /// Recorded instead of an option id when the user skips the first-run card.
+extension ChoiceAnswer {
+    /// Recorded instead of an option id when the user skips a question card.
     public static let dismissed = "_dismissed"
 }
 
@@ -96,7 +124,7 @@ public struct LocalFile: Identifiable, Hashable, Sendable {
     /// The optimistic attachment the bubble renders until the upload replaces it.
     public var placeholder: Attachment {
         Attachment(id: id, kind: kind, name: name, mimeType: mimeType, size: size,
-                   url: url.absoluteString, indexingState: "pending")
+                   url: url.absoluteString, indexingState: AttachmentIndexingState.pending)
     }
 }
 

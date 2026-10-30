@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import test from 'node:test';
-import {loadPublishedReleases, releasesContentRoot, validateReleaseBody} from '../scripts/releases-content.mjs';
-import {publishedReleaseVersions} from '../lib/published-release-versions.js';
+import {loadPublishedReleases, releasesContentRoot, validateReleaseBody} from '../scripts/content.ts';
 import {
   ALL_PLATFORMS,
   filterReleaseChangelog,
@@ -11,7 +10,7 @@ import {
   parseReleaseChangelog,
   releasePlatforms,
   resolveReleasePlatform,
-} from '../src/lib/release-changelog.js';
+} from '../lib/content/changelog.ts';
 
 /** Read a published release body (front matter stripped) for parsing tests. */
 function releaseBody(version) {
@@ -24,14 +23,28 @@ function releaseBody(version) {
 test('loads every published Polymux release in newest-first order', () => {
   const releases = loadPublishedReleases();
   const versions = releases.map(({version}) => version);
-  assert.deepEqual(
-    versions,
-    [...publishedReleaseVersions].sort((left, right) => right.localeCompare(left, undefined, {numeric: true})),
-  );
+  assert.ok(['0.3.0', '0.2.4', '0.2.3', '0.2.2', '0.2.1', '0.2.0', '0.1.0'].every((version) => versions.includes(version)));
+  assert.deepEqual(releases.map((release) => release.date), releases.map((release) => release.date).toSorted().reverse());
   assert.equal(new Set(releases.map(({version}) => version)).size, releases.length);
-  assert.match(releases[0]?.summary ?? '', /release/i);
+  assert.match(releases.find((release) => release.version === '0.3.0')?.summary ?? '', /release/i);
   assert.equal(releases.find(({version}) => version === '0.2.0')?.downloadable, false);
   assert.equal(releases.find(({version}) => version === '0.1.0')?.downloadable, false);
+  assert.ok(releases.filter((release) => versions.indexOf(release.version) >= versions.indexOf('0.3.0')).every((release) => release.historical && !release.downloadable));
+});
+
+test('multiline Markdown bullets retain their continuation and unsupported prose fails validation', () => {
+  const body = '## Features\n### Desktop\n- A change with\n  **important details**.\n';
+  const sections = parseReleaseChangelog(body);
+  assert.match(sections[0].items[0], /important details/);
+  assert.throws(() => validateReleaseBody('probe.md', body + '\nAn ungrouped caveat.\n'), /unsupported paragraph/);
+});
+
+test('repeated category areas merge without duplicate panel keys or mutating parsed sections', () => {
+  const sections = parseReleaseChangelog('## Features\n### Desktop\n- First.\n### AI\n- Second.\n### Desktop\n- Third.\n');
+  const groups = groupReleaseChangelog(sections);
+  assert.deepEqual(groups[0].sections.map((section) => section.area), ['Desktop', 'AI']);
+  assert.deepEqual(groups[0].sections[0].items, ['First.', 'Third.']);
+  assert.deepEqual(sections[0].items, ['First.']);
 });
 
 test('requires category and product-area sections for release notes', () => {

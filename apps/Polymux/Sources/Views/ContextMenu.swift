@@ -1,9 +1,9 @@
 import SwiftUI
 
 extension View {
-    func appMenu<Menu: View>(@ViewBuilder content: () -> Menu) -> some View {
+    func appMenu<Menu: View>(destructive: Set<String> = [], @ViewBuilder content: () -> Menu) -> some View {
         #if os(macOS)
-        overlay { ContextMenu(content: content()).accessibilityHidden(true) }
+        overlay { ContextMenu(content: content(), destructive: destructive).accessibilityHidden(true) }
             .accessibilityActions { content() }
         #else
         contextMenu(menuItems: content)
@@ -16,6 +16,7 @@ import AppKit
 
 private struct ContextMenu<Content: View>: NSViewRepresentable {
     let content: Content
+    let destructive: Set<String>
 
     func makeNSView(context: Context) -> ContextView {
         ContextView()
@@ -23,9 +24,16 @@ private struct ContextMenu<Content: View>: NSViewRepresentable {
 
     func updateNSView(_ view: ContextView, context: Context) {
         let content = AnyView(content.environment(\.self, context.environment))
+        let appearance = NSAppearance(named: context.environment.colorScheme == .dark ? .darkAqua : .aqua)
         view.build = {
             let menu = NSHostingMenu(rootView: content)
+            menu.appearance = appearance
             menu.allowsContextMenuPlugIns = false
+            menu.update()
+            for item in menu.items where item.isSeparatorItem { item.setAccessibilityElement(false) }
+            for item in menu.items where destructive.contains(item.title) {
+                item.attributedTitle = NSAttributedString(string: item.title, attributes: [.foregroundColor: NSColor.systemRed])
+            }
             return menu
         }
         view.enabled = context.environment.isEnabled

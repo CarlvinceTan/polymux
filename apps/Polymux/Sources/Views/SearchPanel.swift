@@ -3,6 +3,9 @@ import PolymuxKit
 
 struct SearchPanel: View {
     let session: AppSession
+    /// The chat a profile's search covers; nil searches everything.
+    var scope: String? = nil
+    var onBack: (() -> Void)? = nil
     let close: () -> Void
     let select: (SearchResult) -> Void
     @State private var store: GlobalSearchStore
@@ -13,41 +16,64 @@ struct SearchPanel: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.panelContext) private var panel
 
-    init(session: AppSession, close: @escaping () -> Void, select: @escaping (SearchResult) -> Void) {
+    init(session: AppSession, scope: String? = nil, onBack: (() -> Void)? = nil,
+         close: @escaping () -> Void, select: @escaping (SearchResult) -> Void) {
         self.session = session
+        self.scope = scope
+        self.onBack = onBack
         self.close = close
         self.select = select
-        _store = State(initialValue: GlobalSearchStore(client: session.client, actor: session.sidebar.cacheActor))
+        _store = State(initialValue: GlobalSearchStore(client: session.client, actor: session.sidebar.cacheActor, scope: scope))
+    }
+
+    private var kinds: [SearchKind] {
+        scope == nil ? SearchKind.allCases : [.all, .messages, .media, .files]
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("", text: $query)
-                    .accessibilityLabel("Search everything")
-                    .font(.title3).textFieldStyle(.plain)
-                    .focused($focused).focusEffectDisabled()
-                    .submitLabel(.search)
-                    .onSubmit(openSelection)
-                    #if os(macOS)
-                    .background { SearchFocus(prompt: "").frame(width: 0, height: 0) }
-                    #endif
-                Button("Close search", systemImage: "xmark", action: dismiss)
-                    .labelStyle(.iconOnly).buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 36, height: 36).contentShape(Circle())
+            VStack(spacing: 12) {
+                ZStack {
+                    Text("Search")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .padding(.horizontal, 64)
+                        .accessibilityAddTraits(.isHeader)
+                    HStack {
+                        if let onBack { PanelNavButton(symbol: "chevron.left", label: "Back", action: onBack) }
+                        Spacer()
+                        PanelNavButton(symbol: "xmark", label: "Close search", action: dismiss)
+                    }
+                }
+                .frame(minHeight: 44)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.muted)
+                    TextField(scope == nil ? "Search" : "Search this chat", text: $query)
+                        .accessibilityLabel(scope == nil ? "Search everything" : "Search this chat")
+                        .textFieldStyle(.plain)
+                        .focused($focused).focusEffectDisabled()
+                        .submitLabel(.search)
+                        .onSubmit(openSelection)
+                        #if os(macOS)
+                        .background {
+                            SearchFocus(prompt: scope == nil ? "Search" : "Search this chat", autofocus: true)
+                                .frame(width: 0, height: 0)
+                        }
+                        #endif
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .glassEffect(.regular, in: Capsule())
             }
             .padding(16)
-            Divider()
             ScrollView(.horizontal) {
                 PillPicker("Search category", selection: $kind,
-                           options: SearchKind.allCases.map { ($0.title, $0) })
-                    .padding(16)
+                           options: kinds.map { ($0.title, $0) })
+                    .padding(.horizontal, 16).padding(.bottom, 12)
             }
             .scrollIndicators(.hidden)
             if let error = store.error, !cleanQuery.isEmpty {
-                Label(error, systemImage: "wifi.slash")
+                Label(error, systemImage: "internaldrive")
                     .font(.caption).foregroundStyle(.primary)
                     .padding(.horizontal, 16).padding(.bottom, 8)
             }
@@ -58,13 +84,24 @@ struct SearchPanel: View {
                             .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 16).padding(.bottom, 16)
+                .padding(PanelStyle.contentInset)
             }
             .scrollIndicators(.hidden)
+            .mask {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                        .frame(height: PanelStyle.contentInset)
+                    Rectangle().fill(.black)
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: PanelStyle.contentInset)
+                }
+            }
             .overlay {
                 if results.isEmpty && !cleanQuery.isEmpty && !store.isSearching {
-                    Text("No results found")
-                        .foregroundStyle(.secondary)
+                    Text("No results found.")
+                        .foregroundStyle(.muted)
+                } else if results.isEmpty && store.isSearching {
+                    ProgressView().controlSize(.small).accessibilityLabel("Searching")
                 }
             }
         }
@@ -85,6 +122,7 @@ struct SearchPanel: View {
 
     private var results: [SearchResult] {
         guard cleanQuery.isEmpty else { return store.results }
+        guard scope == nil else { return [] }
         let agents = Dictionary(session.sidebar.agents.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return session.sidebar.threads.compactMap { thread in
             if thread.id == thread.agentID, let agent = agents[thread.agentID], kind == .all || kind == .bots {
@@ -104,7 +142,7 @@ struct SearchPanel: View {
                 AgentAvatar(agentID: agentID).frame(width: 36, height: 36)
             } else {
                 Image(systemName: symbol(result))
-                    .font(.title3).foregroundStyle(.secondary)
+                    .font(.title3).foregroundStyle(.muted)
                     .frame(width: 36, height: 36)
             }
             VStack(alignment: .leading, spacing: 4) {
@@ -116,6 +154,10 @@ struct SearchPanel: View {
                 }
                 if !result.snippet.isEmpty {
                     Text(result.snippet).font(.subheadline).foregroundStyle(.primary).lineLimit(2)
+                }
+                if let date = result.message?.date {
+                    Text(date, format: .dateTime.year().month(.abbreviated).day().hour().minute())
+                        .font(.caption).foregroundStyle(.muted)
                 }
             }
         }

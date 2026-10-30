@@ -146,6 +146,14 @@ func TestProfileEditAppliesAfterActiveReply(t *testing.T) {
 	if factory.closed.Load() != 0 {
 		t.Fatal("editing closed the active session")
 	}
+	if err := api.settings.SetProviders([]contract.Provider{{ID: "replacement", Name: "Replacement", Type: "custom", Enabled: true, BaseURL: "http://localhost/v1", Models: []contract.ProviderModel{{ID: "next-model", Enabled: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	remapped := profileRequest(t, api, http.MethodPatch, path, `{"provider":"replacement","model":"next-model","reasoning":"xhigh"}`, 200)
+	if !remapped.Agent.Active || remapped.Agent.Name != updated.Agent.Name || remapped.Agent.Role != updated.Agent.Role || remapped.Prompt != updated.Prompt || remapped.Agent.Provider != "replacement" || remapped.Agent.Model != "next-model" || remapped.Agent.Reasoning != "xhigh" || factory.closed.Load() != 0 {
+		t.Fatalf("model remap overwrote profile or interrupted its reply: %+v", remapped)
+	}
+	profileRequest(t, api, http.MethodPatch, path, `{"provider":"replacement","model":"missing"}`, 400)
 	avatar := avatarDesign()
 	identity := avatarRequest(t, api, path+"/avatar", avatar, 200)
 	if !identity.Active || factory.closed.Load() != 0 {
@@ -164,8 +172,22 @@ func TestProfileEditAppliesAfterActiveReply(t *testing.T) {
 		t.Fatalf("next reply ignored edited instructions: %q", reply)
 	}
 	second := <-factory.opened
-	if second.path != "profile.jsonl" || second.definition.Agent.ID != agent.ID || len(second.definition.Tools) != len(first.definition.Tools) || factory.closed.Load() != 1 || factory.unsafe.Load() {
+	if second.path != "profile.jsonl" || second.definition.Agent.ID != agent.ID || second.definition.Agent.Model != "next-model" || second.definition.Agent.Provider != "replacement" || second.definition.Agent.Reasoning != "xhigh" || len(second.definition.Tools) != len(first.definition.Tools) || factory.closed.Load() != 1 || factory.unsafe.Load() {
 		t.Fatalf("profile reload lost continuity %+v closed=%d unsafe=%v", second, factory.closed.Load(), factory.unsafe.Load())
+	}
+	profileRequest(t, api, http.MethodPatch, path, `{"reasoning":"minimal"}`, 200)
+	send("reasoning")
+	profileReply(t, api, agent.ID, "reasoning")
+	next := <-factory.opened
+	if next.definition.Agent.Reasoning != "minimal" || next.definition.Agent.Model != "next-model" || factory.closed.Load() != 2 {
+		t.Fatalf("reasoning-only edit did not reload the runtime: %+v closed=%d", next, factory.closed.Load())
+	}
+	profileRequest(t, api, http.MethodPatch, path, `{"name":"Lola"}`, 200)
+	send("renamed")
+	profileReply(t, api, agent.ID, "renamed")
+	renamed := <-factory.opened
+	if renamed.path != next.path || renamed.definition.Agent.ID != agent.ID || renamed.definition.Agent.Name != "Lola" || renamed.definition.Agent.Role != next.definition.Agent.Role || renamed.definition.Prompt != next.definition.Prompt || factory.closed.Load() != 3 {
+		t.Fatalf("name-only edit did not refresh identity and preserve the conversation: %+v", renamed)
 	}
 	cleared := profileRequest(t, api, http.MethodPatch, path, `{"name":"Edited","role":"","prompt":""}`, 200)
 	if cleared.Agent.Role != "" || cleared.Prompt != "" {
@@ -177,7 +199,7 @@ func TestProfileEditAppliesAfterActiveReply(t *testing.T) {
 	}
 	threads, err := s.Threads(t.Context())
 	messages, messageErr := s.Messages(t.Context(), agent.ID, 0, 100)
-	if err != nil || messageErr != nil || len(threads) != 1 || len(messages) != 7 {
+	if err != nil || messageErr != nil || len(threads) != 1 || len(messages) != 11 {
 		t.Fatalf("profile edit changed history/conversation threads=%d messages=%d err=%v/%v", len(threads), len(messages), err, messageErr)
 	}
 }
@@ -194,7 +216,7 @@ func TestEditedDefaultProfileSurvivesStartupSeeding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profileRequest(t, api, http.MethodPatch, "/agents/assistant", `{"name":"My assistant","role":"","prompt":"New instructions"}`, 200)
+	profileRequest(t, api, http.MethodPatch, "/agents/assistant", `{"name":"My assistant","role":"","prompt":"New instructions","reasoning":"max"}`, 200)
 	api.Close()
 	s.Close()
 	s, err = store.Open(t.Context(), path)
@@ -208,17 +230,43 @@ func TestEditedDefaultProfileSurvivesStartupSeeding(t *testing.T) {
 	}
 	defer api.Close()
 	profile := profileRequest(t, api, http.MethodGet, "/agents/assistant", "", 200)
-	if profile.Agent.Name != "My assistant" || profile.Agent.Role != "" || profile.Prompt != "New instructions" || profile.Agent.Model != "provider/default" {
+	if profile.Agent.Name != "My assistant" || profile.Agent.Role != "" || profile.Prompt != "New instructions" || profile.Agent.Model != "provider/default" || profile.Agent.Reasoning != "max" {
 		t.Fatalf("startup replaced user profile %+v", profile)
 	}
 	definition, err := s.Definition(t.Context(), "assistant")
 	var d agentruntime.Definition
 	decodeErr := json.Unmarshal(definition, &d)
-	if err != nil || decodeErr != nil || len(d.Tools) != 2 || d.Tools[0] != "read" || d.Tools[1] != "bash" {
+	if err != nil || decodeErr != nil || d.Agent.Reasoning != "max" || len(d.Tools) != 2 || d.Tools[0] != "read" || d.Tools[1] != "bash" {
 		t.Fatalf("profile edit changed tools %+v err=%v/%v", d, err, decodeErr)
 	}
 	profileRequest(t, api, http.MethodGet, "/agents/missing", "", 404)
 	profileRequest(t, api, http.MethodPatch, "/agents/missing", `{"name":"Missing","role":"","prompt":""}`, 404)
 	profileRequest(t, api, http.MethodPatch, "/agents/assistant", `{"name":"","role":"","prompt":""}`, 400)
 	profileRequest(t, api, http.MethodPatch, "/agents/assistant", `{"name":"Valid","role":"","prompt":"","model":"other"}`, 400)
+}
+
+func TestProfileReasoningChangesIndependently(t *testing.T) {
+	t.Parallel()
+	api := settingsAPI(t)
+	created := httptest.NewRecorder()
+	api.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(`{"name":"Reasoning","role":"","prompt":""}`)))
+	var agent contract.Agent
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &agent) != nil {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	path := "/agents/" + agent.ID
+	for _, level := range []string{"minimal", "low", "medium", "high", "xhigh", "max", "off"} {
+		t.Run(level, func(t *testing.T) {
+			updated := profileRequest(t, api, http.MethodPatch, path, `{"reasoning":"`+level+`"}`, 200)
+			read := profileRequest(t, api, http.MethodGet, path, "", 200)
+			if updated.Agent.Reasoning != level || read.Agent.Reasoning != level || read.Agent.Model != agent.Model || read.Agent.Provider != agent.Provider {
+				t.Fatalf("reasoning edit changed model or did not persist: %+v", read.Agent)
+			}
+		})
+	}
+	profileRequest(t, api, http.MethodPatch, path, `{"reasoning":"extreme"}`, 400)
+	read := profileRequest(t, api, http.MethodGet, path, "", 200)
+	if read.Agent.Reasoning != "off" {
+		t.Fatalf("invalid edit changed reasoning: %+v", read.Agent)
+	}
 }

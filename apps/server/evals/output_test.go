@@ -88,7 +88,7 @@ func TestMEDIA1NativeGeneration(t *testing.T) {
 	var providerURL string
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer media-eval-fixture" {
-			http.Error(w, "credential missing", 401)
+			http.Error(w, "credential missing", http.StatusUnauthorized)
 			return
 		}
 		switch r.URL.Path {
@@ -111,7 +111,19 @@ func TestMEDIA1NativeGeneration(t *testing.T) {
 	providerURL = provider.URL
 	var jobID atomic.Value
 	h := Start(t, Options{ID: "MEDIA1", Steps: []Step{
-		Fixed(nil, ToolReply("media1-image", "generate_image", map[string]any{"prompt": "A blue kite"})),
+		// Generation tools are deferred: the model loads them with tool_search first.
+		Fixed(func(req *ChatRequest) error {
+			if strings.Contains(string(req.Tools), `"generate_image"`) {
+				return fmt.Errorf("deferred generation tools were offered up front")
+			}
+			return nil
+		}, ToolReply("media1-search", "tool_search", map[string]any{"query": "generate image video"})),
+		Fixed(func(req *ChatRequest) error {
+			if !strings.Contains(string(req.Tools), `"generate_image"`) || !strings.Contains(string(req.Tools), `"generate_video"`) {
+				return fmt.Errorf("tool_search did not load the generation tools")
+			}
+			return nil
+		}, ToolReply("media1-image", "generate_image", map[string]any{"prompt": "A blue kite"})),
 		Fixed(func(req *ChatRequest) error {
 			if !hasToolResult(req, "media1-image", "Attached Generated image.png") {
 				return fmt.Errorf("native image generation did not attach")

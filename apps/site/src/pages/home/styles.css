@@ -1,0 +1,69 @@
+.hero, .setup, .installation { width: min(var(--width), calc(100% - 48px)); margin-inline: auto; }
+
+.hero { padding-top: 76px; }
+.hero-copy { max-width: 740px; margin: 0 auto 64px; text-align: center; }
+.eyebrow { margin: 0 0 20px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
+.hero h1 { font-size: var(--title-size); }
+.lede { max-width: 560px; margin: var(--space) auto 0; color: var(--muted); font-size: 18px; line-height: 1.6; }
+.actions { display: flex; align-items: center; justify-content: center; gap: var(--space); margin-top: 28px; }
+.primary { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 8px; padding: 0 22px; border-radius: 9px; color: var(--on-accent); background: var(--accent); font-size: 14px; font-weight: 600; transition: background 140ms ease; }
+.primary:hover { background: var(--accent-hover); }
+.text-link { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.text-link:hover, .install-note a:hover, .together a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.availability { margin: 18px 0 0; color: var(--muted); font-size: 12px; }
+.app-preview { margin: 24px 0 0; border-block: 1px solid var(--line); }
+.app-preview summary { display: flex; align-items: center; justify-content: space-between; min-height: 64px; font-size: 13px; font-weight: 500; cursor: pointer; list-style: none; }
+.app-preview summary::-webkit-details-marker { display: none; }
+.app-preview summary span { color: var(--muted); font-size: 20px; transition: transform 160ms ease; }
+.app-preview[open] summary span { transform: rotate(45deg); }
+.app-preview summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.app-preview figure { margin: 0 0 24px; }
+.app-preview a { display: block; border-radius: var(--radius); }
+.app-preview img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+figcaption { margin-top: 18px; color: var(--muted); font-size: 12px; line-height: 1.6; text-align: center; }
+
+.setup, .installation { padding-top: 100px; }
+.section-heading { max-width: 660px; margin: 0 auto 40px; text-align: center; }
+.section-heading h2 { margin: 0; font-size: clamp(32px, 4vw, 44px); line-height: 1.12; font-weight: 600; letter-spacing: -.045em; }
+.section-heading > p:last-child { max-width: 500px; margin: 20px auto 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
+.download-line { display: flex; align-items: center; justify-content: center; gap: 12px; margin: -12px 0 32px; color: var(--muted); font-size: 12px; }
+.choices { display: grid; grid-template-columns: 1.35fr 1fr; gap: 64px; margin-top: 44px; }
+.choices > div { border-top: 1px solid var(--line); padding-top: var(--space); }
+.setup h3, .installation h3 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.025em; }
+.choices p, .install-grid p { margin: 12px 0 20px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.providers { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.providers li { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; font-weight: 500; }
+.providers li.more { border-color: transparent; background: transparent; color: var(--muted); }
+
+.installation { margin-top: 92px; padding-top: 64px; padding-bottom: 72px; border-top: 1px solid var(--line); }
+.install-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.install-grid article { min-width: 0; padding: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.install-label { display: flex; align-items: center; gap: 10px; }
+.install-label > span:first-child { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+.platform { margin-left: auto; border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; color: var(--muted); font-size: 11px; }
+.install-grid h4 { margin: var(--space) 0 0; font-size: 15px; font-weight: 500; }
+.install-grid p { min-height: 48px; }
+.install-grid code { display: block; padding: 14px; overflow-x: auto; border-radius: 7px; background: var(--soft); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; white-space: nowrap; }
+.install-grid .text-link { margin-top: var(--space); }
+.install-note { margin: 20px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; text-align: center; }
+.install-note a { text-decoration: underline; text-underline-offset: 3px; }
+.together { margin: 28px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
+.together a { color: var(--ink); font-weight: 500; }
+
+@media (max-width: 760px) {
+  .hero, .setup, .installation { width: calc(100% - 32px); }
+  .hero { padding-top: 48px; }
+  .hero-copy { margin-bottom: 32px; }
+  .hero h1 { font-size: clamp(40px, 8.5vw, 60px); }
+  .lede { font-size: 16px; }
+  .app-preview img { border-radius: 8px; }
+  figcaption { font-size: 11px; }
+  .setup { padding-top: 64px; }
+  .section-heading { margin-bottom: 28px; }
+  .choices { grid-template-columns: 1fr; gap: 28px; margin-top: 32px; }
+  .installation { margin-top: 56px; padding-top: 48px; padding-bottom: 48px; }
+  .download-line { flex-wrap: wrap; }
+  .install-grid { grid-template-columns: 1fr; gap: 16px; }
+  .install-grid article { padding: var(--space); }
+  .install-grid p { min-height: 0; }
+}

@@ -4,6 +4,8 @@ struct SectionEditor: View {
     @State var name: String
     let save: (String) -> Void
     let cancel: () -> Void
+    var saveOnBlur = true
+    @State private var invalid = false
     @State private var selection: TextSelection?
     @State private var finished = false
     @FocusState private var focused: Bool
@@ -12,31 +14,42 @@ struct SectionEditor: View {
     private var valid: Bool { !cleanName.isEmpty && cleanName.unicodeScalars.count <= 40 }
 
     var body: some View {
-        #if os(macOS)
-        SectionInput(name: name, save: save, cancel: cancel)
-        #else
-        TextField("Section name", text: $name, selection: $selection)
-            .textFieldStyle(.plain)
-            .font(.body)
-            .foregroundStyle(Color.primary.opacity(0.7))
-            .accessibilityLabel("Section name")
-            .focused($focused)
-            .onSubmit { finish() }
-            .onChange(of: focused) { wasFocused, isFocused in
-                if wasFocused && !isFocused { finish() }
+        VStack(alignment: .leading, spacing: 4) {
+            #if os(macOS)
+            SectionInput(name: name, save: save, cancel: cancel, saveOnBlur: saveOnBlur,
+                         tooLong: { invalid = true }, changed: { invalid = $0.unicodeScalars.count > 40 })
+            #else
+            TextField("Section name", text: $name, selection: $selection)
+                .textFieldStyle(.plain)
+                .font(.body)
+                .foregroundStyle(Color.primary.opacity(0.7))
+                .accessibilityLabel("Section name")
+                .focused($focused)
+                .onSubmit { finish() }
+                .onChange(of: focused) { wasFocused, isFocused in
+                    if wasFocused && !isFocused {
+                        if saveOnBlur { finish() } else { cancel() }
+                    }
+                }
+                .onChange(of: name) { _, value in invalid = value.unicodeScalars.count > 40 }
+                .task {
+                    focused = true
+                    selection = TextSelection(range: name.startIndex..<name.endIndex)
+                }
+            #endif
+            if invalid {
+                Text("Section names are limited to 40 characters.")
+                    .font(.caption).foregroundStyle(.muted)
             }
-            .task {
-                focused = true
-                selection = TextSelection(range: name.startIndex..<name.endIndex)
-            }
-        #endif
+        }
     }
 
     private func finish() {
         guard !finished else { return }
-        finished = true
-        if valid { save(cleanName) }
-        else { cancel() }
+        // A too-long name only notes the limit; the editor stays open so it can be corrected.
+        if valid { finished = true; save(cleanName) }
+        else if cleanName.unicodeScalars.count > 40 { invalid = true }
+        else { finished = true; cancel() }
     }
 }
 
@@ -47,6 +60,9 @@ private struct SectionInput: NSViewRepresentable {
     let name: String
     let save: (String) -> Void
     let cancel: () -> Void
+    let saveOnBlur: Bool
+    let tooLong: () -> Void
+    let changed: (String) -> Void
 
     func makeNSView(context: Context) -> SectionField {
         let field = SectionField()
@@ -68,6 +84,11 @@ private struct SectionInput: NSViewRepresentable {
     func updateNSView(_ field: SectionField, context: Context) {
         field.save = save
         field.cancel = cancel
+        field.saveOnBlur = saveOnBlur
+        field.tooLong = tooLong
+        field.changed = changed
+        field.appearance = NSAppearance(named: context.environment.colorScheme == .dark ? .darkAqua : .aqua)
+        field.styleEditor()
     }
 
     static func dismantleNSView(_ field: SectionField, coordinator: ()) { field.detach() }
@@ -81,8 +102,13 @@ private struct SectionInput: NSViewRepresentable {
 private final class SectionField: NSTextField, NSTextFieldDelegate {
     var save: (String) -> Void = { _ in }
     var cancel: () -> Void = {}
+    var tooLong: () -> Void = {}
+    var changed: (String) -> Void = { _ in }
+    var saveOnBlur = true
     private var finished = false
     private var observers: [NSObjectProtocol] = []
+    /// When editing began; the closing menu that opened it can take focus back a moment later.
+    private var began = Date.distantPast
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -97,6 +123,7 @@ private final class SectionField: NSTextField, NSTextFieldDelegate {
         RunLoop.main.perform(inModes: [.default]) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.finished, self.window != nil else { return }
+                self.began = Date()
                 self.selectText(nil)
                 self.styleEditor()
             }
@@ -117,8 +144,15 @@ private final class SectionField: NSTextField, NSTextFieldDelegate {
         observers.removeAll()
     }
 
-    private func styleEditor() {
+    func styleEditor() {
+        var color = NSColor.labelColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = NSColor.labelColor.withAlphaComponent(0.7).usingColorSpace(.deviceRGB) ?? .labelColor
+        }
+        textColor = color
         guard let editor = currentEditor() as? NSTextView else { return }
+        editor.textColor = color
+        editor.typingAttributes[.foregroundColor] = color
         editor.drawsBackground = false
         editor.backgroundColor = .clear
         let active = window?.isKeyWindow == true
@@ -128,7 +162,26 @@ private final class SectionField: NSTextField, NSTextFieldDelegate {
         ]
     }
 
-    func controlTextDidEndEditing(_ notification: Notification) { finish() }
+    func controlTextDidChange(_ notification: Notification) {
+        changed(stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        // Focus lost straight after opening came from the menu closing, not the user; keep editing.
+        let movement = notification.userInfo?["NSTextMovement"] as? Int
+        if movement == NSTextMovement.other.rawValue, Date().timeIntervalSince(began) < 0.6, window != nil, !finished {
+            RunLoop.main.perform(inModes: [.default]) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, !self.finished, self.window != nil else { return }
+                    self.selectText(nil)
+                    self.styleEditor()
+                }
+            }
+            return
+        }
+        if saveOnBlur { finish() }
+        else if !finished { finished = true; cancel() }
+    }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
@@ -146,10 +199,11 @@ private final class SectionField: NSTextField, NSTextFieldDelegate {
 
     private func finish() {
         guard !finished else { return }
-        finished = true
+        // A too-long name only notes the limit; the editor stays open so it can be corrected.
         let name = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty && name.unicodeScalars.count <= 40 { save(name) }
-        else { cancel() }
+        if !name.isEmpty && name.unicodeScalars.count <= 40 { finished = true; save(name) }
+        else if name.unicodeScalars.count > 40 { tooLong() }
+        else { finished = true; cancel() }
     }
 }
 #endif

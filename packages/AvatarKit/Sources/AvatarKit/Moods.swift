@@ -13,7 +13,8 @@ public enum MoodID: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle, .working, .sending, .receiving, .spawning: nil
         case .thinking, .searching, .reading, .curious: .curious
-        case .writing, .listening, .blocked, .approving: .attentive
+        case .writing, .listening, .approving: .attentive
+        case .blocked: .neutral
         case .streaming, .happy, .done, .humming: .happy
         case .excited, .celebrate, .playful: .excited
         case .waking, .surprised: .surprised
@@ -52,6 +53,7 @@ public enum MoodID: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// A look away from the resting gaze, as Polymux's own clips write it.
 public struct MotionPose: Equatable, Sendable {
     public var yaw, pitch, roll, x, y, stretch, zoom, lid: Double
 
@@ -62,14 +64,18 @@ public struct MotionPose: Equatable, Sendable {
         self.x = x; self.y = y; self.stretch = stretch; self.zoom = zoom; self.lid = lid
     }
 
-    static func blend(_ a: MotionPose, _ b: MotionPose, _ t: Double) -> MotionPose {
-        MotionPose(yaw: lerp(a.yaw, b.yaw, t), pitch: lerp(a.pitch, b.pitch, t),
-                   roll: lerp(a.roll, b.roll, t), x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t),
-                   stretch: lerp(a.stretch, b.stretch, t), zoom: lerp(a.zoom, b.zoom, t),
-                   lid: lerp(a.lid, b.lid, t))
+    /// The body turn that carries Grok Bot's front-facing eyes to this look; whole turns of yaw are kept.
+    var turn: [Double] {
+        let turns = (yaw / 360).rounded() * 360
+        let facing = HeadGaze(yaw: REST_GAZE.yaw + yaw - turns, pitch: REST_GAZE.pitch + pitch,
+                              roll: REST_GAZE.roll + roll)
+        var turn = (Rotation(from: REST_GAZE, to: facing) * Rotation(turn: REST_TURN)).turn
+        turn[1] += turns
+        return turn
     }
 }
 
+/// Evenly spaced looks, eased in and out.
 struct MotionClip: Sendable {
     let duration: Double
     let keys: [MotionPose]
@@ -78,10 +84,16 @@ struct MotionClip: Sendable {
         self.duration = duration; self.keys = keys
     }
 
-    func sample(_ time: Double) -> MotionPose {
-        let cursor = clamp(time / duration) * Double(keys.count - 1)
-        let index = min(keys.count - 2, Int(cursor))
-        return .blend(keys[index], keys[index + 1], easings.easeInOutCubic(cursor - Double(index)))
+    func recipe(_ name: String, face: FaceID) -> Recipe {
+        let ease = [0.65, 0, 0.35, 1.0]
+        let times = keys.indices.map { duration * Double($0) / Double(keys.count - 1) }
+        func track(_ value: (MotionPose) -> [Double]) -> [Key] {
+            zip(times, keys).map { Key(t: $0, v: value($1), ease: ease) }
+        }
+        return Recipe(name: name, duration: duration, position: track { [$0.x, -$0.y] }, rotation: track(\.turn),
+                      squash: track { [1 - $0.stretch, 1 + $0.stretch] }, zoom: track { [REST_ZOOM * $0.zoom] },
+                      lids: keys.allSatisfy { $0.lid == 1 } ? [] : track { [1 - $0.lid] },
+                      faces: [FaceEvent(t: 0, face: face)], blinks: duration >= 2.5 ? [duration * 0.45] : [])
     }
 }
 
@@ -134,7 +146,8 @@ extension MoodID {
                                   MotionPose(yaw: 12, pitch: 9, x: 0.04), REST)]
         case .streaming, .humming: TALK_CLIPS
         case .done, .happy, .excited, .celebrate, .playful: HAPPY_CLIPS
-        case .blocked, .listening, .curious: WAIT_CLIPS
+        case .blocked: []
+        case .listening, .curious: WAIT_CLIPS
         case .sending: [MotionClip(1.5, REST, MotionPose(yaw: 20, roll: 8, x: 0.12, stretch: -0.04), REST)]
         case .receiving: [MotionClip(1.7, REST, MotionPose(yaw: -18, roll: -8, x: -0.1), REST)]
         case .waking: [MotionClip(1.6, MotionPose(pitch: 16, y: 0.06, lid: 0.1),
@@ -163,7 +176,7 @@ extension MoodID {
 
 public struct MoodFrame: Sendable {
     public let mood: MoodID
-    public let motion: MotionPose
+    let pose: ClipFrame
     public let elapsed: Double
 }
 
@@ -172,7 +185,7 @@ struct SpawnPose {
     var spin = 0.0
 }
 
-private func springStep(_ time: Double) -> Double {
+func springStep(_ time: Double) -> Double {
     guard time > 0 else { return 0 }
     let phase = time * 14
     return 1 - (1 + phase) * exp(-phase)
@@ -205,63 +218,183 @@ struct SpawnBlend {
     }
 }
 
+extension MoodID {
+    /// Grok Bot's clips for this mood, and the face it holds over them.
+    var grok: (clips: [String], face: FaceID?) {
+        let working = ["Working_A", "Working_B", "Working_C", "Working_D", "Working_E", "Working_F"]
+        return switch self {
+        case .idle: (["Idle_B", "Idle_B", "Idle_D", "Idle_B", "Idle_A"], nil)
+        case .listening: (["Listen_A"], nil)
+        case .thinking, .searching, .writing, .sending, .receiving, .spawning: (["Idle_B"], nil)
+        case .streaming: (["Streaming_A", "Streaming_B", "Streaming_C"], nil)
+        case .reading, .working: (working, nil)
+        case .blocked, .confused, .interrupted: (["Blocked_A"], nil)
+        case .done: (["Done_B", "Done_A", "Done_D"], .happy)
+        case .failed, .sad: (["Blocked_B"], nil)
+        case .sleeping, .bored: (["Idle_B"], .sleepy)
+        case .waking, .surprised: (["Idle_B"], .surprised)
+        case .happy: (["Done_D", "Done_A"], nil)
+        case .excited: (["Done_C"], nil)
+        case .laughing: (["Done_B"], nil)
+        case .proud: (["Marketing_B"], nil)
+        case .curious: (["Working_B"], .inspecting)
+        case .playful: (["Bodymoves_A"], nil)
+        case .shy: (["Idle_D"], .calm)
+        case .suspicious: (["Idle_D"], .squinted)
+        case .angry: (["Blocked_A"], .squinted)
+        case .drowsy: (["Blocked_C"], nil)
+        case .scared: (["Idle_D"], .surprised)
+        case .celebrate: (["Rotation_A"], .happy)
+        case .approving: (["Rotation_C"], nil)
+        case .humming: (["Idle_B"], .calm)
+        }
+    }
+
+    /// Every clip this mood can play: Grok Bot's and Polymux's own, picked between at random.
+    /// Small avatars keep to the gentle ones.
+    func pool(compact: Bool, seed: UInt32, shape: ShapeID?) -> [Recipe] {
+        let face = grok.face ?? expression?.face ?? .neutral
+        var pool = (compact && self == .idle ? ["Idle_B"] : grok.clips).compactMap { RECIPES[$0] }
+        let own = compact && self == .idle ? [IDLE_GLANCE] : clips
+        pool += own.enumerated().map { $1.recipe("\(rawValue)-\($0)", face: face) }
+        if self == .idle { pool.append(MascotMotion.idleRecipe(seed)) }
+        if self == .working { pool.append(MascotMotion.workingRecipe(shape)) }
+        return pool
+    }
+}
+
+extension ExpressionID {
+    var face: FaceID {
+        switch self {
+        case .neutral, .attentive: .neutral
+        case .surprised, .scared: .surprised
+        case .excited, .happy, .laughing, .proud: .happy
+        case .angry, .suspicious: .squinted
+        case .sad: .sad
+        case .confused: .confused
+        case .curious: .inspecting
+        case .shy: .calm
+        case .unimpressed, .sleepy: .sleepy
+        }
+    }
+}
+
+/// Picks a mood's clips and plays them, after Grok Bot's state player.
 public struct MoodPlayer {
     private var requested: MoodID?
     private var active: MoodID?
     private var entered = 0.0
     private var touched = 0.0
-    private var began = 0.0
     private var transition = 0.0
-    private var previous = REST
-    private var sampled = REST
-    private var clip = IDLE_CLIPS[0]
-    private var bag: [Int] = []
-    private var lastIndex: Int?
-    private var seed: UInt64
+    private var clock: Double?
+    private var player = ClipPlayer()
+    private var pool: [Recipe] = []
+    private var bag: [String] = []
+    private(set) var playing: String?
+    private var started = false
+    private var loopMark = 0
+    private var compact = false
+    private var resting = false
+    private var live = false
+    private var face: FaceID?
+    private var random: UInt32
+    /// The avatar's own seed, as Grok Bot seeds from the agent: it picks the idle hop and the clip order.
+    var seed: UInt32 = 0 { didSet { if seed != oldValue { random = seed } } }
+    var shape: ShapeID?
+    /// Where the first clip starts, as a fraction; random by default so avatars side by side fall out of step.
+    var firstPhase: Double?
 
-    public init(seed: UInt64 = UInt64.random(in: 1...UInt64.max)) { self.seed = seed }
+    public init(seed: UInt64 = UInt64.random(in: 1...UInt64.max)) { random = UInt32(truncatingIfNeeded: seed) }
 
-    public mutating func sample(_ mood: MoodID, now: Double, interaction: Bool = false) -> MoodFrame {
+    /// Holds a resting avatar's gaze on a point, x right and y up in -1...1; nil lets it go.
+    mutating func setGaze(_ point: [Double]?) { player.setGaze(point, body: shape) }
+
+    var settled: Bool { player.settled }
+
+    /// `live` avatars advance in real time, so they ease into a rest instead of being placed there.
+    public mutating func sample(_ mood: MoodID, now: Double, interaction: Bool = false,
+                                compact: Bool = false, resting: Bool = false, petted: Bool = false,
+                                live: Bool = false) -> MoodFrame {
+        self.live = live
         if requested != mood {
             requested = mood; entered = now; touched = now
         }
         if interaction { touched = now }
         let age = max(0, now - entered)
         var target = mood
-        if mood == .idle {
-            if active == .sleeping, interaction { target = .waking }
-            else if active == .waking, now - transition < 1.6 { target = .waking }
-            else if now - touched >= 180 { target = .sleeping }
-        } else if mood == .blocked, age >= 120 { target = .drowsy }
-        else if [.done, .celebrate].contains(mood), age >= 8 { target = .idle }
-        else if [.failed, .interrupted].contains(mood), age >= 6 { target = .idle }
-        else if mood == .waking, age >= 1.6 { target = .idle }
+        if !resting {
+            if mood == .idle {
+                if active == .sleeping, interaction { target = .waking }
+                else if active == .waking, now - transition < 1.6 { target = .waking }
+                else if now - touched >= 180 { target = .sleeping }
+            } else if mood == .blocked, age >= 120 { target = .drowsy }
+            else if [.done, .celebrate].contains(mood), age >= 8 { target = .idle }
+            else if [.failed, .interrupted].contains(mood), age >= 6 { target = .idle }
+            else if mood == .waking, age >= 1.6 { target = .idle }
+        }
 
-        if active != target || now < began {
-            previous = sampled; active = target; transition = now; began = now
-            bag = []; lastIndex = nil; clip = pick(target)
+        if let clock, now < clock {
+            player = ClipPlayer(); active = nil; started = false; self.clock = nil
         }
-        while now - began >= clip.duration {
-            began += clip.duration
-            clip = pick(target)
+        if active != target || compact != self.compact || resting != self.resting {
+            if active != target { transition = now }
+            active = target; self.compact = compact; self.resting = resting
+            enter(target)
         }
-        sampled = .blend(previous, clip.sample(now - began),
-                         easings.easeOutQuint(clamp((now - transition) / 0.3)))
-        return MoodFrame(mood: target, motion: sampled, elapsed: age)
+        player.hold(petted ? .happy : face)
+        var remaining = clock.map { max(0, now - $0) } ?? 0
+        clock = now
+        while remaining > 1e-9 {
+            let step = min(remaining, 0.1)
+            player.advance(step)
+            if !resting && player.loopCount != loopMark { next() }
+            remaining -= step
+        }
+        return MoodFrame(mood: target, pose: player.frame, elapsed: age)
     }
 
-    private mutating func pick(_ mood: MoodID) -> MotionClip {
-        let clips = mood.clips
-        if bag.isEmpty {
-            bag = Array(clips.indices)
-            for index in bag.indices.reversed() where index > 0 {
-                seed = seed &* 6364136223846793005 &+ 1442695040888963407
-                bag.swapAt(index, Int(seed % UInt64(index + 1)))
-            }
-            if bag.count > 1, bag.last == lastIndex { bag.swapAt(0, bag.count - 1) }
+    private mutating func enter(_ mood: MoodID) {
+        pool = mood.pool(compact: compact, seed: seed, shape: shape)
+        bag = []
+        playing = nil
+        if resting {
+            // A still avatar rests facing up and to the right, wearing its mood's face.
+            face = mood.grok.face ?? pool.first.map { restPose($0).face }
+            player.hold(face)
+            player.rest()
+            if !live || !started { for _ in 0..<12 { player.advance(0.1) } }
+            return
         }
-        let index = bag.removeLast()
-        lastIndex = index
-        return clips[index]
+        face = mood.grok.face
+        player.hold(face)
+        next()
+    }
+
+    private mutating func next() {
+        if bag.isEmpty { bag = shuffled(pool.map(\.name)) }
+        loopMark = player.loopCount
+        let name = bag.removeFirst()
+        guard name != playing, let recipe = pool.first(where: { $0.name == name }) else { return }
+        player.load(recipe, phase: started ? 0 : firstPhase ?? roll())
+        started = true
+        playing = name
+        loopMark = player.loopCount
+    }
+
+    /// Shuffled, never starting with the clip that just played.
+    private mutating func shuffled(_ names: [String]) -> [String] {
+        var out = names
+        for index in out.indices.reversed() where index > 0 {
+            out.swapAt(index, Int(roll() * Double(index + 1)))
+        }
+        if let first = out.firstIndex(where: { $0 != playing }), first > 0 { out.swapAt(0, first) }
+        return out
+    }
+
+    private mutating func roll() -> Double {
+        random = random &+ 0x6d2b79f5
+        var t = (random ^ (random >> 15)) &* (1 | random)
+        t = (t &+ ((t ^ (t >> 7)) &* (61 | t))) ^ t
+        return Double(t ^ (t >> 14)) / 4294967296
     }
 }

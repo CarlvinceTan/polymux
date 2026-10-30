@@ -1,34 +1,29 @@
 ---
-title: Introduction
+title: Start here
 slug: introduction
-description: Meet the native Polymux app for conversations with your agents on macOS and iOS.
-section: Getting started
+description: Understand the two parts of Polymux and start your first conversation.
+section: Guides
 sectionOrder: 1
 order: 1
 published: true
 ---
 
-# Introduction
+# Start here
 
-Polymux is an open-source native app for talking to AI agents. The SwiftUI app connects to a Go agent server, which runs the agents and stores their conversations.
+Polymux runs your personal AI agents on your Mac, with a native app for talking to them. Both the server and client are currently for **macOS**.
 
-These guides describe the **native app in the current source tree**. Older Electron releases have a different interface and feature set. Check [Installation](/docs/installation/) before choosing a build; a download from the older release line will not match these instructions.
+## What runs where
 
-## In the native app
+- **Server:** runs your agents and keeps their conversations and memory.
+- **Client:** the app you use to chat. Pair clients on your other Macs with the same server.
 
-- Find conversations in the sidebar, with search, unread and active filters, and sorting.
-- Talk to an individual agent or create a group with several agents.
-- Give each agent a name, role, role description, and avatar.
-- Send attachments, reply to messages, and search within a conversation.
-- Review agent activity and answer approval requests in the chat.
-- Configure appearance, the server connection, voice, and notifications in Settings.
+Both parts can run on one Mac. Your agents can keep working when you close a client, as long as the server Mac stays awake and connected.
 
-The app does not currently expose the older tabbed Hub, Drive, Browser, or Tasks workspace. Those older screenshots are not a guide to the native interface.
+## Your first conversation
 
-## App and server
+1. [Install Polymux](/docs/installation/). Start with both parts on one Mac if you are unsure.
+2. Open **Settings → Models**, add a provider, and choose a **Default model**. See [Models](/docs/models-and-agents/).
+3. Press **New chat** (+), name your agent, choose its avatar, and press **Create**.
+4. Send a small request, such as “Help me plan my day.”
 
-The app keeps a local conversation cache; agent execution, tool access, and authoritative history belong to the connected server. A remote server is not the same as running everything on your phone or Mac. A URL alone does not configure remote authentication; see [Installation](/docs/installation/) for the current client-setup limitations.
-
-The current native targets require **macOS 27 or iOS 27**. Windows and Linux packages in the older Electron release line are separate from these native targets.
-
-Start with [Quickstart](/docs/quickstart/), then [Conversations](/docs/workspace/).
+Next: [Chats](/docs/workspace/) covers profiles, files, memory, and schedules. [Tools](/docs/skills-and-mcp/) explains browser and device access.

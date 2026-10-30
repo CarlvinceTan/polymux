@@ -242,7 +242,7 @@ func fill(ctx context.Context, db *store.Store, dir string) error {
 			return err
 		}
 	}
-	threads := []struct{ id, title, lead, members string }{
+	threads := []struct{ id, title, primary, members string }{
 		{"t-chief", "", "t-chief", "t-chief"},
 		{"t-aria", "", "t-aria", "t-aria"},
 		{"t-milo", "", "t-milo", "t-milo"},
@@ -257,7 +257,7 @@ func fill(ctx context.Context, db *store.Store, dir string) error {
 		{"grp-empty", "Empty", "t-nova", "t-nova,t-fern"},
 	}
 	for _, thread := range threads {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO threads(id,agent_id,title,lead_agent_id) VALUES(?,?,?,?)`, thread.id, thread.lead, thread.title, thread.lead); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO threads(id,agent_id,title) VALUES(?,?,?)`, thread.id, thread.primary, thread.title); err != nil {
 			return err
 		}
 		for position, member := range strings.Split(thread.members, ",") {
@@ -284,12 +284,12 @@ func fill(ctx context.Context, db *store.Store, dir string) error {
 			}
 		}
 	}
-	question := store.FocusQuestion
-	focus := contract.Message{
-		ID: "focus:t-approval", ThreadID: "t-approval", Role: "assistant", Status: "done", CreatedAt: Base.Format(time.RFC3339),
-		Parts: []contract.Part{{Kind: "choice", Question: &question, Options: store.FocusOptions}},
+	question, asker := "What should we focus on today?", "t-approval"
+	choice := contract.Message{
+		ID: "choice:t-approval", ThreadID: "t-approval", Role: "assistant", Status: "done", AgentID: &asker, CreatedAt: Base.Format(time.RFC3339),
+		Parts: []contract.Part{{Kind: "choice", Question: &question, Options: []contract.ChoiceOption{{ID: "day", Label: "Plan my day"}, {ID: "code", Label: "Build something"}}}},
 	}
-	if err := insert(ctx, tx, focus); err != nil {
+	if err := insert(ctx, tx, choice); err != nil {
 		return err
 	}
 	if err := insert(ctx, tx, msg("m-fern", "t-fern", "assistant", "done", "t-fern", phrase, Base, "")); err != nil {

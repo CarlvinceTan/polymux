@@ -3,13 +3,13 @@ import Foundation
 /// The network side of one file upload. Injected so tests can stall, record or fail it.
 public protocol UploadClient: Sendable {
     /// Uploads `file` and reports progress in 0...1. Never runs on the main actor.
-    func upload(file: LocalFile, progress: @Sendable (Double) -> Void) async throws -> Attachment
+    func upload(file: LocalFile, progress: @escaping @Sendable (Double) -> Void) async throws -> Attachment
 }
 
 extension APIClient: UploadClient {
-    public func upload(file: LocalFile, progress: @Sendable (Double) -> Void) async throws -> Attachment {
+    public func upload(file: LocalFile, progress: @escaping @Sendable (Double) -> Void) async throws -> Attachment {
         progress(0)
-        let attachment = try await upload(file: file.url)
+        let attachment = try await upload(file: file.url, progress: progress)
         progress(1)
         return attachment
     }
@@ -26,14 +26,14 @@ public actor AttachmentUploader {
 
     public func run(
         _ files: [LocalFile],
-        progress: @Sendable (String, Double) -> Void,
-        finished: @Sendable (String, Attachment) async -> Void
+        progress: @escaping @Sendable (String, Double) -> Void,
+        finished: @Sendable (String, Attachment) async throws -> Void
     ) async throws {
         for file in files {
             let attachment = try await client.upload(file: file) { value in
                 progress(file.id, value)
             }
-            await finished(file.id, attachment)
+            try await finished(file.id, attachment)
         }
     }
 }

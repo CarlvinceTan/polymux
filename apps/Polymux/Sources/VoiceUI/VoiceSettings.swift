@@ -3,123 +3,54 @@ import PolymuxKit
 
 struct VoiceSettings: View {
     let store: SettingsStore
+    let providers: [Provider]
 
     var body: some View {
         if let settings = store.value {
             Section("Voice") {
-                Picker("Mode", selection: binding(\.voiceMode) { SettingsPatch(voiceMode: $0) }) {
-                    Text("Cascaded").tag("pipeline")
-                    Text("Full Duplex").tag("live")
-                }
+                SettingsPicker("Mode", selection: binding(\.voiceMode) { SettingsPatch(voiceMode: $0) },
+                               options: [("Take turns", "pipeline"), ("Live conversation", "live")])
+                .accessibilityLabel("Voice mode")
+                Text(settings.voiceMode == "live" ? "Talk naturally and interrupt replies." : "Speak, then wait for a reply.")
+                    .font(.footnote).foregroundStyle(.muted)
                 if settings.voiceMode == "live" {
-                    Picker("Provider", selection: binding(\.liveProvider) { SettingsPatch(liveProvider: $0) }) {
-                        Text("Gemini Live").tag("gemini")
-                    }
-                    ModelSetting(store: store, live: true).id("live")
-                    Picker("Voice", selection: binding(\.liveVoice) { SettingsPatch(liveVoice: $0) }) {
-                        ForEach(["Aoede", "Kore", "Puck", "Charon", "Fenrir", "Leda", "Orus", "Zephyr"], id: \.self) {
-                            Text($0).tag($0)
-                        }
-                    }
-                } else {
-                    Picker("Provider", selection: binding(\.textProvider) { SettingsPatch(textProvider: $0) }) {
-                        Text("Gemini").tag("gemini")
-                    }
-                    ModelSetting(store: store, live: false).id("pipeline")
+                    // Each provider starts from its own model and voice.
+                    SettingsPicker("Provider", selection: binding(\.liveProvider) { provider in
+                        SettingsPatch(liveProvider: provider, liveModel: provider == "openai" ? "gpt-realtime" : "gemini-3.8-live",
+                                      liveVoice: Self.voices[provider]?.first)
+                    }, options: [("Gemini Live", "gemini"), ("OpenAI Realtime", "openai")])
+                    .accessibilityLabel("Voice provider")
+                    SettingsPicker("Model", selection: binding(\.liveModel) { SettingsPatch(liveModel: $0) },
+                                   options: models(settings).map { ($0, $0) })
+                    .accessibilityLabel("Voice model")
+                    SettingsPicker("Voice", selection: binding(\.liveVoice) { SettingsPatch(liveVoice: $0) },
+                                   options: (Self.voices[settings.liveProvider] ?? []).map { ($0.capitalized, $0) })
                 }
-                Picker("Language", selection: binding(\.voiceLanguage) { SettingsPatch(voiceLanguage: $0) }) {
-                    Text("System").tag("")
-                    ForEach(Self.languages, id: \.self) { Text(VoiceConfig.language($0)).tag($0) }
+                SettingsPicker("Language", selection: binding(\.voiceLanguage) { SettingsPatch(voiceLanguage: $0) },
+                               options: [("System", "")] + Self.languages.map { (VoiceConfig.language($0), $0) })
+                if settings.voiceMode == "live", !settings.speechKeys.contains(settings.liveProvider) {
+                    Text("No \(settings.liveProvider == "openai" ? "OpenAI" : "Gemini") provider yet.")
+                        .font(.footnote).foregroundStyle(.muted)
                 }
-                VoiceKeyView(store: store, provider: settings.voiceMode == "live" ? settings.liveProvider : settings.textProvider)
             }
-            .disabled(!store.isConnected)
             .panelRow()
         }
     }
 
+    /// Matches the voices the server accepts for each live provider.
+    private static let voices = ["gemini": ["Aoede", "Kore", "Puck", "Charon", "Fenrir", "Leda", "Orus", "Zephyr"],
+                                 "openai": ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]]
+
     private static let languages = ["en", "es", "fr", "de", "it", "pt", "nl", "pl", "ru", "tr", "ar", "hi", "id", "ja", "ko", "th", "vi", "zh"]
+
+    private func models(_ settings: PolymuxKit.Settings) -> [String] {
+        let defaults = settings.liveProvider == "openai" ? ["gpt-realtime", "gpt-realtime-mini"] : ["gemini-3.8-live"]
+        let available = providers.filter { $0.enabled && $0.type == settings.liveProvider }
+            .flatMap(\.models).filter { $0.enabled && $0.tags.contains("live") }.map(\.id)
+        return Array(Set(defaults + available + [settings.liveModel])).filter { !$0.isEmpty }.sorted()
+    }
 
     private func binding(_ path: KeyPath<PolymuxKit.Settings, String>, patch: @escaping (String) -> SettingsPatch) -> Binding<String> {
         Binding(get: { store.value?[keyPath: path] ?? "" }, set: { store.edit(patch($0)) })
-    }
-}
-
-private struct ModelSetting: View {
-    let store: SettingsStore
-    let live: Bool
-    @State private var draft = ""
-    @FocusState private var focused: Bool
-
-    private var model: String { (live ? store.value?.liveModel : store.value?.textModel) ?? "" }
-
-    var body: some View {
-        TextField("Model", text: $draft)
-            .autocorrectionDisabled()
-            .focused($focused)
-            .onSubmit { save() }
-            .onAppear { draft = model }
-            .onChange(of: model) { _, value in if !focused { draft = value } }
-            .onChange(of: focused) { _, value in if !value { save() } }
-            .onDisappear { save() }
-            #if os(iOS)
-            .textInputAutocapitalization(.never)
-            #endif
-    }
-
-    private func save() {
-        let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value != model else { return }
-        store.edit(live ? SettingsPatch(liveModel: value) : SettingsPatch(textModel: value))
-    }
-}
-
-private struct VoiceKeyView: View {
-    let store: SettingsStore
-    let provider: String
-    @State private var key = ""
-    @State private var saving = false
-    @State private var issue: String?
-
-    private var saved: Bool { store.value?.speechKeys.contains(provider) == true }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("Set API Key").fixedSize()
-            SecureField("", text: $key)
-                .labelsHidden()
-                .accessibilityLabel("API key")
-                .textFieldStyle(.plain)
-                .lineLimit(1)
-                .frame(minWidth: 0, maxWidth: .infinity)
-                .clipped()
-                .autocorrectionDisabled()
-                .onSubmit { save() }
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
-            Button("Save", action: save).disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .fixedSize()
-            if saved { Button("Remove", role: .destructive) { update(nil) }.fixedSize() }
-        }
-        .buttonStyle(.bordered)
-        .disabled(saving)
-        if let issue { Text(issue).font(.footnote).foregroundStyle(.red) }
-    }
-
-    private func save() {
-        let value = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        update(value)
-    }
-
-    private func update(_ value: String?) {
-        guard !saving else { return }
-        saving = true
-        Task {
-            defer { saving = false }
-            do { try await store.setKey(value, provider: provider); key = ""; issue = nil }
-            catch { issue = error.localizedDescription }
-        }
     }
 }

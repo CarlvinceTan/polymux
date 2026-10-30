@@ -35,7 +35,7 @@ func TestT5Compaction(t *testing.T) {
 			return TextReply("history reply")
 		}}
 	}
-	h := Start(t, Options{ID: "T5", Steps: steps})
+	h := Start(t, Options{ID: "T5", Steps: steps, Window: compactWindow})
 	for i := 0; i < turns; i++ {
 		id := fmt.Sprintf("t5-%03d", i)
 		text := id + " " + history

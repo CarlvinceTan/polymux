@@ -122,7 +122,7 @@ private final class Latch {
 
 /// Never finishes an upload, so whatever is visible cannot be waiting for the server.
 private struct BlockingUploader: UploadClient {
-    func upload(file: LocalFile, progress: @Sendable (Double) -> Void) async throws -> PolymuxKit.Attachment {
+    func upload(file: LocalFile, progress: @escaping @Sendable (Double) -> Void) async throws -> PolymuxKit.Attachment {
         dispatchPrecondition(condition: .notOnQueue(.main))
         progress(0.5)
         try await Task.sleep(for: .seconds(3600))
@@ -131,7 +131,7 @@ private struct BlockingUploader: UploadClient {
 }
 
 private struct InstantUploader: UploadClient {
-    func upload(file: LocalFile, progress: @Sendable (Double) -> Void) async throws -> PolymuxKit.Attachment {
+    func upload(file: LocalFile, progress: @escaping @Sendable (Double) -> Void) async throws -> PolymuxKit.Attachment {
         dispatchPrecondition(condition: .notOnQueue(.main))
         progress(0.25)
         progress(1)
@@ -149,7 +149,7 @@ private final class ParkedUploader: UploadClient, @unchecked Sendable {    priva
     var started: Bool { lock.withLock { entered } }
     var ranOnMain: Bool { lock.withLock { onMain } }
 
-    func upload(file: LocalFile, progress: @Sendable (Double) -> Void) async throws -> PolymuxKit.Attachment {
+    func upload(file: LocalFile, progress: @escaping @Sendable (Double) -> Void) async throws -> PolymuxKit.Attachment {
         dispatchPrecondition(condition: .notOnQueue(.main))
         let main = pthread_main_np() != 0
         let park = lock.withLock { () -> Bool in

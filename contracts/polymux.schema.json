@@ -40,6 +40,10 @@
         "messageID": {
           "type": "string"
         },
+        "agentID": {
+          "type": "string",
+          "x-swift-optional": true
+        },
         "title": {
           "type": "string"
         },
@@ -53,6 +57,7 @@
         "seq",
         "conversationID",
         "messageID",
+        "agentID",
         "title",
         "createdAt"
       ]
@@ -94,6 +99,13 @@
         },
         "enabled": {
           "type": "boolean"
+        },
+        "muted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents whose alerts this device has muted."
         }
       },
       "required": [
@@ -101,8 +113,80 @@
         "token",
         "environment",
         "server",
-        "enabled"
+        "enabled",
+        "muted"
       ]
+    },
+    "ClientState": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What a client device reports about itself; the server keys it by the authenticated device.",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "ios",
+            "macos"
+          ]
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA zone the device is set to."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "location",
+              "home",
+              "alarms"
+            ]
+          },
+          "description": "Connections the user allowed on this device."
+        }
+      },
+      "required": [
+        "platform",
+        "timezone",
+        "capabilities"
+      ]
+    },
+    "ClientRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A tool call the server asks one client device to run.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string",
+          "description": "JSON-encoded tool arguments."
+        }
+      },
+      "required": [
+        "id",
+        "capability",
+        "input"
+      ]
+    },
+    "ClientResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "type": "string",
+          "description": "JSON-encoded result."
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": []
     },
     "HostState": {
       "type": "object",
@@ -157,18 +241,13 @@
           "type": "string"
         },
         "liveProvider": {
-          "type": "string"
+          "type": "string",
+          "description": "gemini (Gemini Live) or openai (OpenAI Realtime)."
         },
         "liveModel": {
           "type": "string"
         },
         "liveVoice": {
-          "type": "string"
-        },
-        "textProvider": {
-          "type": "string"
-        },
-        "textModel": {
           "type": "string"
         },
         "voicePrompt": {
@@ -182,6 +261,25 @@
           "items": {
             "type": "string"
           }
+        },
+        "defaultProvider": {
+          "type": "string",
+          "description": "Provider of the model new bots start with; empty means the server's fallback endpoint."
+        },
+        "defaultModel": {
+          "type": "string"
+        },
+        "defaultReasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         }
       },
       "required": [
@@ -192,11 +290,12 @@
         "liveProvider",
         "liveModel",
         "liveVoice",
-        "textProvider",
-        "textModel",
         "voicePrompt",
         "voiceLanguage",
-        "speechKeys"
+        "speechKeys",
+        "defaultProvider",
+        "defaultModel",
+        "defaultReasoning"
       ]
     },
     "SettingsPatch": {
@@ -213,7 +312,8 @@
           "type": "string"
         },
         "liveProvider": {
-          "type": "string"
+          "type": "string",
+          "description": "gemini (Gemini Live) or openai (OpenAI Realtime)."
         },
         "liveModel": {
           "type": "string"
@@ -221,32 +321,33 @@
         "liveVoice": {
           "type": "string"
         },
-        "textProvider": {
-          "type": "string"
-        },
-        "textModel": {
-          "type": "string"
-        },
         "voicePrompt": {
           "type": "string"
         },
         "voiceLanguage": {
           "type": "string"
+        },
+        "defaultProvider": {
+          "type": "string",
+          "description": "Provider of the model new bots start with; empty means the server's fallback endpoint."
+        },
+        "defaultModel": {
+          "type": "string"
+        },
+        "defaultReasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         }
       },
       "required": []
-    },
-    "SpeechKey": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "key": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "key"
-      ]
     },
     "Agent": {
       "type": "object",
@@ -269,6 +370,29 @@
         },
         "avatar": {
           "$ref": "#/$defs/AvatarDesign"
+        },
+        "provider": {
+          "type": "string",
+          "description": "Settings provider serving the model; empty means the server's fallback endpoint.",
+          "x-go-value": true
+        },
+        "reasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "x-go-value": true
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "ID of the bot that created this one; empty when the user did.",
+          "x-go-value": true
         }
       },
       "required": [
@@ -283,9 +407,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "leadAgentID": {
-          "type": "string"
-        },
         "runs": {
           "type": "array",
           "items": {
@@ -426,7 +547,8 @@
             "attachment",
             "tool",
             "choice",
-            "credential"
+            "credential",
+            "vault"
           ]
         },
         "text": {
@@ -462,6 +584,9 @@
         },
         "credential": {
           "$ref": "#/$defs/CredentialRequest"
+        },
+        "vault": {
+          "$ref": "#/$defs/VaultCard"
         }
       },
       "required": [
@@ -504,12 +629,48 @@
         "text"
       ]
     },
+    "Reaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string",
+          "description": "The reacting bot; absent for the user."
+        }
+      },
+      "required": [
+        "emoji"
+      ]
+    },
+    "ReactionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "remove": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "emoji",
+        "remove"
+      ]
+    },
     "Message": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "runID": {
           "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "description": "Public reply failure code and message, retained independently of the current run. Never includes private provider detail."
         },
         "id": {
           "type": "string"
@@ -568,6 +729,12 @@
             "type": "string"
           },
           "description": "Explicit member IDs addressed by this user message."
+        },
+        "reactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Reaction"
+          }
         }
       },
       "required": [
@@ -621,6 +788,7 @@
             "message.attachment",
             "message.error",
             "message.done",
+            "message.reactions",
             "agent.presence",
             "run.start",
             "run.update",
@@ -631,7 +799,10 @@
             "peer.delivery",
             "group.handoff",
             "activity",
-            "message.read"
+            "message.read",
+            "message.end",
+            "context.compacted",
+            "run.retrying"
           ]
         },
         "messageID": {
@@ -984,7 +1155,8 @@
             "review",
             "follow_up",
             "task",
-            "event"
+            "event",
+            "child"
           ]
         },
         "taskID": {
@@ -1058,6 +1230,7 @@
             "running",
             "waiting_input",
             "waiting_peer",
+            "resuming",
             "completed",
             "failed",
             "cancelled",
@@ -1070,6 +1243,10 @@
         },
         "summary": {
           "type": "string"
+        },
+        "statusText": {
+          "type": "string",
+          "description": "The model's own line for the current step, shown instead of a tool phrase."
         }
       },
       "required": [
@@ -1174,8 +1351,7 @@
         },
         "hops": {
           "type": "integer",
-          "minimum": 0,
-          "maximum": 6
+          "minimum": 0
         }
       },
       "required": [
@@ -1205,30 +1381,6 @@
         "label"
       ]
     },
-    "FocusAnswer": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "optionID": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "optionID"
-      ]
-    },
-    "FocusStatus": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "posted": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "posted"
-      ]
-    },
     "CreateAgentRequest": {
       "type": "object",
       "additionalProperties": false,
@@ -1252,6 +1404,11 @@
         "model": {
           "type": "string",
           "maxLength": 256
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "A configured provider to run model on; omitted runs model on the server's fallback endpoint."
         },
         "avatar": {
           "$ref": "#/$defs/AvatarDesign"
@@ -1298,13 +1455,31 @@
         "prompt": {
           "type": "string",
           "maxLength": 64000
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Set together with model to explicitly remap this bot. Empty selects the server fallback."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         }
       },
-      "required": [
-        "name",
-        "role",
-        "prompt"
-      ]
+      "required": []
     },
     "AnimationBlock": {
       "type": "object",
@@ -1372,7 +1547,111 @@
             "heart",
             "tablet",
             "wedge",
-            "house"
+            "house",
+            "pumpkin",
+            "apple",
+            "pear",
+            "strawberry",
+            "bun",
+            "toast",
+            "cupcake",
+            "cat",
+            "dog",
+            "bear",
+            "rabbit",
+            "fox",
+            "hamster",
+            "capybara",
+            "otter",
+            "pig",
+            "deer",
+            "sheep",
+            "alpaca",
+            "cow",
+            "squirrel",
+            "tiger",
+            "lion",
+            "hedgehog",
+            "seal",
+            "beaver",
+            "guinea_pig",
+            "chinchilla",
+            "ferret",
+            "monkey",
+            "chick",
+            "duck",
+            "penguin",
+            "owl",
+            "parrot",
+            "goose",
+            "whale",
+            "bull",
+            "moon",
+            "wave",
+            "blossom",
+            "gumdrop",
+            "peanut",
+            "saucer",
+            "beacon",
+            "plus",
+            "magnet",
+            "acorn",
+            "pebbles",
+            "cushion",
+            "ring",
+            "gem",
+            "banana",
+            "carrot",
+            "pizza",
+            "sushi",
+            "ice_cream",
+            "sun",
+            "leaf",
+            "tree",
+            "cactus",
+            "mushroom",
+            "mountain",
+            "volcano",
+            "rainbow",
+            "snowflake",
+            "rocket",
+            "robot",
+            "camera",
+            "clock",
+            "key",
+            "bell",
+            "book",
+            "teapot",
+            "lemon",
+            "orange_fruit",
+            "watermelon",
+            "avocado",
+            "cherry",
+            "cookie",
+            "cheese",
+            "egg",
+            "candy",
+            "donut",
+            "tulip",
+            "rose",
+            "sprout",
+            "fern",
+            "pinecone",
+            "shell",
+            "coral",
+            "crystal",
+            "comet",
+            "planet",
+            "mug",
+            "lantern",
+            "gift",
+            "pencil",
+            "paintbrush",
+            "umbrella",
+            "backpack",
+            "headphones",
+            "guitar",
+            "telescope"
           ]
         },
         "color": {
@@ -1456,9 +1735,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "leadAgentID": {
-          "type": "string"
-        },
         "agentIDs": {
           "type": "array",
           "items": {
@@ -1516,9 +1792,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "leadAgentID": {
-          "type": "string"
-        },
         "agentIDs": {
           "type": "array",
           "items": {
@@ -1594,6 +1867,12 @@
           }
         },
         "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bundledSkills": {
           "type": "array",
           "items": {
             "type": "string"
@@ -1818,12 +2097,6 @@
           "items": {
             "type": "string"
           }
-        },
-        "messageIDs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
         }
       },
       "required": [
@@ -1862,14 +2135,33 @@
         "label": {
           "type": "string"
         },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "api",
+            "ssh"
+          ]
+        },
         "origin": {
           "type": "string"
+        },
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "header": {
           "type": "string"
         },
         "scheme": {
           "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "ephemeral": {
+          "type": "boolean"
         },
         "status": {
           "type": "string",
@@ -1883,6 +2175,7 @@
       "required": [
         "name",
         "label",
+        "kind",
         "origin",
         "header",
         "scheme",
@@ -1905,6 +2198,220 @@
         "skip"
       ]
     },
+    "VaultCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "edit",
+            "import"
+          ]
+        },
+        "itemID": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "keyPath": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "done"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "itemID",
+        "title",
+        "kind",
+        "url",
+        "status"
+      ],
+      "description": "Non-secret reference only. Saved values and import passwords never belong in chat parts."
+    },
+    "VaultImport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "added": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "added",
+        "skipped"
+      ]
+    },
+    "VaultStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "created": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "protection": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "created",
+        "available",
+        "protection"
+      ]
+    },
+    "VaultCode": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "used": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "value",
+        "used"
+      ]
+    },
+    "VaultItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "login",
+            "api",
+            "card",
+            "totp",
+            "note",
+            "recovery",
+            "wifi",
+            "passkey"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "codes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VaultCode"
+          }
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "url",
+        "fields",
+        "codes",
+        "revision",
+        "removed"
+      ]
+    },
+    "VaultSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "origin",
+        "fields",
+        "revision"
+      ]
+    },
+    "VaultBrowser": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "endpoint"
+      ]
+    },
     "RoutineWatch": {
       "type": "object",
       "additionalProperties": false,
@@ -1924,6 +2431,290 @@
       },
       "required": [
         "url"
+      ]
+    },
+    "ProviderModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tags",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "contextWindow": {
+          "type": "integer",
+          "description": "Input tokens the model accepts, when the provider reports it; zero means unknown.",
+          "x-go-value": true
+        }
+      }
+    },
+    "Provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "name",
+        "baseURL",
+        "enabled",
+        "order",
+        "models"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "A PiG provider ID, gemini for Google, or a local type: elevenlabs, ollama, lmstudio or custom."
+        },
+        "name": {
+          "type": "string"
+        },
+        "baseURL": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-go-value": true
+        },
+        "sessionHeader": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "status": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "How the provider is signed in, set by the server: oauth or api_key; empty when it has no credential."
+        },
+        "keyHint": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "order": {
+          "type": "integer",
+          "x-go-type": "int"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderModel"
+          }
+        }
+      }
+    },
+    "ProviderOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One way to add a provider: signing in to an account or entering an API key.",
+      "required": [
+        "type",
+        "name",
+        "auth",
+        "label",
+        "subscription"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "oauth",
+            "api_key"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "description": "The sign-in method's name, such as Anthropic (Claude Pro/Max)."
+        },
+        "subscription": {
+          "type": "boolean",
+          "description": "Signing in uses a paid subscription rather than an account."
+        }
+      }
+    },
+    "LoginChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "x-go-value": true
+        }
+      }
+    },
+    "LoginPrompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "message"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "x-go-type": "int",
+          "description": "Answers name the prompt they reply to."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "secret",
+            "manual_code",
+            "select"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "placeholder": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LoginChoice"
+          }
+        }
+      }
+    },
+    "LoginEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "info",
+            "auth_url",
+            "device_code",
+            "progress"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "url": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "instructions": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "userCode": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "verificationUri": {
+          "type": "string",
+          "x-go-value": true
+        }
+      }
+    },
+    "ProviderLogin": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A provider sign-in in progress on the server.",
+      "required": [
+        "id",
+        "revision",
+        "events",
+        "done"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "x-go-type": "int",
+          "description": "Increases with every change; polling with it waits for the next one."
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LoginEvent"
+          }
+        },
+        "prompt": {
+          "$ref": "#/$defs/LoginPrompt"
+        },
+        "done": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "provider": {
+          "$ref": "#/$defs/Provider",
+          "description": "The provider signed in, once done."
+        }
+      }
+    },
+    "MCPStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "connected",
+        "tools"
       ]
     }
   },
@@ -1951,6 +2742,78 @@
     }
   ],
   "x-http": {
+    "GET /vault": {
+      "response": {
+        "$ref": "#/$defs/VaultStatus"
+      },
+      "privacy": "All vault routes require device authentication, a non-browser request, and a private transport. Responses are no-store; vault content never joins chat, search, events, or ordinary client caches."
+    },
+    "GET /vault/items": {
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/VaultSummary"
+        }
+      },
+      "authentication": "Paired device and encrypted transport required. Returns names, origins, field names, and revisions only; no values or unlock session."
+    },
+    "PUT /vault/items/{id}": {
+      "request": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "concurrency": "Client-generated IDs and revisions prevent lost updates; revision 0 creates."
+    },
+    "GET /vault/items/{id}": {
+      "response": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "authentication": "Returns metadata and blank replacement fields only; saved values never leave the server."
+    },
+    "DELETE /vault/items/{id}": {
+      "query": {
+        "revision": "Required current item revision."
+      },
+      "status": 204,
+      "authentication": "Paired device required."
+    },
+    "POST /vault/cards/{id}/save": {
+      "request": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "description": "Private card edit: saves encrypted fields and a value-free completion in one transaction; requires device pairing."
+    },
+    "POST /vault/import": {
+      "response": {
+        "$ref": "#/$defs/VaultImport"
+      },
+      "description": "Private Settings import. Requires device pairing. Accepts CSV or JSON up to 8 MiB, or multipart KDBX up to 32 MiB with password and optional keyfile up to 1 MiB. Never accepts server paths or creates chat cards; imports atomically and skips duplicates."
+    },
+    "POST /vault/cards/{id}/import": {
+      "response": {
+        "$ref": "#/$defs/VaultImport"
+      },
+      "description": "Private CSV or JSON upload, raw body up to 8 MiB; never an ordinary chat attachment. Requires device pairing; stores only encrypted entries and completion metadata."
+    },
+    "GET /vault/browser": {
+      "response": {
+        "$ref": "#/$defs/VaultBrowser"
+      }
+    },
+    "PUT /vault/browser": {
+      "request": {
+        "$ref": "#/$defs/VaultBrowser"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultBrowser"
+      },
+      "authentication": "Only an explicit loopback Chromium CDP endpoint is accepted."
+    },
     "GET /agents": {
       "response": {
         "type": "array",
@@ -2095,21 +2958,12 @@
         "$ref": "#/$defs/Thread"
       }
     },
-    "POST /agents/{id}/focus": {
-      "request": null,
+    "DELETE /threads/{id}": {
       "response": {
-        "$ref": "#/$defs/FocusStatus"
+        "$ref": "#/$defs/DeleteResponse"
       },
-      "note": "post the deterministic first-run card once, while the conversation has no user turn"
-    },
-    "POST /agents/{id}/focus/answer": {
-      "request": {
-        "$ref": "#/$defs/FocusAnswer"
-      },
-      "response": {
-        "$ref": "#/$defs/FocusStatus"
-      },
-      "note": "record the chosen first-run option and post its deterministic acknowledgment"
+      "status": 200,
+      "note": "Delete a group chat and its messages while preserving its member bots. Direct bot chats return 409; missing chats return 404."
     },
     "POST /threads/{id}/messages/{messageID}/answer": {
       "request": {

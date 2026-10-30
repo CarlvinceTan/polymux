@@ -1,0 +1,36 @@
+:root {
+  color-scheme: dark;
+  --page: #0d0d0f;
+  --surface: #171719;
+  --soft: #252528;
+  --ink: #f4f4f5;
+  --text: #d4d4d8;
+  --muted: #a1a1aa;
+  --line: #37373c;
+  --focus: #888891;
+  --accent: #e4e4e7;
+  --accent-hover: #fff;
+  --on-accent: #111113;
+  --scrim: #000c;
+  --shadow: 0 20px 60px #0006;
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, monospace;
+  --font-serif: ui-serif, Georgia, serif;
+  --width: 1080px;
+  --wide: 1180px;
+  --prose-width: 760px;
+  --header-size: 68px;
+  --radius-small: 8px;
+  --radius: 14px;
+  --radius-large: 18px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --title-size: clamp(40px, 6vw, 72px);
+}

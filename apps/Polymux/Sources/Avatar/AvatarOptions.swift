@@ -143,7 +143,7 @@ struct AvatarPoke: Equatable {
             if let design = agent.avatar {
                 let value = AvatarOptions(design: design)
                 if saved[agent.id] != value { saved[agent.id] = value }
-            } else {
+            } else if saved[agent.id] != nil {
                 saved.removeValue(forKey: agent.id)
             }
         }
@@ -167,9 +167,8 @@ struct AvatarPoke: Equatable {
             guard editing[agentID] == nil, knownIDs?.contains(agentID) != false else { continue }
             do { try await commit(for: agentID, client: client, allowEditing: false) }
             catch {
-                sidebar.commits.report("Couldn’t save the avatar. Your changes remain on this device.") { [self] in
-                    Task { await flush(client: client) }
-                }
+                // The sidebar's refresh loop flushes again, so this only reports.
+                sidebar.commits.report("Couldn’t save the avatar. Your changes remain on this device.")
             }
         }
     }

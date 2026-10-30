@@ -68,23 +68,26 @@ func (*testSession) Abort(context.Context) error { return nil }
 func (*testSession) Close() error                { return nil }
 func (*testSession) Path() string                { return "test.jsonl" }
 
-type timeoutFactory struct{ aborted chan struct{} }
+// timeoutFactory's sessions block until aborted; aborted closes on the first abort.
+type timeoutFactory struct {
+	aborted   chan struct{}
+	abortOnce sync.Once
+}
 
 func (f *timeoutFactory) Open(context.Context, agentruntime.Definition, string) (agentruntime.Session, error) {
-	return &timeoutSession{testSession: &testSession{factory: &testFactory{block: true}}, aborted: f.aborted}, nil
+	return &timeoutSession{testSession: &testSession{factory: &testFactory{block: true}}, factory: f}, nil
 }
 
 type timeoutSession struct {
 	*testSession
-	aborted   chan struct{}
-	abortOnce sync.Once
+	factory *timeoutFactory
 }
 
 func (s *timeoutSession) Abort(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.abortOnce.Do(func() { close(s.aborted) })
+	s.factory.abortOnce.Do(func() { close(s.factory.aborted) })
 	return nil
 }
 
@@ -272,7 +275,7 @@ func startTest(t *testing.T, f Factory) (*Server, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api, err := New(t.Context(), s, Config{DataDir: dir, Definitions: []agentruntime.Definition{{Agent: contract.Agent{ID: "assistant", Name: "Assistant"}}}, Factory: f, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	api, err := New(t.Context(), s, Config{DataDir: dir, Definitions: []agentruntime.Definition{{Agent: contract.Agent{ID: "assistant", Name: "Assistant"}}}, Factory: f, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), VaultKeys: &vaultKeys{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,6 +343,81 @@ func TestSendReplayAndSSE(t *testing.T) {
 	}
 	if f.calls.Load() != 1 {
 		t.Fatalf("duplicate model run: %d", f.calls.Load())
+	}
+}
+
+func TestReplySurvivesClientDisconnect(t *testing.T) {
+	started := make(chan context.Context, 1)
+	release := make(chan struct{})
+	factory := &voiceFactory{script: func(ctx context.Context, _ agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		started <- ctx
+		select {
+		case <-release:
+			return agentruntime.Result{Text: "Hello there"}, nil
+		case <-ctx.Done():
+			return agentruntime.Result{}, ctx.Err()
+		}
+	}}
+	api, web := startTest(t, factory)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	client := web.Client()
+	defer client.CloseIdleConnections()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, web.URL+"/threads/assistant/messages", strings.NewReader(`{"id":"disconnect","text":"Keep working","attachmentIDs":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("send status = %d", response.StatusCode)
+	}
+	var runCtx context.Context
+	select {
+	case runCtx = <-started:
+	case <-ctx.Done():
+		t.Fatal("agent did not start")
+	}
+	request, err = http.NewRequestWithContext(ctx, http.MethodGet, web.URL+"/threads/assistant/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d", response.StatusCode)
+	}
+	if _, err := bufio.NewReader(response.Body).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	response.Body.Close()
+	client.CloseIdleConnections()
+	if err := runCtx.Err(); err != nil {
+		t.Fatalf("disconnect cancelled the agent: %v", err)
+	}
+	close(release)
+	awaitReply(t, api, "assistant", "disconnect")
+
+	// A newly connected client can read the reply completed while no client was listening.
+	response, err = web.Client().Get(web.URL + "/threads/assistant/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var messages []contract.Message
+	if err := json.NewDecoder(response.Body).Decode(&messages); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(messages) != 2 || messages[1].Status != "done" || store.Text(messages[1]) != "Hello there" {
+		t.Fatalf("reconnected client received %d %+v", response.StatusCode, messages)
 	}
 }
 

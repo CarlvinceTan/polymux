@@ -15,8 +15,8 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/CarlvinceTan/polymux/packages/memory"
 )
 
 func deleteRequest(t *testing.T, api *Server, id string, status int) {
@@ -27,6 +27,51 @@ func deleteRequest(t *testing.T, api *Server, id string, status int) {
 	err := json.Unmarshal(recorder.Body.Bytes(), &result)
 	if recorder.Code != status || status == 200 && (err != nil || !result.Deleted) {
 		t.Fatalf("delete status=%d body=%s err=%v", recorder.Code, recorder.Body.String(), err)
+	}
+}
+
+func TestDeleteThreadKeepsItsMembers(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(t.Context(), filepath.Join(dir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	api, err := New(t.Context(), db, Config{DataDir: dir, Factory: &testFactory{},
+		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Definitions: []agentruntime.Definition{{Agent: contract.Agent{ID: "a", Name: "A"}}, {Agent: contract.Agent{ID: "b", Name: "B"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	created := httptest.NewRecorder()
+	api.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/threads", strings.NewReader(`{"agentIDs":["a","b"]}`)))
+	var group contract.Thread
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &group) != nil {
+		t.Fatal("group creation failed", created.Code)
+	}
+	for _, tc := range []struct {
+		id     string
+		status int
+	}{
+		{id: "a", status: http.StatusConflict},
+		{id: "missing", status: http.StatusNotFound},
+		{id: group.ID, status: http.StatusOK},
+		{id: group.ID, status: http.StatusNotFound},
+	} {
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/threads/"+tc.id, nil))
+		if response.Code != tc.status {
+			t.Fatalf("delete %s: %d %s", tc.id, response.Code, response.Body.String())
+		}
+	}
+	threads, err := db.Threads(t.Context())
+	if err != nil || len(threads) != 2 {
+		t.Fatal("member chats changed", threads, err)
+	}
+	agents, err := db.Agents(t.Context())
+	if err != nil || len(agents) != 2 {
+		t.Fatal("group deletion removed its members", agents, err)
 	}
 }
 

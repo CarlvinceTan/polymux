@@ -15,8 +15,8 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/memory"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/CarlvinceTan/polymux/packages/memory"
 	"github.com/MichaelKinsy/PiG/agent"
 )
 
@@ -123,6 +123,25 @@ func TestMemoryContextOmitsEmptyBlock(t *testing.T) {
 	message, err = api.memoryContext(t.Context(), group, contract.Message{}, "")
 	if err != nil || len(message.Parts) != 0 {
 		t.Fatalf("empty group produced a header: %q %v", store.Text(message), err)
+	}
+}
+
+func TestFreshMemoryStatesFailure(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	run := contract.Run{ID: "run", AgentID: "assistant", ConversationID: "assistant"}
+	if _, err := api.memory.Save(t.Context(), "assistant", "assistant", memory.Document{Name: "tea", Text: "Prefers green tea."}); err != nil {
+		t.Fatal(err)
+	}
+	build := api.freshMemory(run, "tea")
+	texts, err := build(t.Context())
+	if err != nil || len(texts) != 1 || !strings.Contains(texts[0], "Prefers green tea.") {
+		t.Fatalf("fresh memory = %q, %v", texts, err)
+	}
+	if err := api.memory.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if texts, err := build(t.Context()); err != nil || len(texts) != 1 || texts[0] != memoryUnavailable {
+		t.Fatalf("a failed read must say so, not look empty: %q, %v", texts, err)
 	}
 }
 
@@ -245,7 +264,15 @@ func (f *memoryFactory) Open(context.Context, agentruntime.Definition, string) (
 
 type memorySession struct{ factory *memoryFactory }
 
-func (s *memorySession) Send(_ context.Context, m contract.Message, _ func(agentruntime.Delta) error) (agentruntime.Result, error) {
+func (s *memorySession) Send(ctx context.Context, m contract.Message, _ func(agentruntime.Delta) error) (agentruntime.Result, error) {
+	// The durable runtime adds this to each model request.
+	fresh, err := agentruntime.Fresh(ctx)
+	if err != nil {
+		return agentruntime.Result{}, err
+	}
+	for _, text := range slices.Backward(fresh) {
+		m.Parts = append([]contract.Part{{Kind: contract.PartKindText, Text: &text}}, m.Parts...)
+	}
 	s.factory.received <- m
 	return agentruntime.Result{Text: "Noted"}, nil
 }
