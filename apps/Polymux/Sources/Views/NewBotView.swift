@@ -27,12 +27,9 @@ struct NewBotView: View {
                             #endif
                     }
                     ShapeGrid(options: $options, labels: false, columns: 5, size: 40, colorSize: 28, rowSpacing: 4)
-                    LabeledContent("Model") {
-                        Text(session.settings.value?.defaultModel.isEmpty == false
-                             ? ModelName(model: session.settings.value?.defaultModel ?? "").title : "Server default")
-                            .foregroundStyle(.muted).lineLimit(1)
-                    }
-                    .font(.subheadline)
+                    #if os(macOS)
+                    model
+                    #endif
                 }
                 .padding(.horizontal, 24)
             }
@@ -43,6 +40,10 @@ struct NewBotView: View {
                     .font(.caption).foregroundStyle(.muted).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            #if os(iOS)
+            // The phone sheet is too short to fit it below the avatar choices.
+            if message == nil { model.padding(.leading, 8) }
+            #endif
             Button { Task { await create() } } label: {
                 if creating { ProgressView().controlSize(.small) }
                 else { Text("Create") }
@@ -52,10 +53,22 @@ struct NewBotView: View {
         }
         .interactiveDismissDisabled(creating)
         .panelDismiss(enabled: !creating, onClose: cancel)
+        #if os(macOS)
+        // On a phone the keyboard would cover the avatar choices below the name.
         .task { focused = true }
+        #endif
         .keepDraft(Self.draftKey, value: Binding(get: { BotDraft(name: name, options: options) },
                                                  set: { name = $0.name; options = $0.options }),
                    cache: session.sidebar.cacheActor)
+    }
+
+    private var model: some View {
+        LabeledContent("Model") {
+            Text(session.settings.value?.defaultModel.isEmpty == false
+                 ? ModelName(model: session.settings.value?.defaultModel ?? "").title : "Server default")
+                .foregroundStyle(.muted).lineLimit(1)
+        }
+        .font(.subheadline)
     }
 
     private static let draftKey = "draft/new-bot"
