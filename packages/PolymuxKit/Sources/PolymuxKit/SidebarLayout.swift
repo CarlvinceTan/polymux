@@ -223,9 +223,8 @@ public final class SidebarLayout {
         do { result = try await send() }
         catch {
             snapshot = previous
-            // Only a lost connection retries; a change the server refused would fail again.
-            if error.isTransient { issue = "Couldn’t save that change yet. It will try again." }
-            else { retryAction = nil; issue = error.reason(or: "Couldn’t save that change.") }
+            // Only a lost connection retries, silently; a change the server refused would fail again.
+            if !error.isTransient { retryAction = nil; issue = error.reason(or: "Couldn’t save that change.") }
             if locking { isSaving = false }
             return nil
         }

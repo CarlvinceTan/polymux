@@ -79,10 +79,33 @@ struct SidebarLayoutTests {
         await LayoutProtocol.server.release(fail: true, status: 503)
         await task.value
         #expect(rig.layout.applying(to: rig.thread).sectionID == "projects")
-        #expect(rig.layout.issue?.contains("try again") == true)
+        #expect(rig.layout.issue == nil)
         // The next successful refresh sends the change again without being asked.
         await rig.layout.refresh()
         #expect(rig.layout.applying(to: rig.thread).sectionID == "general")
+        #expect(rig.layout.issue == nil)
+    }
+
+    @Test func retriedChangeShowsALineOnlyOnceRefused() async throws {
+        let rig = try await LayoutRig()
+        defer { rig.clean() }
+        await rig.layout.refresh()
+        await LayoutProtocol.server.pauseMutation()
+        let move = Task { await rig.layout.move(rig.thread, to: "general") }
+        while await !LayoutProtocol.server.waiting { await Task.yield() }
+        await LayoutProtocol.server.release(fail: true, status: 503)
+        await move.value
+        #expect(rig.layout.issue == nil)
+        await LayoutProtocol.server.pauseMutation()
+        let retry = Task { await rig.layout.refresh() }
+        while await !LayoutProtocol.server.waiting { await Task.yield() }
+        await LayoutProtocol.server.release(fail: true)
+        await retry.value
+        #expect(rig.layout.applying(to: rig.thread).sectionID == "projects")
+        #expect(rig.layout.issue?.contains("Test refusal") == true)
+        // Refused for good: the line clears and the change isn't sent again.
+        await rig.layout.refresh()
+        #expect(rig.layout.applying(to: rig.thread).sectionID == "projects")
         #expect(rig.layout.issue == nil)
     }
 
