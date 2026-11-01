@@ -23,11 +23,12 @@ python3 - "$OUT/checks" <<'PY'
 import subprocess, sys
 checks = subprocess.Popen([sys.argv[1]])
 try:
-    code = checks.wait(timeout=30)
+    # CI's virtual GPU renders far slower than real hardware.
+    code = checks.wait(timeout=180)
 except subprocess.TimeoutExpired:
     # The timeout alone can't say where it stuck.
     subprocess.run(["sample", str(checks.pid), "3", "-file", "/dev/stdout"])
     checks.kill()
-    raise SystemExit("Avatar rendering stalled for more than 30 seconds")
+    raise SystemExit("Avatar rendering stalled for more than 180 seconds")
 raise SystemExit(code)
 PY
