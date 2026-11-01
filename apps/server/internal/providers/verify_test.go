@@ -20,8 +20,8 @@ func TestVerifyKey(t *testing.T) {
 		{name: "unavailable", status: http.StatusServiceUnavailable},
 		{name: "redirect", status: http.StatusTemporaryRedirect},
 	} {
+		// Not parallel: closing a test server drops idle connections on the shared default transport.
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer test-key" {
 					t.Error("verification did not use the authenticated model list")
