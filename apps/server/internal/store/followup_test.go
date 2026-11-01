@@ -247,6 +247,12 @@ func TestTimeoutFollowupContext(t *testing.T) {
 	if err != nil || !slices.Contains(ids, child.ID) || slices.Contains(ids, followID) {
 		t.Fatal("cancelling the parent's children must spare its follow-up", ids, err)
 	}
+	stopped, err := descendantIDs(func(query string, args ...any) (*sql.Rows, error) {
+		return s.DB.QueryContext(t.Context(), query, args...)
+	}, parent.ID, false)
+	if err != nil || !slices.Contains(stopped, followID) {
+		t.Fatal("Stop must reach the follow-up too", stopped, err)
+	}
 }
 
 func TestGroupTimeoutChat(t *testing.T) {

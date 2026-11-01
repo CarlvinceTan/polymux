@@ -112,14 +112,15 @@ SELECT child.id FROM runs child JOIN kids ON json_extract(child.data,'$.parentRu
 	return nil
 }
 
-// descendantIDs lists work to stop with its parent. A follow-up reports the parent's outcome, so it and its children stay.
-func descendantIDs(query func(string, ...any) (*sql.Rows, error), id string) ([]string, error) {
+// descendantIDs lists the runs under id. spare skips follow-ups and their children, for a parent that failed:
+// a follow-up reports that failure. A person pressing Stop means all of it, so Stop doesn't spare them.
+func descendantIDs(query func(string, ...any) (*sql.Rows, error), id string, spare bool) ([]string, error) {
 	rows, err := query(`WITH RECURSIVE kids(id) AS (
-SELECT id FROM runs WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.trigger') IS NOT 'follow_up'
+SELECT id FROM runs WHERE json_extract(data,'$.parentRunID')=? AND NOT (? AND json_extract(data,'$.trigger') IS 'follow_up')
 UNION
 SELECT child.id FROM runs child JOIN kids ON json_extract(child.data,'$.parentRunID')=kids.id
-WHERE json_extract(child.data,'$.trigger') IS NOT 'follow_up'
-) SELECT id FROM kids`, id)
+WHERE NOT (? AND json_extract(child.data,'$.trigger') IS 'follow_up')
+) SELECT id FROM kids`, id, spare, spare)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ WHERE json_extract(child.data,'$.trigger') IS NOT 'follow_up'
 func (s *Store) DescendantIDs(ctx context.Context, id string) ([]string, error) {
 	return descendantIDs(func(query string, args ...any) (*sql.Rows, error) {
 		return s.DB.QueryContext(ctx, query, args...)
-	}, id)
+	}, id, true)
 }
 
 func (s *Store) PendingPeers(ctx context.Context, agentID string) ([]string, error) {
@@ -324,7 +325,7 @@ func (s *Store) StopWaiting(ctx context.Context, thread string) ([]string, error
 	if len(ids) == 0 {
 		ids, err = descendantIDs(func(query string, args ...any) (*sql.Rows, error) {
 			return tx.QueryContext(ctx, query, args...)
-		}, run.ID)
+		}, run.ID, false)
 		if err != nil {
 			return nil, err
 		}

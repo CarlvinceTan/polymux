@@ -20,15 +20,16 @@ xcrun swiftc -swift-version 6 -parse-as-library -module-name AvatarRenderChecks 
   "$PRODUCTS/AvatarKit.o" "$PRODUCTS/PolymuxKit.o" "$PRODUCTS/IrohLib.o" \
   "$PRODUCTS/libiroh_ffi.a" -lsqlite3 -framework SystemConfiguration -o "$OUT/checks"
 python3 - "$OUT/checks" <<'PY'
-import subprocess, sys
+import os, subprocess, sys
+# CI's virtual GPU takes 50 to 80 seconds; a real one takes about 3.
+limit = 180 if os.environ.get("CI") else 30
 checks = subprocess.Popen([sys.argv[1]])
 try:
-    # CI's virtual GPU renders far slower than real hardware.
-    code = checks.wait(timeout=180)
+    code = checks.wait(timeout=limit)
 except subprocess.TimeoutExpired:
     # The timeout alone can't say where it stuck.
     subprocess.run(["sample", str(checks.pid), "3", "-file", "/dev/stdout"])
     checks.kill()
-    raise SystemExit("Avatar rendering stalled for more than 180 seconds")
+    raise SystemExit(f"Avatar rendering stalled for more than {limit} seconds")
 raise SystemExit(code)
 PY
