@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run unit tests. Usage: scripts/test.sh [server|packages|swift|tools|all] [test args...]
+# Run unit tests. Usage: scripts/test.sh [server|packages|plugins|swift|tools|all] [test args...]
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 TARGET=${1:-all}
@@ -12,6 +12,7 @@ package_tests() {
     (cd "$ROOT/packages/$package" && GOWORK=off go test "${@:-./...}")
   done
 }
+plugin_tests() { (cd "$ROOT/plugins" && GOWORK=off go test "${@:-./...}"); }
 swift_tests() { (cd "$ROOT" && swift test "$@"); }
 tool_tests() {
   for test in "$ROOT"/scripts/*_test.py; do
@@ -23,10 +24,11 @@ tool_tests() {
 case "$TARGET" in
   server) server "$@" ;;
   packages) package_tests "$@" ;;
+  plugins) plugin_tests "$@" ;;
   swift) swift_tests "$@" ;;
   tools) tool_tests ;;
   all)
-    [ $# = 0 ] || { echo 'Choose server, packages or swift when passing test arguments.' >&2; exit 2; }
-    server; package_tests; swift_tests; tool_tests ;;
-  *) echo "usage: $0 [server|packages|swift|tools|all] [test args...]" >&2; exit 2 ;;
+    [ $# = 0 ] || { echo 'Choose server, packages, plugins or swift when passing test arguments.' >&2; exit 2; }
+    server; package_tests; plugin_tests; swift_tests; tool_tests ;;
+  *) echo "usage: $0 [server|packages|plugins|swift|tools|all] [test args...]" >&2; exit 2 ;;
 esac

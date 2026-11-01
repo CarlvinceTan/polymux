@@ -1,0 +1,12 @@
+{
+  "name": "hub",
+  "title": "Hub",
+  "description": "Your messages and mail in one place.",
+  "symbol": "tray.2",
+  "selectedSymbol": "tray.2.fill",
+  "version": "0.1.0",
+  "kind": "global",
+  "surface": "hub",
+  "engines": { "plugins": 1 },
+  "service": "bin/polymux-hub"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "tailscale",
+  "title": "Tailscale",
+  "description": "Reach this server from your other devices over your tailnet.",
+  "version": "0.1.0",
+  "kind": "global",
+  "engines": { "plugins": 1 },
+  "service": "bin/polymux-tailscale",
+  "provides": ["transport"],
+  "settings": [
+    { "key": "https-port", "title": "HTTPS port", "type": "text", "default": "8443" },
+    { "key": "device-port", "title": "Device port", "type": "text", "default": "7339" }
+  ]
+}
