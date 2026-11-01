@@ -112,11 +112,13 @@ SELECT child.id FROM runs child JOIN kids ON json_extract(child.data,'$.parentRu
 	return nil
 }
 
+// descendantIDs lists work to stop with its parent. A follow-up reports the parent's outcome, so it and its children stay.
 func descendantIDs(query func(string, ...any) (*sql.Rows, error), id string) ([]string, error) {
 	rows, err := query(`WITH RECURSIVE kids(id) AS (
-SELECT id FROM runs WHERE json_extract(data,'$.parentRunID')=?
+SELECT id FROM runs WHERE json_extract(data,'$.parentRunID')=? AND json_extract(data,'$.trigger') IS NOT 'follow_up'
 UNION
 SELECT child.id FROM runs child JOIN kids ON json_extract(child.data,'$.parentRunID')=kids.id
+WHERE json_extract(child.data,'$.trigger') IS NOT 'follow_up'
 ) SELECT id FROM kids`, id)
 	if err != nil {
 		return nil, err

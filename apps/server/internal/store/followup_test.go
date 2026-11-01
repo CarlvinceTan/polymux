@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -237,6 +238,14 @@ func TestTimeoutFollowupContext(t *testing.T) {
 		if strings.HasPrefix(message.ID, "receipt:") || strings.Contains(Text(message), note) {
 			t.Fatal("timeout note landed in the 1:1 thread", message)
 		}
+	}
+	if _, err := s.Job(t.Context(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.DescendantIDs(t.Context(), parent.ID)
+	followID := NewRun("followup:"+parent.ID, "a", "a", "follow_up").ID
+	if err != nil || !slices.Contains(ids, child.ID) || slices.Contains(ids, followID) {
+		t.Fatal("cancelling the parent's children must spare its follow-up", ids, err)
 	}
 }
 
