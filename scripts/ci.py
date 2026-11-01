@@ -29,14 +29,22 @@ def selection(event, kind):
     return None
 
 
+def changed(base, cwd=None):
+    # A rename would list only the new path, hiding the area a file left.
+    diff = subprocess.run(
+        ["git", "diff", "--name-only", "--no-renames", "-z", base, "HEAD"], capture_output=True, cwd=cwd,
+    )
+    return diff.stdout.decode().split("\0") if diff.returncode == 0 else None
+
+
 if __name__ == "__main__":
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     base = selection(event, os.environ["GITHUB_EVENT_NAME"])
     result = {"server": True, "swift": True}
     if base:
         # A missing base runs the full checks, including after a history rewrite.
-        diff = subprocess.run(["git", "diff", "--name-only", "-z", base, "HEAD"], capture_output=True)
-        if diff.returncode == 0:
-            result = affected(diff.stdout.decode().split("\0"))
+        paths = changed(base)
+        if paths is not None:
+            result = affected(paths)
     for name, value in result.items():
         print(f"{name}={str(value).lower()}")

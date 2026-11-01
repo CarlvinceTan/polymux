@@ -1,6 +1,9 @@
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
-from ci import affected, selection
+from ci import affected, changed, selection
 
 
 class SelectionTests(unittest.TestCase):
@@ -23,6 +26,22 @@ class SelectionTests(unittest.TestCase):
         self.assertIsNone(selection({"before": "0" * 40}, "push"))
         self.assertIsNone(selection({"before": "existing", "ref": "refs/tags/app-v1.0.0"}, "push"))
         self.assertEqual(selection({"pull_request": {"base": {"sha": "base"}}}, "pull_request"), "base")
+
+    def test_moving_a_file_out_checks_where_it_left(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            def git(*args):
+                subprocess.run(["git", "-c", "user.name=ci", "-c", "user.email=ci@example.com",
+                                "-c", "commit.gpgsign=false", *args], cwd=repo, check=True, capture_output=True)
+            git("init")
+            (repo / "apps/server").mkdir(parents=True)
+            (repo / "docs").mkdir()
+            (repo / "apps/server/main.go").write_text("package main\n" * 20)
+            git("add", ".")
+            git("commit", "-m", "add")
+            git("mv", "apps/server/main.go", "docs/main.go")
+            git("commit", "-m", "move")
+            self.assertTrue(affected(changed("HEAD~1", repo))["server"])
 
 
 if __name__ == "__main__":
