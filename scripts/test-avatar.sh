@@ -21,8 +21,13 @@ xcrun swiftc -swift-version 6 -parse-as-library -module-name AvatarRenderChecks 
   "$PRODUCTS/libiroh_ffi.a" -lsqlite3 -framework SystemConfiguration -o "$OUT/checks"
 python3 - "$OUT/checks" <<'PY'
 import subprocess, sys
+checks = subprocess.Popen([sys.argv[1]])
 try:
-    subprocess.run([sys.argv[1]], check=True, timeout=30)
+    code = checks.wait(timeout=30)
 except subprocess.TimeoutExpired:
+    # The timeout alone can't say where it stuck.
+    subprocess.run(["sample", str(checks.pid), "3", "-file", "/dev/stdout"])
+    checks.kill()
     raise SystemExit("Avatar rendering stalled for more than 30 seconds")
+raise SystemExit(code)
 PY
