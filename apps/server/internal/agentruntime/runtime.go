@@ -181,6 +181,16 @@ func runtimeMessage(m contract.Message) core.Message {
 	}
 	return out
 }
+// ShellHost and ShellResult move a long command out of a turn; see core.ShellHost.
+type (
+	ShellHost   = core.ShellHost
+	ShellResult = core.ShellResult
+)
+
+func WithShell(ctx context.Context, host *ShellHost) context.Context {
+	return core.WithShell(ctx, host)
+}
+
 func WithSteers(ctx context.Context, drain func(context.Context, func([]contract.Message) error) error) context.Context {
 	return core.WithSteers(ctx, func(ctx context.Context, persist func([]core.Message) error) error {
 		return drain(ctx, func(messages []contract.Message) error {

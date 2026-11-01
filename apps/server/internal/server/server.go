@@ -95,6 +95,7 @@ type Server struct {
 	slots      chan struct{}
 	resources  sync.Map
 	turns      sync.Map
+	shells     sync.Map
 	voices     map[string]*voiceWork
 	voiceSeen  map[string]bool
 	speechDial func(ctx context.Context, provider, model, key string) (*websocket.Conn, error)
@@ -319,6 +320,10 @@ func (s *Server) Close() error {
 		s.actorsMu.Lock()
 		s.closing = true
 		s.cancel()
+		s.shells.Range(func(_, value any) bool {
+			value.(*shellJob).stop()
+			return true
+		})
 		actors := make([]*actor, 0, len(s.actors))
 		for _, a := range s.actors {
 			actors = append(actors, a)
@@ -1157,6 +1162,7 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 		s.respond(w, nil, err)
 		return
 	}
+	s.stopShells(t.ID)
 	for _, id := range ids {
 		if active, ok := s.turns.Load(id); ok {
 			active.(*execution).cancel()
@@ -1325,6 +1331,7 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	runCtx = agentruntime.WithSteers(context.WithValue(runCtx, turnKey{}, state), func(ctx context.Context, persist func([]contract.Message) error) error {
 		return s.Store.DrainSteers(ctx, run.ID, persist)
 	})
+	runCtx = agentruntime.WithShell(runCtx, s.shellHost(run))
 	// Memory is read again for every model request and never stored, so a correction applies at once and old
 	// copies don't pile up in the transcript. An introduction reads it too, to reflect what is already known.
 	if work.Trigger != contract.RunTriggerChild {

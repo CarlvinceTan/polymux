@@ -262,6 +262,9 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (D
 	if !d.Intro {
 		for _, name := range d.Tools {
 			if registration := builtinTool(name); registration != nil {
+				if name == "bash" {
+					registration = session.yielding(registration)
+				}
 				tools = append(tools, registration)
 			}
 		}

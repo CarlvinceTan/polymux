@@ -133,6 +133,7 @@ func (s *Server) eraseReady(ctx context.Context, id string) error {
 }
 
 func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ...*groupActor) (bool, error) {
+	s.stopShells(id)
 	if err := s.stopVoices(ctx, id); err != nil {
 		return false, err
 	}
