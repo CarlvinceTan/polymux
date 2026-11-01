@@ -10,7 +10,7 @@ public actor LocalCacheActor {
     private var stall: Duration = .zero
     private var failing = false
     private var instant = false
-    private var parkNextEntry = false
+    private var parkNextSave = false
     private var parked: CheckedContinuation<Void, Never>?
     private var deliveries: [String: Task<Void, any Error>] = [:]
     private static let claims = UploadClaims()
@@ -39,11 +39,11 @@ public actor LocalCacheActor {
     /// Counts the save and returns before SQLite, so a coalesce test is not limited by disk.
     public func setInstant(_ enabled: Bool) { instant = enabled }
 
-    /// Holds the next cache entry until `release()`. Tests overlap a save with a stream or reload.
-    public func parkNext() { parkNextEntry = true }
+    /// Holds the next save until `release()`. Tests overlap a save with a stream or reload.
+    public func parkSave() { parkNextSave = true }
     public var isParked: Bool { parked != nil }
     public func release() {
-        parkNextEntry = false
+        parkNextSave = false
         parked?.resume()
         parked = nil
     }
@@ -55,6 +55,10 @@ public actor LocalCacheActor {
 
     public func save(agents: [Agent], threads: [Thread], edits: [Thread]? = nil) async throws {
         try await enter()
+        if parkNextSave {
+            parkNextSave = false
+            await withCheckedContinuation { parked = $0 }
+        }
         saves += 1
         if failing { throw ClientError.cache("forced") }
         if instant { return }
@@ -101,10 +105,6 @@ public actor LocalCacheActor {
         // Debug builds trap if a cache call is still on the main queue.
         dispatchPrecondition(condition: .notOnQueue(.main))
         #endif
-        if parkNextEntry {
-            parkNextEntry = false
-            await withCheckedContinuation { parked = $0 }
-        }
         // A sleep would yield, so a stall on the main thread would not miss the heartbeat.
         if stall > .zero { block(stall) }
     }

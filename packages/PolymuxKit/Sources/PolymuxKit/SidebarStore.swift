@@ -708,8 +708,11 @@ public final class SidebarStore {
                     dirty = true
                     continue
                 }
-                if keepsRows(faults) { rollbackRenames(faults) }
-                else { restore() }
+                if keepsRows(faults) {
+                    rollbackRenames(faults)
+                    // These rows are still only in memory. A later failed save must not drop them.
+                    staged.insert(contentsOf: faults.filter { keepsRows([$0]) }, at: 0)
+                } else { restore() }
                 report(faults)
             }
         }

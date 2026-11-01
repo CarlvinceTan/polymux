@@ -288,7 +288,7 @@ private final class LayoutProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "sidebar-layout.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        Task {
+        Task { @Sendable [self] in
             do {
                 let (status, data) = try await Self.server.respond(request)
                 let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,

@@ -114,7 +114,7 @@ struct SidebarOffMainTests {
 
     @Test func renameStaysVisibleWhileTheSaveIsStalled() async throws {
         let rig = try await Rig()
-        await rig.sidebar.cacheActor.parkNext()
+        await rig.sidebar.cacheActor.parkSave()
         await rig.sidebar.cacheActor.setFailing(true)
         rig.sidebar.rename("arlo", to: "Arlo West")
         #expect(rig.sidebar.threads.first { $0.id == "arlo" }?.title == "Arlo West")
@@ -143,7 +143,7 @@ struct SidebarOffMainTests {
 
     @Test func streamedSaveFailureKeepsTheAgentError() async throws {
         let rig = try await Rig()
-        await rig.sidebar.cacheActor.parkNext()
+        await rig.sidebar.cacheActor.parkSave()
         await rig.sidebar.cacheActor.setFailing(true)
         let agent = Agent(id: "nova", name: "Nova")
         async let accepting: Void = rig.sidebar.accept(agent)
@@ -153,6 +153,16 @@ struct SidebarOffMainTests {
         await accepting
         #expect(rig.sidebar.agents.contains { $0.id == "nova" })
         #expect(rig.sidebar.error == "Couldn’t save this bot on this device.")
+        await rig.sidebar.reload()
+        #expect(rig.sidebar.agents.contains { $0.id == "nova" })
+        #expect(rig.sidebar.error == "Couldn’t save this bot on this device.")
+    }
+
+    @Test func laterFailedSaveKeepsAnUnsavedAgent() async throws {
+        let rig = try await Rig()
+        await rig.sidebar.cacheActor.setFailing(true)
+        await rig.sidebar.accept(Agent(id: "nova", name: "Nova"))
+        rig.sidebar.note(rig.event(seq: 3, threadID: "arlo", text: "After the failure"))
         await rig.sidebar.reload()
         #expect(rig.sidebar.agents.contains { $0.id == "nova" })
         #expect(rig.sidebar.error == "Couldn’t save this bot on this device.")

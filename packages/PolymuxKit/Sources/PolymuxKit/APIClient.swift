@@ -548,6 +548,7 @@ public struct APIClient: Sendable {
                 try validate(response, data: data)
                 return try JSONDecoder().decode(T.self, from: data)
             } catch {
+                if retrying, attempt < 2, case ClientError.response(401, _) = error, await credential.renew() { continue }
                 guard retrying, !Task.isCancelled, error.isTransient, attempt < 2 else { throw error }
                 if error.isOffline { await recover() }
                 try await Task.sleep(for: .milliseconds(250 * (attempt + 1)))
@@ -738,6 +739,15 @@ actor Credential {
         found = token
         failedAt = token == nil ? .now : nil
         return token
+    }
+
+    /// Forgets a discovered bearer the server refused. Reports whether a new one replaced it.
+    func renew() async -> Bool {
+        guard explicit == nil else { return false }
+        let refused = found
+        found = nil
+        let token = await value()
+        return token != nil && token != refused
     }
 }
 

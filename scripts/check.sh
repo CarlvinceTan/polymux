@@ -7,7 +7,7 @@ if [ "${1:-}" != --locked ]; then
   exec python3 "$ROOT/scripts/lib/locked.py" "$ROOT/.build/locks/xcode.lock" -- "$0" --locked "$@"
 fi
 shift
-LOG=$(mktemp -t polymux-build)
+LOG=$(mktemp "${TMPDIR:-/tmp}/polymux-build.XXXXXX")
 trap 'rm -f "$LOG"' EXIT
 
 build() {
