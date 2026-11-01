@@ -181,6 +181,7 @@ func runtimeMessage(m contract.Message) core.Message {
 	}
 	return out
 }
+
 // ShellHost and ShellResult move a long command out of a turn; see core.ShellHost.
 type (
 	ShellHost   = core.ShellHost

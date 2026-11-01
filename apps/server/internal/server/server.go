@@ -1629,7 +1629,13 @@ func (s *Server) afterTurn(ctx, writeCtx, turn context.Context, a *actor, done t
 	}
 	done.state.mu.Lock()
 	removals := slices.Clone(done.state.removals)
+	reload := done.state.reload
 	done.state.mu.Unlock()
+	if reload && done.finalized && done.run.Status == contract.RunStatusCompleted {
+		if err := s.Store.QueueReload(writeCtx, done.run, reloadNote); err != nil {
+			s.config.Log.Error("continue after setup", "run", done.run.ID, "error", err)
+		}
+	}
 	if done.finalized && (done.reply.Status == contract.MessageStatusDone || done.reply.Status == contract.MessageStatusSilent) {
 		for _, id := range removals {
 			s.admission.fork()

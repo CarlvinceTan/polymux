@@ -11,7 +11,7 @@ import (
 // IssueRepo is the target repo for user bug reports.
 const IssueRepo = "CarlvinceTan/polymux"
 
-//go:embed polymux/SKILL.md report/SKILL.md html-cards/SKILL.md
+//go:embed polymux/SKILL.md report/SKILL.md html-cards/SKILL.md skill-creator/SKILL.md skill-creator/LICENSE.txt
 var files embed.FS
 
 // Polymux returns the bundled guide to Polymux itself.
@@ -56,7 +56,7 @@ type Skill struct {
 
 // Names lists the bundled skills in their prompt order.
 func Names() []string {
-	return []string{"polymux", "report", "html-cards"}
+	return []string{"polymux", "report", "html-cards", "skill-creator"}
 }
 
 // Install writes the bundled skills under dir, so an agent can read one when it needs it
@@ -80,6 +80,13 @@ func Install(dir string) ([]Skill, error) {
 		skill := Describe(body)
 		skill.Path = path
 		out = append(out, skill)
+	}
+	license, err := text("skill-creator/LICENSE.txt")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skill-creator", "LICENSE.txt"), []byte(license), 0o600); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

@@ -64,7 +64,7 @@ func TestFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"html-cards/SKILL.md", "polymux/SKILL.md", "report/SKILL.md"}
+	want := []string{"html-cards/SKILL.md", "polymux/SKILL.md", "report/SKILL.md", "skill-creator/LICENSE.txt", "skill-creator/SKILL.md"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("embedded files = %v, want %v", paths, want)
 	}
@@ -76,7 +76,7 @@ func TestInstallListsSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(installed) != 3 {
+	if len(installed) != 4 {
 		t.Fatalf("installed %d skills", len(installed))
 	}
 	for _, skill := range installed {

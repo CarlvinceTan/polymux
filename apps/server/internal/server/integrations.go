@@ -24,13 +24,14 @@ func (*integrationTool) Name() string                           { return "manage
 func (*integrationTool) Label() string                          { return "Configure integrations" }
 func (*integrationTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (*integrationTool) Description() string {
-	return "List shared MCP setup, attach or detach this agent by name, register shared MCP setup, or remove this agent's MCP connections and trusted Markdown skill paths, or enable CLI tools. MCP setup is shared, but use is enabled only for this agent; attach reuses shared setup without copying credentials. Hidden connections cannot be attached. Changes persist and are available next turn, not immediately. Prefer CLI plus a skill for occasional/simple work; MCP for frequent structured calls. Decide whether to ask in normal text from the user's task and established preferences. Inspect existing setup; never copy credentials into arguments, URLs, skills or memory. This does not install software or alter OS permissions."
+	return "List shared MCP setup, attach or detach this agent by name, register shared MCP setup, or remove this agent's MCP connections and trusted Markdown skill paths, or enable CLI tools. MCP setup is shared, but use is enabled only for this agent; attach reuses shared setup without copying credentials. Hidden connections cannot be attached. agent_id sets up another bot, otherwise yourself. Changes persist; finish your turn after your own setup and you continue automatically with it loaded, while another bot gets it on its next turn. Prefer CLI plus a skill for occasional/simple work; MCP for frequent structured calls. Decide whether to ask in normal text from the user's task and established preferences. Inspect existing setup; never copy credentials into arguments, URLs, skills or memory. This does not install software or alter OS permissions."
 }
 func (t *integrationTool) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
 			"action":      map[string]any{"type": "string", "enum": []string{"list", "mcp", "skill", "remove", "enable_cli", "device", "attach", "detach"}},
+			"agent_id":    map[string]any{"type": "string", "maxLength": 128, "description": "Bot to set up; omit for yourself"},
 			"host":        map[string]any{"type": "string", "description": "Existing SSH alias or user@tailnet-host; uses existing host keys"},
 			"cua_binary":  map[string]any{"type": "string", "description": "Optional absolute Cua executable on the device; requires cua_socket too"},
 			"cua_socket":  map[string]any{"type": "string", "description": "Existing Cua daemon socket on the device"},
@@ -59,6 +60,7 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 	}
 	var input struct {
 		Action     string            `json:"action"`
+		AgentID    string            `json:"agent_id"`
 		Name       string            `json:"name"`
 		URL        string            `json:"url"`
 		Headers    map[string]string `json:"headers"`
@@ -77,7 +79,14 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 	s := t.server
 	s.actorsMu.RLock()
 	defer s.actorsMu.RUnlock()
-	a := s.actors[state.run.AgentID]
+	if input.AgentID == "" {
+		input.AgentID = state.run.AgentID
+	}
+	// Skills and MCP can be shared, but a bot can't hand another one a shell or a device.
+	if input.AgentID != state.run.AgentID && (input.Action == "enable_cli" || input.Action == "device") {
+		return agent.AgentToolResult{}, errors.New("a bot can only set up skills and MCP for another bot")
+	}
+	a := s.actors[input.AgentID]
 	if a == nil || s.closing || s.deletes[a.id] != nil {
 		return agent.AgentToolResult{}, errors.New("integration owner unavailable")
 	}
@@ -107,14 +116,15 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 				available = append(available, item.Name)
 			}
 		}
-		return toolResult(map[string]any{"mcp": names, "availableMCP": available, "skills": d.Skills, "tools": d.Tools, "devices": d.Devices})
+		folder := filepath.Join(s.config.DataDir, a.id, "skills")
+		return toolResult(map[string]any{"mcp": names, "availableMCP": available, "skills": d.Skills, "skillFolder": folder, "tools": d.Tools, "devices": d.Devices})
 	case "attach", "detach":
 		legacy := slices.ContainsFunc(d.MCP, func(config agentruntime.MCPServer) bool { return config.Name == input.Name })
 		enabled := input.Action == "attach"
 		if err := s.Store.BindMCP(ctx, a.id, input.Name, &enabled, nil, legacy); err != nil {
 			return agent.AgentToolResult{}, err
 		}
-		return toolResult(map[string]any{"configured": true, "available": "next turn"})
+		return t.loaded(ctx, state, a.id)
 	case "device":
 		device := agentruntime.Device{Name: input.Name, Host: input.Host}
 		if !device.Valid() {
@@ -231,7 +241,7 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 			return agent.AgentToolResult{}, err
 		}
 	} else if bytes.Equal(previous, data) {
-		return toolResult(map[string]any{"configured": true, "available": "next turn"})
+		return toolResult(map[string]any{"configured": true, "available": "already set up"})
 	} else if _, err := s.Store.UpdateDefinition(ctx, d.Agent, data); err != nil {
 		return agent.AgentToolResult{}, err
 	}
@@ -277,5 +287,30 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 			return agent.AgentToolResult{}, err
 		}
 	}
-	return toolResult(map[string]any{"configured": true, "available": "next turn"})
+	return t.loaded(ctx, state, a.id)
 }
+
+// loaded arranges for a changed bot to pick up its setup without waiting for another message.
+func (t *integrationTool) loaded(ctx context.Context, state *turnState, target string) (agent.AgentToolResult, error) {
+	if target == state.run.AgentID {
+		if automatic(state.work.Trigger) && state.work.Trigger != contract.RunTriggerFollowUp {
+			return toolResult(map[string]any{"configured": true, "available": "next turn"})
+		}
+		state.mu.Lock()
+		state.reload = true
+		state.mu.Unlock()
+		return toolResult(map[string]any{"configured": true, "available": "finish this turn and you continue automatically with it loaded"})
+	}
+	run, busy, err := t.server.Store.RunningRun(ctx, target)
+	if err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	if busy {
+		if err := t.server.Store.QueueReload(ctx, run, reloadNote); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+	}
+	return toolResult(map[string]any{"configured": true, "available": "on that bot's next turn"})
+}
+
+const reloadNote = "Your tools and skills were updated and are now loaded. Carry on with what you were doing."

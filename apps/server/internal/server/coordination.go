@@ -33,6 +33,7 @@ type turnState struct {
 	handoff    *store.Work
 	target     string
 	tools      int
+	reload     bool
 	notice     *string
 	external   map[string]bool
 	prefixes   []string

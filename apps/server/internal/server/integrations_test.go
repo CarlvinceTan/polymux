@@ -59,6 +59,7 @@ func TestIntegrationSetup(t *testing.T) {
 		`{"action":"mcp","name":"notes","url":"https://token@example.com/mcp"}`,
 		`{"action":"mcp","name":"notes","url":"https://example.com/mcp?token=secret"}`,
 		`{"action":"skill","path":"relative.md"}`,
+		`{"action":"enable_cli","agent_id":"other"}`,
 		`{"action":"mcp","name":"notes","command":"a","url":"https://example.com/mcp"}`,
 	} {
 		if _, err := tool.Execute(ctx, "bad", json.RawMessage(args), nil); err == nil {
