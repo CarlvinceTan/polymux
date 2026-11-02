@@ -1,0 +1,22 @@
+// Model defaults remain available after reopening Settings.
+const app = await cua.getApp(APP);
+await app.waitFor({role: 'button', name: 'Settings', timeout_ms: 10000});
+await app.click({role: 'button', name: 'Settings'});
+await app.click({role: 'button', name: 'Models'});
+await app.waitFor({role: 'button', name: 'Default model, Server default'});
+await app.click({role: 'button', name: 'Default model, Server default'});
+await app.waitFor({role: 'textfield', name: 'Search models'});
+await app.waitFor({text: 'No models found.'});
+const selected = (await app.query({name: 'Not set'})).find((row) => row.role === 'AXRadioButton');
+if (selected?.value !== '1') throw new Error('Server default was not selected');
+await app.click({role: 'button', name: 'Default model, Server default'});
+await app.waitFor({role: 'textfield', name: 'Search models', gone: true});
+await app.click({role: 'button', name: 'Reasoning, Off'});
+await app.click({role: 'radiobutton', name: 'High'});
+await app.waitFor({role: 'button', name: 'Reasoning, High'});
+await app.click({role: 'button', name: 'Close settings'});
+await app.click({role: 'button', name: 'Settings'});
+await app.click({role: 'button', name: 'Models'});
+await app.waitFor({role: 'button', name: 'Reasoning, High', timeout_ms: 10000});
+await app.click({role: 'button', name: 'Close settings'});
+return 'ok';

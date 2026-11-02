@@ -23,7 +23,7 @@ Read and follow the [cdesign skill](.agents/skills/cdesign/SKILL.md) for general
 
 ## Components
 
-- Prefer native SwiftUI components over custom ones, unless instructed otherwise.
+- Prefer native platform controls over custom ones, unless instructed otherwise.
 - Visible button labels are one word ("Send", "Save"). Use two only when one word would be ambiguous.
 
 ## Text

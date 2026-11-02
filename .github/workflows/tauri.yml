@@ -1,0 +1,57 @@
+name: Tauri
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: polymux-tauri-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      tauri: ${{ steps.paths.outputs.tauri }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: paths
+        run: python3 scripts/ci.py >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: changes
+    if: needs.changes.outputs.tauri == 'true'
+    runs-on: macos-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.build/tauri
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/tauri/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --prefix apps/tauri
+      - name: Check and build frontend
+        run: npm run verify --prefix apps/tauri
+      - name: Test API
+        run: npm run test:api --prefix apps/tauri
+      - name: Install browsers
+        run: npm exec --prefix apps/tauri -- playwright install chromium webkit
+      - name: Test browser behavior
+        run: |
+          npm run test:ui --prefix apps/tauri -- --browser=chromium
+          npm run test:ui --prefix apps/tauri -- --browser=webkit
+      - name: Check Tauri backend
+        run: cargo check --locked --manifest-path apps/tauri/src-tauri/Cargo.toml
+      - name: Test Tauri backend
+        run: cargo test --locked --manifest-path apps/tauri/src-tauri/Cargo.toml

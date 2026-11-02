@@ -14,8 +14,9 @@ Native downloads are published on the [Releases page](/releases/). Until a relea
 
 ## Requirements
 
-- **Client:** macOS 27 and Xcode 27.
+- **Client:** macOS 13 or later.
 - **Server:** Go 1.27.3, Git, and a C compiler. Xcode’s command-line tools provide the compiler on macOS.
+- **Building from source:** Node.js 22, Rust stable, and Xcode’s command-line tools.
 
 ## Get the source
 
@@ -26,15 +27,14 @@ git clone --branch dev https://github.com/CarlvinceTan/polymux.git
 cd polymux
 ```
 
-Run the following commands from that folder. Client commands use a local development signature.
+Run the following commands from that folder. Local client builds are ad-hoc signed; release builds are Developer ID signed and notarized.
 
 ## One Mac
 
 Install both parts together:
 
 ```sh
-POLYMUX_SIGN_IDENTITY="-" POLYMUX_TEAM_ID="" \
-  ./scripts/install.sh both
+./scripts/install.sh both
 ```
 
 This installs the app in Applications, starts the server at login, and connects the app to it.
@@ -54,8 +54,7 @@ Keep this Mac awake and connected when you want your agents available.
 For another Mac that only needs the chat app:
 
 ```sh
-POLYMUX_SIGN_IDENTITY="-" POLYMUX_TEAM_ID="" \
-  ./scripts/install.sh app
+./scripts/install.sh app
 ```
 
 Open Polymux, then pair it with your server.

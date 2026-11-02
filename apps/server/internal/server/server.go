@@ -727,8 +727,8 @@ func (s *Server) agentProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateAgentRequest patches an agent's profile. It carries the workspace field
-// the generated wire contract does not have yet; the schema and its Swift
-// client gain it with the repo picker.
+// the generated wire contract does not have yet; the schema and its generated
+// clients gain it with the repo picker.
 type updateAgentRequest struct {
 	contract.UpdateAgentRequest
 	Workspace *string `json:"workspace,omitempty"`

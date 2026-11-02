@@ -12,7 +12,6 @@
     "width": 32,
     "height": 32
   },
-  "fixture": "apps/Polymux/Sources/SiteFixture.swift",
   "hotspotSource": "native accessibility screenshot_frame",
   "hotspots": {
     "atlas": {
@@ -36,7 +35,6 @@
   },
   "source": "cua-driver.get_window_state",
   "encoding": "lossless-webp",
-  "fixtureSha256": "252cb20328a787d8daa317e0966e55ce8a6146fe1436418cef2af854514b57a7",
   "capturedAt": "2026-10-23T14:50:52.594600+00:00",
   "captures": {
     "atlas": {
@@ -57,5 +55,6 @@
       "nativeSha256": "0c8c7b33031580084a6808c13be13205a5ac988457c6697ddb9bf6052177326b",
       "pixelsSha256": "2eefdf2afcde81d6f92a46e60b0bda9cfdc4353ef216ed16a06f9127c8830d32"
     }
-  }
+  },
+  "fixtureSha256": "252cb20328a787d8daa317e0966e55ce8a6146fe1436418cef2af854514b57a7"
 }

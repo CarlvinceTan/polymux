@@ -29,17 +29,11 @@ PATTERNS = (
      "Remove trailing whitespace.", "Git patch hygiene"),
     ("REVIEW", "private-key", re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"), None,
      "Check for an exposed private key; fixtures and examples need context.", "Security review"),
-    ("REVIEW", "fixed-size", re.compile(r"\.fixedSize\s*\("), ".swift",
-     "Check that this is not text in a flexible row or panel.", "DESIGN.md / Text"),
-    ("REVIEW", "alert", re.compile(r"\.alert\s*\(|\bNSAlert\s*\("), ".swift",
-     "Check that this alert is not for a recoverable failure.", "DESIGN.md / Status and errors"),
-    ("REVIEW", "retry-button", re.compile(r'\bButton\s*\(\s*"Retry"'), ".swift",
-     "Check for a prohibited retry button.", "DESIGN.md / Status and errors"),
 )
 
 LOCKS = {
-    "Package.swift": "Package.resolved",
-    "apps/Polymux/Package.swift": "apps/Polymux/Package.resolved",
+    "apps/tauri/package.json": "apps/tauri/package-lock.json",
+    "apps/tauri/src-tauri/Cargo.toml": "apps/tauri/src-tauri/Cargo.lock",
     "apps/site/package.json": "apps/site/package-lock.json",
     "apps/server/go.mod": "apps/server/go.sum",
 }

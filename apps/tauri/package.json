@@ -1,0 +1,52 @@
+{
+  "name": "@polymux/tauri",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "verify": "npm run check && npm run build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test:api": "tsx --test src/lib/api/transport.test.ts src/lib/api/pairing.test.ts src/lib/draft.test.ts src/lib/appearance.test.ts src/lib/shell/dictation.test.ts src/lib/shell/dictationDraft.test.ts src/lib/shell/mentions.test.ts src/lib/avatar/kit/assetCache.test.ts src/lib/features/chat/activityLine.test.ts src/lib/notificationPolicy.test.ts",
+    "test:ui": "playwright test"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {
+    "@lobehub/icons-static-svg": "^1.1.31",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.4.4",
+    "@tauri-apps/plugin-http": "^2.8.3",
+    "@tauri-apps/plugin-notification": "^2.8.0",
+    "@tauri-apps/plugin-opener": "^2.5.2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
+    "dompurify": "^3.4.13",
+    "highlight.js": "^11.12.0",
+    "jsqr": "^1.4.0",
+    "marked": "^18.0.9",
+    "simple-icons": "^16.28.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/language-data": "^6.5.2",
+    "@playwright/test": "^1.64.1",
+    "@polymux/protocol": "file:../../packages/protocol",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@tauri-apps/cli": "^2.12.4",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^26.2.0",
+    "@types/three": "^0.185.4",
+    "binary-extensions": "^3.1.0",
+    "linguist-languages": "^9.5.0",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.4.8",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5"
+  }
+}

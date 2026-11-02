@@ -19,9 +19,7 @@ These workflows start when the user indicates the relevant intent; no exact skil
 | Skill | What it's for |
 | --- | --- |
 | [cdesign](../.agents/skills/cdesign/SKILL.md) | General UI rules: responsiveness, layout balance, text, accessibility, and contrast. Use with [`DESIGN.md`](../DESIGN.md), which holds Polymux-specific policies. |
-| [avatar-preview](../.agents/skills/avatar-preview/SKILL.md) | Animated GIF previews using the real avatar renderer. Use to review avatars, emotions, motion, and work props without launching the app. |
 | [cua-driver](../.agents/skills/cua-driver/SKILL.md) | Operating and verifying real native app UI. This is the current driver for manual checks and E2E flows. |
-| [ui-control](../.agents/skills/ui-control/SKILL.md) | Inspecting or capturing an owned test instance with the experimental Control tool. Observation only; it cannot perform input or replace Cua. See [Control candidate](control.md). |
 
 ## Website
 
@@ -57,6 +55,6 @@ Start with **golang-how-to** for Go work. It identifies the relevant topic skill
 
 - Edit the skill's own `SKILL.md` for its instructions; keep this page as a short index.
 - [`.claude/skills`](../.claude/skills) links to `.agents/skills/`, so there is no second copy to maintain.
-- [`skills-lock.json`](../skills-lock.json) records sources and hashes for imported skills. Repository-created skills such as `cdesign`, `avatar-preview`, and `ui-control` live directly in the checkout.
+- [`skills-lock.json`](../skills-lock.json) records sources and hashes for imported skills. Repository-created skills such as `cdesign` live directly in the checkout.
 
 The **Skills up to date** CI check reports available updates on pull requests and pushes to `dev` or `main`, respecting pinned refs. Updates and check errors produce warnings while the check passes; details appear in its job summary. It does not update skills or the lock file.

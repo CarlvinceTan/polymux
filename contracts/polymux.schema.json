@@ -24,12 +24,10 @@
       "additionalProperties": false,
       "properties": {
         "body": {
-          "type": "string",
-          "x-swift-optional": true
+          "type": "string"
         },
         "outcome": {
-          "type": "string",
-          "x-swift-optional": true
+          "type": "string"
         },
         "seq": {
           "type": "integer"
@@ -41,8 +39,7 @@
           "type": "string"
         },
         "agentID": {
-          "type": "string",
-          "x-swift-optional": true
+          "type": "string"
         },
         "title": {
           "type": "string"
@@ -2089,8 +2086,7 @@
         },
         "at": {
           "type": "string",
-          "format": "date-time",
-          "x-swift-default": "WireDate.string()"
+          "format": "date-time"
         },
         "agentIDs": {
           "type": "array",

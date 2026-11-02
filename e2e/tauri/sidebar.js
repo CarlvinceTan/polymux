@@ -1,0 +1,20 @@
+// Collapsing keeps a reachable restore control and preserves the last expanded width.
+const app = await cua.getApp(APP);
+await app.waitFor({role: 'button', name: 'Search', timeout_ms: 10000});
+const splitter = {role: 'splitter', name: 'Sidebar width'};
+await app.pressKey('end', splitter);
+const [wide] = await app.query(splitter);
+await app.pressKey('return', splitter);
+await app.waitFor({role: 'button', name: 'Show sidebar'});
+await app.waitFor({role: 'button', name: 'Search', gone: true});
+await app.click({role: 'button', name: 'Show sidebar'});
+await app.waitFor({role: 'button', name: 'Search'});
+const [restored] = await app.query(splitter);
+if (wide.value !== restored.value) throw new Error('Reopening the sidebar lost its expanded width');
+await app.click({role: 'button', name: 'Settings'});
+await app.waitFor({role: 'button', name: 'Close settings'});
+await app.click({role: 'button', name: 'Close settings'});
+await app.click({role: 'button', name: 'Search'});
+await app.waitFor({role: 'button', name: 'Close search'});
+await app.click({role: 'button', name: 'Close search'});
+return 'ok';

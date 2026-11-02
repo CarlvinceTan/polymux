@@ -1,8 +1,5 @@
-# Native releases are cut from app-v* tags. The Electron workflow on main only
-# listens for v* tags, so the two pipelines cannot collide.
-#
-# Workflow dispatch is a dry run: it builds, signs, notarizes and uploads the
-# DMG and appcast as artifacts without creating a GitHub release.
+# Tauri releases are cut from app-v* tags. Workflow dispatch is a dry run: it
+# builds the app and uploads the DMG without creating a GitHub release.
 name: Release
 
 on:
@@ -21,168 +18,177 @@ jobs:
   verify:
     uses: ./.github/workflows/tests.yml
 
-  site:
-    uses: ./.github/workflows/site.yml
+  tauri:
+    uses: ./.github/workflows/tauri.yml
 
   macos:
-    needs: [verify, site]
-    runs-on: xcode-27
+    needs: [verify, tauri]
+    runs-on: macos-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.build/tauri
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: maxim-lobanov/setup-xcode@v1
+      - uses: actions/setup-node@v7
         with:
-          xcode-version: latest-stable
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Resolve version
         shell: bash
         run: |
-          VERSION=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' \
-            apps/Polymux/Polymux.xcodeproj/project.pbxproj | head -1)
-          test -n "$VERSION" || { echo "MARKETING_VERSION is missing."; exit 1; }
+          VERSION=$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")
+          test -n "$VERSION" || { echo "The Tauri version is missing."; exit 1; }
           case "$VERSION" in *-*) echo "Only stable versions can be released."; exit 1 ;; esac
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
             test "$GITHUB_REF_NAME" = "app-v$VERSION" || {
-              echo "Tag $GITHUB_REF_NAME does not match MARKETING_VERSION $VERSION."
-              exit 1
-            }
-            git fetch --no-tags origin main
-            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
-              echo "Release tags must point at a commit on main so the site can serve the download."
+              echo "Tag $GITHUB_REF_NAME does not match the Tauri version $VERSION."
               exit 1
             }
           fi
-          NOTES="apps/site/src/content/releases/$VERSION.md"
-          test -f "$NOTES" || { echo "Publish $VERSION on the site before releasing it."; exit 1; }
-          grep -Eiq '^downloadable:[[:space:]]*true[[:space:]]*$' "$NOTES" || { echo "$NOTES must be downloadable."; exit 1; }
-          grep -Eq "^tag:[[:space:]]*['\"]?app-v${VERSION}['\"]?[[:space:]]*$" "$NOTES" || { echo "$NOTES must use tag: app-v$VERSION."; exit 1; }
-          if grep -Eiq '^published:[[:space:]]*false[[:space:]]*$' "$NOTES"; then echo "$NOTES must be published."; exit 1; fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "TAG=app-v$VERSION" >> "$GITHUB_ENV"
 
-      - name: Require release credentials
-        env:
-          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          SPARKLE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          for name in CERT_P12 CERT_PASSWORD APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID SPARKLE_KEY; do
-            test -n "${!name}" || { echo "$name is missing."; exit 1; }
-          done
+      - name: Install locked dependencies
+        run: npm ci --prefix apps/tauri
 
       - name: Import Developer ID certificate
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          CERT_PATH="$RUNNER_TEMP/polymux-release.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/polymux-signing.keychain-db"
-          printf '%s' "$CERT_P12" | base64 --decode > "$CERT_PATH"
-          security create-keychain -p actions "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p actions "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$CERT_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN_PATH"
-          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)"
+          for name in CERT_P12 CERT_PASSWORD TEAM_ID; do
+            test -n "${!name}" || { echo "$name is missing."; exit 1; }
+          done
+          umask 077
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/polymux.p12"
+          KEYCHAIN="$RUNNER_TEMP/polymux-signing.keychain-db"
+          security create-keychain -p actions "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          security import "$RUNNER_TEMP/polymux.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)
           test -n "$IDENTITY" || { echo "No Developer ID Application identity was imported."; exit 1; }
-          echo "POLYMUX_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           echo "POLYMUX_TEAM_ID=$TEAM_ID" >> "$GITHUB_ENV"
-          rm -f "$CERT_PATH"
+          rm -f "$RUNNER_TEMP/polymux.p12"
 
-      - name: Build signed app
-        run: scripts/build.sh macos
-
-      - name: Notarize app
+      - name: Build app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          APP="dist/macos/Polymux.app"
-          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/Polymux.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/Polymux.zip" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
+          npm run tauri --prefix apps/tauri -- build --bundles app
+          test -d "$CARGO_TARGET_DIR/release/bundle/macos/Polymux.app"
+
+      - name: Notarize and staple app
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            test -n "${!name}" || { echo "$name is missing."; exit 1; }
+          done
+          APP="$CARGO_TARGET_DIR/release/bundle/macos/Polymux.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/Polymux-app.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/Polymux-app.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
           xcrun stapler staple "$APP"
           xcrun stapler validate "$APP"
 
-      - name: Build and notarize DMG
+      - name: Create DMG
+        run: |
+          APP="$CARGO_TARGET_DIR/release/bundle/macos/Polymux.app"
+          STAGE="$RUNNER_TEMP/dmg"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          ditto "$APP" "$STAGE/Polymux.app"
+          ln -s /Applications "$STAGE/Applications"
+          mkdir -p dist
+          DMG="dist/Polymux-$VERSION-arm64.dmg"
+          hdiutil create -volname "Polymux" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            codesign --force --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
+            codesign --verify --verbose=2 "$DMG"
+          fi
+          hdiutil verify "$DMG"
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
+
+      - name: Notarize and staple DMG
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          DMG="dist/macos/Polymux-$VERSION-arm64.dmg"
-          scripts/build.sh dmg
-          test -f "$DMG"
-          hdiutil verify "$DMG"
-          codesign --verify --verbose=2 "$DMG"
-          xcrun notarytool submit "$DMG" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
+          for name in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            test -n "${!name}" || { echo "$name is missing."; exit 1; }
+          done
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
           xcrun stapler staple "$DMG"
           xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
-          (cd dist/macos && shasum -a 256 "Polymux-$VERSION-arm64.dmg" > "Polymux-$VERSION-arm64.dmg.sha256")
 
-      - name: Verify the bundle
-        run: |
-          APP="dist/macos/Polymux.app"
-          DMG="dist/macos/Polymux-$VERSION-arm64.dmg"
-          plutil -lint "$APP/Contents/Info.plist"
-          test -d "$APP/Contents/Frameworks/Sparkle.framework"
-          dyld_info -rpaths "$APP/Contents/MacOS/Polymux" | grep -q '@executable_path/../Frameworks'
-          SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
-          for item in "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" \
-            "$SPARKLE/XPCServices/Downloader.xpc" "$SPARKLE/XPCServices/Installer.xpc"; do
-            codesign -dv --verbose=4 "$item" 2>&1 | grep -q '^Timestamp='
-          done
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP/Contents/Info.plist")" = "https://polymux.com/appcast.xml"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist")" = "0R035FKyyBKGGt0CxlZBElZI37gPCXH3WBiwFDELK0g="
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign -d --entitlements - "$APP" 2>&1 | grep -q 'com.apple.security.device.audio-input'
-          codesign -d --entitlements - "$APP" 2>&1 | grep -q 'com.apple.security.device.camera'
-          spctl --assess --type execute --verbose=2 "$APP"
-          hdiutil verify "$DMG"
-
-      - name: Build signed appcast
+      - name: Create signed updater feed
+        if: startsWith(github.ref, 'refs/tags/')
         env:
-          SPARKLE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          SPARKLE=.build/xcode-release/SourcePackages/artifacts/sparkle/Sparkle/bin
-          awk 'BEGIN {frontmatter = 0} /^---$/ {frontmatter++; next} frontmatter >= 2 {print}' \
-            "apps/site/src/content/releases/$VERSION.md" > "dist/macos/Polymux-$VERSION.md"
-          test -s "dist/macos/Polymux-$VERSION.md"
-          printf '%s' "$SPARKLE_KEY" | "$SPARKLE/generate_appcast" \
-            --ed-key-file - \
-            --download-url-prefix "https://github.com/CarlvinceTan/polymux/releases/download/$TAG/" \
-            --full-release-notes-url "https://polymux.com/releases/$VERSION/" \
-            --link "https://polymux.com/" \
-            --embed-release-notes \
-            dist/macos
-          test -f dist/macos/appcast.xml
-          grep -q 'edSignature=' dist/macos/appcast.xml
-          grep -q "Polymux-$VERSION-arm64.dmg" dist/macos/appcast.xml
-          cat dist/macos/appcast.xml
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "TAURI_SIGNING_PRIVATE_KEY is missing."; exit 1; }
+          APP="$CARGO_TARGET_DIR/release/bundle/macos/Polymux.app"
+          TARBALL="dist/Polymux.app.tar.gz"
+          tar -czf "$TARBALL" -C "$(dirname "$APP")" Polymux.app
+          npm run tauri --prefix apps/tauri -- signer sign --app-version "$VERSION" "$TARBALL"
+          test -s "$TARBALL.sig"
+          URL="https://github.com/CarlvinceTan/polymux/releases/download/updates/Polymux.app.tar.gz"
+          python3 - "$VERSION" "$TARBALL.sig" "$URL" <<'PY'
+          import datetime, json, sys
+          version, signature_path, url = sys.argv[1], sys.argv[2], sys.argv[3]
+          signature = open(signature_path).read().strip()
+          data = {
+              "version": version,
+              "notes": f"Polymux {version}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {
+                  "darwin-aarch64": {"signature": signature, "url": url},
+              },
+          }
+          json.dump(data, open("dist/latest.json", "w"), indent=2)
+          PY
+          cat dist/latest.json
+
+      - name: Checksum
+        run: |
+          NAME="Polymux-$VERSION-arm64.dmg"
+          (cd dist && shasum -a 256 "$NAME" > "$NAME.sha256")
+          echo "ARTIFACT=dist/$NAME" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v7
         with:
           name: Polymux-${{ env.VERSION }}-macOS
           path: |
-            dist/macos/Polymux-${{ env.VERSION }}-arm64.dmg
-            dist/macos/Polymux-${{ env.VERSION }}-arm64.dmg.sha256
-            dist/macos/appcast.xml
+            dist/Polymux-${{ env.VERSION }}-arm64.dmg
+            dist/Polymux-${{ env.VERSION }}-arm64.dmg.sha256
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: Polymux-${{ env.VERSION }}-updater
+          path: |
+            dist/Polymux.app.tar.gz
+            dist/Polymux.app.tar.gz.sig
+            dist/latest.json
           if-no-files-found: error
 
       - name: Publish release
@@ -190,49 +196,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          awk 'BEGIN {frontmatter = 0} /^---$/ {frontmatter++; next} frontmatter >= 2 {print}' \
-            "apps/site/src/content/releases/$VERSION.md" > "$RUNNER_TEMP/release-notes.md"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" \
-              "dist/macos/Polymux-$VERSION-arm64.dmg" \
-              "dist/macos/Polymux-$VERSION-arm64.dmg.sha256" \
-              "dist/macos/appcast.xml" \
-              --clobber
-            gh release edit "$TAG" \
-              --title "Polymux $VERSION" \
-              --notes-file "$RUNNER_TEMP/release-notes.md" \
-              --latest
+            gh release upload "$TAG" "$ARTIFACT" "$ARTIFACT.sha256" --clobber
+            gh release edit "$TAG" --title "Polymux $VERSION" --latest
           else
-            gh release create "$TAG" \
-              "dist/macos/Polymux-$VERSION-arm64.dmg" \
-              "dist/macos/Polymux-$VERSION-arm64.dmg.sha256" \
-              "dist/macos/appcast.xml" \
-              --title "Polymux $VERSION" \
-              --notes-file "$RUNNER_TEMP/release-notes.md" \
-              --verify-tag \
-              --latest
+            gh release create "$TAG" "$ARTIFACT" "$ARTIFACT.sha256" \
+              --title "Polymux $VERSION" --verify-tag --latest
           fi
-
-  feed:
-    needs: macos
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: Wait for the published Sparkle feed
-        run: |
-          VERSION=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' \
-            apps/Polymux/Polymux.xcodeproj/project.pbxproj | head -1)
-          for _ in $(seq 1 30); do
-            FEED=$(curl -fsSL https://polymux.com/appcast.xml 2>/dev/null || true)
-            if printf '%s' "$FEED" | grep -q "Polymux-$VERSION-arm64.dmg"; then
-              URL=$(printf '%s' "$FEED" | sed -n 's/.*enclosure url="\([^"]*\)".*/\1/p' | head -1)
-              if [ -n "$URL" ] && curl -fsL --range 0-0 -o /dev/null "$URL"; then
-                echo "The update feed and download are live for $VERSION."
-                exit 0
-              fi
-            fi
-            sleep 10
-          done
-          echo "The update feed did not become available for $VERSION."
-          exit 1
+          if ! gh release view updates >/dev/null 2>&1; then
+            gh release create updates --title "Polymux updates" --notes "Signed update feed." --latest=false
+          fi
+          gh release upload updates dist/Polymux.app.tar.gz dist/Polymux.app.tar.gz.sig dist/latest.json --clobber

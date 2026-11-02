@@ -32,10 +32,21 @@ install_server() {
   cmp -s "$ROOT/dist/server/polymux" "$BIN/polymux" || { echo "Installed server differs from the new build"; return 1; }
 }
 
+build_server() {
+  mkdir -p "$ROOT/dist/server"
+  (cd "$ROOT/apps/server" && go build -tags sqlite_fts5 -o "$ROOT/dist/server/polymux" ./cmd/polymux)
+}
+
+build_app() {
+  (cd "$ROOT/apps/tauri" && CARGO_TARGET_DIR="$ROOT/.build/tauri" npm run tauri -- build --bundles app)
+  rm -rf "$ROOT/dist/macos" && mkdir -p "$ROOT/dist/macos"
+  ditto "$ROOT/.build/tauri/release/bundle/macos/Polymux.app" "$ROOT/dist/macos/Polymux.app"
+}
+
 install_app() {
   rm -rf "$APP"
   ditto "$ROOT/dist/macos/Polymux.app" "$APP"
-  cmp -s "$ROOT/dist/macos/Polymux.app/Contents/MacOS/Polymux" "$APP/Contents/MacOS/Polymux" || { echo "Installed app differs from the new build"; return 1; }
+  cmp -s "$ROOT/dist/macos/Polymux.app/Contents/MacOS/polymux-tauri" "$APP/Contents/MacOS/polymux-tauri" || { echo "Installed app differs from the new build"; return 1; }
 }
 
 # The server starts at login and restarts if it exits.
@@ -71,8 +82,8 @@ open_app() {
 }
 
 echo "Installing Polymux ($target)"
-[ "$server" = 0 ] || (step "Build server" "$ROOT/scripts/build.sh" server) || exit 75
-[ "$app" = 0 ] || (step "Build app" "$ROOT/scripts/build.sh" macos) || exit 75
+[ "$server" = 0 ] || (step "Build server" build_server) || exit 75
+[ "$app" = 0 ] || (step "Build app" build_app) || exit 75
 if [ "$server" = 1 ]; then
   drain_server "$ROOT/dist/server/polymux" "$ADDRESS" || exit 75
   if [ -n "$DRAIN_ID" ]; then

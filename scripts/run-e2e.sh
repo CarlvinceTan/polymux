@@ -1,12 +1,8 @@
 #!/bin/sh
-# Run UI flows against a throwaway instance. Usage: scripts/run-e2e.sh [--driver cua|control] [flow.js ...]
-# Flows starting with "// @fixture <flags>" run against a copy of the app on the DEBUG fixture server.
+# Run UI flows against a throwaway instance. Usage: scripts/run-e2e.sh [--verify-server] [flow.js ...]
 # A "// @relaunch" line quits and reopens the app midway; "// @crash" kills it instead.
 # Flows can call pick(app, item[, trigger]) to choose a menu item (trigger, a query or an opener function, defaults to New chat and reopens a menu that closed early); it returns a fresh handle once the menu has closed.
-# The signed fixture bundle is reused, but each flow gets fresh data and preferences.
-# Cursor animation is fast only inside the flow's own Cua session; global settings are unchanged.
-# A failed flow restarts the shared app so later flows start clean.
-# The app stays in the background; native focus samples fail the flow if its test app takes focus. Both drivers need Accessibility.
+# The app stays in the background; native focus samples fail the flow if its test app takes focus.
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 OUT=$(mktemp -t polymux-e2e)
@@ -20,24 +16,21 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
-DRIVER=${POLYMUX_E2E_DRIVER:-cua}
-if [ "${1:-}" = --driver ]; then DRIVER=${2:-}; shift 2; fi
-case "$DRIVER" in
-  cua) command -v cua-driver >/dev/null || { echo "cua-driver is not installed" >&2; exit 1; } ;;
-  control) command -v node >/dev/null || { echo "Node.js is required for Control flows" >&2; exit 1; } ;;
-  *) echo 'Choose --driver cua or --driver control' >&2; exit 2 ;;
-esac
-if [ $# -eq 0 ]; then set -- "$ROOT"/e2e/flows/*.js; fi
-
-FIXTURES=1
+VERIFY_SERVER=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --verify-server) VERIFY_SERVER=1; shift ;;
+    *) break ;;
+  esac
+done
+if [ $# -eq 0 ]; then set -- "$ROOT"/e2e/tauri/*.js; fi
 for flow in "$@"; do
   [ -f "$flow" ] || { echo "Missing flow: $flow" >&2; exit 2; }
-  case $(head -n 1 "$flow") in '// @fixture'*) ;; *) FIXTURES=0 ;; esac
 done
-if [ "$FIXTURES" = 1 ]; then
-  "$ROOT/scripts/run.sh" --fixture >"$OUT" 2>&1 &
+if [ "$VERIFY_SERVER" = 1 ]; then
+  "$ROOT/scripts/run.sh" --verify-server >"$OUT" 2>&1 &
 else
-  "$ROOT/scripts/run.sh" --no-watch >"$OUT" 2>&1 &
+  "$ROOT/scripts/run.sh" >"$OUT" 2>&1 &
 fi
 PID=$!
 until grep -q "Press Ctrl-C" "$OUT"; do
@@ -50,9 +43,9 @@ STATE=$(sed -n 's/^  data: *\(.*\)\/data$/\1/p' "$OUT")
 
 failed=0
 for flow in "$@"; do
-  if POLYMUX_E2E_DRIVER="$DRIVER" POLYMUX_ROOT="$ROOT" POLYMUX_APP="$NAME" POLYMUX_FLOW="$flow" POLYMUX_STATE="$STATE" POLYMUX_ADDRESS="$ADDRESS" \
-    POLYMUX_ENTITLEMENTS="$ROOT/apps/Polymux/Polymux-local.entitlements" python3 - <<'PY'
-import atexit, json, os, plistlib, re, shutil, signal, subprocess, sys, time
+  if POLYMUX_ROOT="$ROOT" POLYMUX_APP="$NAME" POLYMUX_FLOW="$flow" POLYMUX_STATE="$STATE" POLYMUX_ADDRESS="$ADDRESS" \
+    python3 - <<'PY'
+import atexit, json, os, re, signal, subprocess, sys, time
 started = time.monotonic()
 flow, app = os.environ["POLYMUX_FLOW"], os.environ["POLYMUX_APP"]
 state = os.environ["POLYMUX_STATE"]
@@ -62,17 +55,6 @@ ui_time = 0
 
 
 def driver(tool, args):
-    if os.environ.get("POLYMUX_E2E_DRIVER") == "control":
-        if tool in ("start_session", "end_session"):
-            return True, {"ok": True}
-        env = dict(os.environ, POLYMUX_CONTROL_FIXTURE="1" if fixture else "0")
-        run = subprocess.run(["node", os.environ["POLYMUX_ROOT"] + "/tools/control/flow.mjs"],
-                             input=json.dumps(args), env=env, capture_output=True, text=True, timeout=125)
-        try:
-            result = json.loads(run.stdout)
-        except ValueError:
-            result = {"ok": False, "error": "Control flow returned no valid result", "console": run.stderr[-1500:]}
-        return run.returncode == 0 and result.get("ok", False), result
     run = subprocess.run(["cua-driver", tool, json.dumps(dict(args, session=session))], capture_output=True, text=True)
     try:
         out, _ = json.JSONDecoder().raw_decode(run.stdout[run.stdout.index("{"):])
@@ -93,21 +75,24 @@ def fail(out):
     print(json.dumps({k: v for k, v in out.items() if k in ("error", "console", "value")}, indent=2)[:1500])
     sys.exit(1)
 
-# Launches a bundle in the background, as run.sh does, and returns its pid.
+# Launches the bundle in the background, as run.sh does, and returns its pid.
 launched = set()
 def launch(bundle, data, log, args):
-    subprocess.run(["open", "-g", "-n", "--env", "POLYMUX_DATA_DIR=" + data, "--stdout", log, "--stderr", log, bundle, "--args"] + args, check=True)
+    environment = ["--env", "POLYMUX_TEST_ADDRESS=" + os.environ["POLYMUX_ADDRESS"]]
+    if window_size:
+        environment += ["--env", "POLYMUX_TEST_WINDOW_SIZE=" + window_size]
+    subprocess.run(["open", "-g", "-n", "--env", "POLYMUX_DATA_DIR=" + data, "--stdout", log, "--stderr", log,
+                    *environment, bundle, "--args"] + args, check=True)
     for _ in range(100):
-        found = subprocess.run(["pgrep", "-nf", bundle + "/Contents/MacOS/Polymux"], capture_output=True, text=True).stdout.strip()
+        found = subprocess.run(["pgrep", "-nf", bundle + "/Contents/MacOS/polymux-tauri"], capture_output=True, text=True).stdout.strip()
         if found:
             launched.add(found)
-            record = "fixture.pid" if bundle.startswith(state + "/fixture/") else "app.pid"
-            with open(state + "/" + record, "w") as file:
+            with open(state + "/app.pid", "w") as file:
                 file.write(found)
-            matches = subprocess.run(["pgrep", "-f", bundle + "/Contents/MacOS/Polymux"], capture_output=True, text=True).stdout.split()
+            matches = subprocess.run(["pgrep", "-f", bundle + "/Contents/MacOS/polymux-tauri"], capture_output=True, text=True).stdout.split()
             if matches != [found]:
                 raise SystemExit("multiple processes use this test bundle; exact background reopen is unproven")
-            # A background launch can start without opening its initial SwiftUI window.
+            # A background launch can start without opening its initial window.
             for attempt in range(10):
                 reopened = subprocess.run(["open", "-g", bundle], capture_output=True)
                 if reopened.returncode == 0:
@@ -128,75 +113,20 @@ def stop(pid, kill=signal.SIGTERM):
 # Restart only the app, as run.sh does, and record its pid so run.sh still stops it.
 # A crash kills it without the chance to save anything on the way out.
 def relaunch(crash):
-    global fixture
     kill = signal.SIGKILL if crash else signal.SIGTERM
-    if fixture:
-        stop(fixture[0], kill)
-        fixture = (launch(*fixture_args), fixture[1])
-        with open(state + "/fixture.pid", "w") as f:
-            f.write(str(fixture[0]))
-        return
     with open(state + "/app.pid") as f:
         stop(int(f.read()), kill)
-    pid = launch("%s/%s.app" % (state, app), state + "/data", state + "/app.log", ["-serverAddress", os.environ["POLYMUX_ADDRESS"]])
-    with open(state + "/app.pid", "w") as f:
-        f.write(str(pid))
-
-# A "// @fixture <flags>" first line runs the flow against a copy of the app on the DEBUG fixture
-# server instead of the live one. The copy has its own name, bundle id and data, inside run.sh's state.
-fixture = fixture_args = None
-def start_fixture(flags):
-    global app, fixture, fixture_args
-    root = os.path.join(state, "fixture")
-    bundle = "%s/%s Fixture.app" % (root, app)
-    plist = bundle + "/Contents/Info.plist"
-    app += " Fixture"
-    if not os.path.isfile(root + "/signed"):
-        if os.path.isdir(bundle):
-            shutil.rmtree(bundle)
-        subprocess.run(["ditto", "%s/%s.app" % (state, os.environ["POLYMUX_APP"]), bundle], check=True)
-        with open(plist, "rb") as file:
-            values = plistlib.load(file)
-        identifier = values["CFBundleIdentifier"] + ".fixture"
-        values.update(CFBundleIdentifier=identifier, CFBundleName=app, CFBundleDisplayName=app)
-        with open(plist, "wb") as file:
-            plistlib.dump(values, file)
-        subprocess.run(["codesign", "--force", "--deep", "--sign", "-", "--entitlements", os.environ["POLYMUX_ENTITLEMENTS"], bundle], capture_output=True, check=True)
-        with open(root + "/signed", "w"):
-            pass
-    else:
-        identifier = subprocess.run(["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", plist], capture_output=True, text=True, check=True).stdout.strip()
-    if os.path.isdir(root + "/data"):
-        shutil.rmtree(root + "/data")
-    os.makedirs(root + "/data")
-    subprocess.run(["defaults", "delete", identifier], capture_output=True)
-    style = "Dark" if "--verify-dark" in flags else "Light"
-    fixture_args = (bundle, root + "/data", root + "/app.log", flags + ["-AppleInterfaceStyle", style])
-    fixture = (launch(*fixture_args), identifier)
-    with open(state + "/fixture.pid", "w") as f:
-        f.write(str(fixture[0]))
-
-def stop_fixture():
-    global fixture
-    if fixture:
-        stop(fixture[0])
-        subprocess.run(["defaults", "delete", fixture[1]], capture_output=True)
-        fixture = None
-        try:
-            os.unlink(state + "/fixture.pid")
-        except FileNotFoundError:
-            pass
-
-atexit.register(stop_fixture)
+    launch("%s/%s.app" % (state, app), state + "/data", state + "/app.log", [])
 
 # Samples the frontmost app for the whole flow; a failed sample counts against the flow, so the check fails closed.
 import threading
 samples, sampling = [], threading.Event()
 def frontmost():
-    run = subprocess.run([os.environ["POLYMUX_ROOT"] + "/scripts/control.sh", "desktop"], capture_output=True, text=True)
+    run = subprocess.run(["cua-driver", "list_apps", "{}"], capture_output=True, text=True)
     try:
         result = json.loads(run.stdout)
-        return str(result["frontmost"]) if run.returncode == 0 and result.get("frontmost") else None
+        active = next((item for item in result.get("apps", []) if item.get("active")), None)
+        return str(active["pid"]) if run.returncode == 0 and active else None
     except (ValueError, KeyError):
         return None
 def sample():
@@ -207,8 +137,10 @@ watcher.start()
 
 with open(flow) as f:
     source = f.read()
-if source.startswith("// @fixture"):
-    start_fixture(source.split("\n", 1)[0].split()[2:])
+size = re.search(r"^// @size (\d+)x(\d+)$", source, re.M)
+window_size = f"{size.group(1)}x{size.group(2)}" if size else None
+if window_size:
+    relaunch(False)
 setup_time = time.monotonic() - started
 
 # A closing menu keeps its window for a moment, and a handle taken then goes stale.
@@ -249,11 +181,8 @@ for index, part in enumerate(parts):
     ui_time += time.monotonic() - ui_start
     out.pop("screenshot_png_b64", None)
     if not ok or not out.get("ok"):
-        was_fixture = fixture is not None
-        stop_fixture()
         # A failure can leave the shared app mid-panel; restart it so later flows start clean.
-        if not was_fixture:
-            relaunch(False)
+        relaunch(False)
         fail(out)
     previous = out.get("value")
 sampling.set()
@@ -262,7 +191,6 @@ samples.append(frontmost())
 # Only the test's own windows count; the user may switch apps during a run.
 with open(state + "/app.pid") as f:
     ours = {f.read().strip()} | launched
-stop_fixture()
 if None in samples:
     print("  FAIL " + name + ": couldn't check which app was in front")
     sys.exit(1)

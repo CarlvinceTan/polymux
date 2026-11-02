@@ -37,10 +37,10 @@ When asked to make something like another app or implementation, follow this ord
 - Test enough to confirm the implementation works; no more.
 - Run tests and manual verification in an isolated instance: a temporary server and app named "Polymux N" (N is a number, unique per run) with their own throwaway configuration and app data. Never touch the user's real configuration or app data, or the installed copy of the app.
 - Use `scripts/run.sh` to start it, in the background. Stop it by killing that process (`kill -TERM <pid>`), which also deletes its data. Kill by PID, never by pattern: another agent's instance can match. Always stop it when done. Several runs can go at once without affecting each other.
-- To check the app compiles without launching it, run `scripts/check.sh [macos|ios|all]`; it shares `run.sh`'s build lock. For an iPhone screenshot, run `scripts/sim.sh out.png [app flags]` in a headless simulator, then `scripts/sim.sh --stop`.
-- E2E UI tests are cua-driver flows in `e2e/flows/*.js`. Run them with `scripts/run-e2e.sh [flow.js ...]`; it starts a `run.sh` instance, runs the flows, fails if the test app takes focus, and stops the instance. Flows target elements by role and name, never by pixel position, and `APP` holds the app name.
+- To check the app compiles without launching it, run `scripts/check.sh`; it runs the frontend verify and `cargo check`.
+- E2E UI tests are cua-driver flows in `e2e/tauri/*.js`, with fixture flows in `e2e/tauri-fixtures/*.js`. Run them with `scripts/run-e2e.sh [--verify-server] [flow.js ...]`; it starts a `run.sh` instance, runs the flows, fails if the test app takes focus, and stops the instance. Flows target elements by role and name, never by pixel position, and `APP` holds the app name.
   - Most flows cover behaviour against a real server (create a chat and send, search, relaunch persistence).
-  - Flows whose first line is `// @fixture <flags>` cover states a real server can't produce on demand (failed, slow, approvals). They run against a copy of the instance's app on the DEBUG fixture server, started with those flags. `--verify-fixture` alone shows no window; add a view flag such as `--verify-tools`.
+  - Fixture flows in `e2e/tauri-fixtures/*.js` cover states a real server can't produce on demand (failed, slow, approvals). Run them with `--verify-server`.
   - A `// @relaunch` line quits and reopens the app midway, and `// @crash` kills it; the next part gets the previous result as `PREVIOUS`.
 - Follow the user's GUI control preference in `AGENTS.local.md`, which may allow background control, foreground control, or both. If no preference is saved, use background control. For manual checks, use the `cua-driver` skill.
 - Clean up after manual testing: close every browser window, tab, app, and server you opened, including Chrome windows used to check a site or docs. Verify they are closed; nothing should still be running or cluttering the dock when the task is done.
@@ -53,7 +53,7 @@ When asked to make something like another app or implementation, follow this ord
 Keep toolchains and dependencies on the latest stable release unless that breaks something; prefer upgrading in one scoped change over mixing it with feature work.
 
 - Keep one Go version. `go.work` and `apps/server/go.mod` carry the same `go` directive, and CI reads `apps/server/go.mod`; don't leave a lagging `toolchain` line. Update any doc that states the Go version (`apps/site/src/content/docs/`).
-- Swift packages are locked by `Package.resolved` (`Package.swift` at the root and under `apps/Polymux`); the site uses `apps/site/package-lock.json`. Refresh the lock file with the upgrade, not separately.
+- The Tauri app locks dependencies with `apps/tauri/package-lock.json` and `apps/tauri/src-tauri/Cargo.lock`; the site uses `apps/site/package-lock.json`. Refresh the lock file with the upgrade, not separately.
 - Read the release notes for each major or minor bump, then apply only the migration it requires. Drop deprecated APIs the upgrade obsoletes instead of leaving compatibility shims.
 - Preserve behaviour. An upgrade should not change what the app does; a visible or behavioural difference is a bug to fix, or an intentional change to state explicitly and verify against the reference.
 - Verify with the build plus existing tests and the E2E flows that cover the upgraded area (`scripts/check.sh`, `scripts/run-e2e.sh`). Say which checks you ran and which you could not.
@@ -91,8 +91,8 @@ Never update it unless explicitly asked; report conflicts or suggest changes ins
 
 ## Naming
 
-- Prefer function, component, and variable names of two words or fewer. Use a third word only when two isn't enough to make the name clear. Short names keep call sites and narrow views (e.g. SwiftUI layouts) readable.
-- UI surfaces: a modal is presented over the window; a side panel is docked left (the sidebar) or right (profile, group chat) and becomes a page on iPhone. Use these terms for new views.
+- Prefer function, component, and variable names of two words or fewer. Use a third word only when two isn't enough to make the name clear. Short names keep call sites and narrow views (e.g. Svelte layouts) readable.
+- UI surfaces: a modal is presented over the window; a side panel is docked left (the sidebar) or right (profile, group chat) and becomes a full page in narrow windows. Use these terms for new views.
 
 ## File organisation
 

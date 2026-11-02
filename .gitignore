@@ -26,13 +26,10 @@ __debug_bin*
 *.test
 *.out
 
-# Swift and Xcode output
+# Build and packaging output
 .build/
 dist/
-.swiftpm/
-DerivedData/
-xcuserdata/
-*.xcuserstate
+apps/tauri/src-tauri/target/
 
 # Machine-specific agent rules
 /AGENTS.local.md

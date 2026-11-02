@@ -1,0 +1,231 @@
+/* Polymux desktop design tokens, matching the reference app's colours and metrics. */
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--window-bg);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+
+  --text: rgba(0, 0, 0, 0.85);
+  --text-muted: rgba(0, 0, 0, 0.66);
+  --text-secondary: rgba(0, 0, 0, 0.5);
+  --window-bg: #ffffff;
+  --sidebar-bg: #f2f2f2;
+  --side-surface: #e9e9ed;
+  --panel-bg: #f2f2f2;
+  --row-selected: rgba(0, 0, 0, 0.09);
+  --row-hover: rgba(0, 0, 0, 0.06);
+  --bubble-in: #f2f2f2;
+  --bubble-out: #ededed;
+  --bubble-quote: #e6e6e6;
+  --glass-bar: #e6e6e6;
+  --glass-field: #ececec;
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --hairline: rgba(0, 0, 0, 0.11);
+  --unread-dot: #0b6dd3;
+  --attention: #f6ad23;
+  --danger: #d70015;
+  --radius-panel: 24px;
+  --radius-card: 16px;
+  --radius-row: 10px;
+  --radius-bubble: 16px;
+  --sidebar-min: 260px;
+  --sidebar-max: 400px;
+  --chat-min: 424px;
+  --profile-min: 300px;
+  --profile-max: 480px;
+  --titlebar-height: 52px;
+  --control: 36px;
+  color-scheme: light;
+}
+
+:root[data-mode='dark'] {
+  color-scheme: dark;
+  --text: rgba(255, 255, 255, 0.85);
+  --text-muted: rgba(255, 255, 255, 0.58);
+  --text-secondary: rgba(255, 255, 255, 0.4);
+  --window-bg: #1e1e20;
+  --sidebar-bg: #262626;
+  --side-surface: #232326;
+  --panel-bg: #262626;
+  --row-selected: rgba(255, 255, 255, 0.11);
+  --row-hover: rgba(255, 255, 255, 0.06);
+  --bubble-in: #424242;
+  --bubble-out: #363636;
+  --bubble-quote: #525252;
+  --glass-bar: #343436;
+  --glass-field: #2e2e30;
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --unread-dot: #4d9bff;
+  --attention: #c8770c;
+  --danger: #ff453a;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--window-bg);
+  color: var(--text);
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.glass {
+  background: var(--glass-field);
+  border: 0.5px solid var(--glass-border);
+}
+
+.glass-bar {
+  background: var(--glass-bar);
+  border: 0.5px solid var(--glass-border);
+}
+
+/* Dropdown and open-menu shells, carried over from the Svelte implementation. */
+:root {
+  --neutral-50: rgba(0, 0, 0, 0.05);
+  --neutral-200: var(--hairline);
+  --neutral-400: rgba(0, 0, 0, 0.45);
+  --neutral-500: rgba(0, 0, 0, 0.55);
+  --neutral-700: rgba(0, 0, 0, 0.75);
+  --neutral-800: rgba(0, 0, 0, 0.8);
+  --neutral-950: rgba(0, 0, 0, 0.9);
+  --app-surface: var(--window-bg);
+  --menu-edge: 8px;
+}
+:root[data-mode='dark'] {
+  --neutral-50: rgba(255, 255, 255, 0.08);
+  --neutral-200: rgba(255, 255, 255, 0.12);
+  --neutral-400: rgba(255, 255, 255, 0.45);
+  --neutral-500: rgba(255, 255, 255, 0.55);
+  --neutral-700: rgba(255, 255, 255, 0.75);
+  --neutral-800: rgba(255, 255, 255, 0.8);
+  --neutral-950: rgba(255, 255, 255, 0.92);
+  --app-surface: #2a2a2c;
+}
+.polymux-dropdown-menu {
+  width: max-content;
+  max-width: calc(100vw - (2 * var(--menu-edge)));
+  box-sizing: border-box;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--app-surface);
+  border: 1px solid var(--neutral-200);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  animation: dropdown-in 0.12s ease-out;
+}
+.menu-list {
+  position: fixed;
+  z-index: 200;
+  overflow: visible;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.menu-list::-webkit-scrollbar {
+  display: none;
+}
+.polymux-dropdown-item {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: transparent;
+  color: var(--neutral-700);
+  cursor: default;
+  font-size: 12px;
+  font-weight: 450;
+  line-height: 1.3;
+  text-align: left;
+}
+.polymux-dropdown-item > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.polymux-dropdown-item:hover:not(:disabled),
+.polymux-dropdown-item:focus-visible {
+  background: var(--neutral-50);
+  color: var(--neutral-950);
+}
+.polymux-dropdown-item.danger {
+  color: var(--danger);
+}
+.menu-item-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+}
+.menu-item-chevron {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  color: var(--neutral-500);
+  transform: rotate(-90deg);
+}
+.open-menu {
+  position: fixed;
+  z-index: 200;
+  max-width: 280px;
+}
+.open-menu.compact {
+  max-width: 190px;
+}
+.open-menu:not(.placed) {
+  opacity: 0;
+  pointer-events: none;
+}
+.open-menu .polymux-dropdown-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-menu-shade {
+  position: fixed;
+  z-index: 199;
+  inset: 0;
+  background: transparent;
+}
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

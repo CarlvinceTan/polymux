@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run unit tests. Usage: scripts/test.sh [server|packages|swift|tools|all] [test args...]
+# Run unit tests. Usage: scripts/test.sh [server|packages|tauri|tools|all] [test args...]
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 TARGET=${1:-all}
@@ -12,7 +12,7 @@ package_tests() {
     (cd "$ROOT/packages/$package" && GOWORK=off go test "${@:-./...}")
   done
 }
-swift_tests() { (cd "$ROOT" && swift test "$@"); }
+tauri_tests() { (cd "$ROOT/apps/tauri" && npm run test:api); }
 tool_tests() {
   for test in "$ROOT"/scripts/*_test.py; do
     basename "$test"
@@ -23,10 +23,10 @@ tool_tests() {
 case "$TARGET" in
   server) server "$@" ;;
   packages) package_tests "$@" ;;
-  swift) swift_tests "$@" ;;
+  tauri) tauri_tests ;;
   tools) tool_tests ;;
   all)
-    [ $# = 0 ] || { echo 'Choose server, packages or swift when passing test arguments.' >&2; exit 2; }
-    server; package_tests; swift_tests; tool_tests ;;
-  *) echo "usage: $0 [server|packages|swift|tools|all] [test args...]" >&2; exit 2 ;;
+    [ $# = 0 ] || { echo 'Choose server, packages or tauri when passing test arguments.' >&2; exit 2; }
+    server; package_tests; tauri_tests; tool_tests ;;
+  *) echo "usage: $0 [server|packages|tauri|tools|all] [test args...]" >&2; exit 2 ;;
 esac

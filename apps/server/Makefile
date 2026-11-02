@@ -1,10 +1,8 @@
-.PHONY: build test run tools
+.PHONY: build test run
 
 build:
-	../../scripts/build.sh server
-
-tools:
-	swift build --product media-text --package-path ../..
+	mkdir -p ../../dist/server
+	go build -tags sqlite_fts5 -o ../../dist/server/polymux ./cmd/polymux
 
 test:
 	../../scripts/test.sh server -race ./...

@@ -18,6 +18,15 @@ func Register(*flag.FlagSet) *bool {
 	return &off
 }
 
+func RegisterIsolated(*flag.FlagSet) *bool {
+	off := false
+	return &off
+}
+
+func Isolate(string, string) error {
+	return errors.New("verify fixture is absent from release builds")
+}
+
 func Apply(string) (string, string, error) {
 	return "", "", errors.New("verify fixture is absent from release builds")
 }

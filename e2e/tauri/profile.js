@@ -1,0 +1,42 @@
+// A bot's profile can be edited and its chat searched in the native window.
+const app = await cua.getApp(APP);
+async function capabilities() {
+  const tab = (await app.query({name: 'Capabilities'})).find((row) => row.role === 'AXRadioButton');
+  if (!tab) throw new Error('Missing Capabilities tab');
+  await app.click(tab.element_token);
+}
+await app.waitFor({role: 'button', name: 'New chat', timeout_ms: 10000});
+await app.click({role: 'button', name: 'New chat'});
+await app.click({role: 'menuitem', name: 'New Bot'});
+const name = 'Profile' + Date.now();
+await app.typeText(name, {role: 'textfield', name: 'Name'});
+await app.click({role: 'button', name: 'Create'});
+await app.waitFor({role: 'textfield', name: 'Message', timeout_ms: 10000});
+const openPanel = await app.query({role: 'button', name: 'Close side panel'});
+if (openPanel.length) await app.click(openPanel[0].element_token);
+await app.click({role: 'button', name});
+await app.waitFor({text: 'No scheduled work', timeout_ms: 10000});
+const renamed = `Renamed ${name}`;
+await app.typeText(renamed, {role: 'textfield', name: 'Name'});
+await app.typeText('Native profile role', {role: 'textfield', name: 'Role'});
+await app.waitFor({role: 'textfield', name: 'Name', value: renamed});
+await app.waitFor({role: 'textfield', name: 'Role', value: 'Native profile role'});
+await capabilities();
+await app.waitFor({role: 'textfield', name: 'Instructions', timeout_ms: 10000});
+await app.typeText('Native profile instructions', {role: 'textfield', name: 'Instructions'});
+await app.waitFor({role: 'textfield', name: 'Instructions', value: 'Native profile instructions'});
+await app.click({role: 'button', name: 'Search this chat'});
+await app.waitFor({role: 'textfield', name: 'Search this chat'});
+await app.click({role: 'button', name: 'Close search'});
+await app.click({role: 'button', name: 'Close side panel'});
+await app.waitFor({role: 'button', name: renamed, timeout_ms: 10000});
+const header = (await app.query({role: 'button', name: renamed})).find((row) => row.label === `${renamed} Native profile role`);
+if (!header) throw new Error('Missing renamed chat header');
+await app.click(header.element_token);
+await app.waitFor({role: 'textfield', name: 'Name', value: renamed});
+await app.waitFor({role: 'textfield', name: 'Role', value: 'Native profile role'});
+await capabilities();
+await cua.sleep(4000);
+await app.waitFor({role: 'textfield', name: 'Instructions', value: 'Native profile instructions'});
+await app.click({role: 'button', name: 'Close side panel'});
+return 'ok';

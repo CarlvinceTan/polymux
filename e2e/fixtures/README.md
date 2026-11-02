@@ -1,6 +1,6 @@
 # Vault fixtures
 
-`vault-kdbx.kdbx` is a synthetic KeePassXC-generated database used by `e2e/flows/vault_kdbx.js`.
+`vault-kdbx.kdbx` is a synthetic KeePassXC-generated database available for vault import tests.
 
 - Database password: `e2e-kdbx-password`
 - Entry: `KDBX E2E`

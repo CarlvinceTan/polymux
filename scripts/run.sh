@@ -1,32 +1,21 @@
 #!/bin/sh
-# Run Polymux on throwaway data. Usage: scripts/run.sh [--watch|--server|--fixture <flags>...]
+# Run the Tauri app on throwaway data. Usage: scripts/run.sh [--watch|--no-watch|--server|--verify-server]
 # Type r and Enter to rebuild and restart; --watch does it automatically when sources change.
 # Each run has its own id, data, port, and preferences, so several can run at once.
-# Never touches ~/.polymux, the installed Polymux.app, or its preferences.
+# Never touches ~/.polymux, the installed app, or its preferences.
 set -eu
 umask 077
 watch=0
 server_only=0
-fixture=0
+verify_server=0
+executable=polymux-tauri
 case ${1:-} in
   "") ;;
   --watch) watch=1; shift ;;
   --no-watch) watch=0; shift ;;
   --server) server_only=1; shift ;;
-  --fixture)
-    fixture=1
-    shift
-    appearance=Light
-    for flag in "$@"; do
-      case "$flag" in --verify-dark|--tools-dark) appearance=Dark ;; esac
-    done
-    case ${POLYMUX_VERIFY_APPEARANCE:-${POLYMUX_VERIFY_THEME:-}} in
-      light) appearance=Light ;;
-      dark) appearance=Dark ;;
-    esac
-    set -- --verify-fixture "$@" -AppleInterfaceStyle "$appearance"
-    ;;
-  *) echo "usage: $0 [--watch|--no-watch|--server|--fixture <flags>...]" >&2; exit 2 ;;
+  --verify-server) verify_server=1; shift ;;
+  *) echo "usage: $0 [--watch|--no-watch|--server|--verify-server]" >&2; exit 2 ;;
 esac
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # Share instance numbers even when callers override TMPDIR.
@@ -45,7 +34,7 @@ forget_key() {
 }
 stop_owned() {
   physical=$(CDPATH='' cd -- "$1" && pwd -P)
-  for record in "$1"/app.pid "$1"/server.pid "$1"/fixture.pid; do
+  for record in "$1"/app.pid "$1"/server.pid; do
     [ -f "$record" ] || continue
     pid=$(cat "$record")
     executable=$(ps -p "$pid" -o comm= 2>/dev/null || true)
@@ -120,8 +109,10 @@ ADDRESS=http://127.0.0.1:$PORT
 APP="$STATE/Polymux $ID.app"
 
 build_server() {
+  tags=sqlite_fts5
+  if [ "$verify_server" = 1 ]; then tags=sqlite_fts5,verifyfixture; fi
   (cd "$ROOT/apps/server" && exec python3 "$ROOT/scripts/lib/locked.py" "$STATE/server-build.lock" -- \
-    go build -tags sqlite_fts5 -o "$STATE/polymux.new" ./cmd/polymux) &
+    go build -tags "$tags" -o "$STATE/polymux.new" ./cmd/polymux) &
   BUILD_PID=$!
   if ! wait "$BUILD_PID"; then BUILD_PID=; return 1; fi
   BUILD_PID=
@@ -131,7 +122,8 @@ build_server() {
 build_app() {
   staged="$STATE/build.app"
   rm -rf "$staged"
-  "$ROOT/scripts/check.sh" macos "$staged" >"$STATE/build.log" 2>&1 &
+  python3 "$ROOT/scripts/lib/locked.py" "$ROOT/.build/locks/tauri.lock" -- \
+    "$ROOT/scripts/lib/tauri-build.sh" "$staged" >"$STATE/build.log" 2>&1 &
   BUILD_PID=$!
   if ! wait "$BUILD_PID"; then
     BUILD_PID=
@@ -146,7 +138,7 @@ build_app() {
   /usr/libexec/PlistBuddy -c "Set :CFBundleName Polymux $ID" "$PLIST" || return 1
   /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Polymux $ID" "$PLIST" 2>/dev/null ||
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Polymux $ID" "$PLIST" || return 1
-  codesign --force --deep --sign - --entitlements "$ROOT/apps/Polymux/Polymux-local.entitlements" "$staged" || return 1
+  codesign --force --deep --sign - --entitlements "$ROOT/apps/tauri/src-tauri/entitlements.plist" "$staged" || return 1
   halt app
   rm -rf "$APP"
   mv "$staged" "$APP"
@@ -173,9 +165,16 @@ load_env() {
 }
 
 start_server() {
-  load_env
-  POLYMUX_DATA_DIR="$STATE/data" POLYMUX_LOG_DIR="$STATE/logs" POLYMUX_NO_MDNS=1 POLYMUX_TUNNEL=0 \
-    "$STATE/polymux" serve -dev -listen "127.0.0.1:$PORT" -device-listen "127.0.0.1:0" >>"$STATE/server.log" 2>&1 &
+  if [ "$verify_server" = 1 ]; then
+    env -i HOME="$HOME" TMPDIR="$BASE" PATH="$PATH" \
+      POLYMUX_DATA_DIR="$STATE/data" POLYMUX_LOG_DIR="$STATE/logs" POLYMUX_NO_MDNS=1 POLYMUX_TUNNEL=0 \
+      "$STATE/polymux" serve -dev -verify-fixture -verify-isolated -listen "127.0.0.1:$PORT" \
+      -device-listen "127.0.0.1:0" >>"$STATE/server.log" 2>&1 &
+  else
+    load_env
+    POLYMUX_DATA_DIR="$STATE/data" POLYMUX_LOG_DIR="$STATE/logs" POLYMUX_NO_MDNS=1 POLYMUX_TUNNEL=0 \
+      "$STATE/polymux" serve -dev -listen "127.0.0.1:$PORT" -device-listen "127.0.0.1:0" >>"$STATE/server.log" 2>&1 &
+  fi
   echo $! >"$STATE/server.pid"
   attempts=0
   until [ -s "$STATE/data/devices/local-token" ]; do
@@ -184,15 +183,34 @@ start_server() {
     [ "$attempts" -lt 100 ] || { echo "Server credential was not ready" >&2; return 1; }
     sleep 0.1
   done
+  if [ "$verify_server" = 1 ]; then
+    python3 - "$ADDRESS" "$STATE/data/devices/local-token" "$(cat "$STATE/server.pid")" <<'PY'
+import os, pathlib, sys, time, urllib.error, urllib.request
+address, path, pid = sys.argv[1], pathlib.Path(sys.argv[2]), int(sys.argv[3])
+request = urllib.request.Request(address + '/health', headers={'Authorization': 'Bearer ' + path.read_text().strip()})
+for _ in range(100):
+    try:
+        os.kill(pid, 0)
+        with urllib.request.urlopen(request, timeout=0.2) as response:
+            if response.status == 200:
+                break
+    except (OSError, urllib.error.URLError):
+        pass
+    time.sleep(0.1)
+else:
+    raise SystemExit('The isolated fixture server did not become healthy')
+PY
+  fi
 }
 
 # open -g asks LaunchServices for a background launch, so the app never takes focus.
 start_app() {
-  if [ "$fixture" = 0 ]; then set -- -serverAddress "$ADDRESS" "$@"; fi
   open -g -n --env POLYMUX_DATA_DIR="$STATE/data" --stdout "$STATE/app.log" --stderr "$STATE/app.log" \
+    --env POLYMUX_TEST_ADDRESS="$ADDRESS" \
+    --env POLYMUX_TEST_WINDOW_SIZE="${POLYMUX_TEST_WINDOW_SIZE:-}" \
     "$APP" --args "$@"
   attempts=0
-  until pid=$(pgrep -nf "$APP/Contents/MacOS/Polymux"); do
+  until pid=$(pgrep -nf "$APP/Contents/MacOS/$executable"); do
     attempts=$((attempts + 1))
     [ "$attempts" -lt 100 ] || { echo "The app did not start" >&2; return 1; }
     sleep 0.1
@@ -204,7 +222,8 @@ start_app() {
 fingerprint() {
   if [ "$PLATFORM" = Darwin ]; then format='-f'; template='%m %z %N'
   else format='-c'; template='%Y %s %n'; fi
-  find "$@" -type f -not -path '*/.build/*' -not -path '*/xcuserdata/*' -not -name '.DS_Store' \
+  find "$@" -type f -not -path '*/.build/*' -not -path '*/node_modules/*' -not -path '*/target/*' \
+    -not -path '*/dist/*' -not -name '.DS_Store' \
     -exec stat "$format" "$template" {} + 2>/dev/null | sort | cksum
 }
 
@@ -216,11 +235,11 @@ changed() {
   echo "$now" >"$stamp"
 }
 
-if [ "$fixture" = 0 ]; then build_server; start_server; fi
+build_server; start_server
 if [ "$server_only" = 0 ]; then build_app; start_app "$@"; fi
 
 echo "Polymux $ID running"
-if [ "$fixture" = 0 ]; then echo "  server: $ADDRESS  (binary: $STATE/polymux)"; fi
+echo "  server: $ADDRESS  (binary: $STATE/polymux)"
 echo "  data:   $STATE/data"
 echo "  logs:   $STATE/logs, $STATE/server.log, $STATE/app.log"
 if [ "$watch" = 1 ]; then
@@ -231,7 +250,7 @@ fi
 echo "Press Ctrl-C to stop and delete it."
 
 fingerprint "$ROOT/apps/server" "$ROOT/packages/runtime" "$ROOT/packages/memory" "$ROOT/packages/search" "$ROOT/packages/vault" "$ROOT/go.work" "$ROOT/go.work.sum" >"$STATE/server.stamp"
-fingerprint "$ROOT/apps/Polymux" "$ROOT/packages" "$ROOT/Package.swift" >"$STATE/app.stamp"
+fingerprint "$ROOT/apps/tauri/src" "$ROOT/apps/tauri/src-tauri" "$ROOT/apps/tauri/package.json" "$ROOT/apps/tauri/package-lock.json" >"$STATE/app.stamp"
 input=1
 while :; do
   if [ "$watch" = 1 ]; then
@@ -244,13 +263,13 @@ while :; do
     sleep 1
     continue
   fi
-  if [ "$fixture" = 0 ] && { [ "$watch" = 1 ] || [ "$command" != a ]; } && \
+  if { [ "$watch" = 1 ] || [ "$command" != a ]; } && \
     { [ "$watch" = 0 ] || changed "$STATE/server.stamp" "$ROOT/apps/server" "$ROOT/packages/runtime" "$ROOT/packages/memory" "$ROOT/packages/search" "$ROOT/packages/vault" "$ROOT/go.work" "$ROOT/go.work.sum"; }; then
     echo "Rebuilding server"
     if build_server; then halt server; start_server; echo "Server restarted"; else echo "Server build failed; fix it and reload again"; fi
   fi
   if [ "$server_only" = 0 ] && { [ "$watch" = 1 ] || [ "$command" != s ]; } && \
-    { [ "$watch" = 0 ] || changed "$STATE/app.stamp" "$ROOT/apps/Polymux" "$ROOT/packages" "$ROOT/Package.swift"; }; then
+    { [ "$watch" = 0 ] || changed "$STATE/app.stamp" "$ROOT/apps/tauri/src" "$ROOT/apps/tauri/src-tauri" "$ROOT/apps/tauri/package.json" "$ROOT/apps/tauri/package-lock.json"; }; then
     echo "Rebuilding app"
     if build_app; then start_app "$@"; echo "App relaunched"; else echo "App build failed; fix it and reload again"; fi
   fi

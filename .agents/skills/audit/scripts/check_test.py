@@ -30,7 +30,7 @@ class CheckTests(unittest.TestCase):
         self.put("apps/server/go.mod", "module example.invalid/audit\n\ngo 1.26.0\n")
         self.put("apps/site/package.json", '{"dependencies": {}}\n')
         self.put("apps/site/package-lock.json", "{}\n")
-        self.put("View.swift", "let value = 1\n")
+        self.put("src/example.ts", "let value = 1\n")
         self.put("tracked.txt", "original\n")
         self.put(".gitignore", "ignored/\n")
         self.save()
@@ -87,36 +87,33 @@ class CheckTests(unittest.TestCase):
     def test_worktree_includes_staged_unstaged_and_untracked(self):
         self.put("tracked.txt", "bad \n")
         self.git("add", "tracked.txt")
-        self.put("View.swift", 'Text("x").fixedSize()\n')
         self.put("new.txt", "bad \n")
         self.put("ignored/skip.txt", "bad \n")
         output = self.run_check(code=1)
         self.assertIn('"tracked.txt":1 [whitespace]', output)
-        self.assertIn('"View.swift":1 [fixed-size]', output)
         self.assertIn('"new.txt":1 [whitespace]', output)
         self.assertNotIn("skip.txt", output)
 
     def test_range_uses_committed_endpoint_only(self):
         base = self.git("rev-parse", "HEAD").stdout.decode().strip()
-        self.put("View.swift", 'Text("x").fixedSize()\n')
+        self.put("src/example.ts", "bad \n")
         head = self.save()
-        self.put("View.swift", "fixed\n")
+        self.put("src/example.ts", "fixed\n")
         self.put("new.txt", "bad \n")
-        output = self.run_check("--base", base, "--head", head)
-        self.assertIn("[fixed-size]", output)
+        output = self.run_check("--base", base, "--head", head, code=1)
+        self.assertIn("[whitespace]", output)
         self.assertNotIn("new.txt", output)
-        self.assertNotIn("[whitespace]", output)
 
     def test_existing_matches_are_not_new_findings(self):
-        self.put("View.swift", 'Text("x").fixedSize()\nlet value = 1\n')
+        self.put("src/example.ts", "bad \nlet value = 1\n")
         self.save()
-        self.put("View.swift", 'Text("x").fixedSize()\nlet value = 2\n')
-        self.assertNotIn("[fixed-size]", self.run_check())
+        self.put("src/example.ts", "bad \nlet value = 2\n")
+        self.assertNotIn("[whitespace]", self.run_check())
 
     def test_path_filters_apply_to_tracked_and_untracked_files(self):
-        self.put("View.swift", 'Text("x").fixedSize()\n')
+        self.put("src/example.ts", "bad \n")
         self.put("new.txt", "bad \n")
-        self.assertNotIn("new.txt", self.run_check("--worktree", "--", "View.swift"))
+        self.assertNotIn("new.txt", self.run_check("--worktree", "--", "src/example.ts", code=1))
         self.assertIn('"new.txt"', self.run_check("--worktree", "--", "new.txt", code=1))
         self.put("nested/other.txt", "bad \n")
         output = self.run_check("--", "nested", code=1)
@@ -149,12 +146,14 @@ class CheckTests(unittest.TestCase):
         self.put("apps/site/package-lock.json", '{"changed": true}\n')
         self.assertNotIn("[lockfile]", self.run_check())
 
-    def test_ui_matches_require_context_and_do_not_fail(self):
-        self.put("View.swift", 'Text("x").fixedSize()\n.alert("Error")\nButton("Retry") {}\n')
-        output = self.run_check()
-        for rule in ("fixed-size", "alert", "retry-button"):
-            self.assertIn("[" + rule + "]", output)
-        self.assertNotIn("FAIL", output)
+    def test_tauri_manifest_requires_its_lockfile(self):
+        self.put("apps/tauri/package.json", '{"dependencies": {"example": "1.0.0"}}\n')
+        self.put("apps/tauri/package-lock.json", "{}\n")
+        self.save()
+        self.put("apps/tauri/package.json", '{"dependencies": {"example": "2.0.0"}}\n')
+        self.assertIn("[lockfile]", self.run_check())
+        self.put("apps/tauri/package-lock.json", '{"changed": true}\n')
+        self.assertNotIn("[lockfile]", self.run_check())
 
     def test_secrets_are_not_printed(self):
         secret = "sensitive-example-do-not-print"
@@ -193,10 +192,10 @@ class CheckTests(unittest.TestCase):
         self.assertIn('"tracked.txt":1 [whitespace]', self.run_check(code=1))
 
     def test_deletions_do_not_scan_deleted_content(self):
-        self.put("View.swift", 'Text("x").fixedSize()\n')
+        self.put("src/example.ts", "bad \n")
         self.save()
-        (self.root / "View.swift").unlink()
-        self.assertNotIn("[fixed-size]", self.run_check())
+        (self.root / "src/example.ts").unlink()
+        self.assertNotIn("[whitespace]", self.run_check())
 
     def test_conflicts_and_unmerged_entries_fail(self):
         self.put("tracked.txt", "<<<<<<< HEAD\noriginal\n=======\nother\n>>>>>>> branch\n")

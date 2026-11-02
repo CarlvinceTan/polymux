@@ -5,13 +5,11 @@ on:
     paths:
       - "apps/site/**"
       - ".github/workflows/**"
-      - "apps/Polymux/Polymux.xcodeproj/project.pbxproj"
   push:
     branches: [main, dev]
     paths:
       - "apps/site/**"
       - ".github/workflows/**"
-      - "apps/Polymux/Polymux.xcodeproj/project.pbxproj"
   workflow_dispatch:
   workflow_call:
 

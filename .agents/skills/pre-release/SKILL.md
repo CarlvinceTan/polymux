@@ -28,7 +28,7 @@ Read and follow [the audit skill](../audit/SKILL.md). Use its range helper with 
 
 Cover cross-component compatibility, schema/data migrations, retention and recovery, authentication/security, public contracts, dependency/toolchain upgrades, and meaningful tests. A binary rollback is not a data rollback; identify any recovery plan needed for incompatible changes.
 
-Select the broader relevant checks from the current CI and release workflows, including server race tests, contract freshness, Swift tests, platform builds, site verification, and E2E flows for changed behaviour. Apply the audit skill's snapshot rules: working-tree tests do not prove a different historical/staged candidate. Reuse valid earlier evidence rather than rerunning unaffected checks.
+Select the broader relevant checks from the current CI and release workflows, including server race tests, contract freshness, Tauri checks, platform builds, site verification, and E2E flows for changed behaviour. Apply the audit skill's snapshot rules: working-tree tests do not prove a different historical/staged candidate. Reuse valid earlier evidence rather than rerunning unaffected checks.
 
 ## 3. Prepare release content
 

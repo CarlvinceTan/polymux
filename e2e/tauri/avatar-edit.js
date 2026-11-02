@@ -1,0 +1,23 @@
+// Editing a profile avatar saves the selection before the editor is reopened.
+const app = await cua.getApp(APP);
+await app.waitFor({role: 'button', name: 'New chat', timeout_ms: 10000});
+await app.click({role: 'button', name: 'New chat'});
+await app.click({role: 'menuitem', name: 'New Bot'});
+const name = 'Avatar' + Date.now();
+await app.typeText(name, {role: 'textfield', name: 'Name'});
+await app.click({role: 'button', name: 'Create'});
+await app.waitFor({role: 'textfield', name: 'Message', timeout_ms: 10000});
+await app.click({role: 'button', name});
+await app.waitFor({role: 'button', name: 'Edit avatar'});
+await app.click({role: 'button', name: 'Edit avatar'});
+await app.click((await app.query({name: 'Animals'})).find((row) => row.role === 'AXCheckBox').element_token);
+await app.click((await app.query({name: 'Cat'})).find((row) => row.role === 'AXCheckBox').element_token);
+await app.click({role: 'button', name: 'Close avatar editor'});
+await cua.sleep(1200);
+await app.click({role: 'button', name: 'Edit avatar'});
+await app.waitFor({name: 'Cat'});
+const selected = (await app.query({name: 'Cat'})).find((row) => row.role === 'AXCheckBox');
+if (selected?.value !== '1') throw new Error('The saved cat avatar was not selected on reopening');
+await app.click({role: 'button', name: 'Close avatar editor'});
+await app.click({role: 'button', name: 'Close side panel'});
+return 'ok';

@@ -14,6 +14,48 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
 
+func TestIsolate(t *testing.T) {
+	temp := t.TempDir()
+	out := t.TempDir()
+	t.Setenv("TMPDIR", temp)
+	data := filepath.Join(temp, "data")
+	if err := os.Mkdir(data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, addr := range []string{"", "0.0.0.0:1234", "127.0.0.1:0", "localhost:1234"} {
+		if err := Isolate(data, addr); !errors.Is(err, ErrRefused) {
+			t.Fatalf("accepted %q: %v", addr, err)
+		}
+	}
+	if err := Isolate(out, "127.0.0.1:1234"); !errors.Is(err, ErrRefused) {
+		t.Fatalf("accepted directory outside temporary root: %v", err)
+	}
+	link := filepath.Join(temp, "link")
+	if err := os.Symlink(out, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := Isolate(link, "127.0.0.1:1234"); !errors.Is(err, ErrRefused) {
+		t.Fatalf("accepted symlink outside temporary root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "existing"), []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Isolate(data, "127.0.0.1:1234"); !errors.Is(err, ErrRefused) {
+		t.Fatalf("accepted nonempty data: %v", err)
+	}
+	if err := os.Remove(filepath.Join(data, "existing")); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := Isolate(data, "127.0.0.1:1234"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(data, marker)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSeedMatchesManifest(t *testing.T) {
 	dir := t.TempDir()
 	if err := Seed(dir); err != nil {

@@ -41,7 +41,7 @@ func (f ExtractorFunc) Extract(ctx context.Context, asset Asset) (string, error)
 	return f(ctx, asset)
 }
 
-// SubprocessExtractor runs the media-text tool: <bin> <path> <mime type>.
+// SubprocessExtractor runs an external extractor: <bin> <path> <mime type>.
 type SubprocessExtractor struct {
 	Bin     string
 	Timeout time.Duration
@@ -60,15 +60,15 @@ func (e *SubprocessExtractor) Extract(ctx context.Context, asset Asset) (string,
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return "", fmt.Errorf("media-text: %w (%s)", err, exit.Stderr)
+			return "", fmt.Errorf("extractor: %w (%s)", err, exit.Stderr)
 		}
-		return "", fmt.Errorf("media-text: %w", err)
+		return "", fmt.Errorf("extractor: %w", err)
 	}
 	var result struct {
 		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(out, &result); err != nil {
-		return "", fmt.Errorf("media-text output: %w", err)
+		return "", fmt.Errorf("extractor output: %w", err)
 	}
 	return result.Text, nil
 }

@@ -1,0 +1,34 @@
+import { expect, test } from '@playwright/test';
+
+test('component gallery renders the design system and cursor-aware submenu', async ({ page }) => {
+  await page.goto('/?gallery=1');
+  await expect(page.getByRole('heading', { name: 'Quiet tools for working with agents.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Foundation' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Shared' })).toBeVisible();
+  await expect(page.getByPlaceholder('Search shared components')).toBeVisible();
+  await expect(page.locator('.icon-cell')).toHaveCount(10);
+  await expect(page.locator('.brand-row')).toBeVisible();
+  const tooltipTarget = page.getByRole('button', { name: 'Tooltip demo' });
+  await tooltipTarget.hover();
+  await expect(page.getByText('Tooltip demo')).toBeVisible();
+  await page.getByRole('button', { name: 'Workspace' }).click();
+  await expect(page.getByRole('menuitemradio', { name: 'Research' })).toBeVisible();
+  await page.getByRole('menuitemradio', { name: 'Research' }).click();
+  await expect(page.getByRole('heading', { name: 'Messages' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Feedback' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  const move = page.getByRole('menuitem', { name: 'Move to' });
+  await move.hover();
+  const submenu = page.getByRole('menu', { name: 'More options' });
+  await expect(submenu).toBeVisible();
+  const moveBox = (await move.boundingBox())!;
+  const submenuBox = (await submenu.boundingBox())!;
+  await page.mouse.move(moveBox.x + moveBox.width - 8, moveBox.y + moveBox.height / 2);
+  await page.mouse.move(submenuBox.x + 12, submenuBox.y + 18, { steps: 8 });
+  await expect(submenu).toBeVisible();
+  await submenu.getByRole('menuitem', { name: 'Research' }).click();
+  await expect(page.getByText('Selected: Research')).toBeVisible();
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Open menu' })).toHaveCount(0);
+});

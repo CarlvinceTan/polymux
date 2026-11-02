@@ -1,0 +1,22 @@
+// Run with scripts/run-e2e.sh --tauri --verify-server e2e/tauri-fixtures/providers.js
+const app = await cua.getApp(APP);
+await app.waitFor({role: 'button', name: 'Settings', timeout_ms: 10000});
+await app.click({role: 'button', name: 'Settings'});
+await app.click({role: 'button', name: 'Models'});
+await app.waitFor({text: 'No providers yet.'});
+await app.click({role: 'button', name: 'Add provider'});
+await app.click({role: 'button', name: 'Add custom provider'});
+await app.typeText('http://127.0.0.1:1/v1', {role: 'textfield', name: 'Base URL'});
+await app.typeText('fixture-model', {role: 'textfield', name: 'Model ID'});
+await app.click({role: 'button', name: 'Add'});
+await app.click({role: 'button', name: 'Save'});
+await app.waitFor({role: 'button', name: 'Edit Custom', timeout_ms: 10000});
+await app.click({role: 'button', name: 'Default model, Server default'});
+await app.click({role: 'radiobutton', name: 'Fixture Model Custom'});
+await app.waitFor({role: 'button', name: 'Default model, Fixture Model Custom', timeout_ms: 10000});
+await app.click({role: 'button', name: 'Edit Custom'});
+await app.click({role: 'button', name: 'Delete'});
+await app.click({role: 'button', name: 'Remove'});
+await app.waitFor({text: 'No providers yet.', timeout_ms: 10000});
+await app.waitFor({role: 'button', name: 'Default model, Server default', timeout_ms: 10000});
+return 'ok';

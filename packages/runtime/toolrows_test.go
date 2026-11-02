@@ -15,7 +15,7 @@ func TestToolEventCarriesArgsSummary(t *testing.T) {
 	if got := toolSummary("bash", json.RawMessage(`{"command":"API_KEY=sk-1 go test ./..."}`)); got != "[redacted] go test ./..." {
 		t.Fatalf("summary %q", got)
 	}
-	if got := toolSummary("read", json.RawMessage(`{"path":"a/`+strings.Repeat("b", 400)+`.swift"}`)); len(got) > 200 || !strings.HasSuffix(got, "…") {
+	if got := toolSummary("read", json.RawMessage(`{"path":"a/`+strings.Repeat("b", 400)+`.ts"}`)); len(got) > 200 || !strings.HasSuffix(got, "…") {
 		t.Fatalf("long summary %q", got)
 	}
 	if got := toolSummary("bash", nil); got != "" {

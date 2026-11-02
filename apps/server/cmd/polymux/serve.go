@@ -63,6 +63,7 @@ func runServer(args []string) error {
 	publicURL := flagSet.String("public-url", os.Getenv("POLYMUX_PUBLIC_URL"), "HTTPS origin advertised for remote pairing")
 	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341)")
 	verify := fixture.Register(flagSet)
+	isolated := fixture.RegisterIsolated(flagSet)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -85,7 +86,15 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *verify {
+	if *isolated && !*verify {
+		return errors.New("verify-isolated requires verify-fixture")
+	}
+	if *isolated {
+		if err := fixture.Isolate(*dir, *listen); err != nil {
+			return err
+		}
+		*dev = true
+	} else if *verify {
 		dataDir, addr, err := fixture.Apply(*dir)
 		if err != nil {
 			return err
@@ -173,25 +182,30 @@ func runServer(args []string) error {
 	defer deviceSocket.Close()
 	deviceServer := &http.Server{Handler: devices, ReadTimeout: 10 * time.Second, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	defer deviceServer.Close()
-	config, err := loadModel(*dir)
-	if err != nil {
-		return err
+	model := "verify"
+	var runtime server.Factory
+	if !*isolated {
+		config, err := loadModel(*dir)
+		if err != nil {
+			return err
+		}
+		model = config.Model
+		key, err := config.Key()
+		if err != nil {
+			return err
+		}
+		storage, closeStorage, err := agentruntime.NewDurableStorage(*dir)
+		if err != nil {
+			return err
+		}
+		defer closeStorage()
+		durable, err := agentruntime.NewDurable(ctx, *dir, config.URL, model, key, agentruntime.Client{Headers: config.Headers, Session: config.Session, Window: config.Window}, storage, config.Models...)
+		if err != nil {
+			return err
+		}
+		defer durable.Close()
+		runtime = durable
 	}
-	baseURL, model := config.URL, config.Model
-	key, err := config.Key()
-	if err != nil {
-		return err
-	}
-	storage, closeStorage, err := agentruntime.NewDurableStorage(*dir)
-	if err != nil {
-		return err
-	}
-	defer closeStorage()
-	runtime, err := agentruntime.NewDurable(ctx, *dir, baseURL, model, key, agentruntime.Client{Headers: config.Headers, Session: config.Session, Window: config.Window}, storage, config.Models...)
-	if err != nil {
-		return err
-	}
-	defer runtime.Close()
 	definitions := []agentruntime.Definition{}
 	if *verify {
 		definitions = fixture.Agents(model)

@@ -109,10 +109,9 @@ go test -race -tags sqlite_fts5 ./internal/server -run 'Test(Vault|Credential)'
 From the repository root:
 
 ```sh
-swift test --filter VaultTests
-scripts/check.sh all
-scripts/run-e2e.sh e2e/flows/vault.js e2e/flows/vault_kdbx.js e2e/flows/settings.js e2e/flows/vault_browser.js e2e/flows/vault_values.js
-scripts/run-e2e.sh --driver control e2e/flows/vault_passkey.js
+scripts/check.sh
+npm run test:ui --prefix apps/tauri -- --browser=chromium tests/vault-panel.spec.ts tests/vault-values.spec.ts
+scripts/run-e2e.sh e2e/tauri/sidebar.js
 ```
 
 The flows cover browsing/search, direct entry and replacement, clearing values, recovery-code entry, private chat cards, passkeys, and encrypted KDBX import. Server and client tests verify that no read or save response returns saved values, metadata edits preserve hidden content, stale edits fail, cancelled editors stay closed, imports are atomic, old encrypted entries migrate without re-encryption, and credential-use operations retain their existing boundaries. Optional Chromium tests exercise real filling and WebAuthn use.

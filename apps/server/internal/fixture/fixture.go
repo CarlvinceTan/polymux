@@ -56,6 +56,38 @@ func Register(fs *flag.FlagSet) *bool {
 	return fs.Bool("verify-fixture", false, "seed an empty data dir with the verification fixture")
 }
 
+func RegisterIsolated(fs *flag.FlagSet) *bool {
+	return fs.Bool("verify-isolated", false, "use isolated fixture data and listener")
+}
+
+// Isolate seeds only a temporary directory and never writes worktree metadata.
+func Isolate(dir, addr string) error {
+	if dir == "" || !filepath.IsAbs(dir) {
+		return fmt.Errorf("%w: an absolute temporary data directory is required", ErrRefused)
+	}
+	temp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return err
+	}
+	path, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(temp, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w: data directory must be under the temporary directory", ErrRefused)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host != "127.0.0.1" {
+		return fmt.Errorf("%w: an explicit loopback listener is required", ErrRefused)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%w: an explicit loopback port is required", ErrRefused)
+	}
+	return Seed(path)
+}
+
 // Port maps a worktree path into 20000–29999.
 func Port(root string) int {
 	sum := sha256.Sum256([]byte(filepath.Clean(root)))
