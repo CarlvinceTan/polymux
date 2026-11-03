@@ -88,6 +88,8 @@ struct NetworkSettings: View {
             if ServerHost.shared.available { thisMac }
         }
         .settingsForm()
+        // A move or merge can retire this Mac's server while its session is gone.
+        .task { ServerHost.shared.refresh() }
     }
 
     private var thisMac: some View {
@@ -352,6 +354,7 @@ struct NetworkPage: View {
                 remove(device)
             }
             .buttonStyle(.borderless)
+            .foregroundStyle(.red)
             .frame(maxWidth: .infinity)
             .accessibilityLabel("Remove \(device.title)")
         }

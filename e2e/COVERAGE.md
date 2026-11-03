@@ -86,7 +86,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Providers | List, add, reorder, remove | flow | `providers.js`, `provider-keys.js`, `provider-order.js`, `provider-picker.js` |
 | Devices | A network's page lists them; loading, failed, pair | flow | `fixture-devices.js`, `-slow`, `-failed`, `fixture-pairing.js` |
 | Networks | Join a second, switch, each keeps its place, numbered names, rename, leave | flow | `servers.js`, `fixture-servers.js` |
-| This Mac's server | New install, relaunch, off and on, join keeps it or retires it, choice of merging | flow | `fresh.js`, `join-empty.js`, `join-keeps.js` |
+| This Mac's server | New install, relaunch, off and on, join keeps it or retires it, or merges it from the join screen | flow | `fresh.js`, `join-empty.js`, `join-keeps.js`, `join-merge.js` |
 | Move | Preview, move, app follows, old copy, a new server beside it | flow | `move.js` |
 | Merge | Preview, merge, both sets of bots, same names told apart, old server goes | flow | `merge.js` |
 | Vault | Locked, unlocked, import | flow | `vault.js`, `vault_browser.js`, `vault_kdbx.js`, `vault_passkey.js` (always on Control), `vault_values.js` |
@@ -133,7 +133,7 @@ Release builds have no fixture, so the render counts are Debug numbers.
 | Graph arranging | Dragging a node moves it, undo returns it, dragging the background selects | flow | `fixture-graph-gestures.js`; wheel, right drag and pinch need a real pointer and aren't covered |
 | Permission rules | Rules are added and removed in the side panel; warns while commands can reach path rules | flow | `fixture-permissions.js` |
 | Web plugin panel | Its page fills the side panel and reaches its service; the edge resizes it; it can hide the close button | flow | `fixture-plugin-web.js`, `fixture-plugin-web-noclose.js` |
-| Plugin made by a bot | Waits for a person, stays out of the Marketplace, only serves its own page | done | `TestBotPluginWaitsForAPerson`, `local_test.go` |
+| Plugin made by a bot | Waits for a person, stays out of the Marketplace, only serves its own page; tapping Install shows its button, page and service in the app | done | `TestBotPluginWaitsForAPerson`, `local_test.go`; a scripted bot on a `run.sh` server, 2026-11-02 |
 | Global switcher | Hidden with no Global plugin, always keeps Chats | flow | `fixture-plugin-settings.js`, `PluginStoreTests` |
 | Hub chats | Replaces sidebar and content, unread pills, optimistic send | flow | `fixture-hub.js` |
 | Hub on a real homeserver | Join, unread, reply, reaction, read, media | done | Real server, sidecar and Tuwunel, driven over the API |

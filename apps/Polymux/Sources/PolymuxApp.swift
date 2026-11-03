@@ -219,10 +219,10 @@ final class AppSession {
 struct AppRoot: View {
     @AppStorage("serverAddress") private var address = ServerHost.address
     @State private var pool = SessionPool(servers: ServerStore())
-    @State private var showSettings = false
+    @State private var showSettings = SettingsTab.verifying != nil
     @State private var joinChoice: String?
     /// Kept here because a change of server rebuilds Settings.
-    @State private var settingsTab = SettingsTab.general
+    @State private var settingsTab = SettingsTab.verifying ?? .general
     @State private var pairingTask: Task<Void, Error>?
     @State private var pairingIssue: String?
     @State private var splashDone = false
@@ -296,7 +296,12 @@ struct AppRoot: View {
             URLRouter.shared.handler = { handleConnect($0) }
         }
         .onDisappear { pairingTask?.cancel() }
-        .onChange(of: showSettings) { _, shown in if !shown { settingsTab = .general } }
+        .onChange(of: showSettings) { _, shown in
+            guard !shown else { return }
+            settingsTab = .general
+            // Closing Settings answers the join question with the default: keep separate.
+            joinChoice = nil
+        }
         .panel(isPresented: $showSettings, page: true) {
             ConnectionView(pool: pool, settings: activeSession?.settings,
                             client: activeSession?.client,
@@ -420,7 +425,7 @@ struct ConnectionView: View {
     @Environment(PluginStore.self) private var plugins: PluginStore?
     private var network: NetworkInfo? { networkStore?.value }
     private var providers: [Provider] { providerStore?.providers ?? [] }
-    @State private var networkPage: String?
+    @State private var networkPage = SettingsTab.verifiesPage ? UserDefaults.standard.string(forKey: "serverAddress") : nil
     @State private var joining = false
     @State private var providerTarget: ProviderTarget?
     @State private var pluginTarget: String?
@@ -628,6 +633,23 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String { rawValue.capitalized }
+
+    /// UI checks open Settings at launch: --verify-network, or its page with --verify-network-page.
+    static var verifying: SettingsTab? {
+        #if DEBUG
+        CommandLine.arguments.contains("--verify-network") || verifiesPage ? .network : nil
+        #else
+        nil
+        #endif
+    }
+
+    static var verifiesPage: Bool {
+        #if DEBUG
+        CommandLine.arguments.contains("--verify-network-page")
+        #else
+        false
+        #endif
+    }
 
     /// Plugins draws its own plug, because SF Symbols has none at this angle.
     var icon: Image {
