@@ -50,6 +50,7 @@ type fallbackModels struct {
 type fallbackRoute struct {
 	policy  Fallback
 	session string
+	current string // the model this turn is on; it keeps it until that model fails
 }
 
 // attempt is one model a request may try, with the reasoning level it sends.
@@ -104,23 +105,56 @@ func (f *fallbackModels) unbind(conversation string, route *fallbackRoute) {
 	}
 }
 
-func (f *fallbackModels) policy(conversation, session string) Fallback {
+func (f *fallbackModels) policy(conversation, session string) (Fallback, *fallbackRoute) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if route := f.routes[conversation]; route != nil {
 		route.session = session
-		return route.policy
+		return route.policy, route
 	}
 	if session == "" {
-		return Fallback{}
+		return Fallback{}, nil
 	}
 	for _, route := range f.routes {
 		if route.session == session {
-			return route.policy
+			return route.policy, route
 		}
 	}
 	// An unattributed request stays on its model rather than send a chat elsewhere.
-	return Fallback{Mode: FallbackOff}
+	return Fallback{Mode: FallbackOff}, nil
+}
+
+// restart begins a turn, which tries the bot's models from the top again.
+func (f *fallbackModels) restart(route *fallbackRoute) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	route.current = ""
+}
+
+// stay keeps a turn on the model it's using, so it doesn't swap back mid-task and lose that model's cache. Should that
+// model fail, the rest follow in priority order.
+func (f *fallbackModels) stay(chain []attempt, route *fallbackRoute) []attempt {
+	if route == nil {
+		return chain
+	}
+	f.mu.Lock()
+	current := route.current
+	f.mu.Unlock()
+	for i, next := range chain {
+		if i > 0 && next.model.ProviderID()+"/"+next.model.ID == current {
+			return append(append([]attempt{next}, chain[:i]...), chain[i+1:]...)
+		}
+	}
+	return chain
+}
+
+func (f *fallbackModels) keep(route *fallbackRoute, id string) {
+	if route == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	route.current = id
 }
 
 // claim reports whether a model may be tried. Its only option skips the cooldown, which
@@ -335,8 +369,9 @@ func fitLevel(model *ai.Model, level ai.ThinkingLevel) ai.ThinkingLevel {
 func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessageEventStream, original *ai.Model, request ai.Context, opts ai.StreamOptions) {
 	transcript := ai.NormalizeContext(request)
 	tokens := ai.EstimateContextTokens(transcript).Tokens
-	policy := f.policy(markerID(transcript), opts.SessionID)
+	policy, route := f.policy(markerID(transcript), opts.SessionID)
 	chain, epoch := f.chain(original, opts.Thinking, policy)
+	chain = f.stay(chain, route)
 	own := original.ProviderID() + "/" + original.ID
 	var rejected *ai.AssistantMessage
 	for waits := 0; ; waits++ {
@@ -439,6 +474,9 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 				continue
 			}
 			f.settle(id, epoch, failed, failure)
+			if !failed {
+				f.keep(route, id)
+			}
 			if unused {
 				continue
 			}
@@ -467,6 +505,7 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 			return
 		}
 		chain, epoch = f.chain(original, opts.Thinking, policy)
+		chain = f.stay(chain, route)
 	}
 	if ctx.Err() != nil {
 		endFallback(target, original, "request cancelled", ai.StopReasonAborted)

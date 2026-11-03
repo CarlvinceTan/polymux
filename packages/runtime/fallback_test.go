@@ -440,6 +440,7 @@ func TestFallbackPolicy(t *testing.T) {
 }
 
 func TestFallbackNotice(t *testing.T) {
+	useClock(t, &recordClock{})
 	var limited atomic.Bool
 	limited.Store(true)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

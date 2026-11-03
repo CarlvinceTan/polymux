@@ -21,6 +21,9 @@ const (
 	retryCapMs = 30_000
 	// busyBudget is how long a call keeps waiting out a provider that says it's busy before giving up.
 	busyBudget = 10 * time.Minute
+	// swapPatience is how long a bot with fallbacks waits on its model through a brief hiccup before switching, since
+	// a switch costs the new model an uncached request.
+	swapPatience = 20 * time.Second
 )
 
 // configureRetry is the PiG settings call. Tests replace it to simulate a failure.
@@ -308,7 +311,7 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		if err != nil {
 			load.leave(0)
-			if t.fallback || attempt >= retryMax || !rewindable(req) {
+			if attempt >= retryMax || !rewindable(req) {
 				return nil, err
 			}
 			if waitErr := waitRetry(req.Context(), id, attempt+1, 0); waitErr != nil {
@@ -341,7 +344,7 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 			}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
 			t.failure.capture(resp.Header, body)
 		}
-		if t.fallback || t.failure != nil && t.failure.quota {
+		if t.failure != nil && t.failure.quota {
 			return resp, nil
 		}
 		// A busy provider is waited out for as long as busyBudget, backing off; other failures get a few tries.
@@ -351,6 +354,10 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 		delay := retryAfter(resp.Header)
 		if busy && delay == 0 {
 			delay = backoff(attempt)
+		}
+		// With fallbacks, only a short wait beats switching.
+		if t.fallback && waited+delay > swapPatience {
+			return resp, nil
 		}
 		waited += capDelay(delay)
 		drain(resp)

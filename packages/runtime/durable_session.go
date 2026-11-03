@@ -1093,6 +1093,9 @@ func (s *durableSession) Send(ctx context.Context, m Message, emit func(Delta) e
 		return Result{}, err
 	}
 	conversationID := strconv.FormatInt(int64(s.conversation.Id()), 10)
+	if s.route != nil {
+		s.runtime.fallback.restart(s.route)
+	}
 	sink := bindRetry(conversationID, emit)
 	streamEmit := emit
 	if sink != nil {
