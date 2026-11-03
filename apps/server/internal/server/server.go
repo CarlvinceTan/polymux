@@ -117,7 +117,7 @@ type Server struct {
 	sends      sync.Mutex
 	presenceMu sync.Mutex
 	presence   map[string]int
-	slots      chan struct{}
+	slots      *turnSlots
 	resources  sync.Map
 	turns      sync.Map
 	shells     sync.Map
@@ -278,7 +278,7 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 		return nil, fmt.Errorf("move agent folders: %w", err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	v := &Server{Store: s, settings: preferences, keys: providers.NewKeychain(filepath.Join(c.DataDir, "provider-keys")), memory: memory.New(filepath.Join(c.DataDir, "memory")), worktrees: agentruntime.NewWorktrees(filepath.Join(c.DataDir, "worktrees")), config: c, ctx: ctx, cancel: cancel, actors: map[string]*actor{}, groups: map[string]*groupActor{}, presence: map[string]int{}, deletes: map[string]*deletion{}, voices: map[string]*voiceWork{}, voiceSeen: map[string]bool{}, mux: http.NewServeMux(), slots: make(chan struct{}, 4), sweepWake: make(chan struct{}, 1)}
+	v := &Server{Store: s, settings: preferences, keys: providers.NewKeychain(filepath.Join(c.DataDir, "provider-keys")), memory: memory.New(filepath.Join(c.DataDir, "memory")), worktrees: agentruntime.NewWorktrees(filepath.Join(c.DataDir, "worktrees")), config: c, ctx: ctx, cancel: cancel, actors: map[string]*actor{}, groups: map[string]*groupActor{}, presence: map[string]int{}, deletes: map[string]*deletion{}, voices: map[string]*voiceWork{}, voiceSeen: map[string]bool{}, mux: http.NewServeMux(), slots: newTurnSlots(4), sweepWake: make(chan struct{}, 1)}
 	v.secrets = vault
 	v.instance = ID()
 	if err := v.loadDrain(); err != nil {
@@ -1425,7 +1425,8 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	if isolatedTurn(work.Trigger) {
 		session = run.ID
 	}
-	release, resourceErr := s.acquire(runCtx, session)
+	// The user is waiting on a turn their own message started; background turns can wait behind it.
+	release, resourceErr := s.acquire(runCtx, session, work.Trigger == contract.RunTriggerMessage)
 	if release != nil {
 		defer release()
 	}

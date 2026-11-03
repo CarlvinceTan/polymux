@@ -133,7 +133,7 @@ func (s *Server) voice(w http.ResponseWriter, r *http.Request) {
 func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntime.Result, name string, err error) {
 	var empty agentruntime.Result
 	// The consultation has its own session, so it doesn't wait for the bot's chat turns.
-	release, err := v.server.acquire(ctx, "voice-"+v.id+"/"+task.target)
+	release, err := v.server.acquire(ctx, "voice-"+v.id+"/"+task.target, true)
 	if err != nil {
 		return empty, "", err
 	}
