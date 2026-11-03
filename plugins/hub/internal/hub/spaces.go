@@ -60,3 +60,38 @@ func linkSpaces(chats []contract.HubChat, rooms map[string]*room) {
 		}
 	}
 }
+
+// linkAccounts names the logins each chat belongs to. A login's filtering Space holds its
+// chats, a split portal names its receiver, and a shared group can have several.
+func linkAccounts(chats []contract.HubChat, rooms map[string]*room, spaces map[string]string) {
+	for index := range chats {
+		chat := &chats[index]
+		chat.Accounts = []string{}
+		for _, parent := range chat.Parents {
+			if login, ok := spaces[parent]; ok && !slices.Contains(chat.Accounts, login) {
+				chat.Accounts = append(chat.Accounts, login)
+			}
+		}
+		if value := rooms[chat.ID]; value != nil {
+			if login := value.receiver(); login != "" && !slices.Contains(chat.Accounts, login) {
+				chat.Accounts = append(chat.Accounts, login)
+			}
+		}
+	}
+	for index := range chats {
+		space := &chats[index]
+		if !space.Space {
+			continue
+		}
+		for _, chat := range chats {
+			if !slices.Contains(chat.Parents, space.ID) {
+				continue
+			}
+			for _, login := range chat.Accounts {
+				if !slices.Contains(space.Accounts, login) {
+					space.Accounts = append(space.Accounts, login)
+				}
+			}
+		}
+	}
+}

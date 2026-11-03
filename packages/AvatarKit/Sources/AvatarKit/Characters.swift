@@ -41,6 +41,8 @@ public struct CharacterModel: Sendable {
     var frosting = false
     var meshID: ShapeID? = nil
     var mesh: MascotMesh? { meshID.flatMap(mascot) }
+    /// Rebuilding its geometry takes a large share of a frame.
+    var costly: Bool { mesh != nil || frosting || solid == .pumpkin }
 
     /// Scales a character so its head reads as large as a circle avatar; ears and props may
     /// reach past it, as a circle's never do. Characters only grow, and never past the frame.

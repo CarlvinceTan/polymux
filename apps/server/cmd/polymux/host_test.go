@@ -1,51 +1,30 @@
 package main
 
 import (
-	"net"
+	"strings"
 	"testing"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/host"
 )
 
-func TestHostDefaults(t *testing.T) {
-	for _, mode := range []string{"run", "install"} {
-		t.Run(mode, func(t *testing.T) {
-			listen, control, err := hostListeners("", "", false)
-			if err != nil || listen != "127.0.0.1:7337" || control != "127.0.0.1:7338" {
-				t.Fatalf("host listeners = %q, %q, %v", listen, control, err)
-			}
-		})
+func TestHostAddressFollowsInstance(t *testing.T) {
+	if address := hostAddress(); address != "http://127.0.0.1:7337" {
+		t.Fatalf("default address = %q", address)
+	}
+	t.Setenv("POLYMUX_LISTEN", "127.0.0.1:8000")
+	if address := hostAddress(); address != "http://127.0.0.1:8000" {
+		t.Fatalf("instance address = %q", address)
 	}
 }
 
-func TestHostListeners(t *testing.T) {
-	for _, test := range []struct {
-		name, listen, control, want string
-		invalid                     bool
-	}{
-		{name: "adjacent port", listen: "192.168.1.5:8000", want: "127.0.0.1:8001"},
-		{name: "explicit control", listen: "127.0.0.1:8000", control: "127.0.0.1:9000", want: "127.0.0.1:9000"},
-		{name: "no adjacent port", listen: "127.0.0.1:65535", invalid: true},
-		{name: "invalid port", listen: "127.0.0.1:bad", invalid: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, control, err := hostListeners(test.listen, test.control, false)
-			if (err != nil) != test.invalid {
-				t.Fatalf("error = %v", err)
-			}
-			if err == nil && control != test.want {
-				t.Errorf("controller = %q, want %q", control, test.want)
-			}
-		})
+func TestTestInstanceNeverNamesTheRealJob(t *testing.T) {
+	t.Setenv("POLYMUX_HOST_LABEL", "com.flarehq.polymux.server.test.1")
+	t.Setenv("POLYMUX_HOST_DIR", t.TempDir())
+	service, err := host.Open()
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestTailscaleControllerStaysLocal(t *testing.T) {
-	old := interfaceAddrs
-	interfaceAddrs = func() ([]net.Addr, error) {
-		return []net.Addr{&net.IPNet{IP: net.ParseIP("100.64.0.23"), Mask: net.CIDRMask(32, 32)}}, nil
-	}
-	defer func() { interfaceAddrs = old }()
-	listen, control, err := hostListeners("", "", true)
-	if err != nil || listen != "100.64.0.23:7337" || control != "127.0.0.1:7338" {
-		t.Fatalf("listen %q control %q: %v", listen, control, err)
+	if service.Label == host.Label || strings.Contains(service.Path, "Library/LaunchAgents") {
+		t.Fatalf("service %+v", service)
 	}
 }

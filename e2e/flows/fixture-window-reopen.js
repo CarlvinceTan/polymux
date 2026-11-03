@@ -1,4 +1,5 @@
 // @fixture --verify-fixture --verify-pins
+// @cua
 // Closing and reopening the window keeps the process and titlebar controls usable.
 let app = await cua.getApp(APP);
 await app.waitFor({ role: "button", name: "Settings" });

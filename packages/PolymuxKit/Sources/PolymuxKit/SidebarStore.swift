@@ -10,6 +10,8 @@ public final class SidebarStore {
     @ObservationIgnored private var resolvers: [String: [CheckedContinuation<String?, Never>]] = [:]
     @ObservationIgnored private var agentChats: Set<String> = []
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
+    /// Wraps a reorder, so the interface can slide a chat to its new place.
+    @ObservationIgnored public var animate: (() -> Void) -> Void = { $0() }
 
     public func displayed(_ id: String?) -> Thread? {
         threads.first { $0.id == id || $0.id == aliases[id ?? ""] }
@@ -235,10 +237,49 @@ public final class SidebarStore {
     }
 
     public func thread(for agent: Agent) -> Thread? {
-        threads.first { !$0.isGroup && $0.agentID == agent.id }
+        threads.first { $0.id == agent.id && $0.agentID == agent.id }
     }
 
     public var groups: [Thread] { threads.filter(\.isGroup) }
+
+    /// What the chat list shows: tasks live in their bot's profile instead.
+    public var chats: [Thread] { threads.filter { !$0.isTask } }
+
+    /// A bot's tasks: pinned ones in the order they were pinned, then unfinished, then finished, newest first.
+    public func tasks(of agentID: String) -> [Thread] {
+        Self.ordered(threads.filter { $0.isTask && $0.agentID == agentID })
+    }
+
+    nonisolated static func ordered(_ tasks: [Thread]) -> [Thread] {
+        func rank(_ thread: Thread) -> Int {
+            if thread.task?.pinnedAt != nil { return 0 }
+            return thread.task?.status == TaskInfoStatus.done ? 2 : 1
+        }
+        func touched(_ thread: Thread) -> String {
+            max(thread.task?.updatedAt ?? "", thread.lastMessage?.createdAt ?? "")
+        }
+        return tasks.sorted { lhs, rhs in
+            if rank(lhs) != rank(rhs) { return rank(lhs) < rank(rhs) }
+            if rank(lhs) == 0 { return (lhs.task?.pinnedAt ?? "") < (rhs.task?.pinnedAt ?? "") }
+            return touched(lhs) > touched(rhs)
+        }
+    }
+
+    /// Shows the change at once and puts the task back if the server refuses it.
+    public func updateTask(_ id: String, pinned: Bool? = nil, status: String? = nil) async throws {
+        guard let index = threads.firstIndex(where: { $0.id == id }), let before = threads[index].task else { return }
+        var edited = before
+        if let pinned { edited.pinnedAt = pinned ? (before.pinnedAt ?? WireDate.string()) : nil }
+        if let status { edited.status = status }
+        threads[index].task = edited
+        do {
+            let saved = try await client.updateTask(id: id, pinned: pinned, status: status)
+            if let index = threads.firstIndex(where: { $0.id == id }) { threads[index].task = saved.task }
+        } catch {
+            if let index = threads.firstIndex(where: { $0.id == id }) { threads[index].task = before }
+            throw error
+        }
+    }
 
     public func participants(in thread: Thread) -> [Agent] {
         thread.participantIDs.compactMap { id in agents.first { $0.id == id } }
@@ -259,8 +300,7 @@ public final class SidebarStore {
         epoch &+= 1
         acceptedThreads[thread.id] = thread
         merge(thread, into: &threads)
-        isConnected = true
-        error = nil
+        markConnected()
         staged.append(.chat)
         scheduleSave()
         await settled()
@@ -281,8 +321,7 @@ public final class SidebarStore {
             acceptedThreads[thread.id] = thread
             merge(thread, into: &threads)
         }
-        isConnected = true
-        error = nil
+        markConnected()
         staged.append(.agent)
         scheduleSave()
     }
@@ -405,6 +444,12 @@ public final class SidebarStore {
         for thread in threads { keepFinished(thread) }
     }
 
+    /// Writes only a real change: this runs on every poll, and any write updates every chat row.
+    private func markConnected() {
+        if !isConnected { isConnected = true }
+        if error != nil { error = nil }
+    }
+
     public func refresh() async {
         await settled()
         generation &+= 1
@@ -418,8 +463,7 @@ public final class SidebarStore {
             let snapshots = values.1
             if let applied, applied.agents == values.0, applied.threads == snapshots,
                applied.revision == revision, applied.epoch == epoch {
-                isConnected = true
-                error = nil
+                markConnected()
                 for id in pendingThreads.keys where editTasks[id] == nil && editWorkers[id] == nil { retryEdit(id) }
                 await flush()
                 return
@@ -456,8 +500,7 @@ public final class SidebarStore {
             acceptedThreads.removeAll()
             acceptedThreads = pendingThreads
             applied = (values.0, snapshots, revision, epoch)
-            isConnected = true
-            error = nil
+            markConnected()
             for id in pendingThreads.keys where editTasks[id] == nil && editWorkers[id] == nil { retryEdit(id) }
             await flush()
         } catch {
@@ -619,7 +662,7 @@ public final class SidebarStore {
             thread.unreadCount += 1
         }
         threads[index] = thread
-        if placed != (thread.pinRank, thread.lastMessage?.createdAt) { orderThreads() }
+        if placed != (thread.pinRank, thread.lastMessage?.createdAt) { animate { orderThreads() } }
         return true
     }
 

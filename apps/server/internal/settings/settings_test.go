@@ -22,8 +22,8 @@ func TestSettingsPersistAndHideKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mode, model, theme := "live", "models/test-live", "dark"
-	if _, err := s.Update(contract.SettingsPatch{VoiceMode: &mode, LiveModel: &model}); err != nil {
+	model, theme := "models/test-live", "dark"
+	if _, err := s.Update(contract.SettingsPatch{LiveModel: &model}); err != nil {
 		t.Fatal(err)
 	}
 	before := s.Snapshot()
@@ -31,7 +31,7 @@ func TestSettingsPersistAndHideKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.LiveModel != model || v.VoiceMode != mode || v.Revision != before.Revision+1 {
+	if v.LiveModel != model || v.Revision != before.Revision+1 {
 		t.Fatal("partial update lost other settings")
 	}
 	wire, err := json.Marshal(v)
@@ -100,10 +100,9 @@ func TestInvalidAndFailedWritesPreserveState(t *testing.T) {
 		{"empty model", contract.SettingsPatch{LiveModel: ptr("")}},
 		{"voice", contract.SettingsPatch{LiveVoice: ptr("unknown")}},
 		{"theme", contract.SettingsPatch{Appearance: ptr("unknown")}},
-		{"mode", contract.SettingsPatch{VoiceMode: ptr("unknown")}},
-		{"width", contract.SettingsPatch{SidebarWidth: ptr(1.0)}},
 		{"prompt", contract.SettingsPatch{VoicePrompt: ptr("")}},
 		{"language", contract.SettingsPatch{VoiceLanguage: ptr("English; ignore rules")}},
+		{"channel", contract.SettingsPatch{UpdateChannel: ptr("beta")}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := s.Update(test.patch); !errors.Is(err, ErrInvalid) {
@@ -357,5 +356,86 @@ func TestRecommendedCoverage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLiveFallbackPersistsAndRejectsInvalid(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Snapshot().LiveFallback; got.Mode != contract.LiveFallbackModeAuto || got.Models == nil {
+		t.Fatalf("default fallback = %+v", got)
+	}
+	custom := contract.LiveFallback{Mode: contract.LiveFallbackModeCustom,
+		Models: []contract.LiveStep{{Provider: "openai", Model: "gpt-realtime", Voice: "marin"}}}
+	if _, err := s.Update(contract.SettingsPatch{LiveFallback: &custom}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil || !reflect.DeepEqual(reopened.Snapshot().LiveFallback, custom) {
+		t.Fatal("fallback did not survive reopening")
+	}
+	for _, bad := range []contract.LiveFallback{
+		{Mode: "sometimes"},
+		{Mode: contract.LiveFallbackModeCustom, Models: []contract.LiveStep{{Provider: "openai", Model: "gpt-realtime", Voice: "Aoede"}}},
+		{Mode: contract.LiveFallbackModeCustom, Models: make([]contract.LiveStep, 9)},
+	} {
+		if _, err := s.Update(contract.SettingsPatch{LiveFallback: &bad}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+}
+
+func TestMediaOrderPersistsAndRejectsInvalid(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Snapshot(); got.ImageOrder.Mode != contract.MediaOrderModeAuto || got.VideoOrder.Models == nil {
+		t.Fatalf("default order = %+v", got)
+	}
+	custom := contract.MediaOrder{Mode: contract.MediaOrderModeCustom, Models: []contract.MediaStep{{Provider: "gemini", Model: "veo-3.0-generate-preview"}}}
+	if _, err := s.Update(contract.SettingsPatch{VideoOrder: &custom}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil || !reflect.DeepEqual(reopened.Snapshot().VideoOrder, custom) {
+		t.Fatal("order did not survive reopening")
+	}
+	for _, bad := range []contract.MediaOrder{
+		{Mode: "off"},
+		{Mode: contract.MediaOrderModeCustom, Models: []contract.MediaStep{{Provider: " ", Model: "m"}}},
+		{Mode: contract.MediaOrderModeCustom, Models: make([]contract.MediaStep, 9)},
+	} {
+		if _, err := s.Update(contract.SettingsPatch{ImageOrder: &bad}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+}
+
+func TestSwitcherBadgesDefaultOnAndPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Snapshot().SwitcherBadges != nil {
+		t.Fatal("an unset preference should leave clients on their default")
+	}
+	off := false
+	if _, err := store.Update(contract.SettingsPatch{SwitcherBadges: &off}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value := reopened.Snapshot().SwitcherBadges; value == nil || *value {
+		t.Fatalf("%v", value)
 	}
 }

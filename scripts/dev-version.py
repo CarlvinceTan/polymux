@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Emit monotonic development build numbers, including workflow reruns."""
+"""Emit development build numbers: iOS is the commit count, macOS is monotonic across reruns."""
 
 import pathlib
 import re
+import subprocess
 import sys
 
 
@@ -12,14 +13,17 @@ def versions(run, attempt, version):
     major, minor, patch = map(int, version.split("."))
     base = major * 1000000 + minor * 1000 + patch
     suffix = f"{run % 100}.{attempt}"
-    return {
-        "ios": f"{1 + run // 100}.{suffix}",
-        "macos": f"{base + run // 100}.{suffix}",
-    }
+    return {"macos": f"{base + run // 100}.{suffix}"}
+
+
+def ios_build(root):
+    return subprocess.check_output(["git", "-C", str(root), "rev-list", "--count", "HEAD"], text=True).strip()
 
 
 if __name__ == "__main__":
-    project = pathlib.Path(__file__).resolve().parents[1] / "apps/Polymux/Polymux.xcodeproj/project.pbxproj"
+    root = pathlib.Path(__file__).resolve().parents[1]
+    project = root / "apps/Polymux/Polymux.xcodeproj/project.pbxproj"
     version = re.search(r"MARKETING_VERSION = (\d+\.\d+\.\d+);", project.read_text()).group(1)
+    print(f"ios={ios_build(root)}")
     for key, value in versions(int(sys.argv[1]), int(sys.argv[2]), version).items():
         print(f"{key}={value}")

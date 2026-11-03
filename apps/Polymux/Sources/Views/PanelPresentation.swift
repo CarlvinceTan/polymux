@@ -65,9 +65,10 @@ extension EnvironmentValues {
 }
 
 extension View {
-    func panel<Presented: View>(isPresented: Binding<Bool>,
+    /// `page` fills the screen on iPhone; elsewhere a panel is always a panel.
+    func panel<Presented: View>(isPresented: Binding<Bool>, page: Bool = false,
                                 @ViewBuilder content: @escaping () -> Presented) -> some View {
-        modifier(PanelPresentation(isPresented: isPresented, presented: content))
+        modifier(PanelPresentation(isPresented: isPresented, page: page, presented: content))
     }
 
     func panel<Item: Identifiable, Presented: View>(item: Binding<Item?>,
@@ -90,8 +91,10 @@ extension View {
 
 private struct PanelPresentation<Presented: View>: ViewModifier {
     @Binding var isPresented: Bool
+    let page: Bool
     @ViewBuilder let presented: () -> Presented
     @Environment(\.panelContext) private var parent
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var id = UUID()
 
     private var panel: some View {
@@ -112,12 +115,30 @@ private struct PanelPresentation<Presented: View>: ViewModifier {
                 if isPresented { keys.append(id) }
             }
         #else
-        content.sheet(isPresented: $isPresented) { PanelSheet(content: panel) }
+        Group {
+            if page && sizeClass == .compact {
+                content.fullScreenCover(isPresented: $isPresented) { panel.dropdownHost() }
+            } else {
+                content.sheet(isPresented: $isPresented) { PanelSheet(content: panel) }
+            }
+        }
+        .onChange(of: isPresented) { _, shown in
+            if shown { Keyboard.close() }
+        }
         #endif
     }
 }
 
 #if os(iOS)
+import UIKit
+
+/// Closes the keyboard when the interface changes underneath it, whichever field holds it.
+@MainActor enum Keyboard {
+    static func close() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
 private struct PanelSheet<Content: View>: View {
     let content: Content
 
@@ -189,9 +210,12 @@ private struct PanelHost: ViewModifier {
             .disabled(active)
             .accessibilityHidden(active)
             .overlayPreferenceValue(PanelEntries.self) { entries in
-                if let entry = entries.last {
-                    AnyView(PanelLayer(entry: entry).id(entry.id))
+                ZStack {
+                    if let entry = entries.last {
+                        AnyView(PanelLayer(entry: entry).id(entry.id)).transition(.opacity)
+                    }
                 }
+                .motion(value: entries.last?.id)
             }
             .onPreferenceChange(PanelKeys.self) { keys in
                 let shown = !keys.isEmpty
@@ -263,6 +287,10 @@ private struct PanelLayer: View {
     @State private var exit: PanelExit?
     @State private var height: CGFloat?
     @State private var width: CGFloat?
+    @State private var shown = false
+    /// Set after the first measure, so a panel opens at its size and later changes glide.
+    @State private var measured = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var focus
 
     var body: some View {
@@ -279,7 +307,11 @@ private struct PanelLayer: View {
                 entry.view
                     .frame(width: max(0, min(width ?? PanelSize.width, proxy.size.width - 48)),
                            height: PanelSize.height(height, available: proxy.size.height))
-                    .onPreferenceChange(PanelHeight.self) { height = $0 }
+                    .animation(measured ? Motion.move.unless(reduceMotion) : nil, value: height)
+                    .onPreferenceChange(PanelHeight.self) { value in
+                        height = value
+                        DispatchQueue.main.async { measured = true }
+                    }
                     .onPreferenceChange(PanelWidth.self) { width = $0 }
                     .clipShape(RoundedRectangle(cornerRadius: 24))
                     .overlay {
@@ -287,6 +319,7 @@ private struct PanelLayer: View {
                             .allowsHitTesting(false)
                     }
                     .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
+                    .scaleEffect(shown || reduceMotion ? 1 : 0.97)
                     .focusScope(focus)
                     .onPreferenceChange(PanelDismissal.self) { exit = $0 }
                     .onExitCommand(perform: close)
@@ -297,6 +330,7 @@ private struct PanelLayer: View {
             .accessibilityAddTraits(.isModal)
             .panelHost()
         }
+        .onAppear { withAnimation(Motion.move.unless(reduceMotion)) { shown = true } }
         // Centre on the whole window, not the area below the toolbar.
         .ignoresSafeArea()
         .allowsWindowActivationEvents()

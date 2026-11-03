@@ -529,11 +529,14 @@ func TestOAuthSignInAndRenewal(t *testing.T) {
 	if _, err := reopened.folders(account.ID); err != nil {
 		t.Fatal(err)
 	}
-	// Signing in again keeps the one mailbox.
+	// Signing in again keeps the one mailbox, with its signatures.
+	if err := reopened.signatures(account.ID, contract.HubMailSignatures{Signatures: []contract.HubMailSignature{{ID: "a", Name: "A"}}}); err != nil {
+		t.Fatal(err)
+	}
 	begun, _ = reopened.beginSignIn(t.Context(), "google")
 	address, _ = url.Parse(begun.URL)
 	again, err := reopened.finishSignIn(t.Context(), begun.ID, contract.HubMailCallback{Code: "c", State: address.Query().Get("state")})
-	if err != nil || again.ID != account.ID || len(reopened.accounts()) != 1 {
+	if err != nil || again.ID != account.ID || len(reopened.accounts()) != 1 || len(again.Signatures) != 1 {
 		t.Fatalf("%+v %v %+v", again, err, reopened.accounts())
 	}
 }
@@ -567,54 +570,6 @@ func TestXOAuthAnswersARefusal(t *testing.T) {
 	}
 	if reply, _ := (smtpOAuth{}).Next(nil, false); reply != nil {
 		t.Fatalf("%q", reply)
-	}
-}
-
-func TestComposedMailCarriesAttachments(t *testing.T) {
-	input := contract.HubMailSend{To: []string{"a@example.test"}, Bcc: []string{"hidden@example.test"}, Subject: "Report", Text: "See attached.",
-		Attachments: []contract.HubMailUpload{{Name: "../résumé\r\nX-Evil: 1.pdf", Mime: "application/pdf", Data: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("pdf"), 100))},
-			{Name: "notes.txt", Mime: "not a type", Data: base64.StdEncoding.EncodeToString([]byte("hello"))}}}
-	files, err := uploads(input.Attachments)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw := composeMail(mailAccount{Name: "Me", Email: "me@example.test"}, input, files, time.Unix(0, 0))
-	if bytes.Contains(raw, []byte("hidden@example.test")) {
-		t.Fatal("Bcc reached the message")
-	}
-	headers, _, _ := strings.Cut(string(raw), "\r\n\r\n")
-	if !strings.Contains(headers, "multipart/mixed") {
-		t.Fatal(headers)
-	}
-	parsed, err := parseMail(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(parsed.text, "See attached.") || len(parsed.files) != 2 {
-		t.Fatalf("%+v", parsed)
-	}
-	if got := parsed.files[0]; got.Name != "résumé  X-Evil: 1.pdf" || got.Mime != "application/pdf" || !bytes.Equal(parsed.contents[0], bytes.Repeat([]byte("pdf"), 100)) {
-		t.Fatalf("%+v", got)
-	}
-	if got := parsed.files[1]; got.Mime != "application/octet-stream" || string(parsed.contents[1]) != "hello" {
-		t.Fatalf("%+v", got)
-	}
-}
-
-func TestPlainMailStaysSinglePart(t *testing.T) {
-	raw := composeMail(mailAccount{Email: "me@example.test"}, contract.HubMailSend{To: []string{"a@example.test"}, Text: "hi"}, nil, time.Unix(0, 0))
-	if bytes.Contains(raw, []byte("multipart")) || !bytes.Contains(raw, []byte("text/plain")) {
-		t.Fatalf("%s", raw)
-	}
-}
-
-func TestMailFilesHaveALimit(t *testing.T) {
-	big := base64.StdEncoding.EncodeToString(make([]byte, mailFileLimit/2+1))
-	if _, err := uploads([]contract.HubMailUpload{{Name: "a", Data: big}, {Name: "b", Data: big}}); err == nil {
-		t.Fatal("accepted more than the limit")
-	}
-	if _, err := uploads([]contract.HubMailUpload{{Name: "a", Data: "not base64!"}}); err == nil {
-		t.Fatal("accepted bad data")
 	}
 }
 
@@ -736,5 +691,19 @@ func TestAdoptedWeChatPictureReachesWeChatFirst(t *testing.T) {
 	}
 	if !slices.Equal(sent, []string{"123@chatroom:.gif:GIF8", "123@chatroom:.gif:GIF8"}) {
 		t.Fatalf("%v", sent)
+	}
+}
+
+func TestWeChatMarkupShowsWhatItStandsFor(t *testing.T) {
+	for text, want := range map[string]string{
+		`<?xml version="1.0"?><msg><img aeskey="k"/></msg>`: "[image]",
+		`<msg><emoji md5="m"/></msg>`:                       "[sticker]",
+		`<msg><appmsg/></msg>`:                              "[message]",
+		"<3 you":                                            "<3 you",
+		"see <msg> for details":                             "see <msg> for details",
+	} {
+		if got := wechatLabel(text); got != want {
+			t.Fatalf("%q became %q", text, got)
+		}
 	}
 }

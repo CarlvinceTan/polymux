@@ -31,19 +31,26 @@ enum PanelStyle {
     static let rowPadding: CGFloat = 6
     static let rowRadius: CGFloat = 8
     static let actionHeight: CGFloat = 32
+    /// Row fills: selection reads as a slightly stronger hover everywhere.
+    static let hoverTint = 0.06
+    static let selectedTint = 0.11
 }
 
 struct PanelSection<Content: View>: View {
     let title: String?
     let count: Int?
     let fills: Bool
+    /// A button at the heading's trailing edge, where a count sits.
+    let accessory: PanelAccessory?
     @ViewBuilder let content: () -> Content
     @Environment(\.colorScheme) private var scheme
 
-    init(_ title: String? = nil, count: Int? = nil, fills: Bool = false, @ViewBuilder content: @escaping () -> Content) {
+    init(_ title: String? = nil, count: Int? = nil, fills: Bool = false, accessory: PanelAccessory? = nil,
+         @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.count = count
         self.fills = fills
+        self.accessory = accessory
         self.content = content
     }
 
@@ -54,6 +61,16 @@ struct PanelSection<Content: View>: View {
                     Text(title).accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 8)
                     if let count { Text(count, format: .number).monospacedDigit() }
+                    if let accessory {
+                        Button(action: accessory.action) {
+                            Image(systemName: accessory.symbol)
+                                // Reaches the tap minimum without making the heading taller.
+                                .contentShape(.rect.inset(by: -14))
+                        }
+                        .buttonStyle(.plain)
+                        .help(accessory.label)
+                        .accessibilityLabel(accessory.label)
+                    }
                 }
                 .font(.body).foregroundStyle(.muted)
                 .padding(.horizontal, PanelStyle.headingInset)
@@ -86,6 +103,15 @@ extension View {
         frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PanelStyle.rowInset)
             .padding(.vertical, PanelStyle.rowPadding)
+    }
+
+    /// Reaches the 44-point touch target on iPhone without changing how a small control looks.
+    func tapArea(_ margin: CGFloat) -> some View {
+        #if os(iOS)
+        contentShape(Rectangle().inset(by: -margin))
+        #else
+        self
+        #endif
     }
 
     /// Keeps a list or form row on the panel surface instead of a separate row colour.

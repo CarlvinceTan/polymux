@@ -3,7 +3,11 @@
 const app = await cua.getApp(APP);
 const main = await app.getState({ include_screenshot: false, max_elements: 50 });
 async function row(name) {
-    const matches = (await app.query({ role: "button", name })).filter(item => item.label.startsWith(name + ", "));
+    let matches = [];
+    for (let i = 0; i < 40 && !matches.length; i++) {
+        matches = (await app.query({ role: "button", name })).filter(item => item.label.startsWith(name + ", "));
+        if (!matches.length) await cua.sleep(250);
+    }
     if (matches.length !== 1) throw new Error("Chat row is missing or ambiguous: " + name);
     await app.click(matches[0].element_token);
 }

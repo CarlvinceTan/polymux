@@ -45,16 +45,19 @@ struct ProviderSettings: View {
     private var loaded: Bool { store?.providers != nil }
     @State private var moving = false
     @State private var reordering = false
+    /// The provider order being edited in reorder mode; nil when not reordering.
+    @State private var draft: [Provider]?
     @State private var refreshing = false
     private var labels: [String: String] { store?.names ?? [:] }
 
-    private var groups: [ProviderGroup] { ProviderGroup.collect(providers, names: labels) }
+    private var ordered: [Provider] { draft ?? providers }
+    private var groups: [ProviderGroup] { ProviderGroup.collect(ordered, names: labels) }
 
     var body: some View {
         Section {
             Button { choosing = true } label: {
                 HStack {
-                    Text("Default model").lineLimit(1).layoutPriority(1)
+                    Text("Model").lineLimit(1).layoutPriority(1)
                     Spacer()
                     if selection.model.isEmpty { Text("Server default").foregroundStyle(.muted) }
                     else { ModelLabel(name: selection) }
@@ -63,9 +66,9 @@ struct ProviderSettings: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Default model")
+            .accessibilityLabel("Model")
             .accessibilityValue(selection.model.isEmpty ? "Server default" : selection.title)
-            .dropdown(isPresented: $choosing, width: 280) {
+            .dropdown(isPresented: $choosing) {
                 ModelPicker(providers: providers, provider: settings?.value?.defaultProvider ?? "",
                             model: settings?.value?.defaultModel ?? "") { provider, model in
                     settings?.edit(SettingsPatch(defaultProvider: provider, defaultModel: model))
@@ -74,9 +77,11 @@ struct ProviderSettings: View {
                     .preferredColorScheme(scheme)
             }
             ReasoningPicker(selection: Binding(get: { settings?.value?.defaultReasoning ?? "off" },
-                                               set: { settings?.edit(SettingsPatch(defaultReasoning: $0)) }))
+                                               set: { settings?.edit(SettingsPatch(defaultReasoning: $0)) }),
+                            levels: providers.levels(provider: settings?.value?.defaultProvider ?? "",
+                                                     model: settings?.value?.defaultModel ?? ""))
         } header: {
-            Text("Models").foregroundStyle(.primary)
+            Text("Default model").foregroundStyle(.primary)
         }
         .disabled(settings?.value == nil)
         .panelRow()
@@ -100,6 +105,7 @@ struct ProviderSettings: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Edit \(group.name)")
                     .accessibilityValue(group.summary)
+                    .disabled(reordering)
                     if reordering {
                         Button("Move up", systemImage: "arrow.up") { move(group.id, by: -1) }
                             .accessibilityLabel("Move \(group.name) up")
@@ -121,25 +127,35 @@ struct ProviderSettings: View {
                 }
             }
             if providers.isEmpty && loaded {
-                Text("No providers yet.").foregroundStyle(.primary).frame(maxWidth: .infinity)
+                Text("No providers yet.").foregroundStyle(.muted).frame(maxWidth: .infinity)
             }
             if let issue = issue ?? store?.issue { Text(issue).font(.footnote).foregroundStyle(.muted) }
         } header: {
             HStack {
                 Text("Providers").foregroundStyle(.primary)
                 Spacer()
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
-                    .accessibilityLabel("Refresh providers")
-                    .help("Refresh providers")
-                    .symbolEffect(.rotate, isActive: refreshing)
-                    .disabled(client == nil || moving || refreshing)
-                Button("Reorder", systemImage: "arrow.up.arrow.down") { reordering.toggle() }
-                    .accessibilityLabel("Reorder providers")
-                    .accessibilityValue(reordering ? "On" : "Off")
-                    .help("Reorder providers")
-                    .disabled(groups.count < 2 || moving || refreshing)
-                Button("Add provider", systemImage: "plus") { edit(nil) }
-                    .disabled(client == nil)
+                if reordering {
+                    Button("Save order", systemImage: "checkmark") { saveOrder() }
+                        .accessibilityLabel("Save provider order")
+                        .help("Save order")
+                        .disabled(moving || !loaded)
+                    Button("Cancel", systemImage: "xmark") { cancelOrder() }
+                        .accessibilityLabel("Cancel reordering")
+                        .help("Cancel reordering")
+                        .disabled(moving)
+                } else {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
+                        .accessibilityLabel("Refresh providers")
+                        .help("Refresh providers")
+                        .symbolEffect(.rotate, isActive: refreshing)
+                        .disabled(client == nil || moving || refreshing)
+                    Button("Reorder", systemImage: "arrow.up.arrow.down") { startReordering() }
+                        .accessibilityLabel("Reorder providers")
+                        .help("Reorder providers")
+                        .disabled(groups.count < 2 || moving || refreshing)
+                    Button("Add provider", systemImage: "plus") { edit(nil) }
+                        .disabled(client == nil)
+                }
             }
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
@@ -181,9 +197,15 @@ struct ProviderSettings: View {
 
     @discardableResult
     private func move(_ id: String, to target: Int) -> Bool {
-        guard !moving, !refreshing, loaded, let client,
-              let source = groups.firstIndex(where: { $0.id == id }),
+        guard !moving, !refreshing, loaded, let source = groups.firstIndex(where: { $0.id == id }),
               groups.indices.contains(target), source != target else { return false }
+        if draft != nil {
+            var ordered = groups
+            ordered.insert(ordered.remove(at: source), at: target)
+            draft = ordered.flatMap(\.connections)
+            return true
+        }
+        guard let client else { return false }
         let previous = providers
         var ordered = groups
         ordered.insert(ordered.remove(at: source), at: target)
@@ -205,15 +227,55 @@ struct ProviderSettings: View {
         }
         return true
     }
+
+    private func startReordering() {
+        guard groups.count > 1 else { return }
+        draft = providers
+        reordering = true
+    }
+
+    private func cancelOrder() {
+        draft = nil
+        reordering = false
+    }
+
+    private func saveOrder() {
+        guard !moving else { return }
+        guard let client, let draft else { cancelOrder(); return }
+        let previous = providers
+        var list = draft
+        for index in list.indices { list[index].order = Int64(index) }
+        store?.begin()
+        store?.accept(list)
+        moving = true
+        issue = nil
+        let ids = list.map(\.id)
+        Task {
+            defer { store?.end() }
+            do {
+                store?.accept(try await client.orderProviders(ids))
+                moving = false
+                self.draft = nil
+                reordering = false
+            } catch {
+                store?.accept(previous)
+                moving = false
+                issue = "Couldn’t save provider order."
+            }
+        }
+    }
 }
 
 struct ModelPicker: View {
     let providers: [Provider]
     let provider: String
     let model: String
+    /// Offers Not set.
+    var clearable = true
     let choose: (String, String) -> Void
     @State private var query = ""
     @State private var highlighted: String?
+    @State private var keyed: String?
     @Environment(\.dropdownClose) private var dismiss
     @Environment(ProviderStore.self) private var store: ProviderStore?
 
@@ -226,11 +288,11 @@ struct ModelPicker: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if query.isEmpty {
+                        if query.isEmpty && clearable {
                             option("Not set", id: "", selected: model.isEmpty) { choose("", "") }
                         }
                         ForEach(available) { group in
-                            if query.isEmpty || group.id != available.first?.id {
+                            if (query.isEmpty && clearable) || group.id != available.first?.id {
                                 Divider().padding(.vertical, PanelStyle.cardInset)
                             }
                             heading(group.name)
@@ -254,19 +316,20 @@ struct ModelPicker: View {
                     .padding(PanelStyle.cardInset)
                 }
                 .scrollBounceBehavior(.basedOnSize)
-                .onChange(of: highlighted) { _, id in
+                // Only the keyboard scrolls: a row under the pointer is already in view.
+                .onChange(of: keyed) { _, id in
                     if let id { scroll.scrollTo(id) }
                 }
                 .overlay {
                     if available.isEmpty && (!query.isEmpty || model.isEmpty) {
-                        Text("No models found.").foregroundStyle(.primary)
+                        Text("No models found.").foregroundStyle(.muted)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .allowsHitTesting(false)
                     }
                 }
             }
         }
-        .frame(idealHeight: height, maxHeight: height)
+        .frame(idealWidth: DropdownStyle.listWidth, idealHeight: height, maxHeight: height)
         .onChange(of: query) { highlighted = nil }
         #if os(macOS)
         .onKeyPress(.downArrow) { move(1); return .handled }
@@ -300,13 +363,13 @@ struct ModelPicker: View {
             .padding(.horizontal, PanelStyle.rowInset)
             .frame(minHeight: DropdownStyle.rowHeight)
             .contentShape(.rect(cornerRadius: PanelStyle.rowRadius))
-            .background(.primary.opacity(highlighted == id ? 0.1 : 0), in: .rect(cornerRadius: PanelStyle.rowRadius))
+            .background(.primary.opacity(highlighted == id ? PanelStyle.selectedTint : 0), in: .rect(cornerRadius: PanelStyle.rowRadius))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label ?? title)
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .onHover { hovering in
+        .pointerHover { hovering in
             if hovering { highlighted = id } else if highlighted == id { highlighted = nil }
         }
         .id(id)
@@ -315,7 +378,7 @@ struct ModelPicker: View {
     private func key(_ group: ProviderGroup, _ model: String) -> String { group.id + "/" + model }
 
     private var choices: [(id: String, provider: String, model: String)] {
-        var result: [(id: String, provider: String, model: String)] = query.isEmpty ? [("", "", "")] : []
+        var result: [(id: String, provider: String, model: String)] = query.isEmpty && clearable ? [("", "", "")] : []
         for group in available {
             result += matches(group).map { (key(group, $0.id), source(group, model: $0.id), $0.id) }
         }
@@ -328,6 +391,7 @@ struct ModelPicker: View {
         guard !choices.isEmpty else { return }
         let index = highlighted.flatMap { id in choices.firstIndex { $0.id == id } } ?? (offset > 0 ? -1 : choices.count)
         highlighted = choices[max(0, min(choices.count - 1, index + offset))].id
+        keyed = highlighted
     }
 
     private func select() {
@@ -366,19 +430,58 @@ struct ModelPicker: View {
 struct ReasoningPicker: View {
     @Binding var selection: String
     var inset = false
+    /// Just the value, for a row that already shows the model.
+    var compact = false
+    /// The model's levels; empty offers them all.
+    var levels: [String] = []
     @State private var choosing = false
-    private let options = [("Off", SettingsDefaultReasoning.off), ("Minimal", SettingsDefaultReasoning.minimal),
+    private let all = [("Off", SettingsDefaultReasoning.off), ("Minimal", SettingsDefaultReasoning.minimal),
                            ("Low", SettingsDefaultReasoning.low), ("Medium", SettingsDefaultReasoning.medium),
                            ("High", SettingsDefaultReasoning.high), ("Xhigh", SettingsDefaultReasoning.xhigh),
                            ("Max", SettingsDefaultReasoning.max)]
 
-    private var title: String { options.first { $0.1 == selection }?.0 ?? "Off" }
+    private var options: [(String, String)] {
+        levels.isEmpty ? all : all.filter { levels.contains($0.1) }
+    }
+
+    /// A saved level the model lacks shows as the one it runs at: the next up, else the next down.
+    private var level: String {
+        guard !levels.isEmpty, !levels.contains(selection) else { return selection }
+        let order = all.map(\.1)
+        let index = order.firstIndex(of: selection) ?? 0
+        return order[index...].first(where: levels.contains) ?? order[..<index].last(where: levels.contains) ?? selection
+    }
+
+    private var chosen: Binding<String> {
+        Binding(get: { level }, set: { selection = $0 })
+    }
+
+    private var title: String { all.first { $0.1 == level }?.0 ?? "Off" }
 
     var body: some View {
-        if inset {
+        if compact {
+            valuePicker
+        } else if inset {
             panelPicker
         } else {
-            SettingsPicker("Reasoning", selection: $selection, options: options)
+            SettingsPicker("Reasoning", selection: chosen, options: options)
+        }
+    }
+
+    private var valuePicker: some View {
+        Button { choosing = true } label: {
+            HStack(spacing: PanelStyle.cardInset) {
+                Text(title).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+            }
+            .foregroundStyle(.muted)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reasoning")
+        .accessibilityValue(title)
+        .dropdown(isPresented: $choosing) {
+            DropdownOptions(selection: chosen, options: options)
         }
     }
 
@@ -396,8 +499,8 @@ struct ReasoningPicker: View {
         .sectionRow()
         .accessibilityLabel("Reasoning")
         .accessibilityValue(title)
-        .dropdown(isPresented: $choosing, width: 160) {
-            DropdownOptions(selection: $selection, options: options)
+        .dropdown(isPresented: $choosing) {
+            DropdownOptions(selection: chosen, options: options)
         }
     }
 }

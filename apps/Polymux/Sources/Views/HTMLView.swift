@@ -38,20 +38,20 @@ struct HTMLView: View {
                 Group {
                     if let html = html ?? CardMemory.sources.object(forKey: url as NSURL).map(String.init),
                        let assets = assets ?? CardMemory.assets {
-                        NativeHTML(html: html, assets: assets, dark: scheme == .dark, requestedHeight: fixedHeight,
+                        NativeHTML(html: html, assets: assets, dark: scheme == .dark,
                                    hugWidth: fixedWidth == nil, state: CardMemory.states[url],
                                    measuredHeight: $measuredHeight, measuredWidth: $measuredWidth,
                                    action: action, save: { CardMemory.states[url] = $0 }, fail: { failed = true })
-                            .frame(height: fixedHeight ?? measuredHeight)
+                            .frame(height: max(minHeight, measuredHeight))
                     } else if let issue {
                         Text(issue).font(.caption).foregroundStyle(.muted).padding(16)
                     } else {
-                        ProgressView().frame(height: fixedHeight ?? CardMemory.sizes[url]?.height ?? 100)
+                        ProgressView().frame(height: max(minHeight, CardMemory.sizes[url]?.height ?? 100))
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
-            .background(html == nil ? AppBackground.color(scheme) : .clear)
+            .background(BubbleStyle.incoming(scheme))
             .clipShape(.rect(cornerRadius: BubbleStyle.radius))
             .accessibilityLabel(name)
             if failed {
@@ -63,8 +63,8 @@ struct HTMLView: View {
         .onChange(of: measuredWidth) { remember() }
     }
 
-    private var fixedHeight: CGFloat? {
-        guard let height, height.isFinite else { return nil }
+    private var minHeight: CGFloat {
+        guard let height, height.isFinite else { return 0 }
         return min(BubbleStyle.cardHeight, max(44, CGFloat(height)))
     }
 
@@ -139,7 +139,6 @@ private struct CardInput {
     let html: String
     let assets: CardAssets
     let dark: Bool
-    let requestedHeight: CGFloat?
     let hugWidth: Bool
     let state: String?
     let height: Binding<CGFloat>
@@ -154,7 +153,6 @@ private struct NativeHTML: NSViewRepresentable {
     let html: String
     let assets: CardAssets
     let dark: Bool
-    let requestedHeight: CGFloat?
     let hugWidth: Bool
     let state: String?
     @Binding var measuredHeight: CGFloat
@@ -164,7 +162,7 @@ private struct NativeHTML: NSViewRepresentable {
     let fail: () -> Void
 
     private var input: CardInput {
-        CardInput(html: html, assets: assets, dark: dark, requestedHeight: requestedHeight, hugWidth: hugWidth, state: state,
+        CardInput(html: html, assets: assets, dark: dark, hugWidth: hugWidth, state: state,
                   height: $measuredHeight, width: $measuredWidth, action: action, save: save, fail: fail)
     }
     func makeCoordinator() -> HTMLHost { HTMLHost(input) }
@@ -177,7 +175,6 @@ private struct NativeHTML: UIViewRepresentable {
     let html: String
     let assets: CardAssets
     let dark: Bool
-    let requestedHeight: CGFloat?
     let hugWidth: Bool
     let state: String?
     @Binding var measuredHeight: CGFloat
@@ -187,7 +184,7 @@ private struct NativeHTML: UIViewRepresentable {
     let fail: () -> Void
 
     private var input: CardInput {
-        CardInput(html: html, assets: assets, dark: dark, requestedHeight: requestedHeight, hugWidth: hugWidth, state: state,
+        CardInput(html: html, assets: assets, dark: dark, hugWidth: hugWidth, state: state,
                   height: $measuredHeight, width: $measuredWidth, action: action, save: save, fail: fail)
     }
     func makeCoordinator() -> HTMLHost { HTMLHost(input) }
@@ -197,18 +194,29 @@ private struct NativeHTML: UIViewRepresentable {
 }
 #endif
 
+private final class CardView: WKWebView {
+    /// The pointer is over something inside the card that can scroll.
+    var scrolls = false
+
+    #if os(macOS)
+    // WebKit keeps wheel events it has no use for, which would stop the chat under a card.
+    override func scrollWheel(with event: NSEvent) {
+        if scrolls { super.scrollWheel(with: event) } else { nextResponder?.scrollWheel(with: event) }
+    }
+    #endif
+}
+
 @MainActor
 private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private var input: CardInput
     private var source: String?
     private var dark: Bool?
     private var hug = false
-    private var contentHeight: CGFloat?
     private var failed = false
     private var reloads = 0
     private var saved: String?
     private var sentAt = -Double.infinity
-    private weak var view: WKWebView?
+    private weak var view: CardView?
 
     init(_ input: CardInput) {
         self.input = input
@@ -236,7 +244,7 @@ private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKSc
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = controller
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = CardView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
         view.uiDelegate = self
         #if os(macOS)
@@ -254,10 +262,8 @@ private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKSc
 
     func update(_ view: WKWebView, _ input: CardInput) {
         self.input = input
-        if let contentHeight { updateScroll(contentHeight) }
         if source != input.html {
             source = input.html
-            contentHeight = nil
             failed = false
             reloads = 0
             saved = input.state
@@ -300,6 +306,8 @@ private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKSc
             } else if body["error"] != nil, !failed {
                 failed = true
                 input.fail()
+            } else if let inner = body["inner"] as? Bool {
+                view?.scrolls = inner
             } else {
                 resize(body)
             }
@@ -317,10 +325,11 @@ private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKSc
         if let number = size["height"] as? NSNumber {
             let value = CGFloat(number.doubleValue)
             if value.isFinite, value >= 0 {
-                contentHeight = value
                 let bounded = min(BubbleStyle.cardHeight, max(44, ceil(value)))
                 if abs(input.height.wrappedValue - bounded) > 0.5 { input.height.wrappedValue = bounded }
-                updateScroll(value)
+                #if os(iOS)
+                view?.scrollView.isScrollEnabled = value > BubbleStyle.cardHeight
+                #endif
             }
         }
         guard hug else { return }
@@ -333,12 +342,6 @@ private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKSc
         guard value.isFinite, value > 0 else { return }
         let bounded = min(BubbleStyle.width, max(44, ceil(value)))
         if input.width.wrappedValue != bounded { input.width.wrappedValue = bounded }
-    }
-
-    private func updateScroll(_ contentHeight: CGFloat) {
-        #if os(iOS)
-        view?.scrollView.isScrollEnabled = contentHeight > (input.requestedHeight ?? BubbleStyle.cardHeight)
-        #endif
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -399,27 +402,39 @@ private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKSc
         """
     }
 
-    // The window background the card sits on, and the app's accent pair, resolved for one appearance.
+    // The bubble colour the card sits on, and the app's accent pair, resolved for one appearance.
     private static func tokens(dark: Bool) -> String {
-        let surface = hex(AppBackground.color(dark ? .dark : .light), dark: dark)
+        let mode: ColorScheme = dark ? .dark : .light
+        let surface = hex(BubbleStyle.incoming(mode), over: AppBackground.color(mode), dark: dark)
         let accent = hex(Color("AccentColor"), dark: dark)
         let onAccent = hex(Color("OnAccent"), dark: dark)
         return "color-scheme:\(dark ? "dark" : "light");--surface:\(surface);--accent:\(accent);--on-accent:\(onAccent)"
     }
 
-    private static func hex(_ color: Color, dark: Bool) -> String {
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0
+    private static func rgba(_ color: Color, dark: Bool) -> [CGFloat] {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 1
         #if os(macOS)
         NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
             let resolved = NSColor(color).usingColorSpace(.sRGB) ?? .black
-            resolved.getRed(&red, green: &green, blue: &blue, alpha: nil)
+            resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         }
         #else
         let traits = UITraitCollection(userInterfaceStyle: dark ? .dark : .light)
         traits.performAsCurrent {
-            _ = UIColor(color).resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: nil)
+            _ = UIColor(color).resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         }
         #endif
+        return [red, green, blue, alpha]
+    }
+
+    /// Opaque hex of a colour, composited over `base` when it is translucent.
+    private static func hex(_ color: Color, over base: Color? = nil, dark: Bool) -> String {
+        var c = rgba(color, dark: dark)
+        if c[3] < 1, let base {
+            let b = rgba(base, dark: dark)
+            c = (0..<3).map { c[$0] * c[3] + b[$0] * (1 - c[3]) } + [1]
+        }
+        let (red, green, blue) = (c[0], c[1], c[2])
         let channel = { (value: CGFloat) -> String in
             let byte = Int((min(max(value, 0), 1) * 255).rounded())
             let text = String(byte, radix: 16, uppercase: true)
@@ -467,6 +482,21 @@ private final class HTMLHost: NSObject, WKNavigationDelegate, WKUIDelegate, WKSc
         if (event instanceof ErrorEvent) post({error: true});
       }, true);
       window.addEventListener('unhandledrejection', () => post({error: true}));
+      const scrollable = (node) => {
+        const root = document.scrollingElement;
+        if (root && root.scrollHeight > root.clientHeight + 1) return true;
+        for (; node instanceof Element && node.id !== 'polymux-card'; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if ((/auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight)
+            || (/auto|scroll/.test(style.overflowX) && node.scrollWidth > node.clientWidth)) return true;
+        }
+        return false;
+      };
+      let inner = false;
+      window.addEventListener('pointerover', (event) => {
+        const next = scrollable(event.target);
+        if (next !== inner) post({inner: inner = next});
+      }, true);
     })();
     """
 

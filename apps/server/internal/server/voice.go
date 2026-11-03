@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/text/language"
-	"golang.org/x/text/language/display"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -46,18 +44,10 @@ type voiceWork struct {
 	published map[string]string
 	publishMu sync.Mutex
 	device    string // The device that started the conversation, preferred for device tools.
-	// spoken is a conversation the user hears directly; sink streams its reply text as it is written.
-	spoken   bool
-	language string
-	sink     func(agentID, text string)
 }
 
-// voice is a private consultation for a live spokesperson; voiceStream is the user talking to the
-// agent directly, with its reply streamed so speech can start at the first sentence.
-func (s *Server) voice(w http.ResponseWriter, r *http.Request)       { s.voiceTurn(w, r, false) }
-func (s *Server) voiceStream(w http.ResponseWriter, r *http.Request) { s.voiceTurn(w, r, true) }
-
-func (s *Server) voiceTurn(w http.ResponseWriter, r *http.Request, spoken bool) {
+// voice is a private consultation for a live spokesperson.
+func (s *Server) voice(w http.ResponseWriter, r *http.Request) {
 	thread, ok := s.thread(w, r)
 	if !ok {
 		return
@@ -111,13 +101,6 @@ func (s *Server) voiceTurn(w http.ResponseWriter, r *http.Request, spoken bool) 
 	}()
 	ctx = context.WithValue(ctx, voiceKey{}, work)
 	ctx = context.WithValue(ctx, chainKey{}, work.chain)
-	var events *sseWriter
-	if spoken {
-		events = newSSE(w)
-		work.spoken = true
-		work.language = spokenLanguage(s.settings.Snapshot().VoiceLanguage, r.Header.Get("Accept-Language"))
-		work.sink = func(agentID, text string) { events.send("", map[string]string{"agentID": agentID, "text": text}) }
-	}
 	var replies []voiceReply
 	for index := 0; index < len(work.tasks); index++ {
 		task := work.tasks[index]
@@ -130,22 +113,10 @@ func (s *Server) voiceTurn(w http.ResponseWriter, r *http.Request, spoken bool) 
 		work.chain.mu.Unlock()
 		result, name, err := work.run(ctx, task)
 		if err != nil {
-			if events != nil {
-				events.send("error", map[string]string{"message": "The reply stopped; its outcome may be uncertain."})
-				return
-			}
 			fail(w, 502, "voice_task", "The private consultation failed; its outcome may be uncertain. Do not retry automatically.")
 			return
 		}
 		replies = append(replies, voiceReply{task.target, name, result.Text})
-	}
-	if events != nil {
-		if len(replies) == 0 {
-			events.send("error", map[string]string{"message": "No agent is available to answer."})
-			return
-		}
-		events.send("done", map[string]any{})
-		return
 	}
 	if len(replies) == 0 {
 		fail(w, 409, "voice_unavailable", "No selected agent is available.")
@@ -258,6 +229,9 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	for _, connection := range d.MCP {
 		state.prefixes = append(state.prefixes, connection.Name+"__")
 	}
+	if err = v.server.bindGate(ctx, state, outputCWD(d, v.server.config.DataDir)); err != nil {
+		return empty, "", err
+	}
 	ctx = context.WithValue(ctx, turnKey{}, state)
 	ctx = context.WithValue(ctx, htmlKey{}, &htmlScope{messageID: state.run.ID, cwd: outputCWD(d, v.server.config.DataDir), publish: func(ctx context.Context, attachment contract.Attachment, path string) error {
 		return v.publish(ctx, task.target, attachment.ID, "", &attachment, path)
@@ -301,6 +275,7 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 		if err := session.Close(); err != nil {
 			v.server.config.Log.Warn("close private voice session", "error", err)
 		}
+		v.server.discard(context.WithoutCancel(ctx), session)
 	}()
 	aborted := make(chan struct{})
 	stopAbort := context.AfterFunc(ctx, func() {
@@ -317,30 +292,6 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 		}
 	}()
 	output := 0
-	// Spoken text streams as written, except a reply that is only NO_RESPONSE.
-	held, sent := "", ""
-	say := func(text string) {
-		if v.sink == nil || text == "" {
-			return
-		}
-		held += text
-		if sent == "" && strings.HasPrefix("NO_RESPONSE", strings.TrimSpace(held)) {
-			return
-		}
-		sent += held
-		v.sink(task.target, held)
-		held = ""
-	}
-	// The stream may end before its last words arrive; the final reply supplies what's missing.
-	defer func() {
-		if err != nil || strings.TrimSpace(result.Text) == "NO_RESPONSE" {
-			return
-		}
-		if rest, ok := strings.CutPrefix(result.Text, sent); ok {
-			held = ""
-			say(rest)
-		}
-	}()
 	result, err = session.Send(ctx, message, func(delta agentruntime.Delta) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -362,7 +313,6 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 		if output > 64<<10 || v.chain.output > 128<<10 {
 			return errors.New("voice output budget exhausted")
 		}
-		say(delta.Text)
 		return nil
 	})
 	if len(result.Text) > 64<<10 {
@@ -547,50 +497,7 @@ func (s *Server) stopVoices(ctx context.Context, agentID string) error {
 	return nil
 }
 
-// role tells the agent who hears its reply: the user directly, or a live spokesperson relaying it.
+// role tells the agent that a spokesperson turns its findings into speech for the user.
 func (v *voiceWork) role() string {
-	if v.spoken {
-		return "Always speak " + v.language + ". You are talking with the user by voice, privately: this conversation doesn't appear in their typed chat. Reply in short, natural spoken sentences, with no Markdown, lists, code or links. Before slow work, say in a few words what you're doing. Use send_to_user or show_html only to deliberately send something to the typed chat. Use your scoped memory and typed history to answer references to earlier conversations. Save a durable fact or create a reminder when asked; don't save the conversation itself as memory."
-	}
 	return "You are consulting privately with the user's spokesperson agent. Return your findings to the spokesperson, who will speak to the user. These exchanges do not appear in the user's typed chat. Use send_to_user or show_html only to deliberately send a user-facing message or artifact to that chat. Do not reproduce the private exchange there. Retain your existing identity and configured tools. Use your scoped memory and typed history to answer references to earlier conversations. Save a durable fact or create a reminder when requested; do not save the private transcript as memory. Use only tools in the available tool list; unavailable management or continuation tools cannot run in this private consultation."
-}
-
-// spokenLanguage names the language voice replies use: the chosen one, else the device's.
-func spokenLanguage(code, device string) string {
-	if code == "" {
-		code, _, _ = strings.Cut(strings.Split(device, ",")[0], "-")
-	}
-	if name := display.English.Languages().Name(language.Make(code)); code != "" && name != "" {
-		return name
-	}
-	return "the user's language"
-}
-
-// sseWriter sends server-sent events, one at a time, flushing each.
-type sseWriter struct {
-	mu         sync.Mutex
-	w          http.ResponseWriter
-	controller *http.ResponseController
-}
-
-func newSSE(w http.ResponseWriter) *sseWriter {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(200)
-	return &sseWriter{w: w, controller: http.NewResponseController(w)}
-}
-
-func (e *sseWriter) send(event string, value any) {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if event != "" {
-		fmt.Fprintf(e.w, "event: %s\n", event)
-	}
-	fmt.Fprintf(e.w, "data: %s\n\n", data)
-	_ = e.controller.Flush()
 }

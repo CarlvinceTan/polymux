@@ -12,6 +12,7 @@ struct SearchPanel: View {
     @State private var query = ""
     @State private var kind = SearchKind.all
     @State private var selected: String?
+    @State private var keyed: String?
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var scheme
     @Environment(\.panelContext) private var panel
@@ -77,14 +78,21 @@ struct SearchPanel: View {
                     .font(.caption).foregroundStyle(.primary)
                     .padding(.horizontal, 16).padding(.bottom, 8)
             }
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(results, id: \.id) { result in
-                        Button { select(result) } label: { row(result) }
-                            .buttonStyle(.plain)
+            ScrollViewReader { scroll in
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(results, id: \.id) { result in
+                            Button { select(result) } label: { row(result) }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(highlighted == result.id ? .isSelected : [])
+                                .id(result.id)
+                        }
                     }
+                    .padding(PanelStyle.contentInset)
                 }
-                .padding(PanelStyle.contentInset)
+                .onChange(of: keyed) { _, id in
+                    if let id { scroll.scrollTo(id) }
+                }
             }
             .scrollIndicators(.hidden)
             .mask {
@@ -124,7 +132,7 @@ struct SearchPanel: View {
         guard cleanQuery.isEmpty else { return store.results }
         guard scope == nil else { return [] }
         let agents = Dictionary(session.sidebar.agents.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return session.sidebar.threads.compactMap { thread in
+        return session.sidebar.chats.compactMap { thread in
             if thread.id == thread.agentID, let agent = agents[thread.agentID], kind == .all || kind == .bots {
                 return SearchResult(id: "bot/" + agent.id, kind: "bots", title: agent.name, snippet: agent.role,
                                     threadID: thread.id, agentID: agent.id)
@@ -164,8 +172,8 @@ struct SearchPanel: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(RoundedRectangle(cornerRadius: 10))
-        .background(selected == result.id ? Color.primary.opacity(0.11) : .clear, in: RoundedRectangle(cornerRadius: 10))
-        .onHover { if $0 { selected = result.id } }
+        .background(.primary.opacity(highlighted == result.id ? PanelStyle.selectedTint : 0), in: RoundedRectangle(cornerRadius: 10))
+        .pointerHover { if $0 { selected = result.id } }
     }
 
     private func symbol(_ result: SearchResult) -> String {
@@ -178,14 +186,24 @@ struct SearchPanel: View {
         return "text.bubble"
     }
 
+    /// What Return opens: the chosen row, or the first when nothing has been chosen.
+    private var highlighted: String? {
+        #if os(macOS)
+        results.contains { $0.id == selected } ? selected : results.first?.id
+        #else
+        selected
+        #endif
+    }
+
     private func move(_ offset: Int) {
         guard !results.isEmpty else { return }
-        let index = results.firstIndex { $0.id == selected } ?? (offset > 0 ? -1 : results.count)
+        let index = results.firstIndex { $0.id == highlighted } ?? 0
         selected = results[max(0, min(results.count - 1, index + offset))].id
+        keyed = selected
     }
 
     private func openSelection() {
-        if let result = results.first(where: { $0.id == selected }) ?? results.first { select(result) }
+        if let result = results.first(where: { $0.id == highlighted }) ?? results.first { select(result) }
     }
 
     private func dismiss() {

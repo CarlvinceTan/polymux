@@ -191,11 +191,12 @@ func TestMediaVideo(t *testing.T) {
 func TestMediaProviderBoundaries(t *testing.T) {
 	api, _ := startTest(t, &voiceFactory{})
 	mediaProvider(t, api, "xai", "https://api.example.com/v1")
-	if err := api.settings.SetCapabilities(map[string]settings.Capability{"image-gen": {Choice: json.RawMessage(`{"provider":"media-test","model":"test-model"}`)}}); err != nil {
+	custom := contract.MediaOrder{Mode: contract.MediaOrderModeCustom, Models: []contract.MediaStep{{Provider: "media-test", Model: "test-model"}}}
+	if _, err := api.settings.Update(contract.SettingsPatch{ImageOrder: &custom}); err != nil {
 		t.Fatal(err)
 	}
 	tool := &mediaTool{server: api, files: api.outputs, kind: "image"}
-	if _, _, err := tool.selection(); err == nil || !strings.Contains(err.Error(), "not supported") {
+	if _, err := tool.candidates(); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatal("unsupported adapter was advertised", err)
 	}
 	provider := settings.Provider{ID: "vault-media", Type: "gemini", BaseURL: "https://example.com/v1"}

@@ -1,3 +1,4 @@
+// @cua
 // Provider methods stay distinct; keys and manual endpoints feed the searchable default model picker.
 let app = await cua.getApp(APP);
 async function confirm(label) {
@@ -31,14 +32,14 @@ await app.waitFor({ role: "textfield", name: "API key", timeout_ms: 10000 });
 await app.typeText("polymux-test-key", { role: "textfield", name: "API key" });
 await app.click({ role: "button", name: "Continue" });
 await app.waitFor({ role: "button", name: "Edit OpenAI", timeout_ms: 10000 });
-await app.click({ role: "button", name: "Default model" });
+await app.click({ role: "button", name: "Model" });
 await app.typeText("gpt-5", { role: "textfield", name: "Search models" });
 const models = await app.query({ role: "button" });
 const chosen = models.find(row => row.label?.startsWith("Gpt 5") && row.label.endsWith(" OpenAI"));
 if (!chosen) throw new Error("no connected OpenAI models found");
 if ((await app.query({ text: "Server default" })).length) throw new Error("development fallback leaked into the picker");
 await app.click({ role: "button", name: chosen.label });
-await app.waitFor({ role: "button", name: "Default model", value: chosen.label, timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Model", value: chosen.label, timeout_ms: 5000 });
 app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
 await app.click({ role: "button", name: "Add provider" });
 await app.click({ role: "button", name: "Add custom provider" });
@@ -50,15 +51,15 @@ await app.typeText(sharedModel, { role: "textfield", name: "Model ID" });
 await app.click({ role: "button", name: "Add" });
 await app.click({ role: "button", name: "Save" });
 await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 10000 });
-await app.click({ role: "button", name: "Default model" });
+await app.click({ role: "button", name: "Model" });
 await app.typeText("Custom " + sharedModel, { role: "textfield", name: "Search models" });
 await app.click({ role: "button", name: sharedTitle });
-await app.waitFor({ role: "button", name: "Default model", value: sharedTitle, timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Model", value: sharedTitle, timeout_ms: 5000 });
 app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
 await app.click({ role: "button", name: "Edit Custom" });
 await app.waitFor({ role: "textfield", name: "Name", value: "Manual test", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Delete" });
-await app.waitFor({ role: "button", name: "Default model", value: "Server default", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Model", value: "Server default", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Edit OpenAI" });
 await app.click({ role: "button", name: "Remove API key 1" });
 await confirm("Remove");

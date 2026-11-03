@@ -3,6 +3,11 @@ name: Development updates
 # Keep delivery manual while TestFlight credentials and first-install checks are pending.
 on:
   workflow_dispatch:
+    inputs:
+      ios:
+        description: Upload an iOS build to TestFlight
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -24,10 +29,13 @@ jobs:
       macos: ${{ steps.version.outputs.macos }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - id: version
         run: python3 scripts/dev-version.py "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   ios:
+    if: inputs.ios
     needs: version
     runs-on: xcode-27
     environment: development
@@ -41,40 +49,23 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - name: Prepare credential paths
-        run: |
-          echo "POLYMUX_IOS_PROFILE=$RUNNER_TEMP/Polymux.mobileprovision" >> "$GITHUB_ENV"
-          echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
-      - name: Install iOS signing credentials
+      - name: Install App Store Connect key
         env:
-          CERT_P12: ${{ secrets.IOS_CERT_P12 }}
-          CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
-          PROFILE: ${{ secrets.IOS_PROFILE_BASE64 }}
           ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
         run: |
-          for name in CERT_P12 CERT_PASSWORD PROFILE ASC_PRIVATE_KEY ASC_KEY_ID ASC_ISSUER_ID POLYMUX_TEAM_ID; do
+          for name in ASC_PRIVATE_KEY ASC_KEY_ID ASC_ISSUER_ID POLYMUX_TEAM_ID; do
             test -n "${!name}" || { echo "$name is missing."; exit 1; }
           done
           umask 077
-          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/ios.p12"
-          printf '%s' "$PROFILE" | base64 --decode > "$POLYMUX_IOS_PROFILE"
-          printf '%s' "$ASC_PRIVATE_KEY" > "$ASC_KEY_PATH"
-          KEYCHAIN="$RUNNER_TEMP/ios-signing.keychain-db"
-          security create-keychain -p actions "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p actions "$KEYCHAIN"
-          security import "$RUNNER_TEMP/ios.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -d user -s "$KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey.p8"
       - name: Archive iOS
         run: scripts/testflight.sh archive
       - name: Upload to internal TestFlight only
         run: scripts/testflight.sh upload
-      - name: Remove signing credentials
+      - name: Remove API key
         if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/ios-signing.keychain-db" || true
-          rm -f "$RUNNER_TEMP/ios.p12" "$POLYMUX_IOS_PROFILE" "$ASC_KEY_PATH"
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
   macos:
     needs: version
@@ -112,6 +103,10 @@ jobs:
           test -n "$IDENTITY"
           echo "POLYMUX_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           echo "POLYMUX_TEAM_ID=$TEAM_ID" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
       - name: Build signed development app
         run: scripts/build.sh macos
       - name: Notarize and staple
@@ -155,7 +150,7 @@ jobs:
               --title 'Polymux development updates' --notes 'Development builds from passing dev commits.'
           fi
           # Keep versioned payloads immutable; switch the feed only after the payload is available.
-          gh release upload dev-updates "dist/dev-updates/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip"
+          gh release upload dev-updates "dist/dev-updates/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip" dist/symbols/*.dSYM.zip
           gh release upload dev-updates dist/dev-updates/appcast.xml --clobber
           gh release edit dev-updates --prerelease --latest=false \
             --notes "Build $POLYMUX_BUILD_NUMBER from commit $GITHUB_SHA. Internal development channel."

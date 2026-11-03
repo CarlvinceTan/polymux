@@ -3,6 +3,7 @@ import {relative, resolve, sep} from 'node:path';
 import {type Plugin, type ViteDevServer, type PreviewServer} from 'vite';
 import {createDownloads} from '../lib/server/downloads.ts';
 import {retire} from '../lib/server/http.ts';
+import {createNightly} from '../lib/server/nightly.ts';
 import {components, machineDocs, pageHead, releaseSummary} from './routes.ts';
 import {pagesRoot, prepare} from './prepare.ts';
 import {siteRoot} from './content.ts';
@@ -23,6 +24,7 @@ function registerMiddleware(server: ViteDevServer | PreviewServer, options: {
   docs?: () => ReturnType<typeof machineDocs>;
   sitemap?: () => string;
 }) {
+  const nightly = createNightly();
   server.middlewares.use(async (request, response, next) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const path = normalizePath(url.pathname);
@@ -46,6 +48,9 @@ function registerMiddleware(server: ViteDevServer | PreviewServer, options: {
     else if (['/api/releases', '/api/updates/win32/x64/RELEASES', '/api/updates/linux/x64/latest-linux.yml'].includes(path)) retire(response);
     else if (path === '/api/downloads') {
       try {await options.download({query: Object.fromEntries(url.searchParams)}, response);}
+      catch (error) {next(error as Error);}
+    } else if (path === '/api/nightly') {
+      try {await nightly({}, response);}
       catch (error) {next(error as Error);}
     } else next();
   });

@@ -3,7 +3,7 @@
 let app = await cua.getApp(APP);
 let rows = [];
 for (let attempt = 0; attempt < 60 && !rows.length; attempt++) {
-  const state = await app.getState({ query: "Chief", include_screenshot: false, max_elements: 500, tree_format: "elements" });
+  const state = await app.getState({ query: "Chief", include_screenshot: false, timeout_ms: 5000, max_elements: 500, tree_format: "elements" });
   if (state.truncated) throw new Error("Incomplete chat lookup");
   rows = state.elements.filter(item => item.role === "AXButton" && item.label.startsWith("Chief, "));
   if (!rows.length) await cua.sleep(500);

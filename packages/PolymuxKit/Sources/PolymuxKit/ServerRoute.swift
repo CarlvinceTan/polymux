@@ -3,10 +3,13 @@ import Network
 
 /// Keeps the server's identity stable while its direct or encrypted route changes underneath it.
 public actor ServerRoute {
-    private let direct: URL
-    private let ticket: String?
-    private let token: String?
+    private var direct: URL
+    private var ticket: String?
+    private var token: String?
+    private var also: URL?
     private var base: URL?
+    /// The address the current route was opened for.
+    private var startedAt: URL?
     private var tunnel: Tunnel?
     private var opening: Task<(URL, Tunnel?), any Error>?
     private var checking = false
@@ -15,14 +18,23 @@ public actor ServerRoute {
     private var monitor: NWPathMonitor?
     private var pathSeen = false
 
-    public init(url: URL, ticket: String?, token: String?) {
+    public init(url: URL, ticket: String?, token: String?, also: URL? = nil) {
         direct = url
         self.ticket = ticket
+        self.token = token
+        self.also = also
+    }
+
+    /// Learns where a server is moving, ahead of its own address going quiet.
+    public func follow(_ url: URL, ticket: String?, token: String) {
+        also = url
+        if let ticket { self.ticket = ticket }
         self.token = token
     }
 
     public func resolve() async throws -> URL {
         if let base { return base }
+        startedAt = direct
         let epoch = generation
         let task: Task<(URL, Tunnel?), any Error>
         if let opening { task = opening }
@@ -49,14 +61,18 @@ public actor ServerRoute {
     }
 
     public func recover() async {
-        guard ticket != nil, !checking else { return }
+        guard ticket != nil || also != nil, !checking else { return }
         if let checkedAt, checkedAt.duration(to: .now) < .seconds(2) { return }
         checking = true
         checkedAt = .now
         let epoch = generation
         let reachable = await Tunnel.reachable(direct, token: token)
         defer { checking = false }
-        guard epoch == generation, reachable == (tunnel != nil) else { return }
+        if !reachable, let also, await Tunnel.reachable(also, token: token) {
+            direct = also
+            self.also = nil
+        }
+        guard epoch == generation, reachable == (tunnel != nil) || direct != startedAt else { return }
         generation += 1
         let retired = tunnel
         tunnel = nil

@@ -376,3 +376,32 @@ func TestSTPersistedSteer(t *testing.T) {
 		}
 	}
 }
+
+// A child can't reach the user, so a message during one starts its own turn.
+func TestSTChildNotSteered(t *testing.T) {
+	s, err := Open(t.Context(), filepath.Join(t.TempDir(), "child.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Register(t.Context(), []contract.Agent{{ID: "a", Name: "A"}, {ID: "b", Name: "B"}}); err != nil {
+		t.Fatal(err)
+	}
+	child := NewRun("child-job", "b", "b", contract.RunTriggerChild)
+	child.Status = "running"
+	if err := s.RunEvent(t.Context(), "run.start", &child, nil); err != nil {
+		t.Fatal(err)
+	}
+	text := "hello"
+	request := contract.SendRequest{ID: "during-child", Text: text, AttachmentIDs: []string{}}
+	if _, _, err := s.Send(t.Context(), "b", request, []contract.Part{{Kind: "text", Text: &text}}, "b"); err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := s.HasSteers(t.Context(), child.ID)
+	if err != nil || waiting {
+		t.Fatalf("message steered the child: %v, %v", waiting, err)
+	}
+	if id, err := s.Job(t.Context(), "b"); err != nil || id != "during-child" {
+		t.Fatalf("job %q, %v", id, err)
+	}
+}

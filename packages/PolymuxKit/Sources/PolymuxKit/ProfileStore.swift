@@ -10,6 +10,8 @@ public final class ProfileStore {
     public private(set) var connections: [MCPConnection]?
     public private(set) var issue: String?
     public private(set) var cancelIssue: String?
+    /// Whether a refresh has finished, so a section still without data failed to load.
+    public private(set) var settled = false
 
     @ObservationIgnored private let agentID: String
     @ObservationIgnored private let client: APIClient
@@ -57,6 +59,7 @@ public final class ProfileStore {
             async let mcp: () = loadConnections()
             _ = await (profile, schedule, setup, mcp)
             checkedAt = .now
+            settled = true
         }
         refreshing = task
         await task.value

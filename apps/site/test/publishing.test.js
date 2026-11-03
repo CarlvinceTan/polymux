@@ -3,7 +3,7 @@ import {readFileSync, rmSync, mkdirSync, symlinkSync, existsSync} from 'node:fs'
 import {resolve} from 'node:path';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
-import {readDocument, date, readFeatures} from '../lib/content/documents.ts';
+import {readDocument, date} from '../lib/content/documents.ts';
 import {readRelease} from '../lib/content/releases.ts';
 import {loadContent} from '../scripts/content.ts';
 import {pagesRoot, prepare, outputPath} from '../scripts/prepare.ts';
@@ -43,7 +43,7 @@ test('content-only release publication prepares its routes and allowlist before 
 test('the Vercel function build prepares metadata independently of frontend generation', () => {
   const fixture = fixtureRoot();
   try {
-    fixture.write('src/content/product/features.json', 'not frontend content');
+    fixture.write('src/content/site.json', 'not frontend content');
     const script = new URL('../scripts/api.ts', import.meta.url);
     const result = spawnSync(process.execPath, [script.pathname, fixture.root], {encoding: 'utf8'});
     assert.equal(result.status, 0, result.stderr);
@@ -55,19 +55,19 @@ test('the Vercel function build prepares metadata independently of frontend gene
   } finally {rmSync(fixture.root, {recursive: true});}
 });
 
-test('invalid product slugs fail before cleanup can delete existing generated output', () => {
+test('invalid slugs fail before cleanup can delete existing generated output', () => {
   const fixture = fixtureRoot();
   try {
+    const post = (slug) => `---\ntitle: Post\nslug: ${JSON.stringify(slug)}\ndate: 2026-10-24\nexcerpt: A post\npublished: true\n---\nBody\n`;
+    fixture.write('src/content/blog/post.md', post('post'));
     prepare({root: fixture.root});
-    const feature = loadContent(fixture.root).features[0];
-    const route = resolve(pagesRoot(fixture.root), 'product/conversations/index.html');
+    const route = resolve(pagesRoot(fixture.root), 'blog/post/index.html');
     const original = readFileSync(route, 'utf8');
     for (const slug of ['', '../docs', 'nested/voice', '.', '/outside']) {
-      fixture.write('src/content/product/features.json', JSON.stringify([{...feature, slug}]));
+      fixture.write('src/content/blog/post.md', post(slug));
       assert.throws(() => prepare({root: fixture.root}), /slug/);
       assert.equal(readFileSync(route, 'utf8'), original);
     }
-    assert.throws(() => readFeatures([feature, feature]), /Duplicate product slug/);
     assert.throws(() => outputPath(fixture.root, '../outside/index.html'), /escapes/);
   } finally {rmSync(fixture.root, {recursive: true});}
 });

@@ -11,7 +11,12 @@ import (
 // IssueRepo is the target repo for user bug reports.
 const IssueRepo = "CarlvinceTan/polymux"
 
-//go:embed polymux/SKILL.md report/SKILL.md html-cards/SKILL.md skill-creator/SKILL.md skill-creator/LICENSE.txt
+// CardsName identifies the card reference among installed files. It ships with show_html, so it isn't a listed skill.
+const CardsName = "html-cards"
+
+const cardsFile = CardsName + "/REFERENCE.md"
+
+//go:embed polymux/SKILL.md report/SKILL.md skill-creator/SKILL.md skill-creator/LICENSE.txt plugin-creator/SKILL.md html-cards/REFERENCE.md
 var files embed.FS
 
 // Polymux returns the bundled guide to Polymux itself.
@@ -34,11 +39,12 @@ func Bundled() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cards, err := text("html-cards/SKILL.md")
-	if err != nil {
-		return "", err
-	}
-	return guide + "\n" + report + "\n" + cards, nil
+	return guide + "\n" + report, nil
+}
+
+// Cards returns the reference for building show_html cards.
+func Cards() (string, error) {
+	return text(cardsFile)
 }
 
 func text(path string) (string, error) {
@@ -56,39 +62,46 @@ type Skill struct {
 
 // Names lists the bundled skills in their prompt order.
 func Names() []string {
-	return []string{"polymux", "report", "html-cards", "skill-creator"}
+	return []string{"polymux", "report", "skill-creator", "plugin-creator"}
 }
 
-// Install writes the bundled skills under dir, so an agent can read one when it needs it
-// instead of carrying every skill's text in each request.
+// Install writes the bundled skills and the card reference under dir, so an agent can read one
+// when it needs it instead of carrying every skill's text in each request.
 func Install(dir string) ([]Skill, error) {
 	var out []Skill
 	for _, name := range Names() {
-		body, err := text(name + "/SKILL.md")
+		body, path, err := install(dir, name+"/SKILL.md")
 		if err != nil {
 			return nil, err
-		}
-		path := filepath.Join(dir, name, "SKILL.md")
-		if current, err := os.ReadFile(path); err != nil || string(current) != body {
-			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-				return nil, err
-			}
-			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-				return nil, err
-			}
 		}
 		skill := Describe(body)
 		skill.Path = path
 		out = append(out, skill)
 	}
-	license, err := text("skill-creator/LICENSE.txt")
+	if _, _, err := install(dir, "skill-creator/LICENSE.txt"); err != nil {
+		return nil, err
+	}
+	_, path, err := install(dir, cardsFile)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "skill-creator", "LICENSE.txt"), []byte(license), 0o600); err != nil {
-		return nil, err
+	return append(out, Skill{Name: CardsName, Path: path}), nil
+}
+
+func install(dir, file string) (body, path string, err error) {
+	if body, err = text(file); err != nil {
+		return "", "", err
 	}
-	return out, nil
+	path = filepath.Join(dir, file)
+	if current, err := os.ReadFile(path); err != nil || string(current) != body {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return "", "", err
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			return "", "", err
+		}
+	}
+	return body, path, nil
 }
 
 // Describe reads a skill's name and description from its front matter.

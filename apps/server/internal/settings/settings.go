@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -147,6 +146,7 @@ func Open(path string) (*Store, error) {
 	if err := json.Unmarshal(data, &s.data); err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
+	fillFallback(&s.data.Settings)
 	if !valid(s.data.Settings) || s.data.Settings.Revision < 1 || !validCapabilities(s.data.Capabilities) {
 		return nil, ErrInvalid
 	}
@@ -173,9 +173,12 @@ var LiveVoices = map[string][]string{
 var LiveDefaults = map[string][2]string{"gemini": {"gemini-3.8-live", "Aoede"}, "openai": {"gpt-realtime", "marin"}}
 
 func defaults() contract.Settings {
-	return contract.Settings{Revision: 1, Appearance: "system", SidebarWidth: 320, VoiceMode: "pipeline",
+	return contract.Settings{Revision: 1, Appearance: "system",
 		LiveProvider: "gemini", LiveModel: "gemini-3.8-live", LiveVoice: "Aoede",
-		SpeechKeys: []string{}, VoicePrompt: `You are Polymux, a spokesperson agent representing {target}, not one of the workers themselves.
+		LiveFallback: contract.LiveFallback{Mode: contract.LiveFallbackModeAuto, Models: []contract.LiveStep{}},
+		ImageOrder:   contract.MediaOrder{Mode: contract.MediaOrderModeAuto, Models: []contract.MediaStep{}},
+		VideoOrder:   contract.MediaOrder{Mode: contract.MediaOrderModeAuto, Models: []contract.MediaStep{}},
+		SpeechKeys:   []string{}, VoicePrompt: `You are Polymux, a spokesperson agent representing {target}, not one of the workers themselves.
 The user is speaking privately with you. Their typed conversation is a separate direct channel.
 Speak naturally and briefly, using an Australian accent. Handle casual conversation yourself.
 Consult your agents using ask_agent for tasks, research, account data, or actions. Include the full
@@ -196,8 +199,12 @@ func (s *Store) Snapshot() contract.Settings {
 
 func snapshot(d document) contract.Settings {
 	v := d.Settings
+	fillFallback(&v)
 	if v.DefaultReasoning == "" {
 		v.DefaultReasoning = contract.SettingsDefaultReasoningOff
+	}
+	if v.UpdateChannel == "" {
+		v.UpdateChannel = contract.SettingsUpdateChannelNightly
 	}
 	v.SpeechKeys = []string{}
 	return v
@@ -211,11 +218,8 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	if p.Appearance != nil {
 		v.Appearance = *p.Appearance
 	}
-	if p.SidebarWidth != nil {
-		v.SidebarWidth = *p.SidebarWidth
-	}
-	if p.VoiceMode != nil {
-		v.VoiceMode = *p.VoiceMode
+	if p.SwitcherBadges != nil {
+		v.SwitcherBadges = p.SwitcherBadges
 	}
 	if p.LiveProvider != nil && *p.LiveProvider != v.LiveProvider {
 		// Each provider has its own models and voices; switching starts from its defaults.
@@ -229,6 +233,15 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	}
 	if p.LiveVoice != nil {
 		v.LiveVoice = *p.LiveVoice
+	}
+	if p.LiveFallback != nil {
+		v.LiveFallback = *p.LiveFallback
+	}
+	if p.ImageOrder != nil {
+		v.ImageOrder = *p.ImageOrder
+	}
+	if p.VideoOrder != nil {
+		v.VideoOrder = *p.VideoOrder
 	}
 	if p.VoiceLanguage != nil {
 		v.VoiceLanguage = strings.TrimSpace(*p.VoiceLanguage)
@@ -244,6 +257,9 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	}
 	if p.DefaultReasoning != nil {
 		v.DefaultReasoning = *p.DefaultReasoning
+	}
+	if p.UpdateChannel != nil {
+		v.UpdateChannel = *p.UpdateChannel
 	}
 	if !valid(*v) {
 		return contract.Settings{}, ErrInvalid
@@ -270,16 +286,16 @@ func valid(v contract.Settings) bool {
 	if v.Appearance != "system" && v.Appearance != "light" && v.Appearance != "dark" {
 		return false
 	}
-	if math.IsNaN(v.SidebarWidth) || math.IsInf(v.SidebarWidth, 0) || v.SidebarWidth < 260 || v.SidebarWidth > 440 {
-		return false
-	}
-	if v.VoiceMode != "pipeline" && v.VoiceMode != "live" {
-		return false
-	}
 	if !slices.Contains(LiveVoices[v.LiveProvider], v.LiveVoice) || !ValidModel(v.LiveModel) {
 		return false
 	}
+	if !validFallback(v.LiveFallback) || !validOrder(v.ImageOrder) || !validOrder(v.VideoOrder) {
+		return false
+	}
 	if v.VoiceLanguage != "" && !languageCode.MatchString(v.VoiceLanguage) {
+		return false
+	}
+	if v.UpdateChannel != "" && v.UpdateChannel != contract.SettingsUpdateChannelNightly && v.UpdateChannel != contract.SettingsUpdateChannelStable {
 		return false
 	}
 	if !ValidReasoning(v.DefaultReasoning) || v.DefaultModel != "" && !chatModel.MatchString(v.DefaultModel) ||
@@ -287,6 +303,53 @@ func valid(v contract.Settings) bool {
 		return false
 	}
 	return strings.TrimSpace(v.VoicePrompt) != "" && len(v.VoicePrompt) <= 16000
+}
+
+// fillFallback gives settings saved before fallbacks existed the auto policy.
+func fillFallback(v *contract.Settings) {
+	if v.LiveFallback.Mode == "" {
+		v.LiveFallback.Mode = contract.LiveFallbackModeAuto
+	}
+	if v.LiveFallback.Models == nil {
+		v.LiveFallback.Models = []contract.LiveStep{}
+	}
+	for _, order := range []*contract.MediaOrder{&v.ImageOrder, &v.VideoOrder} {
+		if order.Mode == "" {
+			order.Mode = contract.MediaOrderModeAuto
+		}
+		if order.Models == nil {
+			order.Models = []contract.MediaStep{}
+		}
+	}
+}
+
+func validOrder(o contract.MediaOrder) bool {
+	if o.Mode != contract.MediaOrderModeAuto && o.Mode != contract.MediaOrderModeCustom || len(o.Models) > 8 {
+		return false
+	}
+	for _, step := range o.Models {
+		if strings.TrimSpace(step.Provider) == "" || len(step.Provider) > 128 || !ValidModel(step.Model) {
+			return false
+		}
+	}
+	return true
+}
+
+func validFallback(f contract.LiveFallback) bool {
+	switch f.Mode {
+	case contract.LiveFallbackModeAuto, contract.LiveFallbackModeCustom, contract.LiveFallbackModeOff:
+	default:
+		return false
+	}
+	if len(f.Models) > 8 {
+		return false
+	}
+	for _, step := range f.Models {
+		if !slices.Contains(LiveVoices[step.Provider], step.Voice) || !ValidModel(step.Model) {
+			return false
+		}
+	}
+	return true
 }
 
 // languageCode is empty for the system language, else a BCP 47 tag such as "es" or "pt-BR".

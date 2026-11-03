@@ -50,7 +50,7 @@ struct SurfaceTests {
         let barrel = try #require(mesh.paints.firstIndex { $0.0 == "#526478" }) + 1
         let glass = try #require(mesh.paints.firstIndex { $0.0 == "#9CD5D6" }) + 1
         func vertices(_ material: Int) -> [Vec3] {
-            mesh.faces.filter { $0[3] == material }.flatMap { $0.prefix(3).map { mesh.points[$0] } }
+            mesh.faces.filter { $0[3] == material }.flatMap { $0.corners.map { mesh.points[$0] } }
         }
         let casing = vertices(0).filter { hypot($0.x - 0.1, $0.y - 0.1) > 0.55 }
         let bodyDepth = try #require(casing.map(\.z).max())

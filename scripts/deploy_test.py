@@ -30,9 +30,14 @@ class DeployTests(unittest.TestCase):
         self.tool("git", '''case "$*" in
           *"remote get-url origin"*) echo https://github.com/example/repo.git ;;
           *"rev-parse FETCH_HEAD"*) echo "${SHA:-new-sha}" ;;
+          *"rev-list -n 1"*) echo "$*" >> "$TEST_LOG"; echo "${TAG_SHA:-release-sha}" ;;
+          *"merge-base --is-ancestor"*) [ "${BEHIND:-0}" = 1 ] ;;
           *"diff --quiet"*) echo "$*" >> "$TEST_LOG"; [ "${UI_ONLY:-0}" = 1 ] ;;
         esac''')
-        self.tool("gh", 'echo "$RESULT"')
+        self.tool("gh", '''case "$*" in
+          *"release view"*) echo "$*" >> "$TEST_LOG"; echo v9.9.9 ;;
+          *) echo "$RESULT" ;;
+        esac''')
         self.tool("shlock", 'touch "$2"')
         self.tool("launchctl", 'echo "launchctl $*" >> "$TEST_LOG"; exit 99')
         self.tool("install", '[ "$1" != -S ] || shift; exec /usr/bin/install "$@"')
@@ -58,6 +63,31 @@ class DeployTests(unittest.TestCase):
         self.assertEqual((self.state / "sha").read_text().strip(), "new-sha")
         self.assertEqual((self.bin / "polymux").read_text().strip(), "candidate")
         self.assertFalse((self.state / "lock").exists())
+
+    def stable(self):
+        data = self.home / ".polymux/data"
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "settings.json").write_text('{"settings":{"updateChannel":"stable"}}')
+
+    def test_stable_deploys_the_latest_release_without_dev_ci(self):
+        self.stable()
+        result = self.deploy(RESULT="failure")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.state / "sha").read_text().strip(), "release-sha")
+        self.assertIn("rev-list -n 1 v9.9.9", (self.home / "calls").read_text())
+
+    def test_stable_never_moves_the_server_backwards(self):
+        self.stable()
+        result = self.deploy(BEHIND="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.state / "sha").read_text().strip(), "old")
+        self.assertNotIn("install", (self.home / "calls").read_text())
+
+    def test_unset_channel_follows_dev(self):
+        result = self.deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.state / "sha").read_text().strip(), "new-sha")
+        self.assertNotIn("release view", (self.home / "calls").read_text())
 
     def test_failed_ci_does_not_advance_deployed_commit(self):
         self.assertEqual(self.deploy(RESULT="failure").returncode, 0)

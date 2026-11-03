@@ -11,10 +11,10 @@ export const site = {
 export const githubUrl = `https://github.com/${site.repository}`;
 export const docsPath = (slug: string) => slug === 'introduction' ? '/docs/' : `/docs/${slug}/`;
 export const releasePath = (version: string) => `/releases/${encodeURIComponent(version)}/`;
-export const productPath = (slug: string) => `/product/${encodeURIComponent(slug)}/`;
+export const pluginPath = (name: string) => `/plugins/${encodeURIComponent(name)}/`;
 export const navigation = [
   {id: 'home', label: 'Home', href: '/'},
-  {id: 'product', label: 'Product', href: '/product/'},
+  {id: 'plugins', label: 'Plugins', href: '/plugins/'},
   {id: 'docs', label: 'Docs', href: '/docs/'},
   {id: 'blog', label: 'Blog', href: '/blog/'},
   {id: 'releases', label: 'Releases', href: '/releases/'},

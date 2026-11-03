@@ -1,0 +1,25 @@
+name: Nightly
+
+# Scheduled runs only start from the default branch, so this triggers dev.yml on dev.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  trigger:
+    if: github.repository == 'CarlvinceTan/polymux'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Build Mac Nightly when dev has new commits
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/dev" --jq .sha)
+          last=$(gh release view dev-updates --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -Eo '[0-9a-f]{40}' | head -1 || true)
+          if [ "$head" = "$last" ]; then echo "dev is unchanged since the last Nightly ($head)."; exit 0; fi
+          gh workflow run dev.yml --repo "$GITHUB_REPOSITORY" --ref dev -f ios=false

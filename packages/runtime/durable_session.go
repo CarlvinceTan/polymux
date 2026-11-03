@@ -92,7 +92,7 @@ func NewDurable(ctx context.Context, dir, baseURL, model, key string, client Cli
 	}
 	catalogue := models.runtime()
 	var runtime *DurableRuntime
-	fallback := &fallbackModels{Models: catalogue, now: time.Now, blocked: map[string]providerHealth{}}
+	fallback := &fallbackModels{Models: catalogue, now: time.Now, blocked: map[string]providerHealth{}, routes: map[string]*fallbackRoute{}}
 	opened, err := harness.OpenHarness(ctx, storage, harness.HarnessOptions{
 		Models: fallback,
 		Settings: func() *harness.HarnessSettings {
@@ -139,6 +139,7 @@ func (r *DurableRuntime) SetProviders(specs []ProviderSpec) {
 	defer r.specsMu.Unlock()
 	next := make(map[string]*modelRegistry, len(specs))
 	order := make([]string, 0, len(specs))
+	preferred := make(map[string]string, len(specs))
 	for _, spec := range specs {
 		registry := newSpecRegistry(spec)
 		if spec.Builtin != nil {
@@ -147,6 +148,7 @@ func (r *DurableRuntime) SetProviders(specs []ProviderSpec) {
 		registry.register(r.catalogue)
 		next[spec.ID] = registry
 		order = append(order, registry.id)
+		preferred[registry.id] = spec.Preferred
 	}
 	for id := range r.specs {
 		if next[id] == nil {
@@ -154,7 +156,7 @@ func (r *DurableRuntime) SetProviders(specs []ProviderSpec) {
 		}
 	}
 	r.specs = next
-	r.fallback.replace(order)
+	r.fallback.replace(order, preferred)
 }
 
 var ErrProviderMissing = errors.New("this bot's provider is no longer configured; choose a model in its profile")
@@ -215,7 +217,7 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (D
 	if err != nil {
 		return nil, err
 	}
-	cwd := d.workingDir(filepath.Join(r.dir, d.Agent.ID))
+	cwd := d.workingDir(AgentDir(r.dir, d.Agent.ID))
 	if err := os.MkdirAll(cwd, 0700); err != nil {
 		return nil, err
 	}
@@ -226,9 +228,12 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (D
 	r.owners.Store(conversation.Id(), d.Agent.ID)
 	connected, clients, mcpErr := connectMCP(ctx, servers, cwd, r.agentEnv(d.Agent.ID))
 	session := &durableSession{conversation: conversation, definition: d, attachments: filepath.Join(r.dir, "attachments"), clients: clients, runtime: r, degraded: mcpErr != nil}
+	session.route = r.fallback.bind(strconv.FormatInt(int64(conversation.Id()), 10), d.Agent.Fallback)
 	opened := false
 	defer func() {
 		if !opened {
+			// A conversation made here has no saved path, so nothing else could forget it.
+			session.definition.Ephemeral = durablePath(conversation.Id()) != path
 			_ = session.Close()
 		}
 	}()
@@ -380,6 +385,8 @@ type ProviderSpec struct {
 	Headers map[string]string
 	Session string
 	Models  []string
+	// Preferred is the model auto fallbacks choose here when the bot's own isn't offered.
+	Preferred string
 	// Windows holds the context windows the provider reported, by model.
 	Windows map[string]int
 	// Builtin is the PiG provider serving this type, with its credential in Credentials; nil uses BaseURL and Key.
@@ -733,6 +740,7 @@ func modelID(d Definition, fallback string) string {
 type durableSession struct {
 	conversation harness.Conversation
 	definition   Definition
+	route        *fallbackRoute
 	attachments  string
 	mu           sync.Mutex
 	// emit is the current turn's delta sink; hooks report tool activity through it, and
@@ -995,8 +1003,11 @@ func (s *durableSession) Path() string {
 	if s.definition.Ephemeral {
 		return ""
 	}
-	return durablePath(s.conversation.Id())
+	return s.Transcript()
 }
+
+// Transcript names the conversation for Forget, ephemeral or not.
+func (s *durableSession) Transcript() string { return durablePath(s.conversation.Id()) }
 func (s *durableSession) Reusable() bool {
 	return !s.degraded
 }
@@ -1042,6 +1053,7 @@ func (s *durableSession) Close() error {
 			}
 			s.extensions = nil
 			s.runtime.sessions.Delete(s)
+			s.runtime.fallback.unbind(strconv.FormatInt(int64(s.conversation.Id()), 10), s.route)
 			// An ephemeral conversation is never reopened, so its transcript goes with it.
 			if s.definition.Ephemeral {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1394,7 +1406,6 @@ func (s *durableSession) content(m Message) (ai.UserContent, error) {
 		if attachment.Kind == AttachmentKindImage {
 			if data, err := os.ReadFile(filepath.Join(s.attachments, attachment.ID)); err == nil {
 				blocks = append(blocks, ai.ImageContent{MimeType: attachment.MimeType, Data: base64.StdEncoding.EncodeToString(data)})
-				continue
 			}
 		}
 		text := "Attachment: " + attachment.Name + " (" + attachment.MimeType + ")"

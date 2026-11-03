@@ -69,7 +69,7 @@ struct SidebarFeedback: View {
 
     @ViewBuilder private func highlight(_ area: SidebarArea) -> some View {
         if let frame = frames[area] {
-            RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06))
+            RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(PanelStyle.hoverTint))
                 .frame(width: frame.width, height: frame.height)
                 .position(x: frame.midX, y: frame.midY)
         }
@@ -97,7 +97,10 @@ extension View {
     func sidebarDrag<Preview: View>(_ item: SidebarItem, active: Binding<SidebarItem?>,
                                    @ViewBuilder preview: () -> Preview) -> some View {
         onDrag {
+            // iOS asks at the lift, which can become a menu and never end; a real drag reports below.
+            #if os(macOS)
             active.wrappedValue = item
+            #endif
             return item.provider()
         } preview: {
             preview()

@@ -68,3 +68,31 @@ func TestLocalPublication(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalKeepsInstallToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("POLYMUX_DATA_DIR", "")
+	install := filepath.Join(home, ".polymux", "data")
+	path := filepath.Join(install, "devices", "local-token")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{filepath.Join(install, "polymux.db"): "", path: "install"} {
+		if err := os.WriteFile(name, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	pairs, err := device.Open(t.Context(), dir, "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pairs.Close() })
+	if _, err := localCredential(t.Context(), pairs, dir); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "install" {
+		t.Fatalf("install token %q, %v", data, err)
+	}
+}

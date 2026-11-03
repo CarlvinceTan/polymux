@@ -2,7 +2,21 @@ import SwiftUI
 
 /// Whether a device is connected, shown as a small light.
 struct StatusDot: View {
-    enum State { case online, offline, pairing, checking, unknown }
+    enum State {
+        case online, offline, pairing, checking, unknown
+
+        /// The light in words; nil when presence isn't known.
+        var title: String? {
+            switch self {
+            case .online: "Online"
+            case .offline: "Offline"
+            case .pairing: "Pairing"
+            case .checking: "Checking"
+            case .unknown: nil
+            }
+        }
+    }
+
     let state: State
 
     var body: some View {
@@ -21,16 +35,6 @@ struct StatusDot: View {
         }
         .frame(width: 8, height: 8)
         .accessibilityElement()
-        .accessibilityLabel(label)
-    }
-
-    private var label: String {
-        switch state {
-        case .online: "Online"
-        case .offline: "Offline"
-        case .pairing: "Pairing"
-        case .checking: "Checking"
-        case .unknown: "Status unknown"
-        }
+        .accessibilityLabel(state.title ?? "Status unknown")
     }
 }

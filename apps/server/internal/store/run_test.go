@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -249,6 +250,22 @@ func TestResumeInterrupted(t *testing.T) {
 				t.Fatalf("recovery %+v %v", run, err)
 			}
 		})
+	}
+}
+
+// A second SQLite library in the process can't see the runtime's locks and truncates its -shm mid-write.
+func TestDurableReadsShareRuntimeDriver(t *testing.T) {
+	s := runStore(t)
+	if err := writeDurable(t, s, `{}`, false); err != nil {
+		t.Fatal(err)
+	}
+	db, ok := openDurable(t.Context(), s.DB)
+	if !ok {
+		t.Fatal("durable.db did not open")
+	}
+	defer db.Close()
+	if driver := reflect.TypeOf(db.Driver()).Elem().PkgPath(); driver != "modernc.org/sqlite" {
+		t.Fatalf("durable.db opened through %s", driver)
 	}
 }
 

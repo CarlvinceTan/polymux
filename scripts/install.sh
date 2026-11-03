@@ -8,15 +8,8 @@ trap 'cancel_drain; rm -f "$LOG"' EXIT
 trap 'exit 130' INT TERM HUP
 pick_target install "${1:-}"
 
-# Listen on Tailscale when it is up so other devices can reach this Mac; loopback otherwise.
-TAILNET=$(ifconfig | awk '/inet 100\./ { split($2, o, "."); if (o[2] >= 64 && o[2] <= 127) { print $2; exit } }')
-if [ -n "$TAILNET" ]; then
-  ADDRESS="http://$TAILNET:7337"
-  FLAGS="<string>-tailscale</string>"
-else
-  ADDRESS="http://127.0.0.1:7337"
-  FLAGS=""
-fi
+# The server listens on loopback; other devices reach it through a tunnel or a transport plugin.
+ADDRESS="http://127.0.0.1:7337"
 
 backup() {
   [ -d "$HOME_DIR/data" ] || return 0
@@ -39,30 +32,7 @@ install_app() {
 }
 
 # The server starts at login and restarts if it exits.
-start_server() {
-  cat >"$PLIST" <<PLIST_EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>$LABEL</string>
-  <key>ProgramArguments</key><array><string>$BIN/polymux</string><string>serve</string>$FLAGS</array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$HOME_DIR/logs/launchd.log</string>
-  <key>StandardErrorPath</key><string>$HOME_DIR/logs/launchd.log</string>
-</dict>
-</plist>
-PLIST_EOF
-  launchctl bootstrap "$DOMAIN" "$PLIST"
-  # Any HTTP reply means the server is listening; /health itself requires a credential.
-  tries=0
-  until [ "$(curl -s -o /dev/null -w '%{http_code}' "$ADDRESS/health")" != "000" ]; do
-    tries=$((tries + 1))
-    [ "$tries" -lt 30 ] || { echo "The server did not start; see $HOME_DIR/logs/launchd.log"; return 1; }
-    sleep 1
-  done
-}
+start_server() { "$BIN/polymux" host install; }
 
 open_app() {
   # Point at the local server when there is one; otherwise the app pairs with a remote server.

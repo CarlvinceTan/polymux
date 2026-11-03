@@ -10,7 +10,7 @@
 .prose li > p:last-child { margin-bottom: 0; }
 .prose strong { color: var(--ink); }
 .prose a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--focus); text-underline-offset: 3px; }
-.prose a:hover { text-decoration-color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .prose a:hover { text-decoration-color: var(--ink); } }
 .prose blockquote { margin: var(--space) 0; padding-left: var(--space-4); border-left: 2px solid var(--focus); color: var(--muted); }
 .prose code { padding: 2px var(--space-1); border-radius: var(--space-1); background: var(--soft); color: var(--ink); font-family: var(--font-mono); font-size: .86em; }
 .prose pre { margin: var(--space) 0; padding: var(--space-4); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-small); background: var(--surface); }

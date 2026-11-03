@@ -203,6 +203,9 @@ func (f *outputFiles) publish(ctx context.Context, call, name, mediaType string,
 		}
 	}
 	a = contract.Attachment{ID: id, Kind: kind, Name: name, MimeType: mediaType, Size: size, URL: "/attachments/" + id + "/content", IndexingState: contract.AttachmentIndexingStatePending}
+	if kind == "image" {
+		setImageSize(&a, path)
+	}
 	if kind == "image" || kind == "video" {
 		if makeThumbnail(ctx, path, path+".jpg", kind) == nil {
 			url := "/attachments/" + id + "/thumbnail"

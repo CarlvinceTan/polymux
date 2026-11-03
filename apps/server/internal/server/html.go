@@ -28,11 +28,11 @@ import (
 const htmlLimit = 1 << 20
 
 // htmlPrompt is the model-facing contract for card markup.
-const htmlPrompt = `Display one self-contained HTML card inside the message bubble: a visualisation, a small tool, a simulation, a game, or an interactive answer. Cards are sandboxed mini-apps: canvas, WebGL, SVG, animation, Web Audio, Web Workers and WebAssembly all work; network and browser storage don't. Write edge-to-edge inner content only (no outer wrapper, margins, radius or shadow); pad your own content, 16px is typical. Inline CSS and JS only; images are data: URLs; external URLs, links, forms, popups and CDNs are blocked. A styled kit and Chart.js 4 are preloaded: read the html-cards skill for its classes, colour tokens and chart rules before building anything beyond plain text.
+const htmlPrompt = `Display one self-contained HTML card inside the message bubble: a visualisation, a small tool, a simulation, a game, or an interactive answer. Cards are sandboxed mini-apps: canvas, WebGL, SVG, animation, Web Audio, Web Workers and WebAssembly all work; network and browser storage don't. The bubble supplies the card's background, radius and edge: write edge-to-edge inner content only (no outer wrapper, border, background, margins, radius or shadow, and don't wrap everything in a panel); pad your own content, 16px is typical. Inline CSS and JS only; images are data: URLs; external URLs, links, forms, popups and CDNs are blocked. A styled kit and Chart.js 4 are preloaded: read the card reference for its classes, colour tokens and chart rules before building anything beyond plain text.
 
 polymuxSend(textOrJSON) from a click or change handler sends the user's reply to this card (one per gesture, under 16 KB; sends without a real gesture are ignored). polymuxSave(value) keeps up to 64 KB of JSON state; restore from polymuxState when the card is shown again.
 
-Size: width 44-550, height 44-400 CSS px; omit either to measure the content. Keep layouts responsive; phones may narrow the width.
+Size: width 44-550 CSS px; omit to measure the content. The card grows to show all of its content and never scrolls as a whole, so keep it compact: aim for under 400 CSS px tall, and use tabs, paging, collapsible sections or a second card for more. Only small parts may scroll inside it, such as a wide table or code block; never the main content. height 44-400 sets a minimum, for a canvas or game that needs a set size. Size content in px, not vh. Keep layouts responsive; phones may narrow the width.
 
 The tool returns a receipt only; never repeat the HTML as message text.`
 
@@ -63,7 +63,7 @@ func (*htmlTool) Schema() ai.ToolSchema {
 				"html":   map[string]any{"type": "string", "minLength": 1, "maxLength": htmlLimit, "description": "Inner HTML body content or fragment with inline resources; no outer card wrapper, body margins, outer rounded corners, or drop shadow."},
 				"title":  map[string]any{"type": "string", "maxLength": 128, "description": "Short accessible card title."},
 				"width":  map[string]any{"type": "number", "minimum": 44, "maximum": 550, "description": "Optional fixed native viewport width in logical CSS pixels. Omit to size the card to its rendered content, up to 550. Responsive content must fit narrower phone widths."},
-				"height": map[string]any{"type": "number", "minimum": 44, "maximum": 400, "description": "Optional fixed native viewport height in logical CSS pixels; overflow scrolls vertically. Omit for measured content height capped at 400."},
+				"height": map[string]any{"type": "number", "minimum": 44, "maximum": 400, "description": "Optional minimum height in logical CSS pixels, for a canvas or game that needs a set size; taller content still grows the card. Omit to measure the content."},
 			},
 			"required": []string{"html"},
 		},

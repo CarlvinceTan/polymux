@@ -32,7 +32,7 @@ func (t *chatTool) Description() string {
 	if t.question {
 		return "Post a question card with choices and optional free text. Continue independent work; the user's answer starts a new turn in this chat. Use stable unique option IDs. Only ask when the answer is needed."
 	}
-	return "Send a short progress message to the user's chat immediately, then continue working. Avoid repeating it in your final reply."
+	return "Send one short message bubble to the user's chat immediately, then continue. Use it for each beat of a reply, an acknowledgement before real work, a real update or a result."
 }
 func (t *chatTool) Schema() ai.ToolSchema {
 	properties := map[string]any{"text": map[string]any{"type": "string", "minLength": 1, "maxLength": 8192}}
@@ -110,6 +110,7 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 		return agent.AgentToolResult{}, err
 	}
 	state.posts++
+	state.spoke = true
 	return toolResult(map[string]any{"message_id": message.ID, "posted": true})
 }
 
@@ -125,6 +126,10 @@ func (s *Server) answerChoice(w http.ResponseWriter, r *http.Request) {
 	card, err := s.Store.AnswerChoice(r.Context(), thread.ID, r.PathValue("messageID"), answer)
 	if errors.Is(err, store.ErrChoice) {
 		fail(w, http.StatusConflict, "choice", "This question is unavailable or has already been answered.")
+		return
+	}
+	if err == nil && !s.confirmInstall(r.Context(), thread.ID, card, answer) {
+		fail(w, http.StatusConflict, "plugin", "This plugin can't be installed.")
 		return
 	}
 	s.respond(w, card, err)

@@ -10,23 +10,33 @@ import UIKit
 @MainActor @Observable
 final class Notifications: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifications()
-    private(set) var destination: String?
+    /// One server's alerts; each is registered and polled on its own.
+    private final class Feed {
+        let client: APIClient
+        var remote = false
+        var registered = false
+        var registrationTime = Date.distantPast
+        var monitor: Task<Void, Never>?
+
+        init(client: APIClient) { self.client = client }
+    }
+
+    /// The chat a tapped alert opens, until that server's window takes it.
+    private var destination: (server: String, thread: String)?
     private(set) var routeID = UUID()
     private(set) var issue: String?
-    private var client: APIClient?
+    private var feeds: [String: Feed] = [:]
     private var token: String? = UserDefaults.standard.string(forKey: "notifications.token")
-    private var remote = false
-    private var registered = false
-    private var registrationTime = Date.distantPast
-    private var monitor: Task<Void, Never>?
     private var windows: [UUID: String] = [:]
-    private var address = ""
     private let defaults = UserDefaults.standard
+    /// The server on show, which mute changes apply to.
+    var current = ""
 
     private(set) var enabled = UserDefaults.standard.bool(forKey: "notifications.enabled")
-    /// Agents whose alerts this device mutes; their unread dots are unaffected.
-    private(set) var muted: Set<String> = []
-    private var installation: String {
+    /// Agents whose alerts this device mutes, by server; their unread dots are unaffected.
+    private var muted: [String: Set<String>] = [:]
+    /// This install's ID, the same on every server.
+    var installation: String {
         if let id = defaults.string(forKey: "notifications.installation") { return id }
         let id = UUID().uuidString
         defaults.set(id, forKey: "notifications.installation")
@@ -40,26 +50,29 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
 
     /// `address` is the server's saved address; the client's own URL is a local port when tunnelled.
     func connect(_ client: APIClient, address: String) {
-        guard self.client?.id != client.id else { return }
-        monitor?.cancel()
-        if let previous = self.client, let token, self.address != address {
-            let device = PushDevice(id: installation, token: token, environment: pushEnvironment,
-                server: self.address, enabled: false, muted: muted.sorted())
-            Task { _ = try? await previous.registerPush(device) }
-        }
-        self.client = client
-        self.address = address
-        muted = Set(defaults.stringArray(forKey: "notifications.muted.\(address)") ?? [])
-        registered = false
-        remote = false
-        monitor = Task { [weak self] in
+        guard feeds[address]?.client.id != client.id else { return }
+        feeds[address]?.monitor?.cancel()
+        let feed = Feed(client: client)
+        feeds[address] = feed
+        muted[address] = Set(defaults.stringArray(forKey: "notifications.muted.\(address)") ?? [])
+        feed.monitor = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.refresh(client)
+                await self.refresh(feed, address: address)
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }
         if enabled { register() }
+    }
+
+    /// Stops a removed server's alerts, including those it pushes while the app is closed.
+    func disconnect(_ address: String) {
+        guard let feed = feeds.removeValue(forKey: address) else { return }
+        feed.monitor?.cancel()
+        guard let token else { return }
+        let device = PushDevice(id: installation, token: token, environment: pushEnvironment,
+            server: address, enabled: false, muted: [])
+        Task { _ = try? await feed.client.registerPush(device) }
     }
 
     func allow(_ enabled: Bool) async {
@@ -70,32 +83,41 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
             }
             defaults.set(enabled, forKey: "notifications.enabled")
             self.enabled = enabled
-            registered = false
+            for feed in feeds.values { feed.registered = false }
             if enabled { register() }
             else { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
             issue = nil
-            if let client { await refresh(client) }
+            for (address, feed) in feeds { await refresh(feed, address: address) }
         } catch { issue = "Couldn’t update notification permission." }
     }
 
     func received(_ data: Data) {
         token = data.map { String(format: "%02x", $0) }.joined()
         defaults.set(token, forKey: "notifications.token")
-        registered = false
+        for feed in feeds.values { feed.registered = false }
     }
 
     func failed() { issue = "Alerts only arrive while Polymux is open." }
 
-    func isMuted(_ agentID: String) -> Bool { muted.contains(agentID) }
+    func isMuted(_ agentID: String) -> Bool { muted[current]?.contains(agentID) == true }
 
     /// Re-registers with the server so its push queue picks up the new mute list.
     func setMuted(_ muted: Bool, agent agentID: String) {
-        if muted { self.muted.insert(agentID) } else { self.muted.remove(agentID) }
-        defaults.set(self.muted.sorted(), forKey: "notifications.muted.\(address)")
-        registered = false
+        var agents = self.muted[current] ?? []
+        if muted { agents.insert(agentID) } else { agents.remove(agentID) }
+        self.muted[current] = agents
+        defaults.set(agents.sorted(), forKey: "notifications.muted.\(current)")
+        feeds[current]?.registered = false
     }
 
     func visible(_ thread: String?, window: UUID) { windows[window] = thread }
+
+    /// The chat a tapped alert opened on this server, handed over once.
+    func take(_ server: String) -> String? {
+        guard destination?.server == server else { return nil }
+        defer { destination = nil }
+        return destination?.thread
+    }
 
     private func register() {
         #if os(macOS)
@@ -105,25 +127,26 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         #endif
     }
 
-    private func refresh(_ client: APIClient) async {
-        guard self.client?.id == client.id else { return }
-        let address = address
+    private func refresh(_ feed: Feed, address: String) async {
+        guard feeds[address] === feed else { return }
+        let client = feed.client
+        let muted = muted[address] ?? []
         do {
-            if (!registered || Date().timeIntervalSince(registrationTime) > 60), let token {
+            if (!feed.registered || Date().timeIntervalSince(feed.registrationTime) > 60), let token {
                 let status = try await client.registerPush(PushDevice(id: installation, token: token, environment: pushEnvironment,
                     server: address, enabled: enabled, muted: muted.sorted()))
-                guard self.client?.id == client.id else { return }
-                remote = status.available && enabled
-                registered = true
-                registrationTime = Date()
+                guard feeds[address] === feed else { return }
+                feed.remote = status.available && enabled
+                feed.registered = true
+                feed.registrationTime = Date()
                 if enabled && !status.available { issue = "Closed-app alerts need server push setup." }
             }
             let key = "notifications.cursor.\(address)"
             let cursor = defaults.object(forKey: key) as? NSNumber
             let page = try await client.notices(after: cursor?.int64Value)
-            guard self.client?.id == client.id else { return }
+            guard feeds[address] === feed else { return }
             for notice in page.notices {
-                guard enabled, !remote, !windows.values.contains(notice.conversationID),
+                guard enabled, !feed.remote, !windows.values.contains(notice.conversationID),
                       notice.agentID.map({ !muted.contains($0) }) ?? true,
                       let date = WireDate.parse(notice.createdAt),
                       abs(date.timeIntervalSinceNow) < 600 else { continue }
@@ -154,9 +177,11 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         let server = response.notification.request.content.userInfo["server"] as? String
         let thread = response.notification.request.content.userInfo["conversationID"] as? String
         await MainActor.run {
-            guard server == self.defaults.string(forKey: "serverAddress"), let thread else { return }
-            self.destination = thread
+            guard let server, self.feeds[server] != nil, let thread else { return }
+            self.destination = (server, thread)
             self.routeID = UUID()
+            // That server's window takes the chat when it appears.
+            self.defaults.set(server, forKey: "serverAddress")
         }
     }
 
@@ -165,7 +190,7 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         let server = notification.request.content.userInfo["server"] as? String
         let thread = notification.request.content.userInfo["conversationID"] as? String
         return await MainActor.run {
-            guard self.enabled, server == self.address,
+            guard self.enabled, let server, self.feeds[server] != nil,
                   let thread, !self.windows.values.contains(thread) else { return [] }
             return [.banner, .sound]
         }
@@ -180,6 +205,9 @@ final class URLRouter {
 
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppLogo.apply()
+    }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             Task { @MainActor in URLRouter.shared.handler?(url) }

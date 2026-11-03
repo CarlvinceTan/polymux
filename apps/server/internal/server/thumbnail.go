@@ -11,9 +11,25 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
+
+// setImageSize records an image's shape, so clients hold its space before it loads.
+func setImageSize(a *contract.Attachment, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	config, _, err := image.DecodeConfig(f)
+	if err != nil || config.Width == 0 || config.Height == 0 {
+		return
+	}
+	width, height := float64(config.Width), float64(config.Height)
+	a.Width, a.Height = &width, &height
+}
 
 func makeThumbnail(ctx context.Context, path, output, kind string) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)

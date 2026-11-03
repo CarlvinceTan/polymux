@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,6 +25,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/embedproc"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/fixture"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/link"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/push"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/server"
@@ -44,24 +43,20 @@ const (
 var buildSHA = "unknown"
 
 func runServer(args []string) error {
-	if len(args) > 0 && args[0] == "host" {
-		return runHost(args[1:])
-	}
 	if len(args) > 0 && args[0] == "device" {
 		return runDevice(args[1:])
 	}
 	flagSet := flag.NewFlagSet("serve", flag.ContinueOnError)
 	version := flagSet.Bool("version", false, "print the build commit and exit")
-	listen := flagSet.String("listen", os.Getenv("POLYMUX_LISTEN"), "authenticated backend IP:port (loopback, private LAN or Tailscale; defaults to 127.0.0.1:7337)")
+	listen := flagSet.String("listen", os.Getenv("POLYMUX_LISTEN"), "authenticated backend IP:port (loopback; defaults to 127.0.0.1:7337)")
 	dev := flagSet.Bool("dev", os.Getenv("POLYMUX_DEV") == "1", "development mode (loopback is always allowed)")
 	dir := flagSet.String("data", os.Getenv("POLYMUX_DATA_DIR"), "data directory (defaults to ~/.polymux/data)")
 	logDir := flagSet.String("log-dir", os.Getenv("POLYMUX_LOG_DIR"), "log directory (defaults to ~/.polymux/logs)")
 	deviceListen := flagSet.String("device-listen", "", "TLS device listener (defaults to backend port + 2)")
 	noMDNS := flagSet.Bool("no-mdns", os.Getenv("POLYMUX_NO_MDNS") == "1", "disable Bonjour LAN advertisement")
-	tailscale := flagSet.Bool("tailscale", os.Getenv("POLYMUX_TAILSCALE") == "1", "use Tailscale listeners (requires Tailscale)")
 	noTunnel := flagSet.Bool("no-tunnel", os.Getenv("POLYMUX_TUNNEL") == "0", "disable pairing from other networks over iroh")
 	publicURL := flagSet.String("public-url", os.Getenv("POLYMUX_PUBLIC_URL"), "HTTPS origin advertised for remote pairing")
-	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341)")
+	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341 with -public-url, else a free port for transport plugins)")
 	verify := fixture.Register(flagSet)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -78,9 +73,6 @@ func runServer(args []string) error {
 		return err
 	}
 	*publicURL = origin
-	if *publicListen != "" && *publicURL == "" {
-		return errors.New("-public-listen requires -public-url")
-	}
 	groups, err := loadGroups()
 	if err != nil {
 		return err
@@ -110,12 +102,8 @@ func runServer(args []string) error {
 		}
 		*logDir = value
 	}
-	defaultIP, err := listenIP(*tailscale)
-	if err != nil {
-		return err
-	}
 	if *listen == "" {
-		*listen = net.JoinHostPort(defaultIP, "7337")
+		*listen = "127.0.0.1:7337"
 	}
 	if err := validateListen(*listen, *dev); err != nil {
 		return err
@@ -128,7 +116,19 @@ func runServer(args []string) error {
 	}
 	defer logFile.Close()
 	log := slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil))
+	shellCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+	if err := useShellPath(shellCtx); err != nil {
+		log.Warn("keeping the service PATH", "error", err)
+	}
+	stop()
+	if err := moveGuard(*dir); err != nil {
+		return err
+	}
 	lock, err := lockData(*dir, ".server.lock")
+	if err != nil {
+		return err
+	}
+	lock, err = activateIncoming(ctx, *dir, lock)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func runServer(args []string) error {
 		if err != nil || n > 65533 {
 			return errors.New("backend port must allow two adjacent ports")
 		}
-		*deviceListen = deviceDefault(*tailscale, defaultIP, n)
+		*deviceListen = deviceDefault(n)
 	}
 	if err := validateDevice(*deviceListen); err != nil {
 		return err
@@ -171,6 +171,15 @@ func runServer(args []string) error {
 		return err
 	}
 	defer deviceSocket.Close()
+	publicAddress := *publicListen
+	if publicAddress == "" && *publicURL == "" {
+		publicAddress = "127.0.0.1:0"
+	}
+	publicSocket, err := remoteListener(publicAddress)
+	if err != nil {
+		return err
+	}
+	defer publicSocket.Close()
 	deviceServer := &http.Server{Handler: devices, ReadTimeout: 10 * time.Second, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	defer deviceServer.Close()
 	config, err := loadModel(*dir)
@@ -265,9 +274,21 @@ func runServer(args []string) error {
 	if *noTunnel {
 		ticket = nil
 	}
+	identity, err := link.LoadIdentity(*dir)
+	if err != nil {
+		return err
+	}
 	api, err := server.New(ctx, s, server.Config{
 		GroupCaps:   &groups,
+		PluginIndex: os.Getenv("POLYMUX_PLUGIN_INDEX"),
 		BuildSHA:    buildSHA,
+		ServerID:    link.Fingerprint(identity.PublicKey),
+		Exit:        cancel,
+		Supervised:  supervised(),
+		Mover: func(target, drain string, merge bool) error {
+			return spawnMover(*dir, *listen, *logDir, target, drain, merge)
+		},
+		Address:     *listen,
 		DataDir:     *dir,
 		Model:       model,
 		Definitions: definitions,
@@ -278,6 +299,7 @@ func runServer(args []string) error {
 		Devices:     devices,
 		Ticket:      ticket,
 		PublicURL:   *publicURL,
+		Publish:     plugins.Publish{API: publicSocket.Addr().String(), Device: loopbackAddress(deviceSocket.Addr())},
 	})
 	if err != nil {
 		return err
@@ -289,10 +311,10 @@ func runServer(args []string) error {
 		}
 	}
 	apiHandler := api.Handler()
-	httpServer := &http.Server{Addr: *listen, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer := &http.Server{Addr: *listen, Handler: server.AllowAppOrigins(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		addr, err := netip.ParseAddr(host)
-		if err != nil || !trustedPeer(addr, lanInterfaces()) {
+		if err != nil || !trustedPeer(addr) {
 			device.Reject(w)
 			return
 		}
@@ -301,7 +323,7 @@ func runServer(args []string) error {
 			return
 		}
 		apiHandler.ServeHTTP(w, r)
-	}), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	})), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	defer httpServer.Close()
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -310,20 +332,13 @@ func runServer(args []string) error {
 	defer listener.Close()
 	log.Info("Polymux is listening", "address", listener.Addr(), "data", *dir, "model", model)
 	done := make(chan error, 4)
-	if *publicURL != "" {
-		local, err := remoteListener(*publicListen)
-		if err != nil {
-			return err
-		}
-		defer local.Close()
-		remote := &http.Server{
-			Handler: remoteHandler(apiHandler), ReadHeaderTimeout: 10 * time.Second,
-			IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
-		}
-		defer remote.Close()
-		go func() { done <- remote.Serve(local) }()
-		log.Info("HTTPS tunnel listener ready", "address", local.Addr())
+	remote := &http.Server{
+		Handler: remoteHandler(apiHandler), ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
 	}
+	defer remote.Close()
+	go func() { done <- remote.Serve(publicSocket) }()
+	log.Info("HTTPS tunnel listener ready", "address", publicSocket.Addr())
 	if !*noTunnel {
 		local, err := tunnelListener(listener)
 		if err != nil {
@@ -338,7 +353,7 @@ func runServer(args []string) error {
 	go func() { done <- httpServer.Serve(listener) }()
 	go func() { done <- deviceServer.Serve(tls.NewListener(deviceSocket, pairings.TLSConfig())) }()
 	if address := deviceSocket.Addr().(*net.TCPAddr); shouldAdvertise(address.IP, *noMDNS) {
-		ips := advertisedIPs(address.IP, lanAddrs(), *tailscale)
+		ips := advertisedIPs(address.IP, lanAddrs())
 		if len(ips) == 0 {
 			log.Info("Bonjour advertisement skipped: no eligible IP addresses")
 		} else {
@@ -367,6 +382,18 @@ func runServer(args []string) error {
 	return nil
 }
 
+// loopbackAddress is where a process on this host reaches a listener, whatever interface it binds.
+func loopbackAddress(addr net.Addr) string {
+	tcp, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return addr.String()
+	}
+	if tcp.IP == nil || tcp.IP.IsUnspecified() {
+		return net.JoinHostPort("127.0.0.1", strconv.Itoa(tcp.Port))
+	}
+	return tcp.String()
+}
+
 func tunnelListener(listener net.Listener) (net.Listener, error) {
 	if address, ok := listener.Addr().(*net.TCPAddr); ok && address.IP.IsLoopback() {
 		return listener, nil
@@ -391,7 +418,7 @@ func shouldAdvertise(bind net.IP, noMDNS bool) bool {
 	return !noMDNS && !bind.IsLoopback()
 }
 
-func advertisedIPs(bind net.IP, addrs []string, tailscale bool) []string {
+func advertisedIPs(bind net.IP, addrs []string) []string {
 	if len(bind) != 0 && !bind.IsUnspecified() {
 		addrs = []string{bind.String()}
 	}
@@ -402,7 +429,7 @@ func advertisedIPs(bind net.IP, addrs []string, tailscale bool) []string {
 			continue
 		}
 		ip = ip.Unmap()
-		if ip.Is6() && ip.IsLinkLocalUnicast() || !tailscale && addressRank(ip) == 6 {
+		if ip.Is6() && ip.IsLinkLocalUnicast() || addressRank(ip) == 6 {
 			continue
 		}
 		ips = append(ips, ip.WithZone("").String())
@@ -411,11 +438,7 @@ func advertisedIPs(bind net.IP, addrs []string, tailscale bool) []string {
 }
 
 func bonjourTXT(key []byte) map[string]string {
-	fingerprint := sha256.Sum256(key)
-	return map[string]string{
-		"v": "1",
-		"k": base64.RawURLEncoding.EncodeToString(fingerprint[:])[:16],
-	}
+	return map[string]string{"v": "1", "k": link.Fingerprint(key)}
 }
 
 func instanceName(hostname string) string {
@@ -442,14 +465,10 @@ func defaultLogDir() (string, error) {
 	return filepath.Join(home, ".polymux", "logs"), nil
 }
 
-// Production default: all interfaces, or the tailnet IP with -tailscale.
-func deviceDefault(tailscale bool, tailnet string, port int) string {
-	host := "0.0.0.0"
-	if tailscale {
-		host = tailnet
-	}
+// Production default: all interfaces.
+func deviceDefault(port int) string {
 	if port == 0 {
 		return net.JoinHostPort("127.0.0.1", "0")
 	}
-	return net.JoinHostPort(host, strconv.Itoa(port+2))
+	return net.JoinHostPort("0.0.0.0", strconv.Itoa(port+2))
 }

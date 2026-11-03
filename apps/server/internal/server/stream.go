@@ -165,6 +165,10 @@ func (st *stream) handle(ctx context.Context, delta agentruntime.Delta) error {
 			return err
 		}
 		return st.setActivity(contract.RunActivityGenerating, text)
+	case delta.Notice != "":
+		st.s.config.Log.Warn("model switched", "run", st.run.ID, "notice", delta.Notice)
+		st.run.Notice = &delta.Notice
+		return st.s.Store.RunEvent(st.ctx, contract.EventTypeRunUpdate, st.run, nil)
 	case delta.Kind == "generating":
 		if len(st.tools) > 0 {
 			return nil

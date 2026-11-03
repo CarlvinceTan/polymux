@@ -1,6 +1,5 @@
 import SwiftUI
 import ImageIO
-import QuickLook
 import QuickLookThumbnailing
 import UniformTypeIdentifiers
 
@@ -46,15 +45,16 @@ struct DraftPreview: View {
                 .opacity(hovered ? 1 : 0)
                 .allowsHitTesting(hovered)
                 .accessibilityHidden(!hovered)
+                .motion(value: hovered)
                 #endif
         }
         #if os(macOS)
-        .onHover { hovered = $0 }
+        .pointerHover { hovered = $0 }
         #endif
         .appMenu {
             Button("Remove attachment", systemImage: "trash", action: remove)
         }
-        .quickLookPreview($preview)
+        .mediaPreview($preview, kind: mediaKind, poster: thumbnail)
         .task(id: DraftKey(url: file.url, scale: displayScale)) {
             thumbnail = nil
             let image = await DraftThumbnails.image(file: file, side: side, scale: displayScale)
@@ -82,15 +82,27 @@ struct DraftPreview: View {
                 .frame(width: 18, height: 18)
                 .glassEffect(.regular.interactive(), in: Circle())
                 #if os(iOS)
-                .frame(width: 44, height: 44, alignment: .topTrailing)
+                // Reaches past the corner, leaving the tile's centre to the preview.
+                .padding(.init(top: 14, leading: 12, bottom: 12, trailing: 14))
                 .contentShape(Rectangle())
                 #else
                 .contentShape(Circle())
                 #endif
         }
         .buttonStyle(.plain)
+        #if os(iOS)
+        .padding([.top, .trailing], -10)
+        #else
         .padding(4)
+        #endif
         .accessibilityLabel("Remove \(file.url.lastPathComponent)")
+    }
+
+    /// Animated images stay in QuickLook, which plays them.
+    private var mediaKind: MediaKind? {
+        if file.kind.conforms(to: .gif) { return nil }
+        if file.kind.conforms(to: .image) { return .image }
+        return file.kind.conforms(to: .movie) ? .video : nil
     }
 
     private var symbol: String {

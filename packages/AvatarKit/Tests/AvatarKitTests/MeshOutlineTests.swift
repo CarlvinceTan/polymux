@@ -43,7 +43,9 @@ struct MeshOutlineTests {
         }
         #expect(!frame.parts.isEmpty)
         var morph = ThinkingMorph()
-        let result = morph.apply(frame, elapsed: 0.1, now: 0.1, scale: 100, displaySize: 44, reducedMotion: false)
+        let phase = morph.sample(elapsed: 0.04, now: 0.04, reducedMotion: false)
+        #expect(phase != nil)
+        let result = morph.apply(frame, phase: phase!, scale: 100, displaySize: 44)
         #expect(result.parts.allSatisfy { $0.outline == $0.path })
         #expect(result.parts.first?.path != frame.parts.first?.path)
     }
@@ -85,25 +87,5 @@ struct MeshOutlineTests {
             }
             #expect(layers.allSatisfy { $0.outline?.isEmpty == true }, "Materials must not stroke internal mesh edges")
         }
-    }
-
-    @Test(arguments: [Rotation.identity, .rest, Rotation(yaw: -70, pitch: 15), Rotation(yaw: 70, pitch: -15),
-                      Rotation(yaw: 180, pitch: 15)])
-    func frostingGapMatchesPaint(_ rotation: Rotation) throws {
-        let layers = Cupcake.layers(Silhouette(radii: ShapeID.cupcake.radii), rotation: rotation, scale: 100)
-        let outline = try #require(layers.first?.outline)
-        #expect(layers.dropFirst().allSatisfy { $0.outline?.isEmpty == true })
-        #expect(!outline.isEmpty)
-        // The silhouette must retain sprinkles and the cake, not just the central frosting mound.
-        let reference = layers.reduce(CGMutablePath() as CGPath) { $0.union($1.path) }
-        for y in stride(from: -160.0, to: 20, by: 3.1) {
-            for x in stride(from: -110.0, to: 110, by: 3.1) {
-                let point = CGPoint(x: x, y: y)
-                #expect(outline.contains(point) == reference.contains(point))
-            }
-        }
-        var elements = 0
-        outline.applyWithBlock { _ in elements += 1 }
-        #expect(elements < 1500, "A stack gap must not stroke the frosting's internal mesh edges")
     }
 }

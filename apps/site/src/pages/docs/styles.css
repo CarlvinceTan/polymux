@@ -4,11 +4,12 @@
 .docs-sidebar section > button, .docs-drawer section > button { width: 100%; display: flex; justify-content: space-between; padding: var(--space-2); border: 0; background: transparent; color: var(--muted); font-size: 12px; font-weight: 700; }
 .docs-sidebar ul, .docs-drawer ul { margin: 0; padding: 0; list-style: none; }
 .docs-sidebar a, .docs-drawer nav a { display: block; padding: var(--space-2); border-radius: var(--radius-small); color: var(--muted); font-size: 13px; }
-.docs-sidebar a:hover, .docs-sidebar a.active, .docs-drawer nav a:hover, .docs-drawer nav a.active { color: var(--ink); background: var(--soft); }
+.docs-sidebar a.active, .docs-drawer nav a.active { color: var(--ink); background: var(--soft); }
+@media (hover: hover) and (pointer: fine) { .docs-sidebar a:hover, .docs-drawer nav a:hover { color: var(--ink); background: var(--soft); } }
 .docs-main { min-width: 0; width: 100%; max-width: 856px; margin-inline: auto; padding: var(--space-12); }
 .docs-neighbours { margin-top: var(--space-16); padding-top: var(--space); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); border-top: 1px solid var(--line); }
 .docs-neighbours > a { min-width: 0; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-small); }
-.docs-neighbours > a:hover { background: var(--soft); }
+@media (hover: hover) and (pointer: fine) { .docs-neighbours > a:hover { background: var(--soft); } }
 .docs-neighbours .next { text-align: right; }
 .docs-neighbours small { color: var(--muted); font-size: 11px; }
 .docs-neighbours strong { font-size: 13px; }
@@ -18,11 +19,12 @@
 .docs-search:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
 .docs-search svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; flex: none; }
 .docs-search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 13px; }
+@media (pointer: coarse) { .docs-search input { font-size: 16px; } }
 .docs-search input::placeholder { color: var(--muted); opacity: 1; }
 .docs-search kbd { flex: none; font-family: inherit; font-size: 10px; }
 .docs-search-results { position: absolute; top: calc(100% + var(--space-2)); width: 100%; max-height: min(370px, calc(100dvh - var(--header-size) - var(--space-2))); overflow: auto; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-small); background: var(--surface); box-shadow: var(--shadow); }
 .docs-search-results a { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); border-radius: var(--radius-small); }
-.docs-search-results a:hover { background: var(--soft); }
+@media (hover: hover) and (pointer: fine) { .docs-search-results a:hover { background: var(--soft); } }
 .docs-search-results strong { font-size: 13px; }
 .docs-search-results small, .docs-search-results p { color: var(--muted); font-size: 12px; }
 .docs-search-results p { padding: var(--space-3); text-align: center; }

@@ -1,9 +1,28 @@
 import Foundation
 
-extension Agent: Identifiable {}
+extension Agent: Identifiable {
+    /// An unset policy is auto.
+    public var fallbacks: AgentFallback { fallback ?? AgentFallback(mode: AgentFallbackMode.auto) }
+}
+
+extension FallbackModel: Identifiable {
+    public var id: String { provider + "/" + model }
+}
 extension Provider: Identifiable {}
+extension [Provider] {
+    /// The reasoning levels a model supports; empty when they aren't known.
+    public func levels(provider: String, model: String) -> [String] {
+        first { $0.id == provider }?.models.first { $0.id == model }?.reasoning ?? []
+    }
+}
 extension Thread: Identifiable {
-    public var isGroup: Bool { id != agentID }
+    public var isGroup: Bool { id != agentID && task == nil }
+    public var isTask: Bool { task != nil }
+    /// A finished task never counts as working, even if a last turn is still ending.
+    public var isWorking: Bool {
+        guard let task, task.status != TaskInfoStatus.done else { return false }
+        return task.workers > 0 || runs.contains { [RunStatus.queued, RunStatus.running, RunStatus.waitingPeer, RunStatus.resuming].contains($0.status) }
+    }
     public var participantIDs: [String] { agentIDs.isEmpty ? [agentID] : agentIDs }
 }
 extension MessageStatus {
@@ -75,6 +94,7 @@ extension ChoiceAnswer {
 
 public enum WireDate {
     private static let lock = NSLock()
+    private nonisolated(unsafe) static let parsed = NSCache<NSString, NSDate>()
     private nonisolated(unsafe) static let fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -94,11 +114,15 @@ public enum WireDate {
         return fractional.string(from: date)
     }
 
+    /// Remembers each result: a transcript reads every message's date on each update.
     public static func parse(_ value: String) -> Date? {
+        let key = value as NSString
+        if let date = parsed.object(forKey: key) { return date as Date }
         lock.lock()
         defer { lock.unlock() }
-        if let date = fractional.date(from: value) { return date }
-        return plain.date(from: value)
+        guard let date = fractional.date(from: value) ?? plain.date(from: value) else { return nil }
+        parsed.setObject(date as NSDate, forKey: key)
+        return date
     }
 }
 

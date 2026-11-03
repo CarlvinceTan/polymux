@@ -17,6 +17,16 @@ Native downloads are published on the [Releases page](/releases/). Until a relea
 - **Client:** macOS 27 and Xcode 27.
 - **Server:** Go 1.27.3, Git, and a C compiler. Xcode’s command-line tools provide the compiler on macOS.
 
+## The Mac app
+
+The Mac app carries its own copy of the server. On a Mac with no Polymux yet, it starts that server at login and connects to it, with nothing else to install. Turn it off under **Settings › Network › This Mac**.
+
+If you join a network from a new install, the app retires its own server while it's still empty. If this Mac's server has chats on it, the app asks whether to keep the two networks separate or merge them.
+
+To change which Mac is the server, join its network from a new install, open the network in **Settings › Network**, and choose **Move server**. Chats, bots, the vault and your devices go with it. Logins for tools on the old Mac, and files outside Polymux's data folder, stay behind.
+
+To combine two networks, open the one you're giving up in **Settings › Network** and choose **Merge network**. Its chats, bots and vault come to the other network, and its server stops. Bots start a new working context and keep their chats and memory, schedules arrive paused, and plugins stay behind. The merge screen lists which devices gain or lose access first.
+
 ## Get the source
 
 Clone the native development branch, `dev`, on each Mac you are installing on:
@@ -62,8 +72,8 @@ Open Polymux, then pair it with your server.
 
 ## Pair another Mac
 
-1. On an already connected client, open **Settings → Devices → Add device** and copy its pairing link.
-2. On the new client, open the same screen, paste the link into **Join with a link**, and press **Return**.
+1. On an already connected client, open **Settings → Network**, choose the network, press **+** beside Devices, and copy its pairing link.
+2. On the new client, open **Settings → Network**, press **+** beside Networks, paste the link into **Join with a link**, and press **Return**.
 
 For a server-only installation, generate a link on the server Mac instead. Replace `SERVER_ADDRESS` with the address printed by the installer:
 
@@ -75,7 +85,7 @@ Pairing links contain credentials. Share them privately, and use the complete li
 
 ## If something is not working
 
-- **Cannot connect:** check that the server is running and try a fresh pairing link. Other devices connect through an encrypted tunnel, or over Tailscale when the server runs with `-tailscale`. If the tunnel is turned off on the server, use Tailscale.
+- **Cannot connect:** check that the server is running and try a fresh pairing link. Other devices connect through an encrypted tunnel, or through a transport plugin such as Tailscale. If the tunnel is turned off on the server, install a transport plugin.
 - **Chats open but replies fail:** check your provider and **Default model** in **Settings → Models**.
 
 To update, pull the source version you want and rerun the relevant install command. Release builds check for updates automatically; use **Polymux → Check for Updates…** to check now. Next, [choose a model](/docs/models-and-agents/) and [start a conversation](/docs/).

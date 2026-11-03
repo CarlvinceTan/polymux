@@ -7,6 +7,8 @@ let package = Package(
     products: [
         .library(name: "PolymuxKit", targets: ["PolymuxKit"]),
         .library(name: "AvatarKit", targets: ["AvatarKit"]),
+        .library(name: "GraphKit", targets: ["GraphKit"]),
+        .library(name: "PolymuxCall", targets: ["PolymuxCall"]),
         .library(name: "PolymuxUpdates", targets: ["PolymuxUpdates"]),
         .executable(name: "media-text", targets: ["MediaText"])
     ],
@@ -21,11 +23,15 @@ let package = Package(
         .target(name: "AvatarKit", path: "packages/AvatarKit/Sources/AvatarKit", resources: [.copy("Resources/Bloub-LICENSE.txt"), .copy("Resources/Characters-LICENSE.txt"), .copy("Resources/DSBot-LICENSE.txt")],
                 swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
         .target(name: "PolymuxAvatar", dependencies: ["PolymuxKit", "AvatarKit"], path: "apps/Polymux/Sources/Avatar"),
-        .target(name: "PolymuxVoice", dependencies: ["PolymuxKit"], path: "apps/Polymux/Sources/Voice"),
+        // Linked by the app and its Live Activity extension, so it carries no other dependencies.
+        .target(name: "PolymuxCall", path: "packages/PolymuxCall/Sources/PolymuxCall"),
+        .target(name: "PolymuxVoice", dependencies: ["PolymuxKit", "PolymuxCall"], path: "apps/Polymux/Sources/Voice"),
         .target(name: "PolymuxUpdates", dependencies: [.product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS]))], path: "packages/PolymuxUpdates/Sources/PolymuxUpdates"),
         .executableTarget(name: "MediaText", path: "packages/MediaText/Sources/MediaText"),
+        .target(name: "GraphKit", path: "packages/GraphKit/Sources/GraphKit"),
         .testTarget(name: "PolymuxKitTests", dependencies: ["PolymuxKit", "PolymuxAvatar", "AvatarKit"], path: "packages/PolymuxKit/Tests/PolymuxKitTests"),
         .testTarget(name: "PolymuxVoiceTests", dependencies: ["PolymuxVoice", "PolymuxKit"], path: "apps/Polymux/Tests/VoiceTests"),
-        .testTarget(name: "AvatarKitTests", dependencies: ["AvatarKit"], path: "packages/AvatarKit/Tests/AvatarKitTests", resources: [.copy("Fixtures")])
+        .testTarget(name: "AvatarKitTests", dependencies: ["AvatarKit"], path: "packages/AvatarKit/Tests/AvatarKitTests", resources: [.copy("Fixtures")]),
+        .testTarget(name: "GraphKitTests", dependencies: ["GraphKit"], path: "packages/GraphKit/Tests/GraphKitTests", resources: [.copy("Fixtures")])
     ]
 )

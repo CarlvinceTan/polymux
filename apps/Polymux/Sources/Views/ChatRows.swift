@@ -12,6 +12,9 @@ struct AgentRow: View {
     var finished: Message? = nil
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderCount.hit("row")
+        #endif
         HStack(spacing: gap ?? RowDetails.gap) {
             AgentAvatar(agentID: agent.id, conversationID: thread?.id ?? agent.id,
                         runs: thread?.runs ?? [], activity: activity, connected: connected,
@@ -152,46 +155,50 @@ struct RowDetails: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(name)
-                        #if os(iOS)
-                        .font(.headline)
-                        #else
-                        .font(.body.weight(.medium))
-                        #endif
-                        .foregroundStyle(foreground).lineLimit(1)
-                        .layoutPriority(1)
-                    if !role.isEmpty {
-                        // Secondary text yields first: a long role truncates before it can
-                        // squeeze out the name, the date or the activity dot.
-                        Text(role).font(.caption).foregroundStyle(secondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    if thread?.pinned == true {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2).foregroundStyle(secondary)
-                            .accessibilityLabel("Pinned")
-                    }
-                    if let date = thread?.lastMessage?.date {
-                        Text(date, format: ProgressiveTime())
-                            .font(.caption2).foregroundStyle(secondary).lineLimit(1).layoutPriority(2)
-                    }
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(name)
+                    #if os(iOS)
+                    .font(.headline)
+                    #else
+                    .font(.body.weight(.medium))
+                    #endif
+                    .foregroundStyle(foreground).lineLimit(1)
+                    .layoutPriority(1)
+                if !role.isEmpty {
+                    // Secondary text yields first: a long role truncates before it can
+                    // squeeze out the name or the date.
+                    Text(role).font(.caption).foregroundStyle(secondary).lineLimit(1)
                 }
-                if !preview.isEmpty {
-                    Text(preview)
-                        #if os(iOS)
-                        .font(.subheadline)
-                        #else
-                        .font(.caption)
-                        #endif
-                        .lineLimit(1).foregroundStyle(secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 4)
+                if thread?.pinned == true {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2).foregroundStyle(secondary)
+                        .accessibilityLabel("Pinned")
+                }
+                if let date = thread?.lastMessage?.date {
+                    Text(date, format: ProgressiveTime())
+                        .font(.caption2).foregroundStyle(secondary).lineLimit(1).layoutPriority(2)
                 }
             }
-            if let marker {
-                ActivityDot(marker: marker).accessibilityHidden(true)
+            if !preview.isEmpty || marker != nil {
+                HStack(spacing: 6) {
+                    if preview.isEmpty {
+                        Spacer(minLength: 0)
+                    } else {
+                        Text(preview)
+                            #if os(iOS)
+                            .font(.subheadline)
+                            #else
+                            .font(.caption)
+                            #endif
+                            .lineLimit(1).foregroundStyle(secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let marker {
+                        ActivityDot(marker: marker).accessibilityHidden(true)
+                    }
+                }
             }
         }
     }

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/MichaelKinsy/PiG/agent"
+	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/durable/storage"
 )
 
@@ -37,6 +40,25 @@ func recordingProvider(t *testing.T) (*httptest.Server, func() []string) {
 
 func turn(text string) Message {
 	return Message{ID: "m-" + text, ThreadID: "assistant", Role: "user", Parts: []Part{{Kind: "text", Text: &text}}}
+}
+
+func TestImagePath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "shot"), []byte("image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	session := &durableSession{attachments: dir}
+	content, err := session.content(Message{Parts: []Part{{Attachment: &Attachment{ID: "shot", Kind: AttachmentKindImage, Name: "Shot.png", MimeType: "image/png"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := content.(ai.UserContentBlocks)
+	if _, ok := blocks[1].(ai.ImageContent); !ok {
+		t.Fatalf("blocks %+v", blocks)
+	}
+	if text, ok := blocks[2].(ai.TextContent); !ok || !strings.Contains(text.Text, "Local file: "+filepath.Join(dir, "shot")) {
+		t.Fatalf("a model without vision gets no path: %+v", blocks[2])
+	}
 }
 
 func openDurable(t *testing.T, provider *httptest.Server) *DurableRuntime {
@@ -162,6 +184,9 @@ func TestEphemeralDurableSessionStartsFresh(t *testing.T) {
 	}
 	if fresh.Path() == path {
 		t.Fatal("ephemeral turn resumed an existing conversation")
+	}
+	if transcript := fresh.(*durableSession).Transcript(); transcript == path || transcript == "" {
+		t.Fatalf("ephemeral transcript %q, want its own conversation", transcript)
 	}
 	if _, err := fresh.Send(t.Context(), turn("anything"), nil); err != nil {
 		t.Fatal(err)

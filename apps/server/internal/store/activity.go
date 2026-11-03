@@ -19,6 +19,7 @@ var activityKinds = map[string][2]string{
 	"memory.saved": {"Saved", "brain"}, "memory.deleted": {"Deleted", "brain"},
 	"skill.saved": {"Saved", "sparkles"}, "skill.removed": {"Removed", "sparkles"},
 	"subagent.started": {"Started", "arrow.triangle.branch"}, "subagent.finished": {"Finished", "arrow.triangle.branch"},
+	"task.created":    {"Started", "checklist"},
 	"connector.added": {"Connected", "powerplug"}, "connector.removed": {"Disconnected", "powerplug"},
 	"instructions.updated": {"Updated", "doc.text"},
 	"device.added":         {"Connected", "desktopcomputer"}, "device.removed": {"Disconnected", "desktopcomputer"},

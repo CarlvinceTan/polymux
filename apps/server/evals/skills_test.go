@@ -12,7 +12,7 @@ import (
 
 // A skill is listed by location, so the agent must be able to read it there.
 func TestSKILL1ListedSkillIsReadable(t *testing.T) {
-	location := regexp.MustCompile(`<skill name=\\?"html-cards\\?" location=\\?"([^"\\]+)\\?"`)
+	location := regexp.MustCompile(`<skill name=\\?"polymux\\?" location=\\?"([^"\\]+)\\?"`)
 	h := Start(t, Options{ID: "SKILL1", Agents: []agentruntime.Definition{{
 		Agent: contract.Agent{ID: agentID, Name: "Assistant", Model: evalModel}, Tools: []string{"read"},
 	}}, Steps: []Step{
@@ -24,8 +24,8 @@ func TestSKILL1ListedSkillIsReadable(t *testing.T) {
 			return ToolReply("skill1-read", "read", map[string]any{"path": match[1]})
 		}},
 		Fixed(func(req *ChatRequest) error {
-			if !hasToolResult(req, "skill1-read", "polymuxSend") {
-				return fmt.Errorf("the html-cards skill could not be read at its listed location")
+			if !hasToolResult(req, "skill1-read", "Route messages by stable agent IDs") {
+				return fmt.Errorf("the polymux skill could not be read at its listed location")
 			}
 			return nil
 		}, TextReply("done")),
@@ -39,7 +39,7 @@ func TestSKILL1ListedSkillIsReadable(t *testing.T) {
 	if err := h.Emulator.Done(); err != nil {
 		h.die(err.Error())
 	}
-	if strings.Contains(requestText(h.Emulator.requests[0]), "## Kit") {
+	if strings.Contains(requestText(h.Emulator.requests[0]), "## Delegation") {
 		h.die("skill text was inlined for an agent that can read it")
 	}
 	pass(t, "SKILL1", "listed skills load from their location")

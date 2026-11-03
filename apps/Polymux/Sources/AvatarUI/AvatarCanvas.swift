@@ -20,8 +20,6 @@ struct AvatarInput {
     var mood: MoodID?
     var interactive: Bool
     var personality: String
-    var showsProps: Bool
-    var prop: WorkProp?
     var reduceMotion: Bool
     var running: Bool
     /// Awake enough to keep drawing while it settles after `running` ends.
@@ -168,6 +166,10 @@ final class AvatarSurfaceView: AvatarSurfaceBase {
 
     fileprivate func step(_ link: CADisplayLink) {
         let date = Date()
+        #if os(macOS)
+        // Leaving the window sends no event here, so a gazing avatar checks that the pointer is still around.
+        if pointer == nil, visible.contains(where: { $0.canvas.input?.gazing == true }) { point(nil, date: date) }
+        #endif
         var changed = false
         for tile in visible where tile.canvas.moving {
             let id = ObjectIdentifier(tile.canvas)
@@ -204,23 +206,23 @@ final class AvatarSurfaceView: AvatarSurfaceBase {
         }
         for (id, layers) in layered where kept[id] == nil { layers.root.removeFromSuperlayer() }
         layered = kept
-        cut(tiles.map(\.element))
+        cut(tiles.map(\.element), scale: scale)
         if !(host.sublayers ?? []).elementsEqual(order, by: ===) { host.sublayers = order }
         CATransaction.commit()
     }
 
     /// In a stack, each avatar cuts a gap out of every one drawn before it.
-    private func cut(_ drawn: [AvatarSlot]) {
+    private func cut(_ drawn: [AvatarSlot], scale: CGFloat) {
         for (index, tile) in drawn.enumerated() {
             guard let layers = layered[ObjectIdentifier(tile.canvas)] else { continue }
             let box = rect(tile)
-            let covers = drawn[(index + 1)...].compactMap { front -> CGPath? in
-                guard tile.group != nil, front.group == tile.group,
-                      let path = layered[ObjectIdentifier(front.canvas)]?.cutout(front.gap) else { return nil }
-                var shift = CGAffineTransform(translationX: rect(front).minX - box.minX, y: rect(front).minY - box.minY)
-                return path.copy(using: &shift)
+            let covers = drawn[(index + 1)...].compactMap { front -> AvatarCover? in
+                guard tile.group != nil, front.group == tile.group, front.gap > 0,
+                      let pieces = layered[ObjectIdentifier(front.canvas)]?.silhouette, !pieces.isEmpty else { return nil }
+                return AvatarCover(pieces: pieces, offset: CGPoint(x: rect(front).minX - box.minX, y: rect(front).minY - box.minY),
+                                   gap: front.gap)
             }
-            layers.cut(covers)
+            layers.cut(covers, scale: scale)
         }
     }
 

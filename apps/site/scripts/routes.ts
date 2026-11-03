@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {JSDOM} from 'jsdom';
-import {site, docsPath, releasePath, githubUrl} from '../lib/site.ts';
+import {site, docsPath, pluginPath, releasePath, githubUrl} from '../lib/site.ts';
 import {date, text, unique} from '../lib/content/documents.ts';
 import {renderSafeMarkdown} from '../lib/content/markdown.js';
 import type {BlogPost, Guide, GuideSection, PostSummary, Release, ReleaseSummary, Route, PageKind} from '../lib/content/types.ts';
@@ -9,13 +9,13 @@ import {loadContent, siteRoot} from './content.ts';
 
 export const entries: Record<PageKind, string> = {
   home: '/src/pages/home/main.ts', blog: '/src/pages/blog/main.ts', post: '/src/pages/blog/post.ts',
-  docs: '/src/pages/docs/main.ts', product: '/src/pages/product/main.ts', releases: '/src/pages/releases/main.ts',
-  legal: '/src/pages/legal/main.ts',
+  docs: '/src/pages/docs/main.ts', plugins: '/src/pages/plugins/main.ts',
+  releases: '/src/pages/releases/main.ts', legal: '/src/pages/legal/main.ts',
 };
 export const components: Record<PageKind, string> = {
   home: '/src/pages/home/App.svelte', blog: '/src/pages/blog/BlogIndex.svelte', post: '/src/pages/blog/BlogPost.svelte',
-  docs: '/src/pages/docs/DocsPage.svelte', product: '/src/pages/product/ProductPage.svelte', releases: '/src/pages/releases/Releases.svelte',
-  legal: '/src/pages/legal/LegalPage.svelte',
+  docs: '/src/pages/docs/DocsPage.svelte', releases: '/src/pages/releases/Releases.svelte',
+  plugins: '/src/pages/plugins/PluginsPage.svelte', legal: '/src/pages/legal/LegalPage.svelte',
 };
 
 export function postSummary(post: BlogPost): PostSummary {
@@ -54,7 +54,6 @@ export function createRoutes(content: ReturnType<typeof loadContent>, root = sit
   const routes: Route[] = [
     route('/', 'home', staticPage('home').title, metadata.home.description, {}, metadata.home.updated),
     route('/blog/', 'blog', staticPage('blog').title, metadata.blog.description, {posts: content.posts.map(postSummary)}, metadata.blog.updated),
-    route('/product/', 'product', staticPage('product').title, metadata.product.description, {feature: null, features: content.features}, metadata.product.updated),
   ];
   for (const post of content.posts) {
     const {body, ...rendered} = post;
@@ -72,9 +71,11 @@ export function createRoutes(content: ReturnType<typeof loadContent>, root = sit
       },
     }, page.updated));
   }
-  for (const feature of content.features) {
-    routes.push(route(`/product/${feature.slug}/`, 'product', `${feature.name} — Polymux`, feature.description,
-      {feature, features: content.features}, feature.updated));
+  routes.push(route('/plugins/', 'plugins', staticPage('plugins').title, metadata.plugins.description,
+    {plugin: null, plugins: content.plugins}, metadata.plugins.updated));
+  for (const plugin of content.plugins) {
+    routes.push(route(pluginPath(plugin.name), 'plugins', `${plugin.title} — Polymux Plugins`, plugin.description,
+      {plugin, plugins: content.plugins}));
   }
   for (const [index, release] of content.releases.entries()) {
     const {body, ...rendered} = release;

@@ -89,6 +89,7 @@ private struct VaultBrowser: View {
                     .padding(PanelStyle.cardInset)
             }
             .scrollIndicators(.hidden)
+            .edgeFade()
         }
     }
 

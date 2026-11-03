@@ -44,6 +44,24 @@ struct ProviderPage: View {
                     .disabled(busy)
                     .panelRow()
                 }
+                if !keys.isEmpty || options.contains(where: { $0.auth == ProviderOptionAuth.apiKey }) {
+                    Section {
+                        if keys.isEmpty { Text("No API keys yet.").frame(maxWidth: .infinity) }
+                        ForEach(keys) { connection in row(connection) }
+                    } header: {
+                        heading("API keys", auth: ProviderOptionAuth.apiKey)
+                    }
+                    .panelRow()
+                }
+                if !accounts.isEmpty || options.contains(where: { $0.auth == ProviderOptionAuth.oauth }) {
+                    Section {
+                        if accounts.isEmpty { Text("No accounts yet.").frame(maxWidth: .infinity) }
+                        ForEach(accounts) { connection in row(connection) }
+                    } header: {
+                        heading("Accounts", auth: ProviderOptionAuth.oauth)
+                    }
+                    .panelRow()
+                }
                 Section {
                     if models.isEmpty {
                         Text("No models yet.").frame(maxWidth: .infinity)
@@ -76,24 +94,6 @@ struct ProviderPage: View {
                 }
                 .disabled(busy)
                 .panelRow()
-                if !keys.isEmpty || options.contains(where: { $0.auth == ProviderOptionAuth.apiKey }) {
-                    Section {
-                        if keys.isEmpty { Text("No API keys yet.").frame(maxWidth: .infinity) }
-                        ForEach(keys) { connection in row(connection) }
-                    } header: {
-                        heading("API keys", auth: ProviderOptionAuth.apiKey)
-                    }
-                    .panelRow()
-                }
-                if !accounts.isEmpty || options.contains(where: { $0.auth == ProviderOptionAuth.oauth }) {
-                    Section {
-                        if accounts.isEmpty { Text("No accounts yet.").frame(maxWidth: .infinity) }
-                        ForEach(accounts) { connection in row(connection) }
-                    } header: {
-                        heading("Accounts", auth: ProviderOptionAuth.oauth)
-                    }
-                    .panelRow()
-                }
             }
             .formStyle(.grouped)
         }

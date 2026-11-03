@@ -3,6 +3,7 @@ package agentruntime
 
 import (
 	"context"
+	"strings"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/skills"
@@ -40,7 +41,13 @@ type Definition struct {
 	TurnContext func() (context.Context, bool) `json:"-"`
 }
 
-func (d Definition) SystemPrompt() string { return runtimeDefinition(d).SystemPrompt() }
+// SystemPrompt is the bot's instructions, or the default ones when it has none of its own.
+func (d Definition) SystemPrompt() string {
+	if strings.TrimSpace(d.Prompt) != "" {
+		return d.Prompt
+	}
+	return DefaultPrompt
+}
 
 type (
 	Client       = core.Client
@@ -59,6 +66,7 @@ const (
 )
 
 var (
+	AgentDir           = core.AgentDir
 	ErrProviderMissing = core.ErrProviderMissing
 	NewDurableStorage  = core.NewDurableStorage
 	NewWorktrees       = core.NewWorktrees
@@ -127,8 +135,18 @@ func runtimeDefinition(d Definition) core.Definition {
 		BeforeTool:         d.BeforeTool,
 		AfterInner:         d.AfterInner,
 		TurnContext:        d.TurnContext,
-		Agent:              core.Agent{ID: d.Agent.ID, Name: d.Agent.Name, Role: d.Agent.Role, Model: d.Agent.Model, Provider: d.Agent.Provider, Reasoning: d.Agent.Reasoning},
+		Agent:              core.Agent{ID: d.Agent.ID, Name: d.Agent.Name, Role: d.Agent.Role, Model: d.Agent.Model, Provider: d.Agent.Provider, Reasoning: d.Agent.Reasoning, Fallback: runtimeFallback(d.Agent.Fallback)},
 	}
+}
+func runtimeFallback(f *contract.AgentFallback) core.Fallback {
+	if f == nil {
+		return core.Fallback{}
+	}
+	models := make([]core.FallbackModel, len(f.Models))
+	for i, m := range f.Models {
+		models[i] = core.FallbackModel{Provider: m.Provider, Model: m.Model, Reasoning: m.Reasoning}
+	}
+	return core.Fallback{Mode: f.Mode, Models: models}
 }
 func productDefinition(d core.Definition) Definition {
 	return Definition{

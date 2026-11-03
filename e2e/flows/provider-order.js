@@ -1,3 +1,4 @@
+// @cua
 // Accounts stay within one provider row; reordering moves and persists whole provider groups.
 let app = await cua.getApp(APP);
 async function confirm(label) {
@@ -51,7 +52,7 @@ if ((await app.query({ role: "button", name: "Edit OpenAI" })).length !== 1) thr
 await add("Anthropic");
 const order = async () => (await app.query({ role: "button" })).filter(row => /^Edit (OpenAI|Anthropic)$/.test(row.label)).map(row => row.label);
 if (JSON.stringify(await order()) !== JSON.stringify(["Edit OpenAI", "Edit Anthropic"])) throw new Error("new provider didn't append");
-await app.click({ role: "button", name: "Default model" });
+await app.click({ role: "button", name: "Model" });
 await app.typeText("gpt-5", { role: "textfield", name: "Search models" });
 const models = (await app.query({ role: "button" })).filter(row => row.label?.startsWith("Gpt 5") && row.label.endsWith(" OpenAI"));
 if (!models.length || new Set(models.map(row => row.label)).size !== models.length) throw new Error("account model lists weren't deduplicated");
@@ -63,17 +64,18 @@ async function noArrows() {
     }
 }
 await noArrows();
-await app.click({ role: "button", name: "Refresh providers" });
 await app.click({ role: "button", name: "Reorder providers" });
 for (let attempt = 0; attempt < 100; attempt++) {
     const [button] = await app.query({ role: "button", name: "Move Anthropic up" });
     if (button?.enabled && button.element_token) break;
-    if (attempt === 99) throw new Error("provider refresh did not finish");
+    if (attempt === 99) throw new Error("reorder mode did not start");
     await cua.sleep(100);
 }
 await app.click({ role: "button", name: "Move Anthropic up" });
 await app.waitFor({ role: "button", name: "Move OpenAI down", timeout_ms: 5000 });
 if (JSON.stringify(await order()) !== JSON.stringify(["Edit Anthropic", "Edit OpenAI"])) throw new Error("move up didn't change priority");
+await app.click({ role: "button", name: "Save provider order" });
+await app.waitFor({ role: "button", name: "Reorder providers", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Close Settings" });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
@@ -83,6 +85,13 @@ await noArrows();
 await app.click({ role: "button", name: "Reorder providers" });
 await app.click({ role: "button", name: "Move Anthropic down" });
 if (JSON.stringify(await order()) !== JSON.stringify(["Edit OpenAI", "Edit Anthropic"])) throw new Error("move down didn't change priority");
+await app.click({ role: "button", name: "Cancel reordering" });
+await app.waitFor({ role: "button", name: "Reorder providers", timeout_ms: 5000 });
+if (JSON.stringify(await order()) !== JSON.stringify(["Edit Anthropic", "Edit OpenAI"])) throw new Error("cancel didn't restore priority");
+await app.click({ role: "button", name: "Reorder providers" });
+await app.click({ role: "button", name: "Move Anthropic down" });
+await app.click({ role: "button", name: "Save provider order" });
+await app.waitFor({ role: "button", name: "Reorder providers", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Edit OpenAI" });
 await app.waitFor({ role: "button", name: "Edit API key 1", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Edit Work" });

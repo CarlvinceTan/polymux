@@ -10,6 +10,11 @@ public enum ClientPaths {
         token(address, root: root)
     }
 
+    /// Deletes this device's credential and cache for a server.
+    public static func forget(_ address: String) throws {
+        try FileManager.default.removeItem(at: directory(address, root: root))
+    }
+
     /// The tunnel ticket a pairing link carried for this server, if any.
     public static func ticket(_ address: String) -> URL {
         token(address, root: root).deletingLastPathComponent().appending(path: "ticket")
@@ -34,7 +39,8 @@ public enum ClientPaths {
     }
 
     static func root(home: URL, support: URL, environment: [String: String], desktop: Bool) -> URL {
-        if let path = environment["POLYMUX_DATA_DIR"], !path.isEmpty {
+        // Beside a server's data, not in it, as an install has them: the data can move away.
+        if let path = environment["POLYMUX_CLIENT_DIR"] ?? environment["POLYMUX_DATA_DIR"], !path.isEmpty {
             return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
         }
         return desktop ? home.appending(path: ".polymux", directoryHint: .isDirectory)

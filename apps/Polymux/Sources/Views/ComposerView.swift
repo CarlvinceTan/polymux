@@ -18,7 +18,31 @@ nonisolated struct DraftFile: Identifiable, Sendable {
     }
 }
 
+/// The composer row's sizes, which the sidebar's switcher lines up with.
+enum ComposerMetrics {
+    static var control: CGFloat {
+        #if os(macOS)
+        32
+        #else
+        44
+        #endif
+    }
+
+    static var edge: CGFloat {
+        #if os(macOS)
+        14
+        #else
+        24
+        #endif
+    }
+}
+
 struct ComposerView: View {
+    /// What the + button has open: one dropdown that changes in place, so it stays above the button.
+    private enum Adding {
+        case menu, emoji
+    }
+
     let client: APIClient
     let draft: DraftStore
     let isVoiceActive: Bool
@@ -33,7 +57,8 @@ struct ComposerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var motion: Animation? { reduceMotion ? nil : .easeOut(duration: 0.2) }
+    @State private var mentionIndex = 0
+    private var motion: Animation? { Motion.quick.unless(reduceMotion) }
     @State private var dictation = DictationInput()
     @State private var dictationDraft = DictationDraft()
     @State private var ignoresDictation = false
@@ -43,9 +68,12 @@ struct ComposerView: View {
     @State private var text = ""
     @State private var selection: TextSelection?
     @State private var insertion = NSRange(location: 0, length: 0)
+    @State private var caret: Int?
+    /// Where the caret was when + took focus, since the field forgets it on macOS.
+    @State private var held: TextSelection?
     @Binding var files: [DraftFile]
     @State private var photos: [PhotosPickerItem] = []
-    @State private var attachments = false
+    @State private var adding: Adding?
     @State private var importing = false
     @State private var pickingPhotos = false
     @State private var camera = false
@@ -84,10 +112,15 @@ struct ComposerView: View {
         .animation(motion, value: recording)
         .animation(motion, value: error)
         .task { await dictation.refresh() }
+        #if os(macOS)
+        // A phone keeps the keyboard down until asked: raising it hides half of the chat just opened.
         .task {
             await Task.yield()
             if !isVoiceActive { focused = true }
         }
+        #endif
+        // A draft read ahead of opening shows with the chat, not a moment after it.
+        .onAppear { applyDraft() }
         .task(id: scenePhase == .background) {
             await draft.restore()
             applyDraft()
@@ -100,7 +133,7 @@ struct ComposerView: View {
         .onChange(of: isVoiceActive) { _, active in
             focused = !active
             if active {
-                attachments = false
+                adding = nil
                 Task { await stopDictation() }
             }
         }
@@ -111,6 +144,12 @@ struct ComposerView: View {
             Task { await stopDictation() }
         }
         .onChange(of: text) { _, value in
+            // The field ignores a caret set along with new text, so it follows once the text has landed.
+            if let caret {
+                self.caret = nil
+                selection = TextSelection(insertionPoint: String.Index(utf16Offset: min(caret, value.utf16.count), in: value))
+                held = selection
+            }
             draftTask?.cancel()
             drafting(!value.isEmpty && focused)
             draftTask = Task {
@@ -148,6 +187,18 @@ struct ComposerView: View {
         .onChange(of: reply?.messageID) { _, value in
             if value != nil { focused = true }
         }
+        #if os(macOS)
+        .onChange(of: adding) { old, new in
+            guard old == .emoji, new == nil, let held else { return }
+            Task { @MainActor in
+                // After the dropdown has handed focus back, which would otherwise take it from the field.
+                await Task.yield()
+                focused = true
+                await Task.yield()
+                selection = held
+            }
+        }
+        #endif
         .onChange(of: drops.wrappedValue, initial: true) { _, items in
             guard !items.isEmpty else { return }
             drops.wrappedValue = []
@@ -216,7 +267,14 @@ struct ComposerView: View {
     private var controls: some View {
         HStack(alignment: .bottom, spacing: 12) {
             if !recording {
-                Button { attachments.toggle() } label: {
+                Button {
+                    #if os(macOS)
+                    // Regaining focus selects the whole draft, so the next key would replace it.
+                    held = focused ? selection : nil
+                    focused = false
+                    #endif
+                    adding = adding == nil ? .menu : nil
+                } label: {
                     Image(systemName: "plus").font(.system(size: 17, weight: .regular))
                         .frame(width: controlSize, height: controlSize)
                         .contentShape(Circle())
@@ -224,17 +282,20 @@ struct ComposerView: View {
                 .buttonStyle(.plain).frame(width: controlSize, height: controlSize)
                 .glassEffect(.regular.interactive(), in: Circle())
                 .accessibilityLabel("Add attachment")
-                .popover(isPresented: $attachments, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        attachmentButton("Files", icon: "doc") { importing = true }
-                        attachmentButton("Photos", icon: "photo") { pickingPhotos = true }
-                        attachmentButton("Camera", icon: "camera") { camera = true }
-                            #if os(iOS)
-                            .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
-                            #endif
+                .dropdown(isPresented: Binding(get: { adding != nil }, set: { if !$0 { adding = nil } }), alignment: .leading) {
+                    if adding == .emoji {
+                        EmojiPicker(action: "Insert", select: insert)
+                    } else {
+                        AttachmentMenu {
+                            attachmentButton("Files", icon: "doc") { importing = true }
+                            attachmentButton("Photos", icon: "photo") { pickingPhotos = true }
+                            attachmentButton("Camera", icon: "camera") { camera = true }
+                                #if os(iOS)
+                                .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                                #endif
+                            AttachmentRow(title: "Emoji", icon: "face.smiling") { adding = .emoji }
+                        }
                     }
-                    .padding(6).frame(minWidth: 160)
-                    .presentationCompactAdaptation(.popover)
                 }
             }
             VStack(alignment: .leading, spacing: 10) {
@@ -248,6 +309,7 @@ struct ComposerView: View {
                             Button("Cancel reply", systemImage: "xmark") { clearReply() }
                                 .labelStyle(.iconOnly).buttonStyle(.plain)
                                 .foregroundStyle(.muted)
+                                .tapArea(14)
                         }
                         .transition(.opacity)
                     }
@@ -269,9 +331,12 @@ struct ComposerView: View {
                         .scrollIndicators(.hidden).focused($focused)
                         .opacity(polishing ? 0.5 : 1)
                         .onSubmit {
-                            if let first = mentionChoices.first { mention(first) }
+                            if let mentionTarget { mention(mentionTarget) }
                             else { submit() }
                         }
+                        .onKeyPress(.downArrow) { moveMention(1) }
+                        .onKeyPress(.upArrow) { moveMention(-1) }
+                        .onChange(of: mentionQuery?.term) { mentionIndex = 0 }
                         .onKeyPress(keys: [.return], phases: .down) { key in
                             guard key.modifiers.contains(.shift) else { return .ignored }
                             let range: Range<String.Index>
@@ -280,7 +345,8 @@ struct ComposerView: View {
                             var updated = text
                             updated.replaceSubrange(range, with: "\n")
                             let offset = text.distance(from: text.startIndex, to: range.lowerBound) + 1
-                            draftText.wrappedValue = updated
+                            dictationDraft.edit(from: text, to: updated)
+                            editText(updated, range: NSRange(range, in: text))
                             selection = TextSelection(insertionPoint: text.index(text.startIndex, offsetBy: offset))
                             return .handled
                         }
@@ -370,6 +436,16 @@ struct ComposerView: View {
 
     private var mentionHeight: CGFloat { min(160, CGFloat(mentionChoices.count) * 40 + 6) }
 
+    private var mentionTarget: Agent? {
+        mentionChoices.indices.contains(mentionIndex) ? mentionChoices[mentionIndex] : mentionChoices.first
+    }
+
+    private func moveMention(_ offset: Int) -> KeyPress.Result {
+        guard !mentionChoices.isEmpty else { return .ignored }
+        mentionIndex = max(0, min(mentionChoices.count - 1, mentionIndex + offset))
+        return .handled
+    }
+
     private func mentionList(width: CGFloat) -> some View {
         MentionSize(width: width, height: mentionHeight) {
             VStack(alignment: .leading, spacing: 2) {
@@ -383,7 +459,10 @@ struct ComposerView: View {
                     ForEach(mentionChoices) { member in
                         Button { mention(member) } label: {
                             mentionLabel(member, fill: true)
-                                .background(member.id == mentionChoices.first?.id ? Color.primary.opacity(0.1) : .clear,
+                                .pointerHover { inside in
+                                    if inside, let index = mentionChoices.firstIndex(of: member) { mentionIndex = index }
+                                }
+                                .background(member.id == mentionTarget?.id ? Color.primary.opacity(PanelStyle.selectedTint) : .clear,
                                             in: .rect(cornerRadius: 10))
                                 .contentShape(Rectangle())
                         }
@@ -391,8 +470,8 @@ struct ComposerView: View {
                         .accessibilityLabel(members.filter({ $0.name == member.name }).count > 1
                                                 ? "Mention \(member.name), \(member.role), \(member.id.prefix(6))"
                                                 : "Mention \(member.name)")
-                        .accessibilityValue(member.id == mentionChoices.first?.id ? "Top match" : "")
-                        .accessibilityHint(member.id == mentionChoices.first?.id ? "Press Return to select" : "")
+                        .accessibilityValue(member.id == mentionTarget?.id ? "Top match" : "")
+                        .accessibilityHint(member.id == mentionTarget?.id ? "Press Return to select" : "")
                     }
                 }
                 .padding(4)
@@ -404,7 +483,7 @@ struct ComposerView: View {
     }
 
     private func mentionLabel(_ member: Agent, fill: Bool) -> some View {
-        let first = member.id == mentionChoices.first?.id
+        let first = member.id == mentionTarget?.id
         return HStack(spacing: 0) {
             Text("@\(member.name)").lineLimit(1).layoutPriority(1)
             if member.id == "everyone" || first {
@@ -453,41 +532,44 @@ struct ComposerView: View {
     private func editText(_ updated: String, range: NSRange? = nil) {
         let selected: NSRange?
         if let range { selected = range }
+        // The field's caret belongs to its own text, which `text` can't index once it's been set from elsewhere.
         else if case let .selection(bounds) = selection?.indices,
-                bounds.lowerBound >= text.startIndex, bounds.upperBound <= text.endIndex {
-            selected = NSRange(bounds, in: text)
+                bounds.lowerBound >= updated.startIndex, bounds.upperBound <= updated.endIndex {
+            selected = NSRange(bounds, in: updated)
         } else { selected = nil }
         mentions = MentionToken.updated(mentions, from: text, to: updated, selection: selected)
         text = updated
     }
 
     private func attachmentButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button {
-            attachments = false
+        AttachmentRow(title: title, icon: icon) {
+            adding = nil
             action()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon).frame(width: 24, alignment: .center)
-                Text(title)
-            }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10).padding(.vertical, 9)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+    }
+
+    private func insert(_ value: String) {
+        #if os(macOS)
+        let place = held
+        #else
+        let place = selection
+        #endif
+        var at = text.endIndex
+        if case let .selection(range) = place?.indices, range.isEmpty, range.lowerBound <= text.endIndex {
+            at = range.lowerBound
+        }
+        var updated = text
+        updated.insert(contentsOf: value, at: at)
+        caret = at.utf16Offset(in: text) + value.utf16.count
+        dictationDraft.edit(from: text, to: updated)
+        editText(updated, range: NSRange(at..<at, in: text))
     }
 
     private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty }
     private var recording: Bool { dictation.ready && !dictation.stopping }
     private var isExpanded: Bool { !recording && (!files.isEmpty || reply != nil) }
 
-    private var controlSize: CGFloat {
-        #if os(macOS)
-        32
-        #else
-        44
-        #endif
-    }
+    private var controlSize: CGFloat { ComposerMetrics.control }
 
     private func addFile(_ url: URL) async throws {
         let file = try await Task.detached(priority: .userInitiated) {
@@ -517,7 +599,7 @@ struct ComposerView: View {
             insertion = NSRange(bounds, in: text)
         } else { insertion = NSRange(location: text.utf16.count, length: 0) }
         focused = false
-        attachments = false
+        adding = nil
         ignoresDictation = false
         dictationDraft.stop()
         dictated = nil
@@ -579,6 +661,49 @@ struct ComposerView: View {
             let local = await Task.detached(priority: .userInitiated) { pending.map(\.local) }.value
             await send(draft, local, quote, targets)
         }
+    }
+}
+
+struct AttachmentMenu<Rows: View>: View {
+    @ViewBuilder let rows: Rows
+    @Environment(\.dropdownClose) private var close
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { rows }
+            .padding(PanelStyle.cardInset)
+            #if os(macOS)
+            // Holds focus so Esc reaches the menu rather than the composer.
+            .focusable().focused($focused).focusEffectDisabled()
+            .task { focused = true }
+            .onExitCommand { close() }
+            #endif
+    }
+}
+
+struct AttachmentRow: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: PanelStyle.rowInset) {
+                Image(systemName: icon).frame(width: 24).accessibilityHidden(true)
+                Text(title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .foregroundStyle(enabled ? Color.primary : Color.muted)
+            .padding(.horizontal, PanelStyle.rowInset)
+            .frame(minHeight: DropdownStyle.rowHeight)
+            .contentShape(.rect(cornerRadius: PanelStyle.rowRadius))
+            .background(.primary.opacity(hovered && enabled ? PanelStyle.hoverTint : 0),
+                        in: .rect(cornerRadius: PanelStyle.rowRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .pointerHover { hovered = $0 }
     }
 }
 
@@ -742,7 +867,7 @@ struct CameraView: UIViewControllerRepresentable {
 }
 #endif
 
-private struct Waveform: View {
+struct Waveform: View {
     let level: Float
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var samples: [Float] = []

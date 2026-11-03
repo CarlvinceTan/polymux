@@ -19,6 +19,7 @@ Paths below are relative to the repository root.
 | [`apps/site/`](../apps/site/) | Public website and user-facing documentation. |
 | [`packages/`](../packages/) | Reusable Go backend modules (`runtime`, `memory`, `vault`, `search`) and shared Swift app code. See [Backend packages](packages.md) for backend usage and boundaries. |
 | [`contracts/`](../contracts/) | Shared API schema and code generation for the server and clients. |
+| [`plugins/`](../plugins/) | The official plugins and the scripts that package them. See [Plugins](plugins.md). |
 | [`scripts/`](../scripts/) | Build, run, test, installation, and delivery commands. |
 | [`e2e/`](../e2e/) | UI test flows and fixtures. |
 | [`tools/`](../tools/) | Developer tools, including the experimental Control observer. |
@@ -37,6 +38,7 @@ Generated output is separate from source: `.build/` holds caches and local build
 | [Project skills](skills.md) | Available coding-agent skills, what they do, and when to use them. |
 | [Development delivery](development.md) | Development-channel builds, deployment, TestFlight, and delivery status—not general local setup. |
 | [Vault](vault.md) | Credential handling, private cards, secret references, and security boundaries. |
+| [Plugins](plugins.md) | Global and Scoped plugins, packages, the index, and Hub. |
 | [Control candidate](control.md) | The observation-only UI tooling experiment and its current limits. E2E input still uses Cua. |
 | [References](references.md) | Other products that inform Polymux's behaviour. |
 

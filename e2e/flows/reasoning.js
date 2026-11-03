@@ -1,3 +1,4 @@
+// @cua
 // Full-row reasoning pickers persist globally and each bot can override its initial preference.
 let app = await cua.getApp(APP);
 const host = await app.getState({ query: "Settings", include_screenshot: false });
@@ -10,7 +11,7 @@ async function capabilities() {
 async function choose(level) {
     const trigger = { role: "button", name: "Reasoning" };
     const [control] = await app.query(trigger);
-    const [model] = await app.query({ role: "button", name: "Default model" });
+    const [model] = await app.query({ role: "button", name: "Model" });
     const [profileModel] = model ? [] : await app.query({ role: "button", name: "Model" });
     const row = model ?? profileModel;
     if (!control?.frame || !row?.frame || control.frame.x > row.frame.x + 2 ||

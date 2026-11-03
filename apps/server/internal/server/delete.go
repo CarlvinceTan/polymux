@@ -8,9 +8,17 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+)
+
+const (
+	sweepWait  = 5 * time.Second
+	sweepRetry = 30 * time.Second
 )
 
 type deletion struct {
@@ -116,12 +124,11 @@ func (s *Server) eraseReady(ctx context.Context, id string) error {
 			break
 		}
 	}
-	removed := false
 	if err == nil {
-		removed, err = s.removeAgent(ctx, id, a, groups...)
+		err = s.removeAgent(ctx, id, a, groups...)
 	}
 	s.actorsMu.Lock()
-	if !s.closing && removed {
+	if !s.closing && err == nil {
 		for _, group := range groups {
 			if thread, loadErr := s.Store.Thread(ctx, group.id); loadErr == nil {
 				s.startGroup(thread.ID)
@@ -132,10 +139,10 @@ func (s *Server) eraseReady(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ...*groupActor) (bool, error) {
+func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ...*groupActor) error {
 	s.stopShells(id)
 	if err := s.stopVoices(ctx, id); err != nil {
-		return false, err
+		return err
 	}
 	if a != nil {
 		a.stop()
@@ -169,7 +176,7 @@ func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ..
 	}
 	peers, err := s.Store.PendingPeers(ctx, id)
 	if err != nil {
-		return false, err
+		return err
 	}
 	for _, runID := range peers {
 		if active, ok := s.turns.Load(runID); ok {
@@ -178,44 +185,14 @@ func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ..
 			select {
 			case <-turn.done:
 			case <-ctx.Done():
-				return false, ctx.Err()
+				return ctx.Err()
 			}
 		}
 	}
-	// The durable transcripts outlive the store's session rows, so note them first.
-	transcripts := []string{}
-	if path, err := s.Store.Session(ctx, id); err == nil {
-		transcripts = append(transcripts, path)
+	if err := s.Store.DeleteAgent(ctx, id); err != nil {
+		return err
 	}
-	for _, group := range groups {
-		if path, err := s.Store.GroupSession(ctx, group.id, id); err == nil {
-			transcripts = append(transcripts, path)
-		}
-	}
-	files, existed, err := s.Store.DeleteAgent(ctx, id)
-	if err != nil {
-		return false, err
-	}
-	cleanupErr := errors.Join(s.removeDraft(id), s.memory.Delete(ctx, id), s.secrets.Delete(id, ""), s.removeMedia(id), s.forget(ctx, transcripts...))
-	for _, group := range groups {
-		if exists, err := s.Store.HasThread(ctx, group.id); err == nil && !exists {
-			cleanupErr = errors.Join(cleanupErr, s.removeDraft(group.id))
-		}
-	}
-	s.removeAttachments(files)
-	if existed && id != "" && !strings.ContainsAny(id, "/\\.") {
-		dirs := []string{filepath.Join(s.config.DataDir, id)}
-		for _, group := range groups {
-			dirs = append(dirs, filepath.Join(s.config.DataDir, "groups", group.id, id))
-		}
-		for _, dir := range dirs {
-			if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink == 0 {
-				if err := os.RemoveAll(filepath.Join(dir, "sessions")); err != nil {
-					s.config.Log.Warn("remove deleted session", "error", err)
-				}
-			}
-		}
-	}
+	s.settle(ctx)
 	var workspace string
 	if a != nil {
 		a.mu.Lock()
@@ -247,30 +224,51 @@ func (s *Server) removeAgent(ctx context.Context, id string, a *actor, groups ..
 			}
 		}
 	}
-	return true, cleanupErr
+	return nil
 }
 
-// removeAttachments deletes attachment files and thumbnails inside the attachments folder.
-func (s *Server) removeAttachments(files []string) {
+// removeAttachment deletes an attachment file and thumbnail inside the attachments folder.
+func (s *Server) removeAttachment(path string) error {
 	base, err := filepath.Abs(filepath.Join(s.config.DataDir, "attachments"))
 	if err != nil {
-		return
+		return err
 	}
-	for _, path := range files {
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			continue
-		}
-		relative, err := filepath.Rel(base, absolute)
-		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			continue
-		}
-		for _, file := range []string{path, path + ".jpg"} {
-			if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
-				s.config.Log.Warn("remove deleted attachment", "error", err)
-			}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(base, absolute)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	var problems []error
+	for _, file := range []string{path, path + ".jpg"} {
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+			problems = append(problems, err)
 		}
 	}
+	return errors.Join(problems...)
+}
+
+// removeFolder deletes a folder's sessions. Files the agent wrote stay; only a folder left empty goes.
+func removeFolder(dir string) error {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "sessions")); err != nil {
+		return err
+	}
+	if err := os.Remove(dir); err != nil && !errors.Is(err, syscall.ENOTEMPTY) {
+		return err
+	}
+	return nil
 }
 
 // eraseGroup stops a group chat and deletes it with its sessions and checkouts. Members stay.
@@ -309,28 +307,10 @@ func (s *Server) eraseGroup(ctx context.Context, id string) error {
 			s.config.Log.Warn("close deleted group", "error", err)
 		}
 	}
-	transcripts := []string{}
-	for _, agent := range thread.AgentIDs {
-		if path, err := s.Store.GroupSession(ctx, id, agent); err == nil {
-			transcripts = append(transcripts, path)
-		}
-	}
-	files, err := s.Store.DeleteGroup(ctx, id)
-	if err != nil {
+	if err := s.Store.DeleteGroup(ctx, id); err != nil {
 		return err
 	}
-	if err := s.removeDraft(id); err != nil {
-		return err
-	}
-	if err := s.forget(ctx, transcripts...); err != nil {
-		s.config.Log.Warn("forget deleted group transcripts", "error", err)
-	}
-	s.removeAttachments(files)
-	if !strings.ContainsAny(id, "/\\.") {
-		if err := os.RemoveAll(filepath.Join(s.config.DataDir, "groups", id)); err != nil {
-			s.config.Log.Warn("remove deleted group sessions", "error", err)
-		}
-	}
+	s.settle(ctx)
 	for agent, workspace := range workspaces {
 		if err := s.worktrees.Remove(ctx, workspace, agent, id); err != nil {
 			s.config.Log.Warn("remove group worktree", "thread", id, "error", err)
@@ -339,17 +319,144 @@ func (s *Server) eraseGroup(ctx context.Context, id string) error {
 	return nil
 }
 
-// forget deletes closed conversations' durable transcripts when the runtime keeps them.
-func (s *Server) forget(ctx context.Context, paths ...string) error {
+// settle tries the cleanups a deletion just committed and leaves any that fail to the sweeper.
+func (s *Server) settle(ctx context.Context) {
+	if s.sweep(ctx) {
+		s.wakeSweep()
+	}
+}
+
+// discard queues a finished turn's transcript: nothing saved its path, so nothing can reopen it.
+func (s *Server) discard(ctx context.Context, session agentruntime.Session) {
+	path := session.Path()
+	if durable, ok := session.(interface{ Transcript() string }); ok {
+		path = durable.Transcript()
+	}
+	if path == "" {
+		return
+	}
+	if err := s.Store.AddCleanup(ctx, store.Cleanup{Kind: store.CleanupTranscript, Target: path}); err != nil {
+		s.config.Log.Warn("queue finished transcript", "error", err)
+	}
+	s.wakeSweep()
+}
+
+// orphans lists conversations nothing can reopen, such as those of a crashed turn. It must run before any turn starts,
+// while every live conversation has a saved path.
+func (s *Server) orphans(ctx context.Context) []string {
 	runtime, ok := s.config.Factory.(interface {
-		Forget(context.Context, string) error
+		Transcripts(context.Context) ([]string, error)
 	})
 	if !ok {
 		return nil
 	}
-	var err error
-	for _, path := range paths {
-		err = errors.Join(err, runtime.Forget(ctx, path))
+	saved, err := s.Store.SavedSessions(ctx)
+	if err != nil {
+		s.config.Log.Warn("list saved sessions", "error", err)
+		return nil
 	}
-	return err
+	all, err := runtime.Transcripts(ctx)
+	if err != nil {
+		s.config.Log.Warn("list transcripts", "error", err)
+		return nil
+	}
+	// A store that names none of them may be new or restored, so it proves nothing.
+	orphaned := slices.DeleteFunc(slices.Clone(all), func(path string) bool { return slices.Contains(saved, path) })
+	if len(orphaned) == len(all) {
+		return nil
+	}
+	return orphaned
+}
+
+func (s *Server) wakeSweep() {
+	select {
+	case s.sweepWake <- struct{}{}:
+	default:
+	}
+}
+
+// runSweeps forgets orphans once, then finishes cleanups that failed or were cut short by a restart.
+func (s *Server) runSweeps(ctx context.Context, orphans []string) {
+	defer s.workers.Done()
+	for _, path := range orphans {
+		step := store.Cleanup{Kind: store.CleanupTranscript, Target: path}
+		attempt, cancel := context.WithTimeout(ctx, sweepWait)
+		err := s.clean(attempt, step)
+		cancel()
+		if ctx.Err() != nil {
+			return // The next start lists it again.
+		}
+		if err != nil {
+			s.config.Log.Warn("forget orphaned transcript", "path", path, "error", err)
+			if err := s.Store.AddCleanup(ctx, step); err != nil {
+				s.config.Log.Warn("queue orphaned transcript", "error", err)
+			}
+		}
+	}
+	for {
+		var retry <-chan time.Time
+		if s.sweep(ctx) {
+			retry = time.After(sweepRetry)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.sweepWake:
+		case <-retry:
+		}
+	}
+}
+
+// sweep runs every pending cleanup once and reports whether any remain.
+func (s *Server) sweep(ctx context.Context) bool {
+	s.sweepMu.Lock()
+	defer s.sweepMu.Unlock()
+	steps, err := s.Store.Cleanups(ctx)
+	if err != nil {
+		s.config.Log.Warn("list cleanups", "error", err)
+		return true
+	}
+	left := false
+	for _, step := range steps {
+		attempt, cancel := context.WithTimeout(ctx, sweepWait)
+		err := s.clean(attempt, step)
+		if err == nil {
+			err = s.Store.Cleaned(attempt, step)
+		}
+		cancel()
+		if err != nil {
+			s.config.Log.Warn("deletion cleanup", "kind", step.Kind, "target", step.Target, "error", err)
+			left = true
+		}
+	}
+	return left
+}
+
+func (s *Server) clean(ctx context.Context, step store.Cleanup) error {
+	switch step.Kind {
+	case store.CleanupAgent:
+		id := step.Target
+		return errors.Join(s.removeDraft(id), s.memory.Delete(ctx, id), s.secrets.Delete(id, ""), s.removeMedia(id), removeFolder(agentruntime.AgentDir(s.config.DataDir, id)))
+	case store.CleanupAttachment:
+		return s.removeAttachment(step.Target)
+	case store.CleanupDraft:
+		return s.removeDraft(step.Target)
+	case store.CleanupGroup:
+		if strings.ContainsAny(step.Target, "/\\.") {
+			return nil
+		}
+		return errors.Join(s.removeDraft(step.Target), os.RemoveAll(filepath.Join(s.config.DataDir, "groups", step.Target)))
+	case store.CleanupMember:
+		if !filepath.IsLocal(step.Target) {
+			return nil
+		}
+		return removeFolder(filepath.Join(s.config.DataDir, "groups", step.Target))
+	case store.CleanupTranscript:
+		if runtime, ok := s.config.Factory.(interface {
+			Forget(context.Context, string) error
+		}); ok {
+			return runtime.Forget(ctx, step.Target)
+		}
+	}
+	return nil
 }

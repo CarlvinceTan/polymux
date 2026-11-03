@@ -12,7 +12,7 @@ await app.waitFor({ role: "button", name: "Model", value: "Not set", timeout_ms:
 await app.click({ role: "button", name: "Close side panel" });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
-await app.waitFor({ role: "button", name: "Default model", value: "Server default", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Model", value: "Server default", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Add provider" });
 await app.waitFor({ role: "button", name: "Add custom provider" });
 const state = await app.getState({ query: "Add custom provider", tree_format: "elements", max_elements: 800, timeout_ms: 5000, include_screenshot: false });

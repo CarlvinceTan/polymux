@@ -1,20 +1,12 @@
 package hub
 
 import (
-	"bytes"
-	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"mime"
-	"mime/quotedprintable"
 	"net"
 	"net/http"
 	"net/mail"
-	"net/smtp"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,29 +17,62 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
-	_ "github.com/emersion/go-message/charset"
-	gomail "github.com/emersion/go-message/mail"
 
 	"github.com/CarlvinceTan/polymux/plugins/hub/internal/contract"
 )
 
 const (
 	mailPage    = 50
-	previewSize = 512
 	dialTimeout = 20 * time.Second
 )
 
-type mailHosts struct{ imap, smtp string }
+// mailPreset is a provider's servers. Domains fill them in from an address, and a preset also
+// wins for a server typed by hand, since its port is the part nobody can guess.
+type mailPreset struct {
+	contract.HubMailPreset
+	domains []string
+}
 
-var mailPresets = map[string]mailHosts{
-	"gmail.com":      {"imap.gmail.com:993", "smtp.gmail.com:587"},
-	"googlemail.com": {"imap.gmail.com:993", "smtp.gmail.com:587"},
-	"outlook.com":    {"outlook.office365.com:993", "smtp.office365.com:587"},
-	"hotmail.com":    {"outlook.office365.com:993", "smtp.office365.com:587"},
-	"live.com":       {"outlook.office365.com:993", "smtp.office365.com:587"},
-	"icloud.com":     {"imap.mail.me.com:993", "smtp.mail.me.com:587"},
-	"me.com":         {"imap.mail.me.com:993", "smtp.mail.me.com:587"},
-	"fastmail.com":   {"imap.fastmail.com:993", "smtp.fastmail.com:465"},
+var mailPresets = []mailPreset{
+	{contract.HubMailPreset{ID: "gmail", Name: "Gmail / Google Workspace", ImapHost: "imap.gmail.com", ImapPort: 993, SmtpHost: "smtp.gmail.com", SmtpPort: 587,
+		Hint: "Needs a 16-character app password from your Google account."}, []string{"gmail.com", "googlemail.com"}},
+	{contract.HubMailPreset{ID: "outlook", Name: "Outlook / Microsoft 365", ImapHost: "outlook.office365.com", ImapPort: 993, SmtpHost: "smtp.office365.com", SmtpPort: 587,
+		Hint: "Tenants with security defaults on need OAuth sign-in."}, []string{"outlook.com", "hotmail.com", "live.com"}},
+	{contract.HubMailPreset{ID: "icloud", Name: "iCloud Mail", Hidden: true, ImapHost: "imap.mail.me.com", ImapPort: 993, SmtpHost: "smtp.mail.me.com", SmtpPort: 587,
+		Hint: "Needs an app-specific password from appleid.apple.com."}, []string{"icloud.com", "me.com", "mac.com"}},
+	// Lark's 587 listener doesn't complete STARTTLS.
+	{contract.HubMailPreset{ID: "lark", Name: "Lark / Feishu", Hidden: true, ImapHost: "imap.larksuite.com", ImapPort: 993, SmtpHost: "smtp.larksuite.com", SmtpPort: 465,
+		Hint: "Use the mail password from Lark's mail settings, and keep SMTP on 465."}, nil},
+	{contract.HubMailPreset{ID: "fastmail", Name: "Fastmail", Hidden: true, ImapHost: "imap.fastmail.com", ImapPort: 993, SmtpHost: "smtp.fastmail.com", SmtpPort: 465,
+		Hint: "Needs an app password scoped to mail."}, []string{"fastmail.com"}},
+	{contract.HubMailPreset{ID: "custom", Name: "Other (IMAP/SMTP)", ImapPort: 993, SmtpPort: 587,
+		Hint: "Enter the server names your provider documents for IMAP and SMTP."}, nil},
+}
+
+func presetForDomain(domain string) (mailPreset, bool) {
+	index := slices.IndexFunc(mailPresets, func(item mailPreset) bool { return slices.Contains(item.domains, strings.ToLower(domain)) })
+	if index < 0 {
+		return mailPreset{}, false
+	}
+	return mailPresets[index], true
+}
+
+func presetForHost(host string) (mailPreset, bool) {
+	index := slices.IndexFunc(mailPresets, func(item mailPreset) bool {
+		return host != "" && (strings.EqualFold(item.ImapHost, host) || strings.EqualFold(item.SmtpHost, host))
+	})
+	if index < 0 {
+		return mailPreset{}, false
+	}
+	return mailPresets[index], true
+}
+
+func presets() []contract.HubMailPreset {
+	out := make([]contract.HubMailPreset, 0, len(mailPresets))
+	for _, item := range mailPresets {
+		out = append(out, item.HubMailPreset)
+	}
+	return out
 }
 
 // credential is how an account signs in; it only reaches disk sealed.
@@ -58,15 +83,37 @@ type credential struct {
 
 // mailAccount names a mailbox. Provider is set when it signs in with OAuth.
 type mailAccount struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Provider string `json:"provider,omitempty"`
-	IMAP     string `json:"imap"`
-	SMTP     string `json:"smtp"`
-	Sealed   []byte `json:"sealed"`
+	ID         string                      `json:"id"`
+	Name       string                      `json:"name"`
+	Email      string                      `json:"email"`
+	Provider   string                      `json:"provider,omitempty"`
+	IMAP       string                      `json:"imap"`
+	SMTP       string                      `json:"smtp"`
+	Sealed     []byte                      `json:"sealed"`
+	Signatures []contract.HubMailSignature `json:"signatures,omitempty"`
+	Default    string                      `json:"defaultSignature,omitempty"`
+	// FilesSent is what the first send learned: whether the provider files its own copy of sent mail.
+	FilesSent *bool `json:"filesSent,omitempty"`
 
 	secret credential
+}
+
+func (a mailAccount) wire(issue string) contract.HubMailAccount {
+	auth := "password"
+	if a.Provider != "" {
+		auth = "oauth"
+	}
+	out := contract.HubMailAccount{ID: a.ID, Name: a.Name, Email: a.Email, Imap: &a.IMAP, Smtp: &a.SMTP, Auth: &auth, Signatures: a.Signatures}
+	if out.Signatures == nil {
+		out.Signatures = []contract.HubMailSignature{}
+	}
+	if a.Default != "" {
+		out.DefaultSignature = &a.Default
+	}
+	if issue != "" {
+		out.Issue = &issue
+	}
+	return out
 }
 
 type mailFile struct {
@@ -86,6 +133,9 @@ type mailbox struct {
 	clients map[string][]byte
 	signIns map[string]*signIn
 	access  map[string]accessToken
+	conns   map[string]*mailConn
+	health  map[string]string
+	layouts *layoutCache
 }
 
 func openMailbox(dir string, keys keyStore) (*mailbox, error) {
@@ -94,7 +144,9 @@ func openMailbox(dir string, keys keyStore) (*mailbox, error) {
 	}
 	value := &mailbox{path: filepath.Join(dir, "mail.json"), oauth: &http.Client{Timeout: dialTimeout}, seal: &sealer{keys: keys},
 		issuer:  func(provider string) string { return oauthProviders[provider].issuer },
-		clients: map[string][]byte{}, signIns: map[string]*signIn{}, access: map[string]accessToken{}}
+		clients: map[string][]byte{}, signIns: map[string]*signIn{}, access: map[string]accessToken{}, conns: map[string]*mailConn{},
+		health: map[string]string{}, layouts: newLayoutCache()}
+	value.purgeUploads()
 	data, err := os.ReadFile(value.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return value, nil
@@ -127,7 +179,7 @@ func (m *mailbox) accounts() []contract.HubMailAccount {
 	defer m.mu.Unlock()
 	out := make([]contract.HubMailAccount, 0, len(m.list))
 	for _, item := range m.list {
-		out = append(out, contract.HubMailAccount{ID: item.ID, Name: item.Name, Email: item.Email})
+		out = append(out, item.wire(m.health[item.ID]))
 	}
 	return out
 }
@@ -158,20 +210,32 @@ func (m *mailbox) keep(item mailAccount) error {
 	return m.save()
 }
 
+// hostsFor settles an account's servers. A known host keeps its own ports, whatever the form sent.
+func hostsFor(input contract.HubMailSetup) (imapAddress, smtpAddress string) {
+	_, domain, _ := strings.Cut(strings.TrimSpace(input.Email), "@")
+	if preset, ok := presetForDomain(domain); ok {
+		imapAddress = net.JoinHostPort(preset.ImapHost, strconv.FormatInt(preset.ImapPort, 10))
+		smtpAddress = net.JoinHostPort(preset.SmtpHost, strconv.FormatInt(preset.SmtpPort, 10))
+	}
+	if input.ImapHost != "" {
+		imapAddress = net.JoinHostPort(input.ImapHost, strconv.FormatInt(input.ImapPort, 10))
+	}
+	if input.SmtpHost != "" {
+		port := input.SmtpPort
+		if preset, ok := presetForHost(input.SmtpHost); ok {
+			port = preset.SmtpPort
+		}
+		smtpAddress = net.JoinHostPort(input.SmtpHost, strconv.FormatInt(port, 10))
+	}
+	return imapAddress, smtpAddress
+}
+
 func (m *mailbox) add(input contract.HubMailSetup) (contract.HubMailAccount, error) {
 	item := mailAccount{ID: "mail-" + randomHex(8), Name: strings.TrimSpace(input.Name), Email: strings.TrimSpace(input.Email), secret: credential{Password: input.Password}}
 	if _, err := mail.ParseAddress(item.Email); err != nil || input.Password == "" {
 		return contract.HubMailAccount{}, publicError("Check the address and password.")
 	}
-	_, domain, _ := strings.Cut(item.Email, "@")
-	preset := mailPresets[strings.ToLower(domain)]
-	item.IMAP, item.SMTP = preset.imap, preset.smtp
-	if input.ImapHost != "" {
-		item.IMAP = net.JoinHostPort(input.ImapHost, strconv.FormatInt(input.ImapPort, 10))
-	}
-	if input.SmtpHost != "" {
-		item.SMTP = net.JoinHostPort(input.SmtpHost, strconv.FormatInt(input.SmtpPort, 10))
-	}
+	item.IMAP, item.SMTP = hostsFor(input)
 	if item.IMAP == "" || item.SMTP == "" {
 		return contract.HubMailAccount{}, publicError("Enter the mail servers.")
 	}
@@ -185,543 +249,122 @@ func (m *mailbox) add(input contract.HubMailSetup) (contract.HubMailAccount, err
 	_ = client.Logout().Wait()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return contract.HubMailAccount{ID: item.ID, Name: item.Name, Email: item.Email}, m.keep(item)
+	return item.wire(""), m.keep(item)
+}
+
+// edit changes a mailbox's details. A blank password keeps how it signs in, and a new one
+// turns an OAuth mailbox into a password mailbox. Its signatures stay.
+func (m *mailbox) edit(id string, input contract.HubMailSetup) (contract.HubMailAccount, error) {
+	item, err := m.account(id)
+	if err != nil {
+		return contract.HubMailAccount{}, err
+	}
+	before := item
+	item.Name, item.Email = strings.TrimSpace(input.Name), strings.TrimSpace(input.Email)
+	if _, err := mail.ParseAddress(item.Email); err != nil {
+		return contract.HubMailAccount{}, publicError("Check the address and password.")
+	}
+	if item.Name == "" {
+		item.Name = item.Email
+	}
+	item.IMAP, item.SMTP = hostsFor(input)
+	if input.Password != "" {
+		item.Provider, item.secret = "", credential{Password: input.Password}
+	}
+	if item.IMAP != before.IMAP || item.Email != before.Email || input.Password != "" {
+		client, err := m.connect(item)
+		if err != nil {
+			return contract.HubMailAccount{}, publicError("Couldn't sign in to that mailbox.")
+		}
+		_ = client.Logout().Wait()
+	}
+	m.disconnect(id)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.health, id)
+	delete(m.access, id)
+	return item.wire(""), m.keep(item)
 }
 
 func (m *mailbox) remove(id string) error {
+	m.disconnect(id)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.list = slices.DeleteFunc(m.list, func(item mailAccount) bool { return item.ID == id })
 	delete(m.access, id)
+	delete(m.health, id)
+	delete(m.conns, id)
 	return m.save()
 }
 
-// connect uses TLS from the first byte; there is no plain fallback.
-func (m *mailbox) connect(item mailAccount) (*imapclient.Client, error) {
-	host, _, err := net.SplitHostPort(item.IMAP)
-	if err != nil {
-		return nil, err
-	}
-	config := m.tls
-	if config == nil {
-		config = &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
-	}
-	client, err := imapclient.DialTLS(item.IMAP, &imapclient.Options{TLSConfig: config, Dialer: &net.Dialer{Timeout: dialTimeout}})
-	if err != nil {
-		return nil, err
-	}
-	if item.Provider != "" {
-		token, err := m.token(context.Background(), item)
-		if err == nil {
-			err = client.Authenticate(xoauth{user: item.Email, token: token})
-		}
-		if err != nil {
-			client.Close()
-			return nil, err
-		}
-		return client, nil
-	}
-	if err := client.Login(item.Email, item.secret.Password).Wait(); err != nil {
-		client.Close()
-		return nil, err
-	}
-	return client, nil
-}
-
-func (m *mailbox) session(id string, use func(*imapclient.Client, mailAccount) error) error {
+// test opens the mailbox and remembers what it said, so status can show it.
+func (m *mailbox) test(id string) (contract.HubMailAccount, error) {
 	item, err := m.account(id)
 	if err != nil {
-		return err
+		return contract.HubMailAccount{}, err
 	}
-	client, err := m.connect(item)
-	if err != nil {
-		return err
+	issue := ""
+	if err := m.session(id, func(client *imapclient.Client, _ mailAccount) error { return client.Noop().Wait() }); err != nil {
+		issue = mailReason(err)
 	}
-	defer client.Close()
-	defer func() { _ = client.Logout().Wait() }()
-	return use(client, item)
-}
-
-func folderRole(attributes []imap.MailboxAttr, name string) string {
-	for _, attribute := range attributes {
-		switch attribute {
-		case imap.MailboxAttrSent:
-			return "sent"
-		case imap.MailboxAttrDrafts:
-			return "drafts"
-		case imap.MailboxAttrTrash:
-			return "trash"
-		case imap.MailboxAttrJunk:
-			return "junk"
-		case imap.MailboxAttrArchive:
-			return "archive"
-		}
-	}
-	if strings.EqualFold(name, "INBOX") {
-		return "inbox"
-	}
-	return ""
-}
-
-func (m *mailbox) folders(id string) ([]contract.HubMailFolder, error) {
-	out := []contract.HubMailFolder{}
-	err := m.session(id, func(client *imapclient.Client, _ mailAccount) error {
-		found, err := client.List("", "*", nil).Collect()
-		if err != nil {
-			return err
-		}
-		for _, item := range found {
-			if slices.Contains(item.Attrs, imap.MailboxAttrNoSelect) {
-				continue
-			}
-			folder := contract.HubMailFolder{Name: item.Mailbox, Role: folderRole(item.Attrs, item.Mailbox)}
-			if status, err := client.Status(item.Mailbox, &imap.StatusOptions{NumUnseen: true}).Wait(); err == nil && status.NumUnseen != nil {
-				folder.Unread = int64(*status.NumUnseen)
-			}
-			out = append(out, folder)
-		}
-		return nil
-	})
-	return out, err
-}
-
-func envelopeOf(account, folder string, buffer *imapclient.FetchMessageBuffer) contract.HubMailEnvelope {
-	value := contract.HubMailEnvelope{ID: int64(buffer.UID), Account: account, Folder: folder,
-		Seen: slices.Contains(buffer.Flags, imap.FlagSeen), Flagged: slices.Contains(buffer.Flags, imap.FlagFlagged)}
-	if envelope := buffer.Envelope; envelope != nil {
-		value.Subject = envelope.Subject
-		value.At = envelope.Date.UnixMilli()
-		if len(envelope.From) > 0 {
-			value.From = envelope.From[0].Name
-			value.Address = envelope.From[0].Addr()
-			if value.From == "" {
-				value.From = value.Address
-			}
-		}
-	}
-	if buffer.BodyStructure != nil {
-		buffer.BodyStructure.Walk(func(_ []int, part imap.BodyStructure) bool {
-			if single, ok := part.(*imap.BodyStructureSinglePart); ok && single.Filename() != "" {
-				value.Attachments++
-			}
-			return true
-		})
-	}
-	return value
-}
-
-// textPart finds the first readable part, for the list's preview line.
-func textPart(structure imap.BodyStructure) (path []int, encoding string, found bool) {
-	if structure == nil {
-		return nil, "", false
-	}
-	structure.Walk(func(at []int, part imap.BodyStructure) bool {
-		single, ok := part.(*imap.BodyStructureSinglePart)
-		if ok && !found && single.MediaType() == "text/plain" && single.Filename() == "" {
-			path, encoding, found = slices.Clone(at), strings.ToLower(single.Encoding), true
-		}
-		return !found
-	})
-	return path, encoding, found
-}
-
-func decodeSnippet(data []byte, encoding string) string {
-	switch encoding {
-	case "base64":
-		clean := bytes.ReplaceAll(bytes.ReplaceAll(data, []byte("\r"), nil), []byte("\n"), nil)
-		clean = clean[:len(clean)/4*4]
-		if decoded, err := base64.StdEncoding.DecodeString(string(clean)); err == nil {
-			data = decoded
-		}
-	case "quoted-printable":
-		if decoded, err := io.ReadAll(quotedprintable.NewReader(bytes.NewReader(data))); len(decoded) > 0 || err == nil {
-			data = decoded
-		}
-	}
-	return strings.Join(strings.Fields(strings.ToValidUTF8(string(data), "")), " ")
-}
-
-// envelopes lists a page, newest first. before is a sequence number from the last page.
-func (m *mailbox) envelopes(id, folder string, before uint32) ([]contract.HubMailEnvelope, error) {
-	out := []contract.HubMailEnvelope{}
-	err := m.session(id, func(client *imapclient.Client, _ mailAccount) error {
-		selected, err := client.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
-		if err != nil {
-			return err
-		}
-		last := selected.NumMessages
-		if before > 0 && before <= last {
-			last = before - 1
-		}
-		if last == 0 {
-			return nil
-		}
-		first := uint32(1)
-		if last > mailPage {
-			first = last - mailPage + 1
-		}
-		var range_ imap.SeqSet
-		range_.AddRange(first, last)
-		buffers, err := client.Fetch(range_, &imap.FetchOptions{UID: true, Flags: true, Envelope: true,
-			BodyStructure: &imap.FetchItemBodyStructure{Extended: true}}).Collect()
-		if err != nil {
-			return err
-		}
-		slices.SortFunc(buffers, func(a, b *imapclient.FetchMessageBuffer) int { return int(b.SeqNum) - int(a.SeqNum) })
-		for _, buffer := range buffers {
-			value := envelopeOf(id, folder, buffer)
-			if path, encoding, found := textPart(buffer.BodyStructure); found {
-				section := &imap.FetchItemBodySection{Part: path, Peek: true, Partial: &imap.SectionPartial{Size: previewSize}}
-				if parts, err := client.Fetch(imap.UIDSetNum(buffer.UID), &imap.FetchOptions{BodySection: []*imap.FetchItemBodySection{section}}).Collect(); err == nil && len(parts) == 1 && len(parts[0].BodySection) == 1 {
-					value.Preview = decodeSnippet(parts[0].BodySection[0].Bytes, encoding)
-				}
-			}
-			out = append(out, value)
-		}
-		return nil
-	})
-	return out, err
-}
-
-func (m *mailbox) raw(client *imapclient.Client, uid uint32) (*imapclient.FetchMessageBuffer, []byte, error) {
-	section := &imap.FetchItemBodySection{}
-	buffers, err := client.Fetch(imap.UIDSetNum(imap.UID(uid)), &imap.FetchOptions{UID: true, Flags: true, Envelope: true,
-		BodyStructure: &imap.FetchItemBodyStructure{Extended: true}, BodySection: []*imap.FetchItemBodySection{section}}).Collect()
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(buffers) != 1 || len(buffers[0].BodySection) == 0 {
-		return nil, nil, errMissing
-	}
-	return buffers[0], buffers[0].BodySection[0].Bytes, nil
-}
-
-type parsedMail struct {
-	text, html string
-	files      []contract.HubMailFile
-	contents   [][]byte
-}
-
-func parseMail(data []byte) (parsedMail, error) {
-	out := parsedMail{files: []contract.HubMailFile{}}
-	reader, err := gomail.CreateReader(bytes.NewReader(data))
-	if err != nil {
-		return out, err
-	}
-	for {
-		part, err := reader.NextPart()
-		if errors.Is(err, io.EOF) {
-			return out, nil
-		}
-		if err != nil {
-			return out, err
-		}
-		body, err := io.ReadAll(io.LimitReader(part.Body, 100<<20))
-		if err != nil {
-			return out, err
-		}
-		switch header := part.Header.(type) {
-		case *gomail.InlineHeader:
-			kind, _, _ := header.ContentType()
-			switch {
-			case kind == "text/plain" && out.text == "":
-				out.text = string(body)
-			case kind == "text/html" && out.html == "":
-				out.html = string(body)
-			}
-		case *gomail.AttachmentHeader:
-			name, _ := header.Filename()
-			kind, _, _ := header.ContentType()
-			out.files = append(out.files, contract.HubMailFile{Index: int64(len(out.files)), Name: name, Mime: kind, Size: int64(len(body))})
-			out.contents = append(out.contents, body)
-		}
-	}
-}
-
-func addresses(list []imap.Address) []string {
-	out := make([]string, 0, len(list))
-	for _, item := range list {
-		out = append(out, item.Addr())
-	}
-	return out
-}
-
-func (m *mailbox) message(id, folder string, uid uint32) (contract.HubMailMessage, error) {
-	var out contract.HubMailMessage
-	err := m.session(id, func(client *imapclient.Client, _ mailAccount) error {
-		// Opening a message marks it read, as a mail app does.
-		if _, err := client.Select(folder, nil).Wait(); err != nil {
-			return err
-		}
-		buffer, data, err := m.raw(client, uid)
-		if err != nil {
-			return err
-		}
-		parsed, err := parseMail(data)
-		if err != nil {
-			return err
-		}
-		out = contract.HubMailMessage{Envelope: envelopeOf(id, folder, buffer), To: []string{}, Cc: []string{}, Text: parsed.text, Html: parsed.html, Files: parsed.files}
-		if buffer.Envelope != nil {
-			out.To, out.Cc = addresses(buffer.Envelope.To), addresses(buffer.Envelope.Cc)
-		}
-		return nil
-	})
-	return out, err
-}
-
-func (m *mailbox) file(w http.ResponseWriter, id, folder string, uid uint32, index int) error {
-	return m.session(id, func(client *imapclient.Client, _ mailAccount) error {
-		if _, err := client.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-			return err
-		}
-		_, data, err := m.raw(client, uid)
-		if err != nil {
-			return err
-		}
-		parsed, err := parseMail(data)
-		if err != nil {
-			return err
-		}
-		if index < 0 || index >= len(parsed.contents) {
-			return errMissing
-		}
-		w.Header().Set("Content-Type", parsed.files[index].Mime)
-		_, err = w.Write(parsed.contents[index])
-		return err
-	})
-}
-
-func (m *mailbox) change(id, folder string, uid uint32, input contract.HubMailChange) error {
-	return m.session(id, func(client *imapclient.Client, _ mailAccount) error {
-		if _, err := client.Select(folder, nil).Wait(); err != nil {
-			return err
-		}
-		set := imap.UIDSetNum(imap.UID(uid))
-		flag := func(name imap.Flag, on bool) error {
-			op := imap.StoreFlagsDel
-			if on {
-				op = imap.StoreFlagsAdd
-			}
-			return client.Store(set, &imap.StoreFlags{Op: op, Silent: true, Flags: []imap.Flag{name}}, nil).Close()
-		}
-		if input.Seen != nil {
-			if err := flag(imap.FlagSeen, *input.Seen); err != nil {
-				return err
-			}
-		}
-		if input.Flagged != nil {
-			if err := flag(imap.FlagFlagged, *input.Flagged); err != nil {
-				return err
-			}
-		}
-		if input.Folder != nil {
-			_, err := client.Move(set, *input.Folder).Wait()
-			return err
-		}
-		return nil
-	})
-}
-
-func headerValue(value string) string {
-	return strings.NewReplacer("\r", " ", "\n", " ").Replace(value)
-}
-
-// composeMail builds the message, multipart when it carries files. Header values lose line breaks,
-// so a subject can't add headers. Bcc stays out of it: those recipients only travel in the envelope.
-func composeMail(from mailAccount, input contract.HubMailSend, files []mailFilePart, now time.Time) []byte {
-	var output bytes.Buffer
-	sender := mail.Address{Name: from.Name, Address: from.Email}
-	fmt.Fprintf(&output, "From: %s\r\n", sender.String())
-	fmt.Fprintf(&output, "To: %s\r\n", headerValue(strings.Join(input.To, ", ")))
-	if len(input.Cc) > 0 {
-		fmt.Fprintf(&output, "Cc: %s\r\n", headerValue(strings.Join(input.Cc, ", ")))
-	}
-	fmt.Fprintf(&output, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", headerValue(input.Subject)))
-	fmt.Fprintf(&output, "Date: %s\r\n", now.Format(time.RFC1123Z))
-	fmt.Fprintf(&output, "Message-ID: <%s@%s>\r\n", randomHex(16), domainOf(from.Email))
-	if input.ReplyTo != nil && *input.ReplyTo != "" {
-		fmt.Fprintf(&output, "In-Reply-To: %s\r\n", headerValue(*input.ReplyTo))
-		fmt.Fprintf(&output, "References: %s\r\n", headerValue(*input.ReplyTo))
-	}
-	output.WriteString("MIME-Version: 1.0\r\n")
-	boundary := "polymux-" + randomHex(12)
-	if len(files) > 0 {
-		fmt.Fprintf(&output, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n--%s\r\n", boundary, boundary)
-	}
-	output.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
-	writer := quotedprintable.NewWriter(&output)
-	_, _ = writer.Write([]byte(strings.ReplaceAll(input.Text, "\n", "\r\n")))
-	_ = writer.Close()
-	if len(files) == 0 {
-		return output.Bytes()
-	}
-	for _, file := range files {
-		fmt.Fprintf(&output, "\r\n--%s\r\nContent-Type: %s\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: %s\r\n\r\n", boundary,
-			mime.FormatMediaType(file.kind, map[string]string{"name": file.name}),
-			mime.FormatMediaType("attachment", map[string]string{"filename": file.name}))
-		encoded := base64.StdEncoding.EncodeToString(file.data)
-		for len(encoded) > 76 {
-			output.WriteString(encoded[:76] + "\r\n")
-			encoded = encoded[76:]
-		}
-		output.WriteString(encoded)
-	}
-	fmt.Fprintf(&output, "\r\n--%s--\r\n", boundary)
-	return output.Bytes()
-}
-
-const (
-	mailFileLimit = 25 << 20
-	// Base64 grows a file by a third.
-	mailBodyLimit = mailFileLimit/3*4 + 1<<20
-)
-
-type mailFilePart struct {
-	name, kind string
-	data       []byte
-}
-
-// uploads decodes what's attached, keeping names and types safe for a header.
-func uploads(list []contract.HubMailUpload) ([]mailFilePart, error) {
-	out := make([]mailFilePart, 0, len(list))
-	total := 0
-	for _, item := range list {
-		data, err := base64.StdEncoding.DecodeString(item.Data)
-		if err != nil {
-			return nil, publicError("That file can't be read.")
-		}
-		if total += len(data); total > mailFileLimit {
-			return nil, publicError("Those files are too large to send.")
-		}
-		kind, _, err := mime.ParseMediaType(item.Mime)
-		if err != nil {
-			kind = "application/octet-stream"
-		}
-		name := filepath.Base(headerValue(item.Name))
-		if name == "." || name == "/" {
-			name = "attachment"
-		}
-		out = append(out, mailFilePart{name: name, kind: kind, data: data})
-	}
-	return out, nil
-}
-
-func domainOf(address string) string {
-	_, domain, _ := strings.Cut(address, "@")
-	return domain
-}
-
-func (m *mailbox) send(ctx context.Context, input contract.HubMailSend) error {
-	item, err := m.account(input.Account)
-	if err != nil {
-		return err
-	}
-	recipients := slices.Concat(input.To, input.Cc, input.Bcc)
-	if len(recipients) == 0 {
-		return publicError("Add someone to send to.")
-	}
-	for index, value := range recipients {
-		parsed, err := mail.ParseAddress(value)
-		if err != nil {
-			return publicError("Check the addresses.")
-		}
-		recipients[index] = parsed.Address
-	}
-	files, err := uploads(input.Attachments)
-	if err != nil {
-		return err
-	}
-	message := composeMail(item, input, files, time.Now())
-	if item.Provider != "" {
-		if item.secret.Password, err = m.token(ctx, item); err != nil {
-			return err
-		}
-	}
-	if err := deliver(ctx, item, recipients, message); err != nil {
-		return err
-	}
-	// Gmail files sent mail itself; anywhere else needs a copy put there.
-	if strings.HasSuffix(item.SMTP, "gmail.com:587") {
-		return nil
-	}
-	return m.session(item.ID, func(client *imapclient.Client, _ mailAccount) error {
-		found, err := client.List("", "*", nil).Collect()
-		if err != nil {
-			return err
-		}
-		index := slices.IndexFunc(found, func(item *imap.ListData) bool { return slices.Contains(item.Attrs, imap.MailboxAttrSent) })
-		if index < 0 {
-			return nil
-		}
-		append := client.Append(found[index].Mailbox, int64(len(message)), &imap.AppendOptions{Flags: []imap.Flag{imap.FlagSeen}})
-		if _, err := append.Write(message); err != nil {
-			return err
-		}
-		if err := append.Close(); err != nil {
-			return err
-		}
-		_, err = append.Wait()
-		return err
-	})
-}
-
-func deliver(ctx context.Context, item mailAccount, recipients []string, message []byte) error {
-	host, port, err := net.SplitHostPort(item.SMTP)
-	if err != nil {
-		return err
-	}
-	dialer := &net.Dialer{Timeout: dialTimeout}
-	config := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
-	var conn net.Conn
-	if port == "465" {
-		conn, err = (&tls.Dialer{NetDialer: dialer, Config: config}).DialContext(ctx, "tcp", item.SMTP)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if issue == "" {
+		delete(m.health, id)
 	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", item.SMTP)
+		m.health[id] = issue
 	}
-	if err != nil {
-		return err
+	return item.wire(issue), nil
+}
+
+// signatures replaces one account's, leaving its connection alone.
+func (m *mailbox) signatures(id string, input contract.HubMailSignatures) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := slices.IndexFunc(m.list, func(item mailAccount) bool { return item.ID == id })
+	if index < 0 {
+		return errMissing
 	}
-	client, err := smtp.NewClient(conn, host)
-	if err != nil {
-		conn.Close()
-		return err
-	}
-	defer client.Close()
-	if port != "465" {
-		if ok, _ := client.Extension("STARTTLS"); !ok {
-			return errors.New("mail server offers no encryption")
+	clean := make([]contract.HubMailSignature, 0, len(input.Signatures))
+	for _, item := range input.Signatures {
+		if strings.TrimSpace(item.Name) == "" {
+			return publicError("Name each signature.")
 		}
-		if err := client.StartTLS(config); err != nil {
-			return err
+		if item.ID == "" {
+			item.ID = randomHex(8)
 		}
+		item.Html = cleanSignature(item.Html)
+		clean = append(clean, item)
 	}
-	var auth smtp.Auth = smtp.PlainAuth("", item.Email, item.secret.Password, host)
-	if item.Provider != "" {
-		auth = smtpOAuth{user: item.Email, token: item.secret.Password}
+	m.list[index].Signatures = clean
+	m.list[index].Default = ""
+	if input.DefaultSignature != nil && slices.ContainsFunc(clean, func(item contract.HubMailSignature) bool { return item.ID == *input.DefaultSignature }) {
+		m.list[index].Default = *input.DefaultSignature
 	}
-	if err := client.Auth(auth); err != nil {
-		return err
+	return m.save()
+}
+
+// learn records whether this provider files its own sent mail.
+func (m *mailbox) learn(id string, files bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if index := slices.IndexFunc(m.list, func(item mailAccount) bool { return item.ID == id }); index >= 0 {
+		m.list[index].FilesSent = &files
+		_ = m.save()
 	}
-	if err := client.Mail(item.Email); err != nil {
-		return err
+}
+
+// mailReason is a failure in the server's own words, which say more than ours would.
+func mailReason(err error) string {
+	var refused *imap.Error
+	if errors.As(err, &refused) && refused.Text != "" {
+		return refused.Text
 	}
-	for _, address := range recipients {
-		if err := client.Rcpt(address); err != nil {
-			return err
-		}
+	var public publicError
+	if errors.As(err, &public) {
+		return public.Error()
 	}
-	writer, err := client.Data()
-	if err != nil {
-		return err
-	}
-	if _, err := writer.Write(message); err != nil {
-		return err
-	}
-	if err := writer.Close(); err != nil {
-		return err
-	}
-	return client.Quit()
+	return "Couldn't reach this mailbox."
 }
 
 func (s *service) mailRoutes(mux *http.ServeMux) {
@@ -729,6 +372,7 @@ func (s *service) mailRoutes(mux *http.ServeMux) {
 		value, _ := strconv.ParseUint(r.PathValue("uid"), 10, 32)
 		return uint32(value)
 	}
+	folder := func(r *http.Request) string { return r.URL.Query().Get("folder") }
 	mux.HandleFunc("POST /mail", func(w http.ResponseWriter, r *http.Request) {
 		input, ok := decodeBody[contract.HubMailSetup](w, r)
 		if !ok {
@@ -742,17 +386,60 @@ func (s *service) mailRoutes(mux *http.ServeMux) {
 		write(w, 200, account)
 	})
 	mux.HandleFunc("POST /mail/send", func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, mailBodyLimit)
-		var input contract.HubMailSend
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			s.failed(w, publicError("Those files are too large to send."))
+		input, ok := decodeBody[contract.HubMailSend](w, r)
+		if !ok {
 			return
 		}
-		s.reply(w, s.mail.send(r.Context(), input))
+		sent, err := s.mail.send(r.Context(), input)
+		if err != nil {
+			s.failed(w, err)
+			return
+		}
+		write(w, 200, sent)
+	})
+	mux.HandleFunc("POST /mail/uploads", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, mailBodyLimit)
+		var input contract.HubMailUpload
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			s.failed(w, publicError("That file is too large to send."))
+			return
+		}
+		staged, err := s.mail.stage(input)
+		if err != nil {
+			s.failed(w, err)
+			return
+		}
+		write(w, 200, staged)
 	})
 	s.signInRoutes(mux)
+	mux.HandleFunc("PATCH /mail/{account}", func(w http.ResponseWriter, r *http.Request) {
+		input, ok := decodeBody[contract.HubMailSetup](w, r)
+		if !ok {
+			return
+		}
+		account, err := s.mail.edit(r.PathValue("account"), input)
+		if err != nil {
+			s.failed(w, err)
+			return
+		}
+		write(w, 200, account)
+	})
 	mux.HandleFunc("DELETE /mail/{account}", func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, s.mail.remove(r.PathValue("account")))
+	})
+	mux.HandleFunc("GET /mail/{account}/health", func(w http.ResponseWriter, r *http.Request) {
+		account, err := s.mail.test(r.PathValue("account"))
+		if err != nil {
+			s.failed(w, err)
+			return
+		}
+		write(w, 200, account)
+	})
+	mux.HandleFunc("PUT /mail/{account}/signatures", func(w http.ResponseWriter, r *http.Request) {
+		input, ok := decodeBody[contract.HubMailSignatures](w, r)
+		if ok {
+			s.reply(w, s.mail.signatures(r.PathValue("account"), input))
+		}
 	})
 	mux.HandleFunc("GET /mail/{account}/folders", func(w http.ResponseWriter, r *http.Request) {
 		folders, err := s.mail.folders(r.PathValue("account"))
@@ -763,32 +450,36 @@ func (s *service) mailRoutes(mux *http.ServeMux) {
 		write(w, 200, folders)
 	})
 	mux.HandleFunc("GET /mail/{account}/messages", func(w http.ResponseWriter, r *http.Request) {
-		before, _ := strconv.ParseUint(r.URL.Query().Get("before"), 10, 32)
-		envelopes, err := s.mail.envelopes(r.PathValue("account"), r.URL.Query().Get("folder"), uint32(before))
+		query := r.URL.Query()
+		page, _ := strconv.Atoi(query.Get("page"))
+		envelopes, err := s.mail.envelopes(r.PathValue("account"), mailQuery{folder: query.Get("folder"), page: page, search: query.Get("query"), sort: query.Get("sort")})
 		if err != nil {
 			s.failed(w, err)
 			return
 		}
 		write(w, 200, envelopes)
 	})
+	mux.HandleFunc("PATCH /mail/{account}/messages", func(w http.ResponseWriter, r *http.Request) {
+		input, ok := decodeBody[contract.HubMailChange](w, r)
+		if ok {
+			s.reply(w, s.mail.change(r.PathValue("account"), folder(r), input))
+		}
+	})
 	mux.HandleFunc("GET /mail/{account}/messages/{uid}", func(w http.ResponseWriter, r *http.Request) {
-		message, err := s.mail.message(r.PathValue("account"), r.URL.Query().Get("folder"), uid(r))
+		message, err := s.mail.message(r.PathValue("account"), folder(r), uid(r))
 		if err != nil {
 			s.failed(w, err)
 			return
 		}
 		write(w, 200, message)
 	})
-	mux.HandleFunc("PATCH /mail/{account}/messages/{uid}", func(w http.ResponseWriter, r *http.Request) {
-		input, ok := decodeBody[contract.HubMailChange](w, r)
-		if ok {
-			s.reply(w, s.mail.change(r.PathValue("account"), r.URL.Query().Get("folder"), uid(r), input))
-		}
-	})
-	mux.HandleFunc("GET /mail/{account}/messages/{uid}/files/{index}", func(w http.ResponseWriter, r *http.Request) {
-		index, _ := strconv.Atoi(r.PathValue("index"))
-		if err := s.mail.file(w, r.PathValue("account"), r.URL.Query().Get("folder"), uid(r), index); err != nil {
+	mux.HandleFunc("GET /mail/{account}/messages/{uid}/files/{part}", func(w http.ResponseWriter, r *http.Request) {
+		file, err := s.mail.part(r.PathValue("account"), folder(r), uid(r), r.PathValue("part"))
+		if err != nil {
 			s.failed(w, err)
+			return
 		}
+		w.Header().Set("Content-Type", file.kind)
+		_, _ = w.Write(file.data)
 	})
 }

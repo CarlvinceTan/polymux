@@ -11,5 +11,7 @@ await app.rightClick({ role: "button", name: source });
 await app.waitFor({ role: "menuitem", name: "React ❤️" });
 const items = await app.query({ role: "menuitem" });
 if (items.some(row => row.label?.startsWith("ID(id:"))) throw new Error("Reaction menu exposes internal group names");
-await app.pressKey("escape");
+// Background keys are refused while a menu holds the window, so close it by choosing.
+await app.click({ role: "menuitem", name: "React ❤️" });
+await app.waitFor({ role: "menuitem", name: "React ❤️", gone: true, timeout_ms: 5000 });
 return "ok";

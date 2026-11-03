@@ -1,18 +1,23 @@
 #!/bin/sh
-# Run Polymux on throwaway data. Usage: scripts/run.sh [--watch|--server|--fixture <flags>...]
-# Type r and Enter to rebuild and restart; --watch does it automatically when sources change.
+# Run Polymux on throwaway data. Usage: scripts/run.sh [--watch|--no-watch|--server|--fresh|--fixture <flags>...]
+# --fresh starts no server: the app runs its own, as a new install does, under a launchd job of this instance's.
+# In a terminal it hot reloads when sources change. Elsewhere, or with --no-watch, type r and Enter to rebuild.
 # Each run has its own id, data, port, and preferences, so several can run at once.
 # Never touches ~/.polymux, the installed Polymux.app, or its preferences.
 set -eu
 umask 077
 watch=0
+# Background runs stay still, so another agent's edit never restarts a test.
+if [ -t 0 ]; then watch=1; fi
 server_only=0
 fixture=0
+fresh=0
 case ${1:-} in
   "") ;;
   --watch) watch=1; shift ;;
   --no-watch) watch=0; shift ;;
   --server) server_only=1; shift ;;
+  --fresh) fresh=1; shift ;;
   --fixture)
     fixture=1
     shift
@@ -26,7 +31,7 @@ case ${1:-} in
     esac
     set -- --verify-fixture "$@" -AppleInterfaceStyle "$appearance"
     ;;
-  *) echo "usage: $0 [--watch|--no-watch|--server|--fixture <flags>...]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--watch|--no-watch|--server|--fresh|--fixture <flags>...]" >&2; exit 2 ;;
 esac
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # Share instance numbers even when callers override TMPDIR.
@@ -42,6 +47,12 @@ forget_key() {
   [ "$PLATFORM" = Darwin ] || return 0
   account=$(printf %s "$1/data/vault" | shasum -a 256 | cut -d' ' -f1)
   /usr/bin/security delete-generic-password -s com.polymux.vault -a "$account" >/dev/null 2>&1 || true
+  account=$(printf %s "$1/data/plugins/hub/data" | shasum -a 256 | cut -d' ' -f1)
+  /usr/bin/security delete-generic-password -s com.polymux.hub -a "$account" >/dev/null 2>&1 || true
+}
+# Removes an instance's launchd job, if its app started one.
+forget_job() {
+  launchctl bootout "gui/$(id -u)/com.flarehq.polymux.server.test.${1##*/}" 2>/dev/null || true
 }
 stop_owned() {
   physical=$(CDPATH='' cd -- "$1" && pwd -P)
@@ -66,6 +77,7 @@ mkdir -p "$BASE"
 for dir in "$BASE"/[0-9]*; do
   owner=$(cat "$dir/run.pid" 2>/dev/null) || continue
   kill -0 "$owner" 2>/dev/null && continue
+  forget_job "$dir"
   stop_owned "$dir"
   forget_key "$dir"
   defaults delete "com.flarehq.polymux.app.test.${dir##*/}" 2>/dev/null || true
@@ -102,6 +114,7 @@ except (OSError, ValueError):
     pass
 PY
   fi
+  forget_job "$STATE"
   stop_owned "$STATE"
   [ ! -f "$STATE/server.pid" ] || wait "$(cat "$STATE/server.pid")" 2>/dev/null || true
   # Remove only this throwaway instance's vault key, including after a failed flow.
@@ -119,7 +132,9 @@ PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0));
 ADDRESS=http://127.0.0.1:$PORT
 APP="$STATE/Polymux $ID.app"
 
+# scripts/e2e.py builds once, so its many instances skip straight to copying the result.
 build_server() {
+  if [ -n "${POLYMUX_E2E_PREBUILT:-}" ]; then cp "$ROOT/.build/e2e-server" "$STATE/polymux"; return; fi
   (cd "$ROOT/apps/server" && exec python3 "$ROOT/scripts/lib/locked.py" "$STATE/server-build.lock" -- \
     go build -tags sqlite_fts5 -o "$STATE/polymux.new" ./cmd/polymux) &
   BUILD_PID=$!
@@ -131,15 +146,24 @@ build_server() {
 build_app() {
   staged="$STATE/build.app"
   rm -rf "$staged"
-  "$ROOT/scripts/check.sh" macos "$staged" >"$STATE/build.log" 2>&1 &
-  BUILD_PID=$!
-  if ! wait "$BUILD_PID"; then
+  if [ -n "${POLYMUX_E2E_PREBUILT:-}" ]; then
+    ditto "${POLYMUX_E2E_APP:-$ROOT/.build/e2e-app/Polymux.app}" "$staged" || return 1
+  else
+    "$ROOT/scripts/check.sh" macos "$staged" >"$STATE/build.log" 2>&1 &
+    BUILD_PID=$!
+    if ! wait "$BUILD_PID"; then
+      BUILD_PID=
+      tail -60 "$STATE/build.log" >&2
+      return 1
+    fi
     BUILD_PID=
-    tail -60 "$STATE/build.log" >&2
-    return 1
   fi
-  BUILD_PID=
 
+  # A new install's copy of the server; other instances run theirs from here instead.
+  if [ "$fresh" = 1 ]; then
+    mkdir -p "$staged/Contents/Helpers"
+    cp "$STATE/polymux" "$staged/Contents/Helpers/polymux"
+  fi
   # Rename the build so it has its own name, bundle id and preferences.
   PLIST="$staged/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE" "$PLIST" || return 1
@@ -186,10 +210,34 @@ start_server() {
   done
 }
 
+# With POLYMUX_SERVER_JOB, the server runs as a real one does: launchd restarts it when it exits.
+start_job() {
+  POLYMUX_HOST_LABEL=com.flarehq.polymux.server.test.$ID POLYMUX_HOST_DIR="$STATE/agents" POLYMUX_LISTEN="127.0.0.1:$PORT" \
+    POLYMUX_DATA_DIR="$STATE/data" POLYMUX_LOG_DIR="$STATE/logs" POLYMUX_DEV=1 POLYMUX_NO_MDNS=1 POLYMUX_TUNNEL=0 \
+    "$STATE/polymux" host install
+}
+
 # open -g asks LaunchServices for a background launch, so the app never takes focus.
 start_app() {
-  if [ "$fixture" = 0 ]; then set -- -serverAddress "$ADDRESS" "$@"; fi
-  open -g -n --env POLYMUX_DATA_DIR="$STATE/data" --stdout "$STATE/app.log" --stderr "$STATE/app.log" \
+  # A preference, as an argument would override the app when it changes server.
+  if [ "$fixture" = 0 ] && [ "$fresh" = 0 ]; then defaults write "$BUNDLE" serverAddress "$ADDRESS"; fi
+  # A crashed instance's number gets reused, and macOS would ask the next one to reopen its windows.
+  defaults write "$BUNDLE" ApplePersistenceIgnoreState -bool YES
+  # What a relaunch needs too. The app's job inherits these, which keeps it away from the real one.
+  : >"$STATE/app.env"
+  if [ "$fresh" = 1 ]; then
+    cat >"$STATE/app.env" <<ENV
+POLYMUX_HOST_LABEL=com.flarehq.polymux.server.test.$ID
+POLYMUX_HOST_DIR=$STATE/agents
+POLYMUX_CLIENT_DIR=$STATE/client
+POLYMUX_LISTEN=127.0.0.1:$PORT
+POLYMUX_LOG_DIR=$STATE/logs
+POLYMUX_DEV=1
+POLYMUX_NO_MDNS=1
+POLYMUX_TUNNEL=0
+ENV
+  fi
+  open -g -n --env POLYMUX_DATA_DIR="$STATE/data" $(sed 's/^/--env /' "$STATE/app.env") --stdout "$STATE/app.log" --stderr "$STATE/app.log" \
     "$APP" --args "$@"
   attempts=0
   until pid=$(pgrep -nf "$APP/Contents/MacOS/Polymux"); do
@@ -216,7 +264,9 @@ changed() {
   echo "$now" >"$stamp"
 }
 
-if [ "$fixture" = 0 ]; then build_server; start_server; fi
+if [ "$fixture" = 0 ]; then build_server; fi
+if [ -n "${POLYMUX_SERVER_JOB:-}" ]; then start_job
+elif [ "$fixture" = 0 ] && [ "$fresh" = 0 ]; then start_server; fi
 if [ "$server_only" = 0 ]; then build_app; start_app "$@"; fi
 
 echo "Polymux $ID running"

@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	_ "modernc.org/sqlite" // Registers the driver durable.db must be read through.
 )
 
 type Work struct {
@@ -229,8 +230,8 @@ func (s *Store) FinalizeTask(ctx context.Context, event contract.Event, message 
 		}
 	}
 	if message != nil && message.Status != contract.MessageStatusSilent {
-		// Progress posts precede the final reply, even when its placeholder was opened first.
-		if _, err := tx.ExecContext(ctx, `UPDATE messages SET seq=(SELECT last_seq+1 FROM threads WHERE id=?) WHERE id=? AND EXISTS(SELECT 1 FROM messages later WHERE later.thread_id=? AND later.seq>messages.seq AND json_extract(later.data,'$.runID')=?)`, message.ThreadID, message.ID, message.ThreadID, run.ID); err != nil {
+		// Progress posts and messages the run took on the way precede the final reply, even when its placeholder was opened first.
+		if _, err := tx.ExecContext(ctx, `UPDATE messages SET seq=(SELECT last_seq+1 FROM threads WHERE id=?) WHERE id=? AND EXISTS(SELECT 1 FROM messages later WHERE later.thread_id=? AND later.seq>messages.seq AND (json_extract(later.data,'$.runID')=? OR later.id IN(SELECT id FROM jobs WHERE thread_id=? AND state='done' AND json_extract(input,'$.parentRunID')=?)))`, message.ThreadID, message.ID, message.ThreadID, run.ID, message.ThreadID, run.ID); err != nil {
 			return err
 		}
 	}
@@ -1059,7 +1060,8 @@ func openDurable(ctx context.Context, q rowQuery) (*sql.DB, bool) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, false
 	}
-	db, err := sql.Open("sqlite3", "file:"+path+"?_query_only=1&_busy_timeout=5000")
+	// The runtime's own driver: a second SQLite library in this process misses the runtime's locks and truncates its -shm.
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=query_only(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, false
 	}

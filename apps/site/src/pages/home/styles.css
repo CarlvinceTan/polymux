@@ -7,9 +7,9 @@
 .lede { max-width: 560px; margin: var(--space) auto 0; color: var(--muted); font-size: 18px; line-height: 1.6; }
 .actions { display: flex; align-items: center; justify-content: center; gap: var(--space); margin-top: 28px; }
 .primary { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 8px; padding: 0 22px; border-radius: 9px; color: var(--on-accent); background: var(--accent); font-size: 14px; font-weight: 600; transition: background 140ms ease; }
-.primary:hover { background: var(--accent-hover); }
+@media (hover: hover) and (pointer: fine) { .primary:hover { background: var(--accent-hover); } }
 .text-link { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
-.text-link:hover, .install-note a:hover, .together a:hover { text-decoration: underline; text-underline-offset: 4px; }
+@media (hover: hover) and (pointer: fine) { .text-link:hover, .install-note a:hover, .together a:hover { text-decoration: underline; text-underline-offset: 4px; } }
 .availability { margin: 18px 0 0; color: var(--muted); font-size: 12px; }
 .app-preview { margin: 24px 0 0; border-block: 1px solid var(--line); }
 .app-preview summary { display: flex; align-items: center; justify-content: space-between; min-height: 64px; font-size: 13px; font-weight: 500; cursor: pointer; list-style: none; }

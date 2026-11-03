@@ -18,8 +18,8 @@ These workflows start when the user indicates the relevant intent; no exact skil
 
 | Skill | What it's for |
 | --- | --- |
-| [cdesign](../.agents/skills/cdesign/SKILL.md) | General UI rules: responsiveness, layout balance, text, accessibility, and contrast. Use with [`DESIGN.md`](../DESIGN.md), which holds Polymux-specific policies. |
-| [avatar-preview](../.agents/skills/avatar-preview/SKILL.md) | Animated GIF previews using the real avatar renderer. Use to review avatars, emotions, motion, and work props without launching the app. |
+| [cdesign](../.agents/skills/cdesign/SKILL.md) | General UI rules: responsiveness, layout balance, native platform fit, generic AI patterns to reject, text, accessibility, and contrast. Use with [`DESIGN.md`](../DESIGN.md), which holds Polymux-specific policies. |
+| [avatar-preview](../.agents/skills/avatar-preview/SKILL.md) | Animated GIF previews using the real avatar renderer. Use to review avatars, emotions, motion and state effects without launching the app. |
 | [cua-driver](../.agents/skills/cua-driver/SKILL.md) | Operating and verifying real native app UI. This is the current driver for manual checks and E2E flows. |
 | [ui-control](../.agents/skills/ui-control/SKILL.md) | Inspecting or capturing an owned test instance with the experimental Control tool. Observation only; it cannot perform input or replace Cua. See [Control candidate](control.md). |
 
@@ -31,6 +31,13 @@ Use both when creating, editing, or reviewing Svelte components and modules in `
 | --- | --- |
 | [svelte-code-writer](../.agents/skills/svelte-code-writer/SKILL.md) | Looking up current Svelte documentation and checking code with the Svelte autofixer. |
 | [svelte-core-bestpractices](../.agents/skills/svelte-core-bestpractices/SKILL.md) | Svelte reactivity, state, events, styling, and library integration. |
+
+Use these when the task calls for them.
+
+| Skill | What it's for |
+| --- | --- |
+| [mobile-native](../.agents/skills/mobile-native/SKILL.md) | Web fixes for phones, such as sticky hover and input zoom. For the website only; the app is native. |
+| [agent-browser](../.agents/skills/agent-browser/SKILL.md) | Exploratory browser checks, using your own `--session`. It drives Chrome, so regression coverage stays in `apps/site/test/`, which also runs WebKit. Native app UI uses cua-driver or ui-control. Needs the CLI; its `skills get core` command serves the guide for the installed version. |
 
 ## Go server
 

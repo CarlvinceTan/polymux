@@ -70,7 +70,7 @@ func TestStreamEndsWhenChatIsDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	response, _ := openStream(t, api, web.URL, group.ID)
-	if _, err := api.Store.DeleteGroup(t.Context(), group.ID); err != nil {
+	if err := api.Store.DeleteGroup(t.Context(), group.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.Copy(io.Discard, response.Body); err != nil {

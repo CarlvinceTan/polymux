@@ -35,10 +35,15 @@ const (
 )
 
 type HubMailAccount struct {
-	ID    string  `json:"id"`
-	Name  string  `json:"name"`
-	Email string  `json:"email"`
-	Issue *string `json:"issue,omitempty"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Email            string             `json:"email"`
+	Issue            *string            `json:"issue,omitempty"`
+	Imap             *string            `json:"imap,omitempty"`
+	Smtp             *string            `json:"smtp,omitempty"`
+	Auth             *string            `json:"auth,omitempty"`
+	Signatures       []HubMailSignature `json:"signatures,omitempty"`
+	DefaultSignature *string            `json:"defaultSignature,omitempty"`
 }
 
 type HubStatus struct {
@@ -52,6 +57,7 @@ type HubStatus struct {
 	Selector      *string           `json:"selector,omitempty"`
 	TextOnly      []string          `json:"textOnly"`
 	WechatRename  bool              `json:"wechatRename"`
+	MailPresets   []HubMailPreset   `json:"mailPresets,omitempty"`
 }
 
 const (
@@ -150,6 +156,7 @@ type HubChat struct {
 	Preview  string   `json:"preview"`
 	At       int64    `json:"at"`
 	Unread   int64    `json:"unread"`
+	Accounts []string `json:"accounts,omitempty"`
 }
 
 type HubChanges struct {
@@ -242,6 +249,7 @@ type HubMailFolder struct {
 	Name   string `json:"name"`
 	Role   string `json:"role"`
 	Unread int64  `json:"unread"`
+	Label  string `json:"label"`
 }
 
 type HubMailEnvelope struct {
@@ -256,39 +264,60 @@ type HubMailEnvelope struct {
 	Seen        bool   `json:"seen"`
 	Flagged     bool   `json:"flagged"`
 	Attachments int64  `json:"attachments"`
+	Answered    bool   `json:"answered"`
+	Draft       bool   `json:"draft"`
+	Importance  string `json:"importance"`
 }
 
+const (
+	HubMailEnvelopeImportanceHigh   = "high"
+	HubMailEnvelopeImportanceNormal = "normal"
+	HubMailEnvelopeImportanceLow    = "low"
+)
+
 type HubMailFile struct {
-	Index int64  `json:"index"`
-	Name  string `json:"name"`
-	Mime  string `json:"mime"`
-	Size  int64  `json:"size"`
+	Part      string `json:"part"`
+	Name      string `json:"name"`
+	Mime      string `json:"mime"`
+	Size      int64  `json:"size"`
+	ContentId string `json:"contentId"`
+	Inline    bool   `json:"inline"`
 }
 
 type HubMailMessage struct {
-	Envelope HubMailEnvelope `json:"envelope"`
-	To       []string        `json:"to"`
-	Cc       []string        `json:"cc"`
-	Text     string          `json:"text"`
-	Html     string          `json:"html"`
-	Files    []HubMailFile   `json:"files"`
+	Envelope   HubMailEnvelope  `json:"envelope"`
+	To         []HubMailAddress `json:"to"`
+	Cc         []HubMailAddress `json:"cc"`
+	Bcc        []HubMailAddress `json:"bcc"`
+	Text       string           `json:"text"`
+	Html       string           `json:"html"`
+	Files      []HubMailFile    `json:"files"`
+	MessageId  string           `json:"messageId"`
+	References []string         `json:"references"`
 }
 
 type HubMailSend struct {
-	Account     string          `json:"account"`
-	To          []string        `json:"to"`
-	Cc          []string        `json:"cc"`
-	Bcc         []string        `json:"bcc"`
-	Subject     string          `json:"subject"`
-	Text        string          `json:"text"`
-	ReplyTo     *string         `json:"replyTo,omitempty"`
-	Attachments []HubMailUpload `json:"attachments,omitempty"`
+	Account    string          `json:"account"`
+	To         []string        `json:"to"`
+	Cc         []string        `json:"cc"`
+	Bcc        []string        `json:"bcc"`
+	Subject    string          `json:"subject"`
+	Text       string          `json:"text"`
+	Html       *string         `json:"html,omitempty"`
+	Draft      *bool           `json:"draft,omitempty"`
+	Importance *string         `json:"importance,omitempty"`
+	InReplyTo  *string         `json:"inReplyTo,omitempty"`
+	References []string        `json:"references,omitempty"`
+	Files      []HubMailAttach `json:"files,omitempty"`
+	Replaces   *HubMailDraft   `json:"replaces,omitempty"`
 }
 
 type HubMailChange struct {
+	Ids     []int64 `json:"ids"`
 	Seen    *bool   `json:"seen,omitempty"`
 	Flagged *bool   `json:"flagged,omitempty"`
 	Folder  *string `json:"folder,omitempty"`
+	Erase   *bool   `json:"erase,omitempty"`
 }
 
 type HubMention struct {
@@ -348,4 +377,46 @@ type HubMailUpload struct {
 	Name string `json:"name"`
 	Mime string `json:"mime"`
 	Data string `json:"data"`
+}
+
+type HubMailAddress struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+type HubMailSignature struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Text string `json:"text"`
+	Html string `json:"html"`
+}
+
+type HubMailSignatures struct {
+	Signatures       []HubMailSignature `json:"signatures"`
+	DefaultSignature *string            `json:"defaultSignature,omitempty"`
+}
+
+type HubMailPreset struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ImapHost string `json:"imapHost"`
+	ImapPort int64  `json:"imapPort"`
+	SmtpHost string `json:"smtpHost"`
+	SmtpPort int64  `json:"smtpPort"`
+	Hint     string `json:"hint"`
+	Hidden   bool   `json:"hidden"`
+}
+
+type HubMailAttach struct {
+	ID        string  `json:"id"`
+	ContentId *string `json:"contentId,omitempty"`
+}
+
+type HubMailDraft struct {
+	ID     int64  `json:"id"`
+	Folder string `json:"folder"`
+}
+
+type HubMailSent struct {
+	Draft *HubMailDraft `json:"draft,omitempty"`
 }

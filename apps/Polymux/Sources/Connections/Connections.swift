@@ -17,43 +17,55 @@ final class Connections {
     static let available = ["location"]
     #endif
 
-    /// What the user allowed for the connected server; each server gets its own consent.
-    private(set) var enabled: Set<String> = []
+    /// One server's connection to this device.
+    private struct Link {
+        let client: APIClient
+        var listener: Task<Void, Never>?
+    }
+
+    /// The server on show, which the toggles apply to.
+    var current = ""
     private(set) var issue: String?
-    private var client: APIClient?
-    private var address = ""
-    private var listener: Task<Void, Never>?
+    /// What the user allowed, by server; each server gets its own consent.
+    private var grants: [String: Set<String>] = [:]
+    private var links: [String: Link] = [:]
     private let defaults = UserDefaults.standard
+
+    var enabled: Set<String> { grants[current] ?? [] }
 
     private init() {
         let center = NotificationCenter.default
         center.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { _ in
-            Task { @MainActor in Connections.shared.report() }
+            Task { @MainActor in Connections.shared.reportAll() }
         }
         #if os(iOS)
         // Streams die in the background; reconnect straight away on return.
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in Connections.shared.restart() }
+            Task { @MainActor in Connections.shared.restartAll() }
         }
         #endif
     }
 
     func connect(_ client: APIClient, address: String) {
-        guard self.client?.id != client.id else { return }
-        self.client = client
-        if self.address != address {
-            self.address = address
+        guard links[address]?.client.id != client.id else { return }
+        links[address]?.listener?.cancel()
+        links[address] = Link(client: client)
+        if grants[address] == nil {
             // Grants were once shared by every server; they stay with the server in use when that changed.
             if let legacy = defaults.stringArray(forKey: "connections.enabled") {
-                defaults.set(legacy, forKey: key)
+                defaults.set(legacy, forKey: key(address))
                 defaults.removeObject(forKey: "connections.enabled")
             }
-            enabled = Set(defaults.stringArray(forKey: key) ?? [])
+            grants[address] = Set(defaults.stringArray(forKey: key(address)) ?? [])
         }
-        restart()
+        restart(address)
     }
 
-    private var key: String { "connections.enabled.\(address)" }
+    func disconnect(_ address: String) {
+        links.removeValue(forKey: address)?.listener?.cancel()
+    }
+
+    private func key(_ address: String) -> String { "connections.enabled.\(address)" }
 
     func allow(_ capability: String, _ on: Bool) async {
         if on {
@@ -61,13 +73,13 @@ final class Connections {
                 issue = error.localizedDescription
                 return
             }
-            enabled.insert(capability)
+            grants[current, default: []].insert(capability)
         } else {
-            enabled.remove(capability)
+            grants[current, default: []].remove(capability)
         }
-        defaults.set(enabled.sorted(), forKey: key)
+        defaults.set(enabled.sorted(), forKey: key(current))
         issue = nil
-        report()
+        report(current)
     }
 
     static func title(_ capability: String) -> String {
@@ -78,34 +90,42 @@ final class Connections {
         }
     }
 
-    private var state: ClientState {
+    private func state(_ address: String) -> ClientState {
         #if os(iOS)
         let platform = ClientStatePlatform.ios
         #else
         let platform = ClientStatePlatform.macos
         #endif
         return ClientState(platform: platform, timezone: TimeZone.current.identifier,
-                           capabilities: enabled.filter(Self.available.contains).sorted())
+                           capabilities: (grants[address] ?? []).filter(Self.available.contains).sorted())
     }
 
-    private func report() {
-        guard let client else { return }
-        let state = state
+    private func report(_ address: String) {
+        guard let client = links[address]?.client else { return }
+        let state = state(address)
         Task { try? await client.reportClient(state) }
     }
 
-    private func restart() {
-        listener?.cancel()
-        guard let client else { return }
-        listener = Task { [weak self] in
+    private func reportAll() {
+        for address in links.keys { report(address) }
+    }
+
+    private func restartAll() {
+        for address in links.keys { restart(address) }
+    }
+
+    private func restart(_ address: String) {
+        links[address]?.listener?.cancel()
+        guard let client = links[address]?.client else { return }
+        links[address]?.listener = Task { [weak self] in
             var delay = 1.0
             while !Task.isCancelled {
-                guard let state = self?.state else { return }
+                guard let state = self?.state(address) else { return }
                 // Regular check-ins let the server notice when this device drops off the network.
                 let checkIn = Task { [weak self] in
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(10))
-                        guard let state = self?.state else { return }
+                        guard let state = self?.state(address) else { return }
                         try? await client.reportClient(state)
                     }
                 }
@@ -113,7 +133,7 @@ final class Connections {
                     try await client.reportClient(state)
                     for try await request in client.clientRequests() {
                         delay = 1
-                        Task { await self?.run(request, client) }
+                        Task { await self?.run(request, client, address) }
                     }
                 } catch {}
                 checkIn.cancel()
@@ -123,10 +143,10 @@ final class Connections {
         }
     }
 
-    private func run(_ request: ClientRequest, _ client: APIClient) async {
+    private func run(_ request: ClientRequest, _ client: APIClient, _ address: String) async {
         var result = ClientResult()
         do {
-            guard enabled.contains(request.capability) else {
+            guard grants[address]?.contains(request.capability) == true else {
                 throw ConnectionError("\(Self.title(request.capability)) is turned off on this device.")
             }
             let output: Data

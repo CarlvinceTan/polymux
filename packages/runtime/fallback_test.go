@@ -356,3 +356,179 @@ func TestFallbackRejectedRequest(t *testing.T) {
 		t.Fatalf("valid request after a rejection = %+v", result)
 	}
 }
+
+func TestFallbackPolicy(t *testing.T) {
+	type call struct{ provider, model, effort string }
+	own := call{"own", "chosen", "high"}
+	cases := []struct {
+		name     string
+		fallback Fallback
+		down     []string
+		reply    string
+		tried    []call
+	}{
+		{name: "off stops on the bot's model", fallback: Fallback{Mode: FallbackOff}, tried: []call{own}},
+		{name: "auto prefers the same model elsewhere", reply: "twin chosen", tried: []call{own, {"twin", "chosen", "high"}}},
+		{name: "auto chooses the provider's preferred model", down: []string{"twin chosen"}, reply: "plain favourite",
+			tried: []call{own, {"twin", "chosen", "high"}, {"plain", "favourite", "high"}}},
+		{name: "custom follows its order and reasoning", fallback: Fallback{Mode: FallbackCustom, Models: []FallbackModel{{Provider: "plain", Model: "smaller", Reasoning: "low"}}},
+			reply: "plain smaller", tried: []call{own, {"plain", "smaller", "low"}}},
+		{name: "custom can stay on the provider", fallback: Fallback{Mode: FallbackCustom, Models: []FallbackModel{{Provider: "own", Model: "other", Reasoning: "max"}}},
+			reply: "own other", tried: []call{own, {"own", "other", "high"}}},
+		{name: "custom skips models it can't reach", fallback: Fallback{Mode: FallbackCustom, Models: []FallbackModel{{Provider: "plain", Model: "gone"}, {Provider: "twin", Model: "chosen", Reasoning: "medium"}}},
+			reply: "twin chosen", tried: []call{own, {"twin", "chosen", "medium"}}},
+		{name: "custom stops after its last model", fallback: Fallback{Mode: FallbackCustom, Models: []FallbackModel{{Provider: "twin", Model: "chosen", Reasoning: "low"}}},
+			down: []string{"twin chosen"}, tried: []call{own, {"twin", "chosen", "low"}}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			down := append([]string{"own chosen"}, test.down...)
+			var mu sync.Mutex
+			var tried []call
+			endpoint := func(name string) *httptest.Server {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var body struct {
+						Model  string `json:"model"`
+						Effort string `json:"reasoning_effort"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					mu.Lock()
+					tried = append(tried, call{name, body.Model, body.Effort})
+					mu.Unlock()
+					if slices.Contains(down, name+" "+body.Model) {
+						w.WriteHeader(429)
+						_, _ = io.WriteString(w, `{"error":{"type":"insufficient_quota"}}`)
+						return
+					}
+					sse(w, name+" "+body.Model, nil)
+				}))
+				t.Cleanup(server.Close)
+				return server
+			}
+			first := endpoint("own")
+			runtime := openDurable(t, first)
+			runtime.SetProviders([]ProviderSpec{
+				{ID: "own", BaseURL: first.URL + "/v1", Models: []string{"chosen", "other"}},
+				{ID: "plain", BaseURL: endpoint("plain").URL + "/v1", Models: []string{"smaller", "favourite"}, Preferred: "favourite"},
+				{ID: "twin", BaseURL: endpoint("twin").URL + "/v1", Models: []string{"chosen"}},
+			})
+			session, err := runtime.Open(t.Context(), Definition{Agent: Agent{ID: "assistant", Name: "Assistant", Model: "chosen", Provider: "own", Reasoning: "high", Fallback: test.fallback}, Intro: true}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = session.Close() })
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			result, err := session.Send(ctx, turn("hello"), nil)
+			if test.reply == "" && err == nil || test.reply != "" && (err != nil || result.Text != test.reply) {
+				t.Fatalf("result=%+v err=%v, want %q", result, err, test.reply)
+			}
+			if test.fallback.Mode == FallbackOff && !strings.Contains(err.Error(), usageLimit) {
+				t.Fatalf("off error %v", err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !slices.Equal(tried, test.tried) {
+				t.Fatalf("tried %v, want %v", tried, test.tried)
+			}
+		})
+	}
+}
+
+func TestFallbackNotice(t *testing.T) {
+	var limited atomic.Bool
+	limited.Store(true)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Model == "chosen" {
+			w.WriteHeader(429)
+			if limited.Load() {
+				_, _ = io.WriteString(w, `{"error":{"type":"insufficient_quota"}}`)
+			}
+			return
+		}
+		sse(w, body.Model, nil)
+	}))
+	t.Cleanup(provider.Close)
+	runtime := openDurable(t, provider)
+	runtime.SetProviders([]ProviderSpec{
+		{ID: "own", BaseURL: provider.URL + "/v1", Models: []string{"chosen"}},
+		{ID: "spare", BaseURL: provider.URL + "/v1", Models: []string{"backup"}},
+	})
+	session, err := runtime.Open(t.Context(), Definition{Agent: Agent{ID: "assistant", Name: "Assistant", Model: "chosen", Provider: "own"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	send := func(want string) {
+		t.Helper()
+		var notices []string
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		result, err := session.Send(ctx, turn("hello"), func(delta Delta) error {
+			if delta.Notice != "" {
+				notices = append(notices, delta.Notice)
+			}
+			return nil
+		})
+		if err != nil || result.Text != "backup" || !slices.Equal(notices, []string{want}) {
+			t.Fatalf("result=%+v err=%v notices=%q, want %q", result, err, notices, want)
+		}
+	}
+	// The second turn skips the cooling model but still says why.
+	send("chosen hit its usage limit, so backup replied instead.")
+	send("chosen hit its usage limit, so backup replied instead.")
+	limited.Store(false)
+	runtime.SetProviders([]ProviderSpec{
+		{ID: "own", BaseURL: provider.URL + "/v1", Models: []string{"chosen"}},
+		{ID: "spare", BaseURL: provider.URL + "/v1", Models: []string{"backup"}},
+	})
+	send("chosen is unavailable, so backup replied instead.")
+}
+
+func TestFallbackAttribution(t *testing.T) {
+	var primary, backup atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primary.Add(1)
+		w.WriteHeader(401)
+	}))
+	t.Cleanup(first.Close)
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backup.Add(1)
+		sse(w, "BACKUP", nil)
+	}))
+	t.Cleanup(second.Close)
+	runtime := openDurable(t, first)
+	runtime.SetProviders([]ProviderSpec{{ID: "first", BaseURL: first.URL, Models: []string{"chosen"}}, {ID: "second", BaseURL: second.URL, Models: []string{"chosen"}}})
+	model := runtime.catalogue.GetModel(SettingsProvider("first"), "chosen")
+	route := runtime.fallback.bind("7", Fallback{Mode: FallbackOff})
+	ask := func(text, session string) *ai.AssistantMessage {
+		return runtime.fallback.CompleteSimple(t.Context(), model, ai.Context{Messages: []ai.Message{ai.UserMessage{Content: ai.UserText(text)}}}, ai.StreamOptions{SessionID: session})
+	}
+	// Repeats reach the model despite its cooldown, so a stopped bot can try again.
+	for range 2 {
+		if result := ask("hello\n"+conversationMarker("7"), "known"); result.ErrorMessage != modelUnavailable {
+			t.Fatalf("off bot: %+v", result)
+		}
+	}
+	if result := ask("summary", "known"); result.ErrorMessage != modelUnavailable {
+		t.Fatalf("summary left an off bot's model: %+v", result)
+	}
+	if result := ask("summary", "unknown"); result.ErrorMessage != modelUnavailable {
+		t.Fatalf("unattributed request left its model: %+v", result)
+	}
+	if primary.Load() != 4 || backup.Load() != 0 {
+		t.Fatalf("primary=%d backup=%d", primary.Load(), backup.Load())
+	}
+	runtime.fallback.unbind("7", route)
+	if assistantText(ask("no session", "")) != "BACKUP" {
+		t.Fatal("a request with no session should follow auto")
+	}
+}

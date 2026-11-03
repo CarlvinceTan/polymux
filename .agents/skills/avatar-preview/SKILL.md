@@ -1,6 +1,6 @@
 ---
 name: avatar-preview
-description: Create high-resolution GIF previews of Polymux avatars using the app’s actual renderer, animations, emotions, state effects and work props. Use when showing or reviewing an avatar, checking avatar edits in motion, or comparing multiple avatars together in one GIF. Display only the resulting avatar GIF unless the user asks for explanation.
+description: Create high-resolution GIF previews of Polymux avatars using the app’s actual renderer, animations, emotions and state effects. Use when showing or reviewing an avatar, checking avatar edits in motion, or comparing multiple avatars together in one GIF. Display only the resulting avatar GIF unless the user asks for explanation.
 compatibility: Requires the Polymux checkout, macOS, Xcode and ffmpeg.
 ---
 
@@ -32,7 +32,7 @@ Use `--list` to discover the current names and behaviours rather than guessing:
 bash scripts/preview.sh --list
 ```
 
-The complete default tour covers every current mood, animation state, expression, one-off movement (spin, bounce, nod) and work prop. Timings come from the native definitions; long exports can take several minutes. Do not apply a short shell timeout. If the harness needs a background job, record its PID and log, wait for its exit, and cancel only by that PID when needed. Each mood gets a representative complete motion cycle, not every possible random variation of an indefinitely running idle animation. The JSON file beside the GIF records the exact coverage and timing without putting labels in the picture.
+The complete default tour covers every current mood, animation state, expression and one-off movement (spin, bounce, nod). Timings come from the native definitions; long exports can take several minutes. Do not apply a short shell timeout. If the harness needs a background job, record its PID and log, wait for its exit, and cancel only by that PID when needed. Each mood gets a representative complete motion cycle, not every possible random variation of an indefinitely running idle animation. The JSON file beside the GIF records the exact coverage and timing without putting labels in the picture.
 
 For a focused review only when the user asks for a subset:
 
@@ -45,7 +45,7 @@ Other controls:
 - `--size 1024` raises the resolution **per avatar**; range 256–2048.
 - `--appearance dark` uses the app’s dark appearance; default is light. Export both only when requested or needed to review appearance-sensitive edits.
 - `--color blue` selects the app palette for original geometric avatars; character colours still come from their actual design.
-- `--sections moods,states,expressions,interactions,props` chooses coverage.
+- `--sections moods,states,expressions,interactions` chooses coverage.
 - `--seconds 2` overrides each segment duration for an explicitly shortened preview. This can cut animations short; do not describe it as a complete tour.
 - `--plan` prints dimensions and the timeline without rendering.
 - `--force` explicitly replaces an earlier GIF and its manifest. Use it only for this task’s own export or when replacement is requested.
@@ -54,7 +54,7 @@ Other controls:
 
 - The bundled exporter compiles the current `AvatarCanvas.swift`, `AvatarLayers.swift`, `AvatarView.swift`, palette and options sources against AvatarKit. It samples the same `AvatarMotion.frame` and draws the app’s `AvatarLayers` through Core Animation into a Metal texture, with a deterministic clock and personality seed.
 - Keep the real rendering and natural animation speed. Do not substitute hand-drawn eyes, approximate motion, static mesh projections, new expressions or invented animation recipes.
-- Show **only the avatar(s)** and their native effects/props on the app’s background. No app windows, editor controls, captions, titles, watermarks, legends or decorative borders.
+- Show **only the avatar(s)** and their native effects on the app’s background. No app windows, editor controls, captions, titles, watermarks, legends or decorative borders.
 - Do not launch the app, steal focus, change saved avatar choices, connect to a server, or touch personal app data to make an export. The helper runs headlessly; its build and temporary frames stay under `.build/avatar-preview/` and are cleaned up.
 - Do not install missing dependencies without approval. If the native build or export fails, report the failure; never pass off an older GIF as the current result.
 

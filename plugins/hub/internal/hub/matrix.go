@@ -83,6 +83,9 @@ type bridgeState struct {
 	Protocol struct {
 		ID string `json:"id"`
 	} `json:"protocol"`
+	Channel struct {
+		Receiver string `json:"fi.mau.receiver"`
+	} `json:"channel"`
 	RoomType   string `json:"com.beeper.room_type"`
 	RoomTypeV2 string `json:"com.beeper.room_type.v2"`
 }
@@ -145,6 +148,7 @@ type matrix struct {
 	adopted bool
 	// Remote IDs of linked accounts, whose ghosts are this person too.
 	selves []string
+	spaces map[string]string
 }
 
 func newMatrix(base string, identity account, log *slog.Logger) *matrix {
@@ -342,6 +346,18 @@ func (r *room) protocol() (string, bool) {
 	return "", false
 }
 
+// receiver is the login a split portal belongs to, when the bridge says.
+func (r *room) receiver() string {
+	for _, value := range r.state {
+		if value.Type == "m.bridge" || value.Type == "uk.half-shot.bridge" {
+			if login := decode[bridgeState](value.Content).Channel.Receiver; login != "" {
+				return login
+			}
+		}
+	}
+	return ""
+}
+
 func (r *room) bridgeType() string {
 	for _, value := range r.state {
 		if value.Type != "m.bridge" && value.Type != "uk.half-shot.bridge" {
@@ -383,6 +399,18 @@ func (m *matrix) setSelves(ids []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.selves = ids
+}
+
+// setSpaces learns which login owns each filtering Space. Chats name their accounts from it,
+// so a change has to reach clients waiting for the next one.
+func (m *matrix) setSpaces(spaces map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if maps.Equal(m.spaces, spaces) {
+		return
+	}
+	m.spaces = spaces
+	m.bump()
 }
 
 // others is everyone but this account, its ghosts and bridge bots.
@@ -560,6 +588,7 @@ func (m *matrix) chats() []contract.HubChat {
 		}
 	}
 	linkSpaces(out, m.rooms)
+	linkAccounts(out, m.rooms, m.spaces)
 	slices.SortFunc(out, func(a, b contract.HubChat) int {
 		if a.At != b.At {
 			return int(b.At - a.At)
@@ -651,6 +680,7 @@ func (m *matrix) timeline(chat string, events []event) []contract.HubMessage {
 		}
 	}
 	out := []contract.HubMessage{}
+	wechat := m.chatPlatform(chat) == wechatPlatform
 	for _, item := range events {
 		content := decode[messageContent](item.Content)
 		if (item.Type != "m.room.message" && item.Type != "m.sticker") || len(item.Unsigned.RedactedBecause) > 0 ||
@@ -666,6 +696,9 @@ func (m *matrix) timeline(chat string, events []event) []contract.HubMessage {
 		message := contract.HubMessage{ID: item.ID, Chat: chat, Sender: item.Sender, SenderName: m.senderName(chat, item.Sender),
 			Mine: mine(item.Sender), Text: content.Body, At: item.At, Edited: edited, Reactions: []contract.HubReaction{}, Readers: []contract.HubMember{},
 			Kind: contract.HubMessageKindText}
+		if wechat {
+			message.Text = wechatLabel(message.Text)
+		}
 		sticker := item.Type == "m.sticker" || content.Sticker
 		switch content.Type {
 		case "m.image":
@@ -709,6 +742,21 @@ func (m *matrix) timeline(chat string, events []event) []contract.HubMessage {
 	}
 	slices.SortFunc(out, func(a, b contract.HubMessage) int { return int(a.At - b.At) })
 	return out
+}
+
+var wechatMarkup = regexp.MustCompile(`^\s*(<\?xml[^>]*>\s*)?<msg[\s>]`)
+
+// wechatLabel stands in for the raw XML an external bridge can post for a picture or sticker.
+func wechatLabel(text string) string {
+	switch {
+	case !wechatMarkup.MatchString(text):
+		return text
+	case strings.Contains(text, "<emoji"):
+		return "[sticker]"
+	case strings.Contains(text, "<img"):
+		return "[image]"
+	}
+	return "[message]"
 }
 
 // stripQuote removes the "> " fallback some senders put in front of a reply.

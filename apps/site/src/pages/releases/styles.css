@@ -7,7 +7,8 @@
 .versions-sidebar > p { margin: 0 0 var(--space-4); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
 .versions-sidebar nav { display: flex; flex-direction: column; gap: var(--space-1); }
 .versions-sidebar a { margin-inline: calc(-1 * var(--space-3)); padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-small); color: var(--muted); font-family: var(--font-mono); font-size: 13px; }
-.versions-sidebar a:hover, .versions-sidebar a.active { color: var(--ink); background: var(--soft); }
+.versions-sidebar a.active { color: var(--ink); background: var(--soft); }
+@media (hover: hover) and (pointer: fine) { .versions-sidebar a:hover { color: var(--ink); background: var(--soft); } }
 .versions-sidebar a.active { border-color: var(--focus); }
 .release-column { min-width: 0; padding: var(--space-8) 0 72px; }
 .release-month { margin: 0 0 var(--space-4); color: var(--muted); font-family: var(--font-mono); font-size: 13px; }
@@ -22,7 +23,8 @@
 .release-title { margin: 0 0 var(--space); padding-bottom: var(--space); border-bottom: 1px solid var(--line); font-size: 28px; line-height: 1.2; letter-spacing: -.03em; }
 .release-platforms { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space); }
 .release-platforms button { min-height: 36px; padding: 0 var(--space-3); border: 1px solid var(--focus); border-radius: var(--radius-small); background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; }
-.release-platforms button:hover, .release-platforms button.active { color: var(--ink); background: var(--soft); }
+.release-platforms button.active { color: var(--ink); background: var(--soft); }
+@media (hover: hover) and (pointer: fine) { .release-platforms button:hover { color: var(--ink); background: var(--soft); } }
 .release-body h2 { font-size: 22px; }
 .release-body h3 { font-size: 16px; }
 .release-downloads { padding: var(--space-5); border-bottom: 1px solid var(--line); }
@@ -31,7 +33,7 @@
 .platform-download-heading { display: flex; align-items: center; gap: var(--space-2); min-height: 52px; padding: var(--space-3); }
 .platform-download-option { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .platform-download-option > span:last-child { display: inline-flex; align-items: center; gap: var(--space-1); }
-.platform-download-option:hover { color: var(--ink); background: var(--soft); }
+@media (hover: hover) and (pointer: fine) { .platform-download-option:hover { color: var(--ink); background: var(--soft); } }
 .download-note { color: var(--muted); font-size: 12px; }
 .download-note a { text-decoration: underline; }
 

@@ -182,6 +182,11 @@ public final class ActivityStore {
                      listening: listening.contains(key(conversationID, agentID)), introduced: introduced)
     }
 
+    public func notice(for message: Message) -> String? {
+        guard message.role == MessageRole.assistant else { return nil }
+        return message.runID.flatMap { snapshots[$0]?.notice }
+    }
+
     public func issue(for message: Message) -> WireError? {
         guard message.role == MessageRole.assistant, message.status == MessageStatus.error else { return nil }
         let run = message.runID.flatMap { snapshots[$0] }

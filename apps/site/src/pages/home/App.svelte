@@ -14,11 +14,16 @@
   ];
   let downloads = $state.raw<ReleaseDownloads | null>(null);
   const client = $derived(downloads?.platforms.macos ?? null);
+  let nightly = $state.raw<{version: string; macos: {url: string; size: number}} | null>(null);
 
   onMount(async () => {
     try {
       const response = await fetch('/api/downloads');
       if (response.ok) downloads = await response.json() as ReleaseDownloads;
+    } catch {}
+    try {
+      const response = await fetch('/api/nightly');
+      if (response.ok) nightly = await response.json();
     } catch {}
   });
 </script>
@@ -98,6 +103,9 @@
       {/each}
     </div>
     <p class="install-note">Commands run from a source checkout. <a href="/docs/installation/#requirements">Requirements</a>: macOS 27, Go 1.27.1; Xcode 27 and signing for the client.</p>
+    {#if nightly}
+      <p class="together">Want the latest? <a href={nightly.macos.url}>Download Nightly {nightly.version} <span aria-hidden="true">↓</span></a> · unstable, rebuilt from <code>dev</code> · {formatFileSize(nightly.macos.size)}</p>
+    {/if}
     <p class="together">Using one Mac? <a href="/docs/installation/#one-mac">Install both together <span aria-hidden="true">↗</span></a></p>
   </section>
 </main>

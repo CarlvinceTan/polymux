@@ -10,7 +10,6 @@ struct NewBotView: View {
     @State private var name = ""
     @State private var options = Self.randomOptions()
     @State private var creating = false
-    @FocusState private var focused: Bool
 
     var body: some View {
         PanelView("New Bot", enabled: !creating, onClose: cancel, width: 460) {
@@ -19,17 +18,10 @@ struct NewBotView: View {
                     VStack(spacing: 12) {
                         AvatarView(options: options, playing: creating, mood: creating ? .spawning : .idle)
                             .frame(width: 80, height: 80)
-                        TextField("Name (optional)", text: $name, prompt: Text("Name (optional)").foregroundStyle(.muted))
-                            .textFieldStyle(.roundedBorder).accessibilityLabel("Name")
-                            .focused($focused).frame(maxWidth: 260)
-                            #if os(macOS)
-                            .background { SearchFocus(prompt: "Name (optional)", autofocus: true).frame(width: 0, height: 0) }
-                            #endif
+                        InlineText(text: $name, prompt: "Name", font: .title2.weight(.semibold),
+                                   placeholder: "Name (optional)", autofocus: true)
                     }
                     ShapeGrid(options: $options, labels: false, columns: 5, size: 40, colorSize: 28, rowSpacing: 4)
-                    #if os(macOS)
-                    model
-                    #endif
                 }
                 .padding(.horizontal, 24)
             }
@@ -40,10 +32,6 @@ struct NewBotView: View {
                     .font(.caption).foregroundStyle(.muted).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            #if os(iOS)
-            // The phone sheet is too short to fit it below the avatar choices.
-            if message == nil { model.padding(.leading, 8) }
-            #endif
             Button { Task { await create() } } label: {
                 if creating { ProgressView().controlSize(.small) }
                 else { Text("Create") }
@@ -53,22 +41,9 @@ struct NewBotView: View {
         }
         .interactiveDismissDisabled(creating)
         .panelDismiss(enabled: !creating, onClose: cancel)
-        #if os(macOS)
-        // On a phone the keyboard would cover the avatar choices below the name.
-        .task { focused = true }
-        #endif
         .keepDraft(Self.draftKey, value: Binding(get: { BotDraft(name: name, options: options) },
                                                  set: { name = $0.name; options = $0.options }),
                    cache: session.sidebar.cacheActor)
-    }
-
-    private var model: some View {
-        LabeledContent("Model") {
-            Text(session.settings.value?.defaultModel.isEmpty == false
-                 ? ModelName(model: session.settings.value?.defaultModel ?? "").title : "Server default")
-                .foregroundStyle(.muted).lineLimit(1)
-        }
-        .font(.subheadline)
     }
 
     private static let draftKey = "draft/new-bot"

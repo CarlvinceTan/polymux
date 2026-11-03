@@ -72,6 +72,20 @@ for (const engine of [webkit, chromium]) {
         }
       });
 
+      await context.test('touch screens avoid sticky hover and search input zoom', async () => {
+        for (const route of routes) {
+          await page.goto(origin + route.path);
+          const ungated = await page.evaluate(() => [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules])
+            .filter((rule) => rule.selectorText?.includes(':hover')).map((rule) => rule.selectorText));
+          assert.deepEqual(ungated, [], route.path);
+        }
+        await page.goto(origin + '/docs/');
+        const size = await page.getByRole('searchbox', {name: 'Search documentation'}).evaluate((element) => ({
+          coarse: matchMedia('(pointer: coarse)').matches, font: getComputedStyle(element).fontSize,
+        }));
+        if (size.coarse) assert.equal(size.font, '16px');
+      });
+
       await context.test('navigation stays reachable on short screens and closes across the desktop breakpoint', async () => {
         await page.goto(origin);
         for (const viewport of viewports.slice(0, 5)) {

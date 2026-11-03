@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -230,6 +231,46 @@ func drainRestart(t *testing.T, group bool) {
 	case id := <-factory.entered:
 		t.Fatalf("unexpected replay: %s", id)
 	default:
+	}
+}
+
+func TestStalledSealReleases(t *testing.T) {
+	api, endpoint := startTest(t, &testFactory{})
+	path := filepath.Join(api.config.DataDir, "maintenance")
+	const id = "stalled-update-identity"
+	if err := os.WriteFile(path, []byte(id), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.loadDrain(); err != nil {
+		t.Fatal(err)
+	}
+	status := func() string {
+		response, err := http.Get(endpoint.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var health struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&health); err != nil {
+			t.Fatal(err)
+		}
+		return health.Status
+	}
+	if got := status(); got != "updating" {
+		t.Fatalf("sealed health %q", got)
+	}
+	api.releaseSeal("another-update-identity")
+	if got := status(); got != "updating" {
+		t.Fatalf("another update released the seal: %q", got)
+	}
+	api.releaseSeal(id)
+	if got := status(); got != "ok" {
+		t.Fatalf("released health %q", got)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("maintenance file: %v", err)
 	}
 }
 

@@ -37,6 +37,8 @@ private final class SoundProbe: LiveSound {
     var stopped = 0
     var muted = false
     var interruptions = 0
+    var tones: [CallTone] = []
+    var onInterruption: ((Bool) -> Void)?
     var trackEvents = false
     let processed = AsyncStream<MicEvent>.makeStream()
     private var iterator: AsyncThrowingStream<MicEvent, Error>.Iterator?
@@ -66,6 +68,8 @@ private final class SoundProbe: LiveSound {
     func interrupt() { playing = false; interruptions += 1 }
     func stop() { stopped += 1; interrupt(); events?.finish(); events = nil }
     func drain() { playing = false; drained?() }
+    func tone(_ tone: CallTone) { tones.append(tone) }
+    func onInterruption(_ handler: @escaping (Bool) -> Void) { onInterruption = handler }
 }
 
 @MainActor
@@ -73,7 +77,6 @@ private final class ReplyProbe: VoiceReply {
     var texts: [String] = []
     var pending: AsyncThrowingStream<VoiceFragment, Error>.Continuation?
     var stopped = 0
-    func preview(_ text: String) {}
     func stream(_ text: String) -> AsyncThrowingStream<VoiceFragment, Error> {
         texts.append(text)
         let stream = AsyncThrowingStream<VoiceFragment, Error>.makeStream()
@@ -266,14 +269,10 @@ private func call(_ id: String = "one", name: String = "ask_agent") -> LiveCall 
 }
 
 @Test @MainActor func voicePreferencesComeFromServer() throws {
-    var settings = Settings(voiceMode: "pipeline", liveProvider: "gemini", liveModel: "server-live",
+    var settings = Settings(liveProvider: "gemini", liveModel: "server-live",
                             liveVoice: "Kore",
                             voicePrompt: "Represent {target}.", speechKeys: ["gemini"])
-    #expect(VoiceConfig(settings: settings).mode == .pipeline)
-    #expect(VoiceConfig(settings: settings).model.isEmpty)
-    settings.voiceMode = "live"
     let config = VoiceConfig(settings: settings)
-    #expect(config.mode == .live)
     #expect(config.model == "server-live")
     #expect(config.voice == "Kore")
     #expect(config.provider == "gemini")
@@ -282,4 +281,83 @@ private func call(_ id: String = "one", name: String = "ask_agent") -> LiveCall 
     #expect(config.prompt.hasSuffix("Always speak \(VoiceConfig.language(""))."))
     settings.voiceLanguage = "es"
     #expect(VoiceConfig(settings: settings).prompt.hasSuffix("Always speak Spanish."))
+}
+
+@MainActor
+private func twoProviders() -> (LiveStore, ProviderProbe, ProviderProbe) {
+    let first = ProviderProbe(), second = ProviderProbe()
+    let store = LiveStore(attempts: [
+        LiveAttempt(options: .init(model: "one", voice: "a", instructions: "Test"), makeProvider: { first }, key: { "" }),
+        LiveAttempt(options: .init(model: "two", voice: "b", instructions: "Test"), makeProvider: { second }, key: { "" }),
+    ], reply: ReplyProbe(), sound: SoundProbe())
+    return (store, first, second)
+}
+
+@Test @MainActor func liveFailedSetupMovesToFallback() async {
+    let (store, first, second) = twoProviders()
+    first.failStart = true
+    await store.start()
+    #expect(store.phase == .listening)
+    #expect(second.options?.model == "two")
+    await store.stop()
+}
+
+@Test @MainActor func liveDroppedSessionMovesToFallback() async {
+    let (store, first, second) = twoProviders()
+    await store.start()
+    first.events?.finish(throwing: LiveFailure.connection)
+    await settle { second.options != nil && store.phase == .listening }
+    #expect(second.options?.voice == "b")
+    await store.stop()
+}
+
+@Test @MainActor func liveFallbackFollowsSettingsMode() {
+    var settings = Settings(liveProvider: "gemini", liveModel: "g", liveVoice: "Aoede",
+                            voicePrompt: "Speak.", speechKeys: ["gemini", "openai"])
+    #expect(VoiceConfig(settings: settings).steps.map(\.provider) == ["gemini", "openai"])
+    settings.liveFallback = LiveFallback(mode: LiveFallbackMode.off)
+    #expect(VoiceConfig(settings: settings).steps.count == 1)
+    let custom = LiveStep(provider: "openai", model: "gpt-realtime-mini", voice: "cedar")
+    settings.liveFallback = LiveFallback(mode: LiveFallbackMode.custom, models: [custom, LiveStep(provider: "gemini", model: "x", voice: "Kore")])
+    #expect(VoiceConfig(settings: settings).steps.dropFirst().first == custom)
+    settings.speechKeys = ["gemini"]
+    #expect(VoiceConfig(settings: settings).steps.map(\.provider) == ["gemini", "gemini"])
+}
+
+@Test @MainActor func callChimesAndTimesFromConnection() async {
+    let rig = LiveRig()
+    #expect(rig.store.connected == nil)
+    await rig.store.start()
+    #expect(rig.store.connected != nil)
+    #expect(rig.sound.tones == [.connect])
+    await rig.store.stop()
+    #expect(rig.sound.tones == [.connect, .end])
+}
+
+@Test @MainActor func callHoldsWhileSystemInterrupts() async {
+    let rig = LiveRig()
+    await rig.store.start()
+    rig.sound.onInterruption?(true)
+    #expect(rig.store.phase == .interrupted)
+    rig.sound.onInterruption?(false)
+    #expect(rig.store.phase == .listening)
+    await rig.store.stop()
+}
+
+@Test @MainActor func callCountsAgentWork() async {
+    let rig = LiveRig()
+    await rig.store.start()
+    #expect(rig.store.working == 0)
+    rig.provider.events?.yield(.calls([call()]))
+    await settle { rig.store.working == 1 }
+    rig.reply.pending?.yield(.init(text: "Done"))
+    rig.reply.pending?.finish()
+    await settle { rig.store.working == 0 }
+    await rig.store.stop()
+}
+
+@Test func callToneIsPlayableWav() throws {
+    let data = CallTone.connect.wav
+    #expect(String(decoding: data.prefix(4), as: UTF8.self) == "RIFF")
+    #expect(data.count == 44 + 2 * 2 * Int(44_100 * 0.11))
 }

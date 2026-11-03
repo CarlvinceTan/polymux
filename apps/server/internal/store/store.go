@@ -113,6 +113,15 @@ PRAGMA user_version=2;`)
 	if err := s.migrateSidebar(ctx); err != nil {
 		return err
 	}
+	if err := s.migrateCleanups(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateTaskThreads(ctx); err != nil {
+		return err
+	}
+	if err := s.migratePlugins(ctx); err != nil {
+		return err
+	}
 	// Background loops look these up every few seconds.
 	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS messages_pending ON messages(status) WHERE indexing_state='pending';
 CREATE INDEX IF NOT EXISTS messages_failed ON messages(id) WHERE indexing_state='error';
@@ -237,44 +246,53 @@ func (s *Store) Deleted(ctx context.Context, id string) (bool, error) {
 	return count != 0, err
 }
 
-func (s *Store) DeleteAgent(ctx context.Context, id string) ([]string, bool, error) {
+func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, false, err
+		return err
 	}
 	defer tx.Rollback()
 	before, err := sidebarSnapshot(ctx, tx)
 	if err != nil {
-		return nil, false, err
-	}
-	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM agents WHERE id=?`, id).Scan(&exists); err != nil {
-		return nil, false, err
+		return err
 	}
 	if _, err := s.closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE (source_agent=? OR target_agent=?) AND json_extract(data,'$.status')='queued'`, id, id); err != nil {
-		return nil, false, err
+		return err
+	}
+	for _, query := range []string{
+		`INSERT OR IGNORE INTO cleanups(kind,target) SELECT 'agent',id FROM agents WHERE id=?`,
+		`INSERT OR IGNORE INTO cleanups(kind,target) SELECT 'transcript',path FROM sessions WHERE agent_id=?`,
+		`INSERT OR IGNORE INTO cleanups(kind,target) SELECT 'transcript',path FROM group_sessions WHERE agent_id=?`,
+		`INSERT OR IGNORE INTO cleanups(kind,target) SELECT 'member',thread_id||'/'||agent_id FROM thread_members WHERE agent_id=? AND thread_id<>agent_id`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, id); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM group_sessions WHERE agent_id=?`, id); err != nil {
-		return nil, false, err
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM thread_members WHERE agent_id=?`, id); err != nil {
-		return nil, false, err
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO cleanups(kind,target) SELECT 'draft',id FROM threads t WHERE id<>? AND NOT EXISTS(SELECT 1 FROM thread_members WHERE thread_id=t.id)`, id); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE threads SET agent_id=(SELECT agent_id FROM thread_members WHERE thread_id=threads.id ORDER BY position LIMIT 1) WHERE id<>agent_id AND agent_id=? AND EXISTS(SELECT 1 FROM thread_members WHERE thread_id=threads.id)`, id); err != nil {
-		return nil, false, err
+		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.path FROM attachments a
 WHERE EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.thread_id IN(SELECT t.id FROM threads t WHERE t.id=? OR NOT EXISTS(SELECT 1 FROM thread_members WHERE thread_id=t.id)) AND json_extract(p.value,'$.attachment.id')=a.id)
 AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.thread_id NOT IN(SELECT t.id FROM threads t WHERE t.id=? OR NOT EXISTS(SELECT 1 FROM thread_members WHERE thread_id=t.id)) AND json_extract(p.value,'$.attachment.id')=a.id)`, id, id)
 	if err != nil {
-		return nil, false, err
+		return err
 	}
-	var files, attachments []string
+	var attachments, files []string
 	for rows.Next() {
 		var attachment, path string
 		if err := rows.Scan(&attachment, &path); err != nil {
 			rows.Close()
-			return nil, false, err
+			return err
 		}
 		attachments = append(attachments, attachment)
 		files = append(files, path)
@@ -282,10 +300,10 @@ AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.t
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, false, err
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO deleted_agents(id,deleted_at) SELECT id,? FROM agents WHERE id=?`, Now(), id); err != nil {
-		return nil, false, err
+		return err
 	}
 	queries := []string{
 		`DELETE FROM runs WHERE thread_id IN(SELECT t.id FROM threads t WHERE t.id=? OR NOT EXISTS(SELECT 1 FROM thread_members WHERE thread_id=t.id))`,
@@ -306,15 +324,20 @@ AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.t
 			args = append(args, id)
 		}
 		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-			return nil, false, err
+			return err
 		}
 	}
 	for _, attachment := range attachments {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM attachments WHERE id=?`, attachment); err != nil {
-			return nil, false, err
+			return err
 		}
 	}
-	return files, exists != 0, s.sidebarCommit(ctx, tx, before, "Deleted agent", nil, nil)
+	for _, file := range files {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO cleanups(kind,target) VALUES('attachment',?)`, file); err != nil {
+			return err
+		}
+	}
+	return s.sidebarCommit(ctx, tx, before, "Deleted agent", nil, nil)
 }
 
 func (s *Store) Definitions(ctx context.Context) ([]json.RawMessage, error) {
@@ -372,9 +395,13 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	if count == 0 {
 		return a, sql.ErrNoRows
 	}
+	fallback, err := json.Marshal(a.Fallback)
+	if err != nil {
+		return a, err
+	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?) WHERE id=?`,
-		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, a.ID,
+		`UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?,'$.fallback',json(?)) WHERE id=?`,
+		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, string(fallback), a.ID,
 	); err != nil {
 		return a, err
 	}
@@ -533,7 +560,12 @@ func (s *Store) Threads(ctx context.Context) ([]contract.Thread, error) {
 	if err != nil {
 		return nil, err
 	}
+	tasks, err := s.taskInfos(ctx, "")
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
+		out[i].Task = tasks[out[i].ID]
 		out[i].Runs = runs[out[i].ID]
 		if out[i].Runs == nil {
 			out[i].Runs = []contract.Run{}
@@ -558,6 +590,11 @@ func (s *Store) Thread(ctx context.Context, id string) (contract.Thread, error) 
 	t, err := threadScan(s.DB.QueryRowContext(ctx, threadSelect+` WHERE t.id=?`, id))
 	if err == nil {
 		t.Runs, err = s.Runs(ctx, id)
+	}
+	if err == nil {
+		var tasks map[string]*contract.TaskInfo
+		tasks, err = s.taskInfos(ctx, id)
+		t.Task = tasks[id]
 	}
 	return t, err
 }
@@ -931,7 +968,8 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 	var parent *string
 	if len(targets) == 1 && !input.QueueOnly {
 		var id string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE thread_id=? AND agent_id=? AND status='running' AND json_extract(data,'$.trigger')!='created' ORDER BY rowid DESC LIMIT 1`, thread, targets[0]).Scan(&id)
+		// A child reports to its parent, so it can't answer the user.
+		err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE thread_id=? AND agent_id=? AND status='running' AND json_extract(data,'$.trigger') NOT IN('created','child') ORDER BY rowid DESC LIMIT 1`, thread, targets[0]).Scan(&id)
 		if err == nil {
 			parent = &id
 		} else if !errors.Is(err, sql.ErrNoRows) {

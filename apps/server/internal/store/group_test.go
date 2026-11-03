@@ -111,7 +111,7 @@ func TestGroupValidation(t *testing.T) {
 	if _, _, err := s.Send(t.Context(), group.ID, contract.SendRequest{ID: request.ID, Text: request.Text, Mentions: []string{"a"}}, m.Parts); !errors.Is(err, ErrConflict) {
 		t.Fatalf("mention change reused an existing send identity: %v", err)
 	}
-	if _, _, err := s.DeleteAgent(t.Context(), "a"); err != nil {
+	if err := s.DeleteAgent(t.Context(), "a"); err != nil {
 		t.Fatal(err)
 	}
 	remaining, err := s.Thread(t.Context(), group.ID)
@@ -121,7 +121,7 @@ func TestGroupValidation(t *testing.T) {
 	if loaded, err := s.Message(t.Context(), m.ID); err != nil || loaded.ThreadID != group.ID {
 		t.Fatalf("remaining group history was deleted %+v %v", loaded, err)
 	}
-	if _, _, err := s.DeleteAgent(t.Context(), "b"); err != nil {
+	if err := s.DeleteAgent(t.Context(), "b"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Thread(t.Context(), group.ID); !errors.Is(err, sql.ErrNoRows) {

@@ -80,11 +80,13 @@ func (s *Server) turnTools(a *actor, work store.Work, state *turnState) []agent.
 		}
 	}
 	if work.Trigger != contract.RunTriggerChild && a.threadID == "" {
-		tools = append(tools, &integrationTool{server: s})
+		tools = append(tools, &integrationTool{server: s}, &pluginInstallTool{server: s}, &taskThreadTool{server: s, action: "create"})
 		state.external["manage_integrations"] = true
+		state.external["install_plugin"] = true
 	}
 	if work.Trigger != contract.RunTriggerChild {
-		tools = append(tools, &workTool{store: s.Store}, &taskTool{server: s}, &historyTool{store: s.Store})
+		tools = append(tools, &workTool{store: s.Store}, &taskTool{server: s}, &historyTool{store: s.Store},
+			&taskThreadTool{server: s, action: "read"}, &taskThreadTool{server: s, action: "update"})
 		for _, action := range []string{"save", "recall", "forget"} {
 			tools = append(tools, &memoryTool{store: s.Store, provider: s.memory, action: action})
 		}
@@ -150,6 +152,28 @@ func fileActivity(delta agentruntime.Delta) (contract.Activity, bool, error) {
 	return payload, err == nil, err
 }
 
+// isolatedTurn runs apart from the agent's chat session.
+func isolatedTurn(trigger string) bool {
+	return trigger == contract.RunTriggerChild || automatic(trigger) && trigger != contract.RunTriggerFollowUp
+}
+
+// splitBeats gives each paragraph of a reply its own bubble, leaving code blocks whole.
+func splitBeats(parts []contract.Part) []contract.Part {
+	var beats []contract.Part
+	for _, part := range parts {
+		if part.Kind != contract.PartKindText || part.Text == nil || strings.Contains(*part.Text, "```") {
+			beats = append(beats, part)
+			continue
+		}
+		for _, beat := range strings.Split(*part.Text, "\n\n") {
+			if beat = strings.TrimSpace(beat); beat != "" {
+				beats = append(beats, contract.Part{Kind: contract.PartKindText, Text: &beat})
+			}
+		}
+	}
+	return beats
+}
+
 // setText replaces the message's first text part, or adds one.
 func setText(m *contract.Message, text *string) {
 	for n := range m.Parts {
@@ -193,6 +217,12 @@ func failure(err error, interrupted bool, attempt int64, background bool) (code,
 	status, summary = contract.RunStatusFailed, "Reply failed"
 	if strings.Contains(err.Error(), "no providers are available right now") {
 		code, message, summary = "providers_unavailable", "No providers are available right now.", "Providers unavailable"
+	}
+	if strings.Contains(err.Error(), "this bot's model is unavailable right now") {
+		code, message, summary = "model_unavailable", "This bot’s model is unavailable right now.", "Model unavailable"
+	}
+	if strings.Contains(err.Error(), "this bot's model reached its usage limit") {
+		code, message, summary = "usage_limit", "This bot’s model reached its usage limit.", "Usage limit reached"
 	}
 	if errors.Is(err, agentruntime.ErrProviderMissing) {
 		code, message, summary = "provider_missing", "This bot’s provider is no longer configured. Choose a model in its profile.", "Provider unavailable"

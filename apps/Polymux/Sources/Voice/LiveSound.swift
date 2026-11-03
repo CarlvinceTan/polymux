@@ -16,10 +16,15 @@ protocol LiveSound: AnyObject {
     func play(_ chunk: LivePCM) throws
     func interrupt()
     func stop()
+    /// Reports when the system takes the audio away (true) and hands it back (false).
+    func onInterruption(_ handler: @escaping (Bool) -> Void)
+    func tone(_ tone: CallTone)
 }
 
 extension LiveSound {
     func setSilenced(_ silenced: Bool) {}
+    func onInterruption(_ handler: @escaping (Bool) -> Void) {}
+    func tone(_ tone: CallTone) {}
 }
 
 @MainActor
@@ -32,6 +37,16 @@ final class NativeSound: LiveSound {
     private var buffers = 0
     private var duration: Double = 0
     private var token = UUID()
+    private var interruption: ((Bool) -> Void)?
+    private var observers: [NSObjectProtocol] = []
+    private var chime: AVAudioPlayer?
+
+    func onInterruption(_ handler: @escaping (Bool) -> Void) { interruption = handler }
+
+    func tone(_ tone: CallTone) {
+        chime = try? AVAudioPlayer(data: tone.wav)
+        chime?.play()
+    }
 
     func start(rate: Int) async throws -> AsyncThrowingStream<MicEvent, Error> {
         stop()
@@ -42,7 +57,36 @@ final class NativeSound: LiveSound {
         let capture = LiveCapture(rate: rate, events: stream.continuation)
         do { try audio.start(capture: capture) }
         catch { stop(); throw error }
+        watch()
         return stream.stream
+    }
+
+    /// A phone call or Siri pauses the session; a route change (headphones, Bluetooth) stops the engine.
+    private func watch() {
+        let center = NotificationCenter.default
+        #if os(iOS)
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            let kind = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            MainActor.assumeIsolated {
+                if kind == AVAudioSession.InterruptionType.began.rawValue {
+                    self?.interruption?(true)
+                } else if options.map(AVAudioSession.InterruptionOptions.init(rawValue:))?.contains(.shouldResume) == true {
+                    self?.resume()
+                }
+            }
+        })
+        #endif
+        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: audio.engine, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.resume() }
+        })
+    }
+
+    private func resume() {
+        do {
+            try audio.resume()
+            interruption?(false)
+        } catch { events?.finish(throwing: VoiceFailure.audio) }
     }
 
     func setSilenced(_ silenced: Bool) { audio.setSilenced(silenced) }
@@ -92,6 +136,8 @@ final class NativeSound: LiveSound {
     }
 
     func stop() {
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
         interrupt()
         audio.stop()
         events?.finish()

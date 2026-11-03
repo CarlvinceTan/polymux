@@ -42,6 +42,16 @@ import Testing
         }
     }
 
+    @Test func thinkingQuicklyDropsCharacterDetail() {
+        let engine = BotEngine(shape: ShapeID.cupcake.radii)
+        engine.character = ShapeID.cupcake.character
+        engine.solid = ShapeID.cupcake.solid
+        engine.setMood(.thinking)
+        _ = engine.sample(0)
+        #expect(!engine.sample(0).parts.isEmpty)
+        #expect(engine.sample(0.1).parts.isEmpty, "A ghost of the avatar lingers while it becomes dots")
+    }
+
     @Test func thinkingMoodMorphsBackToTheStreamingFace() {
         let engine = BotEngine(shape: ShapeID.hexagon.radii)
         engine.solid = ShapeID.hexagon.solid

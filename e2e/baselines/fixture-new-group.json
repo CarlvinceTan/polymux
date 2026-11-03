@@ -1,0 +1,596 @@
+{
+  "start": "7fd494a62a0bd2f3",
+  "scene": "nothing selected",
+  "state": {
+    "w": 1920,
+    "h": 960,
+    "rows": [
+      "AXButton|Dismiss panel|0,0,1920,960",
+      "AXButton|Select Approval|666,320,588,60|scrolled",
+      "AXButton|Select Aria|666,381,588,60|scrolled",
+      "AXButton|Select Chief|666,442,588,60|scrolled",
+      "AXButton|Select Fern|666,503,588,60|scrolled",
+      "AXButton|Select Milo|666,564,588,60|scrolled",
+      "AXButton|Select Nova|666,625,588,60|scrolled",
+      "AXHeading|New Group Chat|907,210,106,16",
+      "AXButton|Close New Group Chat|1218,200,36,36",
+      "AXStaticText|To:|680,266,19,16",
+      "AXTextField|To|707,266,533,16|scrolled",
+      "AXStaticText|Choose at least two bots.|666,740,123,13",
+      "AXButton|Create|1177,728,77,36",
+      "AXButton|Search|191,11,38,31",
+      "AXButton|New chat|227,9,38,34",
+      "AXButton|Settings|271,7,38,38"
+    ]
+  },
+  "steps": [
+    {
+      "action": {
+        "ID": "press:AXButton|Dismiss panel#0",
+        "Kind": "press",
+        "Label": "press Button \"Dismiss panel\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Dismiss panel#0",
+        "Text": "",
+        "Group": "controls"
+      },
+      "signature": "03a034a432274301",
+      "digest": "fb5d475816cb6681",
+      "scene": "grp-empty, Nova, Fern",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit chat|990,8,260,70",
+          "AXStaticText|No messages yet.|1066,487,108,16",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1484,32",
+          "AXButton|Start dictation|1874,914,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||1080,8,80,36",
+          "AXButton|Speech conversation|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "press:AXButton|grp-trip, Chief, Aria, Milo#0",
+        "Kind": "press",
+        "Label": "press Button \"grp-trip, Chief, Aria, Milo\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|grp-trip, Chief, Aria, Milo#0",
+        "Text": "",
+        "Group": "list"
+      },
+      "signature": "4c1973e3cae7d2b9",
+      "digest": "f16272665c066e0d",
+      "scene": "grp-trip, Chief, Aria, Milo",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit chat|990,8,260,70",
+          "AXStaticText|No messages yet.|1066,487,108,16",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1484,32",
+          "AXButton|Start dictation|1874,914,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||1080,8,80,36",
+          "AXButton|Speech conversation|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "scroll:AXScrollArea|#1",
+        "Kind": "scroll",
+        "Label": "scroll unnamed ScrollArea",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXScrollArea|#1",
+        "Text": "",
+        "Group": "scroll"
+      },
+      "signature": "4c1973e3cae7d2b9",
+      "digest": "f16272665c066e0d",
+      "scene": "grp-trip, Chief, Aria, Milo",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit chat|990,8,260,70",
+          "AXStaticText|No messages yet.|1066,487,108,16",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1484,32",
+          "AXButton|Start dictation|1874,914,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||1080,8,80,36",
+          "AXButton|Speech conversation|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "fill:0:AXTextField|Message#0",
+        "Kind": "fill",
+        "Label": "fill TextField \"Message\" with a long double-barrelled name",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXTextField|Message#0",
+        "Text": "Aleksandra Wiśniewska-Kowalczyk-Brzęczyszczykiewicz",
+        "Group": "fill"
+      },
+      "signature": "1318df49a9652404",
+      "digest": "02b6de44b1831f6a",
+      "scene": "grp-trip, Chief, Aria, Milo",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit chat|990,8,260,70",
+          "AXStaticText|No messages yet.|1066,487,108,16",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1484,32",
+          "AXButton|Send message|1874,914,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||1080,8,80,36",
+          "AXButton|Speech conversation|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "resize:640x480",
+        "Kind": "resize",
+        "Label": "resize the window to 640x480 to test its layout",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          640,
+          480
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "resize"
+      },
+      "signature": "6181527e1171bde4",
+      "digest": "1627c435f420f97f",
+      "scene": "grp-trip, Chief, Aria, Milo",
+      "state": {
+        "w": 780,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit chat|420,8,260,70",
+          "AXStaticText|No messages yet.|496,386,108,16",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,712,344,46",
+          "AXButton|Send message|734,726,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||510,8,80,36",
+          "AXButton|Speech conversation|736,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "key:ESC",
+        "Kind": "key",
+        "Label": "press Escape to dismiss whatever is open",
+        "Key": "ESC",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "key"
+      },
+      "signature": "6181527e1171bde4",
+      "digest": "1627c435f420f97f",
+      "scene": "grp-trip, Chief, Aria, Milo",
+      "state": {
+        "w": 780,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit chat|420,8,260,70",
+          "AXStaticText|No messages yet.|496,386,108,16",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,712,344,46",
+          "AXButton|Send message|734,726,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||510,8,80,36",
+          "AXButton|Speech conversation|736,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "idle",
+        "Kind": "idle",
+        "Label": "leave it alone and watch for repainting",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "idle"
+      },
+      "signature": "6181527e1171bde4",
+      "digest": "1627c435f420f97f",
+      "scene": "grp-trip, Chief, Aria, Milo",
+      "state": {
+        "w": 780,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit chat|420,8,260,70",
+          "AXStaticText|No messages yet.|496,386,108,16",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,712,344,46",
+          "AXButton|Send message|734,726,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||510,8,80,36",
+          "AXButton|Speech conversation|736,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "press:AXButton|Approval, , #0",
+        "Kind": "press",
+        "Label": "press Button \"Approval, , \"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Approval, , #0",
+        "Text": "",
+        "Group": "list"
+      },
+      "signature": "056498868558757e",
+      "digest": "0572e95f58179033",
+      "scene": "Approval, , ",
+      "state": {
+        "w": 780,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit Approval’s profile|420,8,260,70",
+          "AXStaticText|No messages yet.|496,393,108,16",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,344,32",
+          "AXButton|Start dictation|734,726,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||510,8,80,36",
+          "AXButton|Speech conversation|736,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "press:AXButton|Edit Approval’s profile#0",
+        "Kind": "press",
+        "Label": "press Button \"Edit Approval’s profile\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Edit Approval’s profile#0",
+        "Text": "",
+        "Group": "controls"
+      },
+      "signature": "ab219bbcc19ca6fa",
+      "digest": "0e7fcfdd0e437e89",
+      "scene": "Approval, , ",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit Approval’s profile|402,8,260,70",
+          "AXStaticText|No messages yet.|478,393,108,16",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|879,164,91,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXImage|Couldn’t load|917,409,14,13|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "fill:6:AXTextField|Name#0",
+        "Kind": "fill",
+        "Label": "fill TextField \"Name\" with a pasted block of lines",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXTextField|Name#0",
+        "Text": "Notes from today: - ship the release - review the rollout plan   - call back  ",
+        "Group": "fill"
+      },
+      "signature": "cea6db6afd92e54d",
+      "digest": "0e7fcfdd0e437e89",
+      "scene": "Approval, , ",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|grp-empty, Nova, Fern|18,84,284,60|scrolled",
+          "AXButton|grp-trip, Chief, Aria, Milo|18,144,284,60|scrolled",
+          "AXButton|t-activity, Chief, Milo|18,204,284,60|scrolled",
+          "AXButton|Approval, ,|18,264,284,60|scrolled",
+          "AXButton|Aria, ,|18,324,284,60|scrolled",
+          "AXButton|Chief, ,|18,384,284,60|scrolled",
+          "AXButton|Fern, ,|18,444,284,60|scrolled",
+          "AXButton|t-long, Chief, Aria|18,504,284,60|scrolled",
+          "AXButton|t-media, Aria, Milo|18,564,284,60|scrolled",
+          "AXButton|Milo, ,|18,624,284,60|scrolled",
+          "AXButton|Nova, ,|18,684,284,60|scrolled",
+          "AXButton|t-stream, Nova, Fern|18,744,284,60|scrolled",
+          "AXButton|Edit Approval’s profile|402,8,260,70",
+          "AXStaticText|No messages yet.|478,393,108,16",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|879,164,91,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXImage|Couldn’t load|917,409,14,13|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    }
+  ],
+  "approved": "2026-11-01",
+  "reason": "First baseline of the Polymux UI, reproduced in two runs"
+}

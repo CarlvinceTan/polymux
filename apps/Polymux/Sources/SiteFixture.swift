@@ -59,7 +59,8 @@ enum SiteFixture {
             case "agents": data = try encoder.encode(examples.map(\.agent))
             case "threads": data = try encoder.encode(examples.map(\.thread))
             case "sidebar":
-                data = try encoder.encode(SidebarSnapshot(cursor: 0, sections: [], placements: examples.map {
+                let main = Section(id: SidebarLayout.unassignedID, name: "Unassigned", order: 0)
+                data = try encoder.encode(SidebarSnapshot(cursor: 0, sections: [main], placements: examples.map {
                     SidebarPlacement(threadID: $0.threadID, pinned: false)
                 }))
             case "messages": data = try encoder.encode(example?.messages ?? [])
@@ -72,8 +73,8 @@ enum SiteFixture {
                 } ?? []
                 data = try encoder.encode(events)
             case "settings":
-                data = try encoder.encode(Settings(appearance: VerifyFixture.appearance, sidebarWidth: 320,
-                                                   voiceMode: "pipeline", liveProvider: "gemini",
+                data = try encoder.encode(Settings(appearance: VerifyFixture.appearance,
+                                                   liveProvider: "gemini",
                                                    liveModel: "gemini-3.8-live", liveVoice: "Aoede"))
             case "tool-runs", "routines", "mcp", "providers": data = Data("[]".utf8)
             default:

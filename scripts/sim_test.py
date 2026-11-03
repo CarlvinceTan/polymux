@@ -36,6 +36,8 @@ class SimulatorTests(unittest.TestCase):
                     if args[2] == "install":
                         value = plistlib.loads((Path(args[-1]) / "Info.plist").read_bytes())
                         self.assertIn(".test.sim.", value["CFBundleIdentifier"])
+                        extension = plistlib.loads((Path(args[-1]) / "PlugIns/Call.appex/Info.plist").read_bytes())
+                        self.assertEqual(extension["CFBundleIdentifier"], value["CFBundleIdentifier"] + ".call")
                     if args[2] == "launch" and fail: raise RuntimeError("launch failed")
                     return ""
 
@@ -44,6 +46,8 @@ class SimulatorTests(unittest.TestCase):
                     if args[0].endswith("check.sh"):
                         bundle = Path(args[-1]); bundle.mkdir()
                         (bundle / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "real.app"}))
+                        extension = bundle / "PlugIns/Call.appex"; extension.mkdir(parents=True)
+                        (extension / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "real.app.call"}))
 
                 with patch.object(sim, "ROOT", root), patch.object(sim, "command", side_effect=command), \
                         patch.object(sim.subprocess, "run", side_effect=run), patch.object(sim.time, "sleep"), \

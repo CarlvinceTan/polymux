@@ -496,7 +496,7 @@ func TestMailRoundTrip(t *testing.T) {
 	if err != nil || !slices.ContainsFunc(folders, func(item contract.HubMailFolder) bool { return item.Role == "inbox" }) {
 		t.Fatalf("%+v %v", folders, err)
 	}
-	envelopes, err := box.envelopes(account.ID, "INBOX", 0)
+	envelopes, err := box.envelopes(account.ID, mailQuery{folder: "INBOX"})
 	if err != nil || len(envelopes) != 1 {
 		t.Fatalf("%+v %v", envelopes, err)
 	}
@@ -508,19 +508,19 @@ func TestMailRoundTrip(t *testing.T) {
 	if err != nil || !strings.Contains(opened.Text, "attached") || len(opened.Files) != 1 || opened.Files[0].Name != "q3.pdf" {
 		t.Fatalf("%+v %v", opened, err)
 	}
-	recorder := httptest.NewRecorder()
-	if err := box.file(recorder, account.ID, "INBOX", uint32(first.ID), 0); err != nil || recorder.Body.String() != "pdf" {
-		t.Fatalf("%q %v", recorder.Body.String(), err)
+	file, err := box.part(account.ID, "INBOX", uint32(first.ID), opened.Files[0].Part)
+	if err != nil || string(file.data) != "pdf" {
+		t.Fatalf("%q %v", file.data, err)
 	}
 	flagged := true
-	if err := box.change(account.ID, "INBOX", uint32(first.ID), contract.HubMailChange{Flagged: &flagged}); err != nil {
+	if err := box.change(account.ID, "INBOX", contract.HubMailChange{Ids: []int64{first.ID}, Flagged: &flagged}); err != nil {
 		t.Fatal(err)
 	}
 	archive := "Archive"
-	if err := box.change(account.ID, "INBOX", uint32(first.ID), contract.HubMailChange{Folder: &archive}); err != nil {
+	if err := box.change(account.ID, "INBOX", contract.HubMailChange{Ids: []int64{first.ID}, Folder: &archive}); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := box.envelopes(account.ID, "Archive", 0)
+	moved, err := box.envelopes(account.ID, mailQuery{folder: "Archive"})
 	if err != nil || len(moved) != 1 || !moved[0].Flagged {
 		t.Fatalf("%+v %v", moved, err)
 	}
@@ -531,7 +531,7 @@ func TestMailRoundTrip(t *testing.T) {
 
 func TestComposedMailCarriesOnlyItsHeaders(t *testing.T) {
 	message := string(composeMail(mailAccount{Name: "Me", Email: "me@example.test"}, contract.HubMailSend{
-		To: []string{"a@example.test"}, Subject: "Hello\r\nBcc: evil@example.test", Text: "line\nline2"}, nil, time.Unix(0, 0)))
+		To: []string{"a@example.test"}, Subject: "Hello\r\nBcc: evil@example.test", Text: "line\nline2"}, nil, time.Unix(0, 0), "<id@test>", false))
 	headers, _, _ := strings.Cut(message, "\r\n\r\n")
 	if strings.Contains(headers, "\r\nBcc:") {
 		t.Fatalf("subject added a header:\n%s", headers)

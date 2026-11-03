@@ -20,15 +20,6 @@ export type ReleaseSummary = {
   downloadable: boolean; historical: boolean; tag: string;
 };
 export type Release = ReleaseSummary & {body: string; html: string; tabs: ReleaseTab[]};
-export type ProductFeatureGroup = 'app' | 'agent';
-export type ProductFeatureIcon = 'workspace' | 'hub' | 'drive' | 'browser' | 'memory' | 'tasks' | 'models' | 'skills';
-export type ProductFeature = {
-  group: ProductFeatureGroup; slug: string; name: string; icon: ProductFeatureIcon;
-  menuDescription: string; title: string; description: string; intro: string;
-  demoTitle: string; demoItems: {label: string; title: string; description: string}[];
-  benefits: {title: string; description: string}[]; steps: string[];
-  example: {title: string; description: string}; docsPath: string; updated?: string;
-};
 export type HomeProps = Record<string, never>;
 export type BlogProps = {posts: PostSummary[]};
 export type PostProps = {post: Omit<BlogPost, 'body'>; related: PostSummary[]};
@@ -36,11 +27,15 @@ export type DocsProps = {
   page: Omit<Guide, 'body'>; sections: GuideSection[]; pages: GuideSearch[];
   neighbours: {previous?: GuideSummary; next?: GuideSummary};
 };
-export type ProductProps = {feature: ProductFeature | null; features: ProductFeature[]};
 export type ReleaseProps = {release: Omit<Release, 'body'>; releases: ReleaseSummary[]};
 export type LegalProps = {title: string; updated?: string; html: string};
-export type PageKind = 'home' | 'blog' | 'post' | 'docs' | 'product' | 'releases' | 'legal';
+export type PluginEntry = {
+  name: string; title: string; description: string; author: string; kind: string; version: string; targets: string[];
+  published?: string; homepage?: string; repository?: string; source?: string;
+};
+export type PluginProps = {plugin: PluginEntry | null; plugins: PluginEntry[]};
+export type PageKind = 'home' | 'blog' | 'post' | 'docs' | 'plugins' | 'releases' | 'legal';
 export type Route = {
   path: string; file: string; kind: PageKind; title: string; description: string;
-  updated?: string; props: HomeProps | BlogProps | PostProps | DocsProps | ProductProps | ReleaseProps | LegalProps;
+  updated?: string; props: HomeProps | BlogProps | PostProps | DocsProps | PluginProps | ReleaseProps | LegalProps;
 };

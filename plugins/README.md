@@ -7,6 +7,7 @@ Plugins maintained by the Polymux team. The app and server don't include them: e
 | [`hub`](hub) | Your messages and mail in one place, with bridges to chat networks. |
 | [`tailscale`](tailscale) | Reaches your server from other devices over your tailnet. |
 | [`permissions`](permissions) | Rules a chat's bots can't break: what they may read, write, run and use. |
+| [`graph-visualiser`](graph-visualiser) | See how your bots, people, devices and repositories work together. |
 
 ## Layout
 

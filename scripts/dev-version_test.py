@@ -1,24 +1,27 @@
+import subprocess
+import tempfile
 import unittest
 
 from pathlib import Path
 from runpy import run_path
 
-versions = run_path(str(Path(__file__).with_name("dev-version.py")))["versions"]
+namespace = run_path(str(Path(__file__).with_name("dev-version.py")))
+versions, ios_build = namespace["versions"], namespace["ios_build"]
 
 
 class VersionTests(unittest.TestCase):
     def test_uploads_and_reruns_increase(self):
         sequence = [(1, 1), (1, 2), (99, 99), (100, 1), (101, 1), (999899, 99)]
-        for platform in ("ios", "macos"):
-            values = [tuple(map(int, versions(run, attempt, "0.4.0")[platform].split("."))) for run, attempt in sequence]
-            self.assertEqual(values, sorted(set(values)))
+        values = [tuple(map(int, versions(run, attempt, "0.4.0")["macos"].split("."))) for run, attempt in sequence]
+        self.assertEqual(values, sorted(set(values)))
 
-    def test_apple_component_limits(self):
-        for run in (1, 99, 100, 999899):
-            major, minor, patch = map(int, versions(run, 99, "1.0.0")["ios"].split("."))
-            self.assertLessEqual(major, 9999)
-            self.assertLessEqual(minor, 99)
-            self.assertLessEqual(patch, 99)
+    def test_ios_build_counts_commits(self):
+        with tempfile.TemporaryDirectory() as root:
+            git = ["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.check_call(git[:3] + ["init", "-q"])
+            for _ in range(3):
+                subprocess.check_call(git + ["commit", "-q", "--allow-empty", "-m", "c"])
+            self.assertEqual(ios_build(root), "3")
 
     def test_mac_dev_build_exceeds_stable(self):
         for version, stable in (("0.4.0", 4000), ("0.4.10", 4010), ("1.0.0", 1000000)):

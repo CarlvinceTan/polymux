@@ -32,6 +32,11 @@ type Worktrees struct {
 
 func NewWorktrees(dir string) *Worktrees { return &Worktrees{dir: dir} }
 
+// AgentDir is an agent's own folder under the data directory, its default working folder.
+func AgentDir(data, agent string) string {
+	return filepath.Join(data, "agents", agent)
+}
+
 func (d Definition) workingDir(fallback string) string {
 	if d.Worktree != "" {
 		return d.Worktree

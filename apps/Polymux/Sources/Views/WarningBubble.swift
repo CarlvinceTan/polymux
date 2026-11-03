@@ -14,7 +14,7 @@ struct WarningBubble: View {
                 ZStack {
                     if visible { bubble.transition(.opacity) }
                 }
-                .animation(.easeInOut(duration: 0.2), value: visible)
+                .motion(Motion.fade, value: visible)
             }
             .frame(maxWidth: BubbleStyle.width)
     }
@@ -25,6 +25,7 @@ struct WarningBubble: View {
             Button("Dismiss", systemImage: "xmark", action: dismiss)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
+                .tapArea(14)
                 .accessibilityLabel("Dismiss warning")
                 .help("Dismiss")
         }
@@ -33,5 +34,18 @@ struct WarningBubble: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: BubbleStyle.radius))
+    }
+}
+
+/// A short note floating over the content, so its arrival never pushes anything aside.
+struct QuietNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text).font(.footnote).foregroundStyle(.primary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: BubbleStyle.radius))
+            .transition(.opacity)
     }
 }

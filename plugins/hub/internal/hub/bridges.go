@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -83,6 +84,8 @@ type bridges struct {
 	children map[string]*child
 	issues   map[string]string
 	hidden   []string
+	// spaces maps each login's filtering Space to the login.
+	spaces map[string]string
 }
 
 type child struct {
@@ -524,9 +527,10 @@ type remoteError struct {
 func (e remoteError) Error() string { return fmt.Sprintf("remote answered %d", e.status) }
 
 type rawLogin struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	State struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	SpaceRoom string `json:"space_room"`
+	State     struct {
 		StateEvent string `json:"state_event"`
 		Message    string `json:"message"`
 	} `json:"state"`
@@ -540,9 +544,22 @@ type rawWhoami struct {
 	} `json:"login_flows"`
 }
 
+// loginSpaces maps each login's filtering Space to the login, from the latest status.
+func (b *bridges) loginSpaces() map[string]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return maps.Clone(b.spaces)
+}
+
 // platforms reports every bridge the package carries, in fleet order.
 func (b *bridges) platforms(ctx context.Context) []contract.HubPlatform {
 	out := []contract.HubPlatform{}
+	spaces := map[string]string{}
+	defer func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		b.spaces = spaces
+	}()
 	for _, item := range b.specs() {
 		// An adopted bridge with no login API can't be connected from here, so it isn't listed.
 		if _, err := b.secret(item.platform); b.adopted && err != nil {
@@ -584,6 +601,9 @@ func (b *bridges) platforms(ctx context.Context) []contract.HubPlatform {
 			}
 			if err == nil {
 				for _, login := range whoami.Logins {
+					if login.SpaceRoom != "" {
+						spaces[login.SpaceRoom] = login.ID
+					}
 					// A login the phone removed stays listed, but no device is behind it.
 					if login.State.StateEvent == "BAD_CREDENTIALS" || login.State.StateEvent == "LOGGED_OUT" {
 						continue

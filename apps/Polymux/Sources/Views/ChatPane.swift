@@ -19,7 +19,7 @@ struct ChatPane: View {
     @State private var searchQuery = ""
     @State private var paneWidth: CGFloat = 720
     @State private var headerHeight: CGFloat = 88
-    @State private var toolbarInset: CGFloat = 44
+    @State private var toolbarInset = ToolbarInset.last
     @FocusState private var searchFocused: Bool
     @State private var showVoice = false
     @State private var voiceStore: (any VoiceSession)?
@@ -28,6 +28,7 @@ struct ChatPane: View {
     @State private var dismissedIssue: String?
     /// Whether the profile panel (or a group's editor) is open; it stays open across chats.
     @Binding var showProfile: Bool
+    @Binding var pluginPanel: String?
     /// What the profile panel, which the window owns on macOS, reads from this chat.
     let openChat: OpenChat
     @State private var target: ReplyTarget?
@@ -43,10 +44,12 @@ struct ChatPane: View {
     @State private var dropping = false
     @State private var dropFolder: URL?
     @Namespace private var scrollSpace
-    @State private var dateFrames: [String: ScrollDateFrame] = [:]
-    @State private var partFrames: [ReplyTarget: CGRect] = [:]
+    /// Change every frame of a scroll, so reading them must not update the chat.
+    @State private var frames = TranscriptFrames()
+    @State private var latestVisible = true
     @State private var scrollPosition = ScrollPosition()
-    @State private var scrollOffset: CGFloat = 0
+    /// The message to reopen on, until the chat has scrolled there.
+    @State private var place: String?
     @State private var scrollHeight: CGFloat = 0
     @State private var scrollDate: Date?
     @State private var dateVisible = false
@@ -56,8 +59,8 @@ struct ChatPane: View {
     @Environment(\.connectionDismissed) private var connectionDismissed
     #if os(iOS)
     @Environment(\.self) private var environment
+    @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
-    private let mobileEdge: CGFloat = 24
 
     private var verticalToolbar: Bool {
         #if os(iOS)
@@ -70,26 +73,40 @@ struct ChatPane: View {
 
     init(agent: Agent, thread: PolymuxKit.Thread, session: AppSession,
          drops: Binding<[DroppedFile]>, files: Binding<[DraftFile]>,
-         showProfile: Binding<Bool>, openChat: OpenChat, destination: SearchDestination? = nil,
-         store: ChatStore? = nil) {
+         showProfile: Binding<Bool>, pluginPanel: Binding<String?>, openChat: OpenChat,
+         destination: SearchDestination? = nil, store: ChatStore) {
         self.agent = agent
         _showProfile = showProfile
+        _pluginPanel = pluginPanel
         self.openChat = openChat
         self.thread = thread
         self.session = session
         self.drops = drops
         self.files = files
         self.destination = destination
-        _store = State(initialValue: store ?? ChatStore(client: session.client, actor: session.sidebar.cacheActor,
-                                                        threadID: thread.id, sidebar: session.sidebar))
+        _store = State(initialValue: store)
+        // Opens where it was left, before the first frame, unless a search result is taking it elsewhere.
+        let place = destination?.threadID == thread.id ? nil : session.places[thread.id]
+            .flatMap { id in store.messages.contains { $0.id == id } ? id : nil }
+        _place = State(initialValue: place)
+        _atBottom = State(initialValue: place == nil)
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderCount.hit("pane")
+        #endif
         Group {
             #if os(iOS)
             NavigationStack {
                 conversation
                     .navigationDestination(isPresented: profilePresented) { profile }
+                    .navigationDestination(item: $pluginPanel) { name in
+                        if let plugin = pluginGroups.joined().first(where: { $0.name == name }) {
+                            PluginPanel(plugin: plugin, thread: thread, session: session) { pluginPanel = nil }
+                        }
+                    }
+                    .toolbar(.hidden, for: .tabBar)
             }
             #else
             conversation
@@ -101,6 +118,9 @@ struct ChatPane: View {
             store.onUpdate = { event, tap in session.sidebar.note(event, at: tap) }
             await store.start()
             reveal()
+            #if DEBUG
+            if CallFixture.enabled { openVoice() }
+            #endif
             await store.markRead()
         }
         .task(id: scenePhase == .background) {
@@ -116,11 +136,22 @@ struct ChatPane: View {
         .onChange(of: destination?.id) { _, _ in reveal() }
         .onChange(of: store.isConnected) { _, _ in reveal() }
         .onChange(of: store.error) { _, _ in reveal() }
-        .onDisappear { store.stop(); clearDate(); highlight = nil; target = nil }
+        .onDisappear { keepPlace(); store.stop(); clearDate(); highlight = nil; target = nil }
+        #if os(macOS)
+        .focusedSceneValue(\.findInChat) { showSearch = true }
+        #endif
         .onChange(of: scenePhase) { _, phase in
             store.isVisible = phase == .active
             if store.isVisible { Task { await store.markRead() } }
         }
+    }
+
+    private var pluginGroups: [[Plugin]] {
+        session.plugins.buttons(chat: thread.isTask ? thread.agentID : thread.id)
+    }
+
+    private func togglePlugin(_ plugin: Plugin) {
+        pluginPanel = pluginPanel == plugin.name ? nil : plugin.name
     }
 
     #if os(iOS)
@@ -179,23 +210,8 @@ struct ChatPane: View {
                 .opacity(showSearch || showVoice ? 0 : 1)
                 .allowsHitTesting(!showSearch && !showVoice)
                 .accessibilityHidden(showSearch || showVoice)
-                .overlay(alignment: .top) {
-                    // The latest button floats above the composer without changing the chat inset.
-                    if showLatest && !latestVisible && !showSearch && !showVoice {
-                        Button { scrollDown += 1 } label: {
-                            Image(systemName: "chevron.down").font(.caption).imageScale(.small)
-                                .padding(.horizontal, 8).padding(.vertical, 6)
-                                .contentShape(Capsule())
-                        }
-                        .accessibilityLabel("Scroll to latest")
-                        .foregroundStyle(.muted)
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: Capsule())
-                        .transition(.opacity)
-                        .alignmentGuide(.top) { $0[.bottom] }
-                    }
-                }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showLatest)
+            .motion(value: showLatest)
+            .motion(value: latestVisible)
             .task(id: atBottom) {
                 if atBottom {
                     showLatest = false
@@ -207,8 +223,7 @@ struct ChatPane: View {
         }
         .overlay {
             if showVoice, let voiceStore {
-                VoiceOverlay(store: voiceStore, dismiss: { showVoice = false })
-                    .padding(.top, max(0, headerHeight - headerInset) + 8)
+                VoiceOverlay(store: voiceStore, name: thread.isGroup ? chatTitle : agent.name, dismiss: { showVoice = false })
             }
         }
         #if os(iOS)
@@ -234,7 +249,7 @@ struct ChatPane: View {
                 ZStack(alignment: .top) {
                     ChatHeader(title: chatTitle, subtitle: headerRole, members: members,
                                isGroup: thread.isGroup, conversationID: thread.id, runs: store.runs, activity: store.activity,
-                                connected: store.isConnected, speakingID: showVoice && voiceStore?.phase == .speaking ? voiceStore?.agentID : nil,
+                               connected: session.sidebar.isConnected,
                                edit: { showProfile.toggle() })
                         .padding(.top, 8)
                         .offset(y: -headerInset)
@@ -244,7 +259,10 @@ struct ChatPane: View {
                 }
                 #if os(macOS)
                 .background {
-                    ToolbarAnchor { toolbarInset = $0 }
+                    ToolbarAnchor { inset in
+                        ToolbarInset.last = inset
+                        toolbarInset = inset
+                    }
                 }
                 #else
                 .background {
@@ -256,10 +274,10 @@ struct ChatPane: View {
         #if os(macOS)
         .overlay {
             Rectangle()
-                .fill(.primary.opacity(0.11))
+                .fill(.primary.opacity(PanelStyle.selectedTint))
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
                 .opacity(dropping ? 1 : 0)
-                .animation(.easeOut(duration: 0.18), value: dropping)
+                .motion(value: dropping)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
@@ -279,7 +297,8 @@ struct ChatPane: View {
         .task { dropFolder = try? await DroppedFile.prepare() }
         #endif
         #if os(macOS)
-        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice)) {
+        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice,
+                                      plugins: pluginGroups, panel: pluginPanel)) {
             if showSearch {
                 HStack(spacing: 8) {
                     searchField
@@ -293,7 +312,11 @@ struct ChatPane: View {
                     }
                     .buttonStyle(.plain).accessibilityHidden(true)
                     HStack {
+                        if thread.isTask {
+                            PanelNavButton(symbol: "chevron.left", label: "Back") { openChat.show(agent.id) }
+                        }
                         Spacer(minLength: 0)
+                        PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
                         PanelNavButton(symbol: "phone", label: "Speech conversation",
                                        enabled: !openingVoice && !showVoice, action: openVoice)
                     }
@@ -315,6 +338,15 @@ struct ChatPane: View {
                 }
             }
             .sharedBackgroundVisibility(.hidden)
+            if !showSearch && !pluginGroups.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    if sizeClass == .compact {
+                        PluginMenu(groups: pluginGroups, open: togglePlugin)
+                    } else {
+                        PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
+                    }
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 if showSearch {
                     Button("Close search", systemImage: "xmark", action: closeSearch)
@@ -340,19 +372,21 @@ struct ChatPane: View {
     private func alignHeader(top: CGFloat, safeTop: CGFloat) {
         let inset = max(0, top + 8 - safeTop)
         guard abs(toolbarInset - inset) > 0.5 else { return }
+        ToolbarInset.last = inset
         toolbarInset = inset
     }
     #endif
 
-    private var chatTitle: String { thread.isGroup ? thread.title : agent.name }
+    private var chatTitle: String { thread.id == agent.id ? agent.name : thread.title }
 
     private var headerRole: String {
-        thread.isGroup ? "" : agent.role.trimmingCharacters(in: .whitespacesAndNewlines)
+        if thread.isTask { return agent.name }
+        return thread.isGroup ? "" : agent.role.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The bot that created this one, for the caption at the start of its chat.
     private var creator: String? {
-        guard !thread.isGroup, let id = agent.createdBy, !id.isEmpty else { return nil }
+        guard thread.id == agent.id, let id = agent.createdBy, !id.isEmpty else { return nil }
         return session.sidebar.agents.first { $0.id == id }?.name
     }
 
@@ -435,32 +469,49 @@ struct ChatPane: View {
             }
             composerField
                 .overlay(alignment: .top) {
-                    ZStack(alignment: .bottom) {
-                        ConnectionStatus(connected: connected, dismissed: connectionDismissed)
-                        WarningBubble(text: serverIssue?.message ?? "",
-                                      visible: connected && store.messages.last?.id == serverIssue?.id
-                                          && serverIssue != nil && dismissedIssue != serverIssue?.id) {
-                            dismissedIssue = serverIssue?.id
+                    // Status and the latest button float above the input without changing the chat inset.
+                    VStack(spacing: 8) {
+                        ZStack(alignment: .bottom) {
+                            ConnectionStatus(connected: connected, dismissed: connectionDismissed)
+                            WarningBubble(text: serverIssue?.message ?? "", visible: issueVisible) {
+                                dismissedIssue = serverIssue?.id
+                            }
+                        }
+                        .frame(height: statusVisible ? nil : 0)
+                        if showLatest && !latestVisible && !showSearch && !showVoice {
+                            latestButton
                         }
                     }
                     .alignmentGuide(.top) { $0[.bottom] + 8 }
                 }
         }
-        #if os(iOS)
-        .padding(.horizontal, mobileEdge).padding(.bottom, mobileEdge).padding(.top, 10)
-        #else
-        .padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 10)
-        #endif
+        .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge).padding(.top, 10)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
     }
 
     private var connected: Bool { store.isConnected && session.sidebar.isConnected }
 
     private var serverIssue: (id: String, message: String)? {
+        if let message = store.messages.last, let notice = store.activity.notice(for: message) {
+            return (message.id, notice)
+        }
         guard let message = store.messages.last(where: { $0.role == MessageRole.assistant && $0.status == MessageStatus.error }),
               let error = store.activity.issue(for: message),
               !error.message.isEmpty else { return nil }
         return (message.id, error.message)
+    }
+
+    private var issueVisible: Bool {
+        serverIssue != nil && dismissedIssue != serverIssue?.id
+            && connected && store.messages.last?.id == serverIssue?.id
+    }
+
+    private var statusVisible: Bool {
+        (!connected && !connectionDismissed.wrappedValue) || issueVisible
+    }
+
+    private var latestButton: some View {
+        LatestButton { scrollDown += 1 }
     }
 
     private var visibleMessages: [Message] {
@@ -470,11 +521,6 @@ struct ChatPane: View {
                     || (message.status != MessageStatus.streaming && !($0.text ?? "").isEmpty)
             }
         }
-    }
-
-    private var latestVisible: Bool {
-        guard let id = visibleMessages.last?.id, let frame = dateFrames[id]?.frame else { return atBottom }
-        return frame.maxY >= topInset && frame.maxY <= scrollHeight
     }
 
     private var composerField: some View {
@@ -504,7 +550,7 @@ struct ChatPane: View {
     }
 
     private func setReply(_ value: ReplyContext?) {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reply = value }
+        withAnimation(Motion.quick.unless(reduceMotion)) { reply = value }
     }
 
     /// Opens at once from the settings already loaded; only a first launch waits for them.
@@ -528,7 +574,7 @@ struct ChatPane: View {
     private func startVoice(_ settings: PolymuxKit.Settings) {
         let config = VoiceConfig(settings: settings)
         voiceStore = config.session(client: session.client,
-            reply: VoiceBridge(client: session.client, threadID: thread.id, spoken: config.mode == .pipeline),
+            reply: VoiceBridge(client: session.client, threadID: thread.id),
             agent: thread.isGroup ? members.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") : "\(agent.name) (\(agent.id))"
         )
         showVoice = true
@@ -537,9 +583,10 @@ struct ChatPane: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                let visible = visibleMessages
                 LazyVStack(spacing: 12) {
-                    ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { index, message in
-                        if startsGroup(index) {
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, message in
+                        if startsGroup(index, in: visible) {
                             ChatStatus(date: message.date)
                         }
                         if index == 0, !store.hasEarlier, let creator {
@@ -559,6 +606,7 @@ struct ChatPane: View {
                                        reactionError: store.reactionErrors[message.id], agents: session.sidebar.agents,
                                        react: { emoji in Task { await store.react(messageID: message.id, emoji: emoji) } },
                                       scrollSpace: scrollSpace)
+                        .equatable()
                         .id(message.id)
                         .background {
                             GeometryReader { geometry in
@@ -571,36 +619,51 @@ struct ChatPane: View {
                         }
                     }
                     TypingRow(members: members.compactMap { member in
-                        let view = store.activity.view(conversationID: thread.id, agentID: member.id, connected: store.isConnected)
-                        return (view.typing || view.working) && store.isConnected ? (member, view) : nil
+                        let view = store.activity.view(conversationID: thread.id, agentID: member.id, connected: session.sidebar.isConnected)
+                        return (view.typing || view.working) && session.sidebar.isConnected ? (member, view) : nil
                     }, session: session, conversationID: thread.id, group: thread.isGroup)
-                    Color.clear.frame(height: 1).id("bottom")
+                    // Closes the content: scrolling here rests at the exact end, where the bottom anchor holds.
+                    Color.clear.frame(height: 15).id("bottom")
                 }
-                .padding(.horizontal, 20).padding(.vertical, 14)
+                .padding(.horizontal, 20).padding(.top, 14)
             }
             .coordinateSpace(name: scrollSpace)
+            // Hidden until it's in place, so reopening never flashes the end of the chat.
+            .opacity(place == nil ? 1 : 0)
+            .task {
+                guard place != nil else { return }
+                frames.moving = true
+                // Gives up rather than leave the chat hidden if the message never lays out.
+                try? await Task.sleep(for: .milliseconds(400))
+                place = nil
+                frames.moving = false
+            }
             .scrollPosition($scrollPosition)
             .scrollIndicators(.hidden)
             .scrollEdgeEffectHidden()
             .contentMargins(.top, topInset, for: .scrollContent)
-            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            // Not for size changes: anchored through a resize, lazy rows stay on screen but stop
+            // reporting frames and accessibility. `ChatViewport` holds the end of the chat instead.
             .defaultScrollAnchor(.top, for: .alignment)
             .onChange(of: scrollDown) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                withAnimation(Motion.move.unless(reduceMotion)) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .onPreferenceChange(ScrollDateFrames.self) { frames in
-                dateFrames = frames
+            .onPreferenceChange(ScrollDateFrames.self) { dates in
+                frames.dates = dates
                 updateDate()
+                settlePlace(proxy)
             }
-            .onPreferenceChange(PartFrames.self) { partFrames = $0 }
+            .onPreferenceChange(PartFrames.self) { frames.parts = $0 }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, offset in
-                scrollOffset = offset
+                frames.offset = offset
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, height in
                 scrollHeight = height
                 updateDate()
             }
             .onScrollPhaseChange { _, phase in
+                frames.moving = phase.isScrolling || frames.jump != nil
                 datePhase(phase)
                 // A chat can open at the top (first unread), so scrolling there also pages back.
                 if phase.isScrolling && atTop { Task { await store.loadEarlier() } }
@@ -609,11 +672,20 @@ struct ChatPane: View {
                 ChatViewport(size: geometry.containerSize, inset: geometry.contentInsets.bottom,
                              gap: geometry.contentSize.height - geometry.visibleRect.maxY)
             } action: { old, next in
+                // Opening away from the end: nothing here may pull it back there.
+                guard place == nil else { return }
                 if old.size != next.size || old.inset != next.inset {
                     if atBottom { scrollPosition.scrollTo(edge: .bottom) }
                 } else {
                     // Separate enter/leave thresholds keep lazy layout estimates from toggling the button.
-                    atBottom = next.gap <= (atBottom ? 90 : 45)
+                    let near = next.gap <= (atBottom ? 90 : 45)
+                    // Only the user leaves the end of a chat; content arriving late keeps it there.
+                    if near || frames.moving { atBottom = near }
+                    // Content arriving at the end keeps it there, in one move.
+                    // Not `scrollPosition`: it keeps the edge and would pull a later jump back.
+                    if atBottom, !frames.moving, next.gap > old.gap, next.gap > 1 - next.inset {
+                        withTransaction(Transaction(animation: nil)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
                 }
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -623,16 +695,18 @@ struct ChatPane: View {
                 // Initial layout can reach the top before the bottom anchor settles.
                 if top && !old && dateScrolling { Task { await store.loadEarlier() } }
             }
-            .onChange(of: store.messages.last?.text) { _, _ in
-                if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .onChange(of: store.messages.count) { _, _ in
-                if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
             .onChange(of: composerHeight) { _, _ in updateDate() }
             .task(id: jumpID) {
                 guard let destination = target else { return }
                 let id = destination.id
+                let current = jumpID
+                // A newer jump cancels this one and owns the flag from then on.
+                defer {
+                    if frames.jump == current {
+                        frames.jump = nil
+                        frames.moving = false
+                    }
+                }
                 while !store.messages.contains(where: { $0.id == id }) && store.hasEarlier {
                     guard !Task.isCancelled else { return }
                     let count = store.messages.count
@@ -646,20 +720,20 @@ struct ChatPane: View {
                     try? await Task.sleep(for: .milliseconds(60))
                     guard !Task.isCancelled else { return }
                 }
-                guard destination.part == nil || partFrames[destination] != nil else { return }
+                guard destination.part == nil || frames.parts[destination] != nil else { return }
                 target = nil
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                withAnimation(Motion.move.unless(reduceMotion)) {
                     highlight = destination
-                    if let frame = partFrames[destination] {
+                    if let frame = frames.parts[destination] {
                         let center = (topInset + scrollHeight - composerHeight) / 2
-                        scrollPosition.scrollTo(y: scrollOffset + frame.midY - center)
+                        scrollPosition.scrollTo(y: frames.offset + frame.midY - center)
                     } else {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }
                 try? await Task.sleep(for: .seconds(1.2))
                 guard !Task.isCancelled else { return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { highlight = nil }
+                withAnimation(Motion.fade.unless(reduceMotion)) { highlight = nil }
             }
         }
     }
@@ -667,12 +741,18 @@ struct ChatPane: View {
     private func updateDate() {
         let top = max(0, headerHeight - headerInset)
         let height = max(0, scrollHeight - composerHeight)
-        let first = dateFrames.values
+        let first = frames.dates.values
             .filter { $0.frame.maxY > top && $0.frame.minY < height }
             .min { $0.frame.minY < $1.frame.minY }
-        scrollDate = first.map { Calendar.current.startOfDay(for: $0.date) }
+        let date = first.map { Calendar.current.startOfDay(for: $0.date) }
+        if scrollDate != date { scrollDate = date }
+        var shown = atBottom
+        if let id = store.messages.last?.id, let frame = frames.dates[id]?.frame {
+            shown = frame.maxY >= topInset && frame.maxY <= scrollHeight
+        }
+        if latestVisible != shown { latestVisible = shown }
         if dateScrolling, scrollDate != nil {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { dateVisible = true }
+            withAnimation(Motion.quick.unless(reduceMotion)) { dateVisible = true }
         }
     }
 
@@ -689,7 +769,7 @@ struct ChatPane: View {
             dateTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.2))
                 guard !Task.isCancelled else { return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { dateVisible = false }
+                withAnimation(Motion.fade.unless(reduceMotion)) { dateVisible = false }
                 dateTask = nil
             }
         } else if phase == .tracking {
@@ -705,12 +785,25 @@ struct ChatPane: View {
         dateVisible = false
     }
 
-    private func startsGroup(_ index: Int) -> Bool {
-        if index == 0 { return true }
-        let messages = visibleMessages
-        let previous = messages[index - 1].date
-        let current = messages[index].date
-        return !Calendar.current.isDate(previous, inSameDayAs: current) || current.timeIntervalSince(previous) > 1800
+    private func startsGroup(_ index: Int, in messages: [Message]) -> Bool {
+        ChatStatus.starts(messages[index].date, after: index == 0 ? nil : messages[index - 1].date)
+    }
+
+    /// Remembers the top message of a chat left away from its end.
+    private func keepPlace() {
+        let top = frames.dates.filter { $0.value.frame.maxY > topInset }.min { $0.value.frame.minY < $1.value.frame.minY }
+        session.places[thread.id] = atBottom ? nil : top?.key
+    }
+
+    /// Runs on layout, because a lazy transcript can't scroll to a message before it has laid out.
+    private func settlePlace(_ proxy: ScrollViewProxy) {
+        guard let place, !frames.dates.isEmpty else { return }
+        if let frame = frames.dates[place]?.frame, frame.minY >= 0, frame.minY < scrollHeight / 2 {
+            self.place = nil
+            frames.moving = false
+        } else {
+            proxy.scrollTo(place, anchor: .top)
+        }
     }
 
     private func reveal() {
@@ -723,10 +816,22 @@ struct ChatPane: View {
 
     private func jump(to id: String, part: Int64? = nil) {
         atBottom = false
+        let next = UUID()
+        frames.jump = next
+        frames.moving = true
         highlight = nil
         target = ReplyTarget(id: id, part: part)
-        jumpID = UUID()
+        jumpID = next
     }
+}
+
+private final class TranscriptFrames {
+    var dates: [String: ScrollDateFrame] = [:]
+    var parts: [ReplyTarget: CGRect] = [:]
+    var moving = false
+    var jump: UUID?
+    /// Changes every scroll tick, so it stays out of `@State` to keep the pane from redrawing.
+    var offset: CGFloat = 0
 }
 
 private struct ChatViewport: Equatable {
@@ -739,6 +844,8 @@ private struct ChatBarState: Hashable {
     let search: Bool
     let opening: Bool
     let voice: Bool
+    let plugins: [[Plugin]]
+    let panel: String?
 }
 
 struct ReplyTarget: Hashable, Sendable {
@@ -769,8 +876,32 @@ private struct JumpGlow: ViewModifier {
     }
 }
 
+struct LatestButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.down").font(.caption).imageScale(.small)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .contentShape(Capsule())
+        }
+        .accessibilityLabel("Scroll to latest")
+        .foregroundStyle(.muted)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .tapArea(10)
+        .transition(.opacity)
+    }
+}
+
 struct ChatStatus: View {
     let date: Date
+
+    /// Whether a message opens a new stretch of the chat, so it gets a time above it.
+    static func starts(_ current: Date, after previous: Date?) -> Bool {
+        guard let previous else { return true }
+        return !Calendar.current.isDate(previous, inSameDayAs: current) || current.timeIntervalSince(previous) > 1800
+    }
 
     var body: some View {
         Text(date, format: ProgressiveTime(separator: true))
@@ -779,9 +910,10 @@ struct ChatStatus: View {
     }
 }
 
-struct MessageBubble: View {
+struct MessageBubble: View, @MainActor Equatable {
     @Environment(\.colorScheme) private var colorScheme
     @State private var contentWidth: CGFloat = 0
+    @State private var waited = false
     let message: Message
     let client: APIClient
     let agentName: String
@@ -800,11 +932,26 @@ struct MessageBubble: View {
     let agents: [Agent]
     let react: (String) -> Void
     let scrollSpace: Namespace.ID
+    /// Hub draws its own reaction bar beneath the bubble.
+    var showsReactions = true
+
+    /// Bubbles redraw for what they show. Their actions never change for a given message.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.message == rhs.message && lhs.agentName == rhs.agentName && lhs.showAuthor == rhs.showAuthor
+            && lhs.replyName == rhs.replyName && lhs.sending == rhs.sending && lhs.glow == rhs.glow
+            && lhs.reactions == rhs.reactions && lhs.reacting == rhs.reacting
+            && lhs.reactionError == rhs.reactionError && lhs.agents == rhs.agents
+    }
+
+    private var glow: ReplyTarget? { highlight?.id == message.id ? highlight : nil }
 
     /// The user's own messages; a task another bot gave this one arrives from that bot.
     private var outgoing: Bool { message.role == MessageRole.user && message.agentID == nil }
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderCount.hit("bubble")
+        #endif
         HStack(alignment: .bottom, spacing: 36) {
             if outgoing { Spacer(minLength: 0) }
             // The glow hugs the natural content, not the full-width row frame.
@@ -814,6 +961,11 @@ struct MessageBubble: View {
             if !outgoing { Spacer(minLength: 0) }
         }
         .reactionPicker(react: react)
+        .task(id: message.status) {
+            guard message.status == MessageStatus.pending else { return }
+            try? await Task.sleep(for: .seconds(1))
+            if !Task.isCancelled { waited = true }
+        }
     }
 
     private var column: some View {
@@ -843,14 +995,14 @@ struct MessageBubble: View {
                             client: client, jump: { jump(reply) },
                              width: replyWidth(reply))
             }
-            if !reactions.isEmpty {
+            if showsReactions, !reactions.isEmpty {
                 ReactionsView(reactions: reactions, agents: agents, react: react)
                     .disabled(!canReact || reacting)
             }
             if let reactionError {
                 Text(reactionError).font(.caption2).foregroundStyle(.muted)
             }
-            if outgoing, [MessageStatus.pending, MessageStatus.failed, MessageStatus.error].contains(message.status) {
+            if outgoing, unsentLine {
                 if sending && message.status == MessageStatus.pending {
                     Text("Sending…").font(.caption2).foregroundStyle(.muted)
                 } else {
@@ -868,6 +1020,12 @@ struct MessageBubble: View {
                 }
             }
         }
+    }
+
+    /// A send that lands right away shows no line, so the bubble keeps its height.
+    private var unsentLine: Bool {
+        message.status == MessageStatus.pending ? waited
+            : [MessageStatus.failed, MessageStatus.error].contains(message.status)
     }
 
     private var bubble: Color {
@@ -956,6 +1114,8 @@ private struct TypingRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var displayed: String?
     @State private var changedAt = Date.distantPast
+    /// The row's space stays once used, so the row leaving never moves the chat.
+    @State private var reserved = false
 
     private var markSize: CGFloat { group ? 22 : 28 }
     private var text: String { ActivityPhrase.line(members.map { ($0.0.name, $0.1) }) }
@@ -969,35 +1129,40 @@ private struct TypingRow: View {
 
     var body: some View {
         Group {
-            if !members.isEmpty {
-                HStack(spacing: group ? 8 : 14) {
-                    TimelineView(.periodic(from: .now, by: 2)) { context in
-                        let mark = mark(at: context.date)
-                        ZStack {
-                            if let mark {
-                                AgentAvatar(agentID: mark.id, conversationID: conversationID,
-                                            activity: session.sidebar.activity, connected: true)
-                                    .frame(width: markSize * 316 / 200, height: markSize * 316 / 200)
-                                    .frame(width: markSize, height: markSize)
-                                    .id(mark.id)
-                                    .transition(.opacity)
+            if !members.isEmpty || reserved {
+                ZStack {
+                    if !members.isEmpty {
+                        HStack(spacing: group ? 8 : 14) {
+                            TimelineView(.periodic(from: .now, by: 2)) { context in
+                                let mark = mark(at: context.date)
+                                ZStack {
+                                    if let mark {
+                                        AgentAvatar(agentID: mark.id, conversationID: conversationID,
+                                                    activity: session.sidebar.activity, connected: true)
+                                            .frame(width: markSize * 316 / 200, height: markSize * 316 / 200)
+                                            .frame(width: markSize, height: markSize)
+                                            .id(mark.id)
+                                            .transition(.opacity)
+                                    }
+                                }
+                                .motion(Motion.fade, value: mark?.id)
                             }
+                            .frame(width: markSize, height: markSize)
+                            ActivityLabel(text: line)
+                                .id(line)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
                         }
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: mark?.id)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(line)
                     }
-                    .frame(width: markSize, height: markSize)
-                    ActivityLabel(text: line)
-                        .id(line)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
                 }
                 .frame(height: 32)
-                .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(line)
+                .onAppear { reserved = true }
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: members.map { $0.0.id })
+        .motion(value: members.map { $0.0.id })
         .task(id: text) {
             guard displayed != text else { return }
             let delay = max(0, 0.8 - Date().timeIntervalSince(changedAt))
@@ -1043,8 +1208,25 @@ private struct ActivityLabel: View {
     }
 }
 
+/// The last measured toolbar height, saved so a new chat draws its header in place from its first frame.
+@MainActor enum ToolbarInset {
+    private static let key = "toolbarInset"
+    #if os(macOS)
+    private static let initial: CGFloat = 52
+    #else
+    private static let initial: CGFloat = 44
+    #endif
+
+    static var last: CGFloat = {
+        let saved = UserDefaults.standard.double(forKey: key)
+        return saved > 0 ? saved : initial
+    }() {
+        didSet { UserDefaults.standard.set(Double(last), forKey: key) }
+    }
+}
+
 #if os(macOS)
-private struct ToolbarAnchor: NSViewRepresentable {
+struct ToolbarAnchor: NSViewRepresentable {
     let changed: (CGFloat) -> Void
 
     func makeNSView(context: Context) -> ToolbarView { ToolbarView() }
@@ -1055,7 +1237,7 @@ private struct ToolbarAnchor: NSViewRepresentable {
     }
 }
 
-private final class ToolbarView: NSView {
+final class ToolbarView: NSView {
     var changed: (CGFloat) -> Void = { _ in }
     private var pending = false
     private var lastInset: CGFloat?
@@ -1081,7 +1263,7 @@ private final class ToolbarView: NSView {
     }
 }
 #else
-private struct ToolbarAnchor: UIViewRepresentable {
+struct ToolbarAnchor: UIViewRepresentable {
     let changed: (CGFloat, CGFloat) -> Void
 
     func makeUIView(context: Context) -> ToolbarView {
@@ -1097,7 +1279,7 @@ private struct ToolbarAnchor: UIViewRepresentable {
     }
 }
 
-private final class ToolbarView: UIView {
+final class ToolbarView: UIView {
     var changed: (CGFloat, CGFloat) -> Void = { _, _ in }
     private var pending = false
     private var lastTop: CGFloat?

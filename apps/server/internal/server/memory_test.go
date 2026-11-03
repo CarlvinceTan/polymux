@@ -132,7 +132,7 @@ func TestFreshMemoryStatesFailure(t *testing.T) {
 	if _, err := api.memory.Save(t.Context(), "assistant", "assistant", memory.Document{Name: "tea", Text: "Prefers green tea."}); err != nil {
 		t.Fatal(err)
 	}
-	build := api.freshMemory(run, "tea")
+	build := api.freshMemory(run, "tea", false)
 	texts, err := build(t.Context())
 	if err != nil || len(texts) != 1 || !strings.Contains(texts[0], "Prefers green tea.") {
 		t.Fatalf("fresh memory = %q, %v", texts, err)

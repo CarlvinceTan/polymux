@@ -124,7 +124,7 @@ enum Cupcake {
         let projected = points.map(screen)
         let normals = vertices.map { rotation.apply($0.normal).z }
         var faces: [(depth: Double, color: String, indices: [Int], path: CGPath?)] = []
-        var backing = MeshOutline(), underlay = MeshOutline(), moundOutline = MeshOutline(), visibleOutline = MeshOutline()
+        var backing = MeshOutline(), underlay = MeshOutline(), moundOutline = MeshOutline()
         let mound = core.map(project)
         for row in 0..<49 {
             for col in 0..<32 {
@@ -141,7 +141,6 @@ enum Cupcake {
             let indices = winding(ids, points)
             backing.add(indices)
             guard facing > 0 else { continue }
-            visibleOutline.add(indices)
             if triangle.shaded { underlay.add(indices) }
             let depth = (points[ids[0]].z + points[ids[1]].z + points[ids[2]].z) / 3
             faces.append((depth, triangle.shaded ? crease : cream, indices, nil))
@@ -198,14 +197,9 @@ enum Cupcake {
         flush()
         // The cake and frosting are above the liner's rim, so the top plane determines their draw order.
         let front = rotation.apply(Vec3(x: 0, y: -1, z: 0)).z >= 0
-        var boundary = backdrop.union(cake.path(cakePoints.map(screen)))
-        boundary = boundary.union(padded(visibleOutline.path(projected).normalized(using: .winding)))
-        for face in faces { if let path = face.path { boundary = boundary.union(path) } }
-        let empty = CGMutablePath()
-        return layers.enumerated().map { index, layer in
+        return layers.map { layer in
             var layer = layer
             layer.front = front
-            layer.outline = index == 0 ? boundary : empty
             return layer
         }
     }

@@ -27,6 +27,7 @@ public final class ChatStore {
     @ObservationIgnored private var streamTask: Task<Void, Never>?
     @ObservationIgnored private var uploadTask: Task<Void, Never>?
     @ObservationIgnored private var loading: Task<Void, Never>?
+    @ObservationIgnored private var warming: Task<Void, Never>?
     @ObservationIgnored private var historyTask: Task<Void, Never>?
     @ObservationIgnored private var readTask: Task<Void, Never>?
     @ObservationIgnored private var historyID = UUID()
@@ -34,15 +35,21 @@ public final class ChatStore {
     @ObservationIgnored private var flushing = false
     @ObservationIgnored private var queued: [String: Message] = [:]
 
+    /// `resumes` off leaves interrupted uploads for `start`, for a chat read ahead of being opened.
     public init(client: APIClient, actor: LocalCacheActor, threadID: String, sidebar: SidebarStore? = nil,
-                uploadClient: (any UploadClient)? = nil) {
+                uploadClient: (any UploadClient)? = nil, resumes: Bool = true) {
         self.client = client
         self.cacheActor = actor
         self.threadID = threadID
         self.sidebar = sidebar
         uploader = AttachmentUploader(client: uploadClient ?? client)
         activity = sidebar?.activity ?? ActivityStore()
-        loading = Task { [weak self] in await self?.prepare() }
+        loading = Task { [weak self] in
+            await self?.prepare()
+            guard resumes else { return }
+            await self?.sweepUploads()
+            await self?.resumeUploads()
+        }
     }
 
     /// Waits for the opening cache read. Later reads go through the same actor.
@@ -56,10 +63,23 @@ public final class ChatStore {
         runs = stored
         activity.restore(stored)
         messages = (try? await cacheActor.call { try $0.messages(threadID: threadID, limit: 100) }) ?? []
+        // A chat never opened here starts from the message the sidebar already has, not a blank page.
+        if messages.isEmpty, let last = sidebar?.lastFinished[threadID], last.status != MessageStatus.silent {
+            messages = [last]
+        }
         for message in queued.values { update(message) }
-        Task {
-            await sweepUploads()
-            await resumeUploads()
+    }
+
+    /// Catches up from the server ahead of opening, so the first frame is already current.
+    public func warm() async {
+        await ready()
+        let threadID = self.threadID
+        guard streamTask == nil, warming == nil, !threadID.hasPrefix("local-"),
+              let cursor = try? await cacheActor.call({ try $0.cursor(threadID: threadID) }),
+              (sidebar?.lastSeq(threadID) ?? 0) > cursor, streamTask == nil else { return }
+        warming = Task { [weak self] in
+            try? await self?.catchUp()
+            self?.warming = nil
         }
     }
 
@@ -68,9 +88,13 @@ public final class ChatStore {
         guard let resolved = await sidebar?.resolved(threadID) ?? (threadID.hasPrefix("local-") ? nil : threadID) else { return }
         threadID = resolved
         await ready()
+        guard streamTask == nil else { return }
+        warming?.cancel()
+        warming = nil
         streamTask = Task { [weak self] in await self?.connect() }
         uploadTask = Task { [weak self] in
             await self?.sweepUploads()
+            await self?.resumeUploads()
             while !Task.isCancelled {
                 if self?.isConnected == true { await self?.resumeUploads() }
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
@@ -452,28 +476,12 @@ public final class ChatStore {
         var delay: UInt64 = 1
         while !Task.isCancelled {
             do {
-                try await repairSequences()
-                var cursor = try await cacheActor.call { try $0.cursor(threadID: threadID) }
-                let visibleCount = max(100, messages.count)
-                while true {
-                    let replay = try await client.events(threadID: threadID, after: cursor)
-                    try Task.checkCancellation()
-                    if replay.isEmpty { break }
-                    for event in replay { try await receive(event, live: false) }
-                    cursor = try await cacheActor.call { try $0.cursor(threadID: threadID) }
-                }
-                messages = try await cacheActor.call { try $0.messages(threadID: threadID, limit: visibleCount) }
-                // The replay filled the cache, so a page short of the limit holds the whole history.
-                hasEarlier = messages.count >= visibleCount
-                for message in queued.values { update(message) }
-                runs = try await cacheActor.call { try $0.runs(threadID: threadID) }
-                activity.restore(runs)
-                isConnected = true
-                error = nil
+                try await catchUp()
+                markConnected()
                 loadHistory()
                 Task { await flush(); await resumeUploads() }
                 scheduleRead()
-                cursor = try await cacheActor.call { try $0.cursor(threadID: threadID) }
+                let cursor = try await cacheActor.call { try $0.cursor(threadID: threadID) }
                 for try await event in client.stream(threadID: threadID, after: cursor) {
                     try Task.checkCancellation()
                     try await receive(event)
@@ -492,6 +500,29 @@ public final class ChatStore {
             catch { return }
             delay = min(delay * 2, 15)
         }
+    }
+
+    /// Replays what the cache missed and publishes one page of it.
+    private func catchUp() async throws {
+        let threadID = self.threadID
+        try await repairSequences()
+        var cursor = try await cacheActor.call { try $0.cursor(threadID: threadID) }
+        let visibleCount = max(100, messages.count)
+        while true {
+            let replay = try await client.events(threadID: threadID, after: cursor)
+            try Task.checkCancellation()
+            if replay.isEmpty { break }
+            try await receive(replay)
+            cursor = try await cacheActor.call { try $0.cursor(threadID: threadID) }
+        }
+        let page = try await cacheActor.call { try $0.messages(threadID: threadID, limit: visibleCount) }
+        try Task.checkCancellation()
+        messages = page
+        // The replay filled the cache, so a page short of the limit holds the whole history.
+        hasEarlier = messages.count >= visibleCount
+        for message in queued.values { update(message) }
+        runs = try await cacheActor.call { try $0.runs(threadID: threadID) }
+        activity.restore(runs)
     }
 
     private func scheduleRead() {
@@ -541,6 +572,31 @@ public final class ChatStore {
         }
     }
 
+    /// Takes a catch-up page in one cache hop and one update, however many events it holds.
+    private func receive(_ page: [Event]) async throws {
+        let threadID = self.threadID
+        let events = page.filter { $0.conversationID == threadID }
+        let touchThreads = sidebar == nil
+        try await cacheActor.call { cache in
+            for event in events where event.seq > (try cache.cursor(threadID: threadID)) {
+                _ = try cache.apply(event, touchThreads: touchThreads)
+            }
+        }
+        for event in events {
+            if event.type == EventType.messageReactions, let id = event.messageID ?? event.message?.id {
+                reactionVersions[id] = event.seq
+                reactionErrors[id] = nil
+            }
+            activity.receive(event, live: false)
+        }
+        // The sidebar only needs where the chat ended up: its last finished message, for the
+        // preview while a reply streams, and the latest event.
+        let tap = ContinuousClock().now
+        let finished = events.last { $0.message.map { $0.status != MessageStatus.streaming } == true }
+        if let finished { onUpdate?(finished, tap) }
+        if let last = events.last, last.seq != finished?.seq { onUpdate?(last, tap) }
+    }
+
     func receive(_ event: Event, live: Bool = true) async throws {
         let threadID = self.threadID
         guard event.conversationID == threadID else { return }
@@ -568,7 +624,13 @@ public final class ChatStore {
         }
         activity.receive(event, live: live)
         if live, let runs = applied.runs { self.runs = runs }
-        if live { isConnected = true }
+        if live { markConnected(clearing: false) }
+    }
+
+    /// Writes only a real change: this runs on every event, and any write updates the open chat.
+    private func markConnected(clearing: Bool = true) {
+        if !isConnected { isConnected = true }
+        if clearing, error != nil { error = nil }
     }
 
     private func update(_ message: Message) {
@@ -608,7 +670,7 @@ public final class ChatStore {
                     try await sidebar?.syncEdit(threadID)
                     try await cacheActor.deliver(client: client, threadID: threadID, request: request)
                     if let message = try await cacheActor.call({ try $0.message(id: request.id) }) { update(message) }
-                    error = nil
+                    if error != nil { error = nil }
                 } catch {
                     if try await cacheActor.call({ try $0.accepted(id: request.id) }) {
                         try await cacheActor.call { try $0.acknowledge(id: request.id) }

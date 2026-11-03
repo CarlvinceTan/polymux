@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -244,4 +245,37 @@ func extract(archive []byte, path string) error {
 		}
 		return os.Rename(partial, path)
 	}
+}
+
+// Forward opens a local port to the server behind ticket until stop is called, for one server
+// reaching another. Its stderr is dropped because dumbpipe prints its secret key there.
+func Forward(ctx context.Context, dir, ticket string) (string, func(), error) {
+	bin, err := Binary(ctx, dir)
+	if err != nil {
+		return "", nil, err
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, err
+	}
+	address := listener.Addr().String()
+	listener.Close()
+	run, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(run, bin, "connect-tcp", "--addr", address, ticket)
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return "", nil, err
+	}
+	stop := func() {
+		cancel()
+		_ = cmd.Wait()
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if conn, err := net.DialTimeout("tcp4", address, time.Second); err == nil {
+			conn.Close()
+			return "http://" + address, stop, nil
+		}
+	}
+	stop()
+	return "", nil, errors.New("tunnel to the other server didn't open")
 }

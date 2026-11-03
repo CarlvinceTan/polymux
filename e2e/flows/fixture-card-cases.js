@@ -41,14 +41,23 @@ for (const [index, name] of cases.entries()) {
   }
 
   await app.click({ role: "button", name: "Inspect", exact: true });
+  await cua.sleep(600);
   const state = await app.getState({ query: '{"case":', tree_format: "elements", include_screenshot: false });
   const row = state.elements?.find((row) => String(row.value || row.label || "").startsWith('{"case":'));
   if (!row) throw new Error("Missing layout report for " + name);
   const report = JSON.parse(row.value || row.label);
-  if (report.case !== name || report.overflow !== 0 || report.frames !== 0) {
+  if (report.case !== name || report.overflow !== 0 || report.frames !== 0 || report.hidden > 0) {
     throw new Error("Unexpected card layout: " + JSON.stringify(report));
   }
   if (name === "code" && !report.scroll.includes("pre")) throw new Error("Code line cannot scroll");
+  if (name === "long") {
+    if (report.height <= 400) throw new Error("Long card didn't grow: " + report.height);
+    // The wheel over a tall card moves the chat rather than stopping in the card.
+    await app.scroll({ role: "button", name: "Inspect", exact: true }, "up", 8);
+    await app.waitFor({ role: "button", name: "Scroll to latest", timeout_ms: 5000 });
+    await app.click({ role: "button", name: "Scroll to latest" });
+    await app.waitFor({ role: "button", name: "Scroll to latest", gone: true, timeout_ms: 5000 });
+  }
   await app.click({ role: "button", name: "Inspect", exact: true });
   if (index < cases.length - 1) await app.click({ role: "button", name: "Next", exact: true });
 }

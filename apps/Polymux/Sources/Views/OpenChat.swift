@@ -6,6 +6,8 @@ import PolymuxKit
 final class OpenChat {
     private(set) var store: ChatStore?
     @ObservationIgnored private var scroll: (String, Int64?) -> Void = { _, _ in }
+    /// Puts another chat or task on screen.
+    @ObservationIgnored var show: (String) -> Void = { _ in }
 
     func open(_ store: ChatStore, jump: @escaping (String, Int64?) -> Void) {
         self.store = store
@@ -43,7 +45,7 @@ struct ProfilePanel: View {
                 GroupEditor(thread: thread, session: session, jump: jump).id(thread.id)
             } else {
                 ProfileView(agent: agent, session: session, threadID: thread.id, attachments: openChat.attachments,
-                            runs: runs, inspector: true, locate: { attachment in
+                            runs: runs, inspector: true, show: openChat.show, locate: { attachment in
                                 #if os(iOS)
                                 close()
                                 #endif

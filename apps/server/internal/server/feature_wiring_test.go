@@ -55,7 +55,7 @@ func TestPrivateAttachDirectory(t *testing.T) {
 	}
 	var api *Server
 	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
-		cwd := filepath.Join(api.config.DataDir, d.Agent.ID)
+		cwd := agentruntime.AgentDir(api.config.DataDir, d.Agent.ID)
 		if err := os.MkdirAll(cwd, 0700); err != nil {
 			return agentruntime.Result{}, err
 		}

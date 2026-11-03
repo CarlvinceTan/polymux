@@ -1,0 +1,75 @@
+// A bot's fallbacks save from its profile and survive a relaunch; with them off, a failed model stops the reply.
+let app = await cua.getApp(APP);
+const host = await app.getState({ query: "Settings", include_screenshot: false });
+await app.click({ role: "button", name: "Settings" });
+await app.click({ role: "button", name: "Models" });
+await app.click({ role: "button", name: "Add provider" });
+await app.waitFor({ role: "button", name: "Add custom provider" });
+await app.click({ role: "button", name: "Add custom provider" });
+await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL" });
+for (const model of ["alpha", "beta", "gamma"]) {
+    await app.typeText(model, { role: "textfield", name: "Model ID" });
+    await app.click({ role: "button", name: "Add" });
+}
+await app.click({ role: "button", name: "Save" });
+await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 10000 });
+await app.click({ role: "button", name: "Close Settings" });
+await app.click({ role: "button", name: "New chat" });
+app = await pick(app, "New Bot");
+await app.typeText("Fallback QA", { role: "textfield", name: "Name" });
+await app.click({ role: "button", name: "Create" });
+await app.waitFor({ role: "button", name: "Edit Fallback QA’s profile", timeout_ms: 10000 });
+await app.click({ role: "button", name: "Edit Fallback QA’s profile" });
+await app.click({ role: "button", name: "Capabilities" });
+await app.click({ role: "button", name: "Model" });
+await app.click({ role: "button", name: "Alpha Custom" });
+app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
+await app.waitFor({ role: "button", name: "Model", value: "Alpha Custom", timeout_ms: 10000 });
+await app.click({ role: "button", name: "Fallback settings" });
+await app.waitFor({ role: "button", name: "Mode", value: "Auto", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Mode" });
+await app.click({ role: "button", name: "Custom" });
+await app.waitFor({ text: "No fallbacks.", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Add fallback" });
+await app.waitFor({ role: "button", name: "Beta Custom", timeout_ms: 5000 });
+if ((await app.query({ role: "button", name: "Not set" })).length) throw new Error("A fallback offered Not set");
+await app.click({ role: "button", name: "Beta Custom" });
+await app.waitFor({ role: "button", name: "Fallback 1", value: "Beta Custom", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Reasoning for Beta Custom" });
+await app.click({ role: "button", name: "High" });
+await app.waitFor({ role: "button", name: "Reasoning for Beta Custom", value: "High", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Add fallback" });
+await app.click({ role: "button", name: "Gamma Custom" });
+await app.waitFor({ role: "button", name: "Fallback 2", value: "Gamma Custom", timeout_ms: 5000 });
+await app.click({ role: "menubutton", name: "More actions for Gamma Custom" });
+app = await pick(app, "Move up");
+await app.waitFor({ role: "button", name: "Fallback 1", value: "Gamma Custom", timeout_ms: 5000 });
+await app.click({ role: "menubutton", name: "More actions for Gamma Custom" });
+app = await pick(app, "Remove");
+await app.waitFor({ role: "button", name: "Fallback 2", gone: true, timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Fallback 1", value: "Beta Custom", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Close Fallbacks" });
+await app.click({ role: "button", name: "Close side panel" });
+return "saved";
+
+// @relaunch
+const app = await cua.getApp(APP);
+await app.waitFor({ role: "button", name: "Edit Fallback QA’s profile", timeout_ms: 10000 });
+await app.click({ role: "button", name: "Edit Fallback QA’s profile" });
+await app.click({ role: "button", name: "Capabilities" });
+await app.click({ role: "button", name: "Fallback settings" });
+await app.waitFor({ role: "button", name: "Mode", value: "Custom", timeout_ms: 10000 });
+await app.waitFor({ role: "button", name: "Fallback 1", value: "Beta Custom", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Reasoning for Beta Custom", value: "High", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Mode" });
+await app.click({ role: "button", name: "Off" });
+await app.waitFor({ role: "button", name: "Mode", value: "Off", timeout_ms: 5000 });
+if ((await app.query({ role: "button", name: "Add fallback" })).length) throw new Error("Off still shows the order");
+await app.click({ role: "button", name: "Close Fallbacks" });
+await app.click({ role: "button", name: "Close side panel" });
+await app.typeText("Stop on the failed model", { role: "textfield", name: "Message" });
+await app.pressKey("return", { role: "textfield", name: "Message" });
+// The model's own retries run first.
+const stopped = { role: "statictext", name: "This bot’s model is unavailable right now.", timeout_ms: 10000 };
+await app.waitFor(stopped).catch(() => app.waitFor(stopped));
+return "ok";

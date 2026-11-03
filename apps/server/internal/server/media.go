@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/settings"
 	"github.com/MichaelKinsy/PiG/agent"
@@ -128,10 +129,22 @@ func (t *mediaTool) Execute(ctx context.Context, call string, raw json.RawMessag
 		if args.JobID != "" {
 			return empty, errors.New("media job is unavailable in this conversation")
 		}
-		provider, model, err := t.selection()
+		choices, err := t.candidates()
 		if err != nil {
 			return empty, err
 		}
+		// Moving past a model with no credential is safe: nothing has been submitted yet.
+		var pick mediaChoice
+		for _, choice := range choices {
+			if _, err = t.headers(ctx, owner, choice.provider); err == nil {
+				pick = choice
+				break
+			}
+		}
+		if pick.provider.ID == "" {
+			return empty, err
+		}
+		provider, model := pick.provider, pick.model
 		job = mediaJob{ID: id, Owner: owner, Conversation: conversation, Kind: t.kind, Prompt: args.Prompt,
 			Provider: provider.ID, Type: provider.Type, BaseURL: strings.TrimRight(provider.BaseURL, "/"), Model: model, Status: "new", Message: scope.messageID, Call: call}
 	}
@@ -216,40 +229,57 @@ func (t *mediaTool) advance(ctx context.Context, dir string, job *mediaJob, head
 	return saveMediaJob(filepath.Join(dir, job.ID+".json"), *job)
 }
 
-func (t *mediaTool) selection() (settings.Provider, string, error) {
+type mediaChoice struct {
+	provider settings.Provider
+	model    string
+}
+
+// candidates lists the usable models in the order the settings give; auto takes every one in provider order.
+func (t *mediaTool) candidates() ([]mediaChoice, error) {
 	capability := t.kind + "-gen"
-	choice := t.server.settings.Capabilities()[capability]
-	var selected struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
+	snapshot := t.server.settings.Snapshot()
+	order := snapshot.ImageOrder
+	if t.kind == "video" {
+		order = snapshot.VideoOrder
 	}
-	_ = json.Unmarshal(choice.Choice, &selected)
 	available := t.server.settings.Providers()
 	slices.SortStableFunc(available, func(a, b settings.Provider) int { return cmp.Compare(a.Order, b.Order) })
-	for range 2 {
-		for _, provider := range available {
-			if !provider.Enabled || (selected.Provider != "" && provider.ID != selected.Provider) {
-				continue
-			}
-			for _, model := range provider.Models {
-				if !model.Enabled || !slices.Contains(model.Tags, capability) || (selected.Model != "" && model.ID != selected.Model) {
-					continue
-				}
-				if err := mediaAdapter(provider.Type, t.kind); err != nil {
-					if selected.Provider != "" && !choice.Fallback {
-						return settings.Provider{}, "", err
-					}
-					continue
-				}
-				return provider, model.ID, nil
-			}
+	var found []mediaChoice
+	var unsupported error
+	consider := func(provider settings.Provider, model settings.Model) {
+		if !provider.Enabled || !model.Enabled || !slices.Contains(model.Tags, capability) {
+			return
 		}
-		if selected.Provider == "" || !choice.Fallback {
-			break
+		if err := mediaAdapter(provider.Type, t.kind); err != nil {
+			unsupported = err
+			return
 		}
-		selected.Provider, selected.Model = "", ""
+		found = append(found, mediaChoice{provider, model.ID})
 	}
-	return settings.Provider{}, "", fmt.Errorf("no enabled %s provider/model is configured for native generation", capability)
+	if order.Mode == contract.MediaOrderModeCustom {
+		for _, step := range order.Models {
+			for _, provider := range available {
+				for _, model := range provider.Models {
+					if provider.ID == step.Provider && model.ID == step.Model {
+						consider(provider, model)
+					}
+				}
+			}
+		}
+	} else {
+		for _, provider := range available {
+			for _, model := range provider.Models {
+				consider(provider, model)
+			}
+		}
+	}
+	if len(found) > 0 {
+		return found, nil
+	}
+	if unsupported != nil {
+		return nil, unsupported
+	}
+	return nil, fmt.Errorf("no enabled %s provider/model is configured for native generation", capability)
 }
 
 func mediaAdapter(provider, kind string) error {

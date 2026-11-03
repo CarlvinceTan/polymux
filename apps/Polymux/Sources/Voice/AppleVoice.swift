@@ -55,6 +55,14 @@ final class VoiceAudio {
         try engine.start()
     }
 
+    /// Restarts the engine after the system stopped it.
+    func resume() throws {
+        #if os(iOS)
+        try AVAudioSession.sharedInstance().setActive(true)
+        #endif
+        if !engine.isRunning { try engine.start() }
+    }
+
     func setSilenced(_ value: Bool) {
         engine.mainMixerNode.outputVolume = value ? 0 : 1
     }
@@ -253,8 +261,6 @@ final class AppleInput: SpeechInput {
         else { audio.setMuted(muted) }
     }
 
-    func finishTurn() { fallback?.finishTurn() }
-
     func finalize() async throws {
         if let fallback { try await fallback.finalize() }
         else { try await analyzer?.finalize(through: nil) }
@@ -331,7 +337,7 @@ private final class LegacyInput: SpeechInput {
         return eventStream.stream
     }
 
-    func finishTurn() {
+    private func finishTurn() {
         recognize(at: capture?.time ?? 0)
     }
 
@@ -423,150 +429,4 @@ private final class LegacyInput: SpeechInput {
     }
 }
 
-private nonisolated struct SpeechBuffer: @unchecked Sendable {
-    let value: AVAudioPCMBuffer
-}
 
-@MainActor
-final class AppleOutput: NSObject, SpeechOutput {
-    var firstAudio: (() -> Void)?
-    private let audio: VoiceAudio
-    private let synthesizer = AVSpeechSynthesizer()
-    private var completion: CheckedContinuation<Void, Error>?
-    private var token = UUID()
-    private var converter: AVAudioConverter?
-    private var buffers = 0
-    private var finished = false
-    private var started = false
-    private var timeout: Task<Void, Never>?
-
-    init(audio: VoiceAudio) { self.audio = audio }
-
-    func setSilenced(_ silenced: Bool) { audio.setSilenced(silenced) }
-
-    func speak(_ text: String) async throws {
-        try Task.checkCancellation()
-        let current = UUID()
-        token = current
-        converter = nil
-        buffers = 0
-        finished = false
-        started = false
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = Self.voice(for: .current)
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                completion = continuation
-                synthesizer.write(utterance) { @Sendable [weak self] buffer in
-                    guard let buffer = buffer as? AVAudioPCMBuffer else { return }
-                    let retained = SpeechBuffer(value: buffer)
-                    Task { @MainActor in self?.receive(retained.value, token: current) }
-                }
-                timeout = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(30))
-                    guard !Task.isCancelled, self?.token == current else { return }
-                    self?.finish(throwing: VoiceFailure.audio)
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                if self?.token == current { self?.stop() }
-            }
-        }
-    }
-
-    func stop() {
-        token = UUID()
-        synthesizer.stopSpeaking(at: .immediate)
-        audio.player.stop()
-        finish(throwing: CancellationError())
-    }
-
-    private static func voice(for locale: Locale) -> AVSpeechSynthesisVoice? {
-        if locale.language.languageCode?.identifier == "en",
-           let australian = AVSpeechSynthesisVoice(identifier: "com.apple.siri.natural.Catherine") {
-            return australian
-        }
-        let preferred = AVSpeechSynthesisVoice(language: locale.identifier)
-            ?? AVSpeechSynthesisVoice(language: "en-US")
-        let language = preferred?.language.split(separator: "-").first
-        let voices = AVSpeechSynthesisVoice.speechVoices().filter {
-            $0.language.split(separator: "-").first == language
-                && !$0.voiceTraits.contains(.isNoveltyVoice)
-                && !$0.voiceTraits.contains(.isPersonalVoice)
-                && !$0.identifier.hasPrefix("com.apple.eloquence.")
-        }
-        return voices.max { left, right in
-            if left.quality != right.quality { return left.quality.rawValue < right.quality.rawValue }
-            if (left.language == preferred?.language) != (right.language == preferred?.language) {
-                return right.language == preferred?.language
-            }
-            if (left.identifier == preferred?.identifier) != (right.identifier == preferred?.identifier) {
-                return right.identifier == preferred?.identifier
-            }
-            return left.identifier > right.identifier
-        } ?? preferred
-    }
-
-    private func receive(_ buffer: AVAudioPCMBuffer, token current: UUID) {
-        guard token == current, completion != nil else { return }
-        guard buffer.frameLength > 0 else {
-            finished = true
-            if buffers == 0 { finish() }
-            return
-        }
-        do {
-            let converted = try convert(buffer)
-            buffers += 1
-            audio.player.scheduleBuffer(converted, completionCallbackType: .dataPlayedBack) { @Sendable [weak self] _ in
-                Task { @MainActor in
-                    guard let self, self.token == current else { return }
-                    self.buffers -= 1
-                    if self.finished, self.buffers == 0 { self.finish() }
-                }
-            }
-            if !started {
-                started = true
-                try audio.player.playAudio()
-                firstAudio?()
-            }
-        } catch {
-            audio.player.stop()
-            finish(throwing: error)
-        }
-    }
-
-    private func convert(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
-        if converter == nil { converter = AVAudioConverter(from: buffer.format, to: audio.format) }
-        guard let converter else { throw VoiceFailure.audio }
-        let ratio = audio.format.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64)
-        guard let result = AVAudioPCMBuffer(pcmFormat: audio.format, frameCapacity: capacity) else {
-            throw VoiceFailure.audio
-        }
-        var supplied = false
-        var error: NSError?
-        let status = converter.convert(to: result, error: &error) { _, inputStatus in
-            if supplied {
-                inputStatus.pointee = .noDataNow
-                return nil
-            }
-            supplied = true
-            inputStatus.pointee = .haveData
-            return buffer
-        }
-        if let error { throw error }
-        guard status != .error else { throw VoiceFailure.audio }
-        return result
-    }
-
-    private func finish(throwing error: Error? = nil) {
-        timeout?.cancel()
-        timeout = nil
-        let continuation = completion
-        completion = nil
-        if let error { continuation?.resume(throwing: error) }
-        else { continuation?.resume() }
-    }
-}

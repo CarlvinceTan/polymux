@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -15,39 +14,8 @@ import (
 	"time"
 )
 
-func listenIP(tailscale bool) (string, error) {
-	if tailscale {
-		return tailnet()
-	}
-	return "127.0.0.1", nil
-}
-
-var interfaceAddrs = net.InterfaceAddrs
-
-func tailnet() (string, error) {
-	addrs, err := interfaceAddrs()
-	if err != nil {
-		return "", fmt.Errorf("find Tailscale interface: %w", err)
-	}
-	return tailnetAddr(addrs)
-}
-
-func tailnetAddr(addrs []net.Addr) (string, error) {
-	prefix := netip.MustParsePrefix("100.64.0.0/10")
-	for _, addr := range addrs {
-		p, err := netip.ParsePrefix(addr.String())
-		if err == nil && prefix.Contains(p.Addr()) {
-			return p.Addr().String(), nil
-		}
-	}
-	return "", errors.New("no Tailscale interface found; start Tailscale or omit -tailscale (POLYMUX_TAILSCALE=0)")
-}
-
 func privateIP(ip netip.Addr) bool {
 	ip = ip.Unmap()
-	if ip.Is4() {
-		return ip.IsPrivate() || ip.IsLinkLocalUnicast() || netip.MustParsePrefix("100.64.0.0/10").Contains(ip)
-	}
 	return ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
@@ -213,17 +181,17 @@ func identityHost(host string) string {
 	return ip.WithZone("").String()
 }
 
-// The API speaks plain HTTP, so it binds only where traffic is already private: loopback, or
-// Tailscale's encrypted interface. Other devices reach it through the encrypted tunnel.
+// The API speaks plain HTTP, so it binds only on loopback. Other devices reach it through a
+// tunnel or a transport plugin.
 func validateListen(address string, _ bool) error {
 	ip, err := listenAddr(address)
 	if err != nil {
 		return err
 	}
-	if ip.IsLoopback() || tailscaleIP(ip) {
+	if ip.IsLoopback() {
 		return nil
 	}
-	return errors.New("the API listener must bind loopback or a Tailscale IP; other devices connect through the encrypted tunnel, or use -tailscale")
+	return errors.New("the API listener must bind loopback; other devices connect through a tunnel or a transport plugin")
 }
 
 func validateDevice(address string) error {
@@ -234,7 +202,7 @@ func validateDevice(address string) error {
 	if ip.IsLoopback() || privateIP(ip) || ip.IsUnspecified() {
 		return nil
 	}
-	return errors.New("the device listener must bind a loopback, private LAN, or Tailscale IP, or all interfaces")
+	return errors.New("the device listener must bind a loopback, private LAN, or all interfaces")
 }
 
 func listenAddr(address string) (netip.Addr, error) {
@@ -249,30 +217,7 @@ func listenAddr(address string) (netip.Addr, error) {
 	return ip.Unmap(), nil
 }
 
-func tailscaleIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	return netip.MustParsePrefix("100.64.0.0/10").Contains(ip) || netip.MustParsePrefix("fd7a:115c:a1e0::/48").Contains(ip)
-}
-
-// trustedPeer admits loopback and Tailscale peers. Some LANs also number hosts from Tailscale's
-// range, so a peer on a subnet of an ordinary interface is a LAN peer, not a Tailscale one.
-func trustedPeer(ip netip.Addr, interfaces []lanInterface) bool {
-	ip = ip.Unmap()
-	if ip.IsLoopback() {
-		return true
-	}
-	if !tailscaleIP(ip) {
-		return false
-	}
-	for _, iface := range interfaces {
-		if interfaceRank(iface.Name) == 2 {
-			continue
-		}
-		for _, addr := range iface.Addrs {
-			if p, err := netip.ParsePrefix(addr.String()); err == nil && p.Masked().Contains(ip) {
-				return false
-			}
-		}
-	}
-	return true
+// trustedPeer admits loopback peers only.
+func trustedPeer(ip netip.Addr) bool {
+	return ip.Unmap().IsLoopback()
 }

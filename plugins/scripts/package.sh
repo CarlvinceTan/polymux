@@ -16,6 +16,11 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/$(dirname "$SERVICE")" "$OUT"
 cp "$ROOT/$NAME/plugin.json" "$STAGE/"
+python3 -c "import json,sys;print('\n'.join(json.load(open(sys.argv[1])).get('skills',[])))" "$ROOT/$NAME/plugin.json" | while read -r skill; do
+  [ -n "$skill" ] || continue
+  mkdir -p "$STAGE/$(dirname "$skill")"
+  cp "$ROOT/$NAME/$skill" "$STAGE/$skill"
+done
 (cd "$ROOT" && GOWORK=off CGO_ENABLED=0 go build -trimpath -o "$STAGE/$SERVICE" "./$NAME")
 if [ -n "${POLYMUX_PLUGIN_BINARIES:-}" ]; then
   find "$POLYMUX_PLUGIN_BINARIES" -maxdepth 1 -type f -exec cp {} "$STAGE/$(dirname "$SERVICE")/" \;

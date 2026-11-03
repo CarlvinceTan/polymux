@@ -24,7 +24,7 @@ await app.click({ role: "button", name: "Unmute notifications" });
 await app.waitFor({ text: "Notifications turned on" });
 await app.waitFor({ text: "Notifications turned on", gone: true, timeout_ms: 5000 });
 // Instructions is an editor that scrolls itself, so it isn't one of the card scroll areas.
-for (const [tab, names] of [["Work", ["Schedule", "Tasks"]], ["Capabilities", ["Skills", "Tools"]]]) {
+for (const [tab, names] of [["Work", ["Schedule", "Tasks"]], ["Capabilities", ["Skills", "MCPs"]]]) {
     await app.click((await element("AXButton", tab)).element_token);
     if (tab === "Capabilities") await element("AXTextArea", "Instructions");
     const header = (await element("AXButton", tab)).frame;

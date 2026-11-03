@@ -19,7 +19,8 @@ sign_app() (
     cp "$POLYMUX_MAC_PROFILE" "$1/Contents/embedded.provisionprofile" || exit 1
     entitlements=$prepared
   fi
-  for item in "$1/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate" \
+  for item in "$1/Contents/Helpers/polymux" \
+    "$1/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate" \
     "$1/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app" \
     "$1/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc" \
     "$1/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc" \

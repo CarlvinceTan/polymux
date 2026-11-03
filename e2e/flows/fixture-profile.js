@@ -80,7 +80,7 @@ await app.click(aria.element_token);
 await app.waitFor({ role: "textfield", name: "Name", value: "Aria", timeout_ms: 10000 });
 await callInChat("Aria");
 await selectTab("Media");
-await app.waitFor({ text: "No media yet" });
+await app.waitFor({ text: "No media yet." });
 await selectTab("Files");
 await app.waitFor({ text: "No files yet" });
 return "ok";

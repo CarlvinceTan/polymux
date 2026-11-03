@@ -7,7 +7,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum Section: String, CaseIterable {
-    case moods, states, expressions, interactions, props
+    case moods, states, expressions, interactions
 }
 
 private struct Settings {
@@ -100,7 +100,6 @@ private struct Scene {
     var state = StateID.idle
     var expression = ExpressionID.neutral
     var mood: MoodID?
-    var prop: WorkProp?
     var moves: [Poke] = []
 
     func frames(_ settings: Settings) -> Int { max(1, Int(ceil((settings.seconds ?? duration) * Double(settings.fps)))) }
@@ -141,9 +140,6 @@ private struct Preview {
                 return [("spin", Poke.spin(turns: 1)), ("bounce", .bounce), ("nod", .nod)].map {
                     Scene(section: section, name: $0.0, duration: $0.1.duration + 1, mood: .idle, moves: [$0.1])
                 }
-            case .props:
-                return WorkProp.allCases.map { Scene(section: section, name: $0.rawValue,
-                                                      duration: 5.5, mood: .working, prop: $0) }
             }
         }
     }
@@ -151,7 +147,7 @@ private struct Preview {
     static func catalog() -> [String: Any] {
         ["avatars": ShapeID.allCases.map { ["id": $0.rawValue, "name": $0.label] },
          "moods": MoodID.allCases.map(\.rawValue), "states": StateID.allCases.map(\.rawValue),
-         "expressions": ExpressionID.allCases.map(\.label), "props": WorkProp.allCases.map(\.rawValue),
+         "expressions": ExpressionID.allCases.map(\.label),
          "sections": Section.allCases.map(\.rawValue)]
     }
 
@@ -188,8 +184,8 @@ private struct Preview {
             ?? (scene.mood == .blocked ? options.color.eyeColor(scheme) : backing)
         return AvatarInput(options: options, state: scene.state, expression: scene.expression, playing: true,
                            frozenAt: nil, timeline: nil, time: nil, repeating: false, cueID: "preview-\(index)",
-                           mood: scene.mood, interactive: false, personality: "avatar-preview", showsProps: false,
-                           prop: scene.prop, reduceMotion: false, running: true, settles: true, gazing: false,
+                           mood: scene.mood, interactive: false, personality: "avatar-preview",
+                           reduceMotion: false, running: true, settles: true, gazing: false,
                            ink: AvatarCanvasState.resolve(ink, dark: settings.dark),
                            markInk: AvatarCanvasState.resolve(mark, dark: settings.dark),
                            backing: AvatarCanvasState.resolve(backing, dark: settings.dark),
@@ -299,7 +295,6 @@ private struct Preview {
         precondition(complete.filter { $0.section == .moods }.compactMap(\.mood) == MoodID.allCases)
         precondition(complete.filter { $0.section == .states }.map(\.state) == STATES.map(\.id))
         precondition(complete.filter { $0.section == .expressions }.map(\.expression) == ExpressionID.allCases)
-        precondition(complete.filter { $0.section == .props }.compactMap(\.prop) == WorkProp.allCases)
         precondition(complete.filter { $0.section == .interactions }.count == 3)
         let named = try Settings(["Balloon"]), stored = try Settings(["pinecone"])
         precondition(named.shapes == [.balloon] && stored.shapes == [.balloon])

@@ -38,6 +38,8 @@ type Pairing struct {
 	Revoked      bool     `json:"revoked"`
 	// Paired is false until the device first connects with its credential.
 	Paired bool `json:"paired"`
+	// Client is the device's stable ID across servers; empty until it reports one.
+	Client string `json:"client,omitempty"`
 }
 
 type Enrollment struct {
@@ -93,6 +95,9 @@ CREATE TABLE IF NOT EXISTS invitations(hash TEXT PRIMARY KEY, expires INTEGER NO
 	}
 	if err == nil {
 		err = s.addPaired(ctx)
+	}
+	if err == nil {
+		err = s.addNetwork(ctx)
 	}
 	if err == nil {
 		err = s.identity(ctx, hostname)
@@ -251,7 +256,7 @@ func (s *Store) Authenticate(ctx context.Context, token string) (Pairing, error)
 }
 
 func (s *Store) List(ctx context.Context) ([]Pairing, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,label,agent,capabilities,revoked,paired FROM devices ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,label,agent,capabilities,revoked,paired,client FROM devices ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +265,7 @@ func (s *Store) List(ctx context.Context) ([]Pairing, error) {
 	for rows.Next() {
 		var p Pairing
 		var caps string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Agent, &caps, &p.Revoked, &p.Paired); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Agent, &caps, &p.Revoked, &p.Paired, &p.Client); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(caps), &p.Capabilities); err != nil {
@@ -497,33 +502,6 @@ func formatPair(urls []string, fp, code, agent string) string {
 	b.WriteString("&a=")
 	b.WriteString(url.QueryEscape(agent))
 	return b.String()
-}
-
-// TailscaleURL keeps Serve/Funnel TCP passthrough. Terminated TLS would replace fp.
-func TailscaleURL(dnsName string, status []byte, port string) string {
-	dnsName = strings.TrimSuffix(strings.TrimSpace(dnsName), ".")
-	if dnsName == "" || port == "" || polymuxHost(strings.ToLower(dnsName)) {
-		return ""
-	}
-	var body struct {
-		TCP map[string]struct {
-			TCPForward, TerminateTLS string
-			HTTPS                    bool
-		}
-	}
-	if json.Unmarshal(status, &body) != nil {
-		return ""
-	}
-	for p, h := range body.TCP {
-		if h.HTTPS || h.TerminateTLS != "" || !strings.HasSuffix(h.TCPForward, ":"+port) {
-			continue
-		}
-		if p == "443" {
-			return "https://" + dnsName
-		}
-		return "https://" + dnsName + ":" + p
-	}
-	return ""
 }
 
 func randomID() string { return base64.RawURLEncoding.EncodeToString(randBytes(32)) }

@@ -34,17 +34,27 @@ struct WindowChecks {
             state.edge = 0
             settle(window)
             let reveal = button("Show sidebar", in: frame)
+            require(glass(of: reveal).layer?.mask == nil, "The reveal glass is masked at rest, clipping its press effect")
+            state.stage = .collapsing
+            state.edge = 200
+            settle(window)
+            require(glass(of: reveal).layer?.mask != nil, "The reveal control is not masked while the sidebar covers it")
+            state.stage = .collapsed
+            state.edge = 0
+            settle(window)
+            require(glass(of: reveal).layer?.mask == nil, "The reveal glass stays masked after the sidebar collapses")
             let point = reveal.convert(NSPoint(x: reveal.bounds.midX, y: reveal.bounds.midY), to: frame)
             require(frame.hitTest(point) === reveal, "Chat toolbar intercepts the sidebar's mouse hit")
             (frame.hitTest(point) as? NSButton)?.performClick(nil)
+            state.stage = .expanding
+            state.edge = 100
+            settle(window)
+            require(glass(of: reveal).layer?.mask == nil, "The reveal glass is masked while opening")
             state.stage = .expanded
             state.edge = 320
             settle(window)
             let settings = button("Settings", in: frame)
-            var parent = settings.superview
-            while let view = parent, !(view is NSGlassEffectView) { parent = view.superview }
-            guard let container = parent?.superview else { fatalError("Missing Settings glass container") }
-            require(!container.clipsToBounds, "Settings glass is clipped to the button height")
+            require(!glass(of: settings).superview!.clipsToBounds, "Settings glass is clipped to the button height")
             let overlay = descendants(frame).first { $0 is PanelHosting }!
             let chatPoint = NSPoint(x: overlay.frame.maxX - 20, y: overlay.frame.midY)
             require(overlay.hitTest(chatPoint) != nil, "Chat toolbar actions lost their hit area")
@@ -67,7 +77,7 @@ struct WindowChecks {
         moving = false
         settle(window)
         require(layouts > 0, "Sidebar did not finish its deferred layout")
-        print("Window controls passed: native sidebar hits, Settings glass bounds, chat toolbar hits, deferred titlebar layout")
+        print("Window controls passed: native sidebar hits, reveal glass masks, Settings glass bounds, chat toolbar hits, deferred titlebar layout")
     }
 
     @MainActor private static func settle(_ window: NSWindow) {
@@ -83,10 +93,21 @@ struct WindowChecks {
     }
 
     @MainActor private static func button(_ label: String, in view: NSView) -> NSButton {
-        guard let button = descendants(view).compactMap({ $0 as? NSButton }).first(where: {
-            $0.accessibilityLabel() == label && !$0.isHiddenOrHasHiddenAncestor
-        }) else { fatalError("Missing \(label) button") }
+        guard let button = button(named: label, in: view), !button.isHiddenOrHasHiddenAncestor else {
+            fatalError("Missing \(label) button")
+        }
         return button
+    }
+
+    @MainActor private static func button(named label: String, in view: NSView) -> NSButton? {
+        descendants(view).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == label }
+    }
+
+    @MainActor private static func glass(of view: NSView) -> NSGlassEffectView {
+        var parent = view.superview
+        while let view = parent, !(view is NSGlassEffectView) { parent = view.superview }
+        guard let glass = parent as? NSGlassEffectView else { fatalError("Missing glass container") }
+        return glass
     }
 
     private static func require(_ condition: Bool, _ message: String) {

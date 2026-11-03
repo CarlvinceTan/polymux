@@ -20,7 +20,7 @@ Polymux’s core is small. Connect the tools you want your agents to use:
 
 In a direct chat, tell the agent which trusted tool, service, or skill file you want to connect. Ask it to explain the access needed before making changes.
 
-Open **Profile → Capabilities** to see its instructions, skills, and tools. Files and programs on a client Mac are not automatically available on the server.
+Open **Profile → Capabilities** to see its instructions, skills, and MCP connections. Files and programs on a client Mac are not automatically available on the server.
 
 ## Devices and permissions
 

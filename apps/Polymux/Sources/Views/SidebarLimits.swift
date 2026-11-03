@@ -32,6 +32,7 @@ final class SidebarState {
     @ObservationIgnored weak var anchor: SidebarAnchor?
     @ObservationIgnored weak var handle: SidebarHandle?
 
+    func collapse() { anchor?.collapse() }
     func beginReveal() -> UUID? { anchor?.beginReveal() }
     func endReveal(_ token: UUID) { anchor?.endReveal(token) }
 }
@@ -208,8 +209,8 @@ final class SidebarAnchor: NSView {
         revealTimer = timer
     }
 
-    private func collapse() {
-        guard let item, let split else { return }
+    func collapse() {
+        guard let item, let split, movement == nil, !item.isCollapsed else { return }
         let token = UUID()
         movement = token
         publish(.collapsing)
@@ -223,7 +224,7 @@ final class SidebarAnchor: NSView {
                 self.finish(token, item: item, split: split)
             } else {
                 NSAnimationContext.runAnimationGroup { @Sendable [weak self] context in
-                    context.duration = 0.22
+                    context.duration = Motion.columnTime
                     context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                     context.allowsImplicitAnimation = true
                     MainActor.assumeIsolated {
@@ -360,23 +361,21 @@ struct SidebarControl: View {
     let state: SidebarState
     let reveal: () -> Void
     let search: () -> Void
-    let add: () -> Void
-    let group: () -> Void
+    let menu: [PluginAction]
     let settings: () -> Void
 
     var body: some View {
-        SidebarBridge(state: state, expanded: state.stage == .expanded,
-                      reveal: reveal, search: search, add: add, group: group, settings: settings)
+        SidebarBridge(state: state, stage: state.stage,
+                      reveal: reveal, search: search, menu: menu, settings: settings)
     }
 }
 
 private struct SidebarBridge: NSViewRepresentable {
     let state: SidebarState
-    let expanded: Bool
+    let stage: SidebarStage
     let reveal: () -> Void
     let search: () -> Void
-    let add: () -> Void
-    let group: () -> Void
+    let menu: [PluginAction]
     let settings: () -> Void
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
@@ -386,8 +385,8 @@ private struct SidebarBridge: NSViewRepresentable {
     func updateNSView(_ view: SidebarHandle, context: Context) {
         state.handle = view
         view.update(edge: state.edge,
-                    content: SidebarContent(state: state, expanded: expanded, enabled: enabled, scheme: scheme,
-                                            reveal: reveal, search: search, add: add, group: group, settings: settings))
+                    content: SidebarContent(stage: stage, enabled: enabled, scheme: scheme,
+                                            reveal: reveal, search: search, menu: menu, settings: settings))
     }
 
     static func dismantleNSView(_ view: SidebarHandle, coordinator: ()) { view.detach() }
@@ -485,14 +484,12 @@ final class SidebarHandle: NSView {
 }
 
 private struct SidebarContent {
-    let state: SidebarState
-    let expanded: Bool
+    let stage: SidebarStage
     let enabled: Bool
     let scheme: ColorScheme
     let reveal: () -> Void
     let search: () -> Void
-    let add: () -> Void
-    let group: () -> Void
+    let menu: [PluginAction]
     let settings: () -> Void
 
 }
@@ -500,11 +497,14 @@ private struct SidebarContent {
 private final class SidebarBar: NSView {
     private let controls = NSView()
     private var visible: CGFloat = SidebarWidth.initial
+    private var occluding = false
+    private var fading = false
     private let group = NSGlassEffectView()
     private let settings = NSGlassEffectView()
     private let reveal = NSGlassEffectView()
     private var buttons: [NSButton] = []
     private var actions: [() -> Void] = []
+    private var creations: [PluginAction] = []
 
     init() {
         super.init(frame: .zero)
@@ -549,12 +549,41 @@ private final class SidebarBar: NSView {
 
     func update(_ content: SidebarContent) {
         appearance = NSAppearance(named: content.scheme == .dark ? .darkAqua : .aqua)
-        actions = [content.search, content.add, content.settings, content.reveal, content.group]
-        controls.isHidden = content.state.stage == .collapsed
-        controls.clipsToBounds = content.state.stage.moving
-        reveal.isHidden = content.expanded
-        for button in buttons { button.isEnabled = content.enabled && !content.state.stage.moving }
-        buttons[3].isEnabled = content.enabled && content.state.stage == .collapsed
+        actions = [content.search, {}, content.settings, content.reveal]
+        creations = content.menu
+        controls.isHidden = content.stage == .collapsed
+        controls.clipsToBounds = content.stage.moving
+        occluding = content.stage == .collapsing
+        switch content.stage {
+        case .expanded:
+            reveal.layer?.removeAnimation(forKey: "revealFade")
+            fading = false
+            reveal.isHidden = true
+            reveal.alphaValue = 1
+        case .expanding:
+            reveal.isHidden = false
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                reveal.layer?.removeAnimation(forKey: "revealFade")
+                reveal.alphaValue = 0
+                fading = false
+            } else if !fading {
+                fading = true
+                let fade = CABasicAnimation(keyPath: "opacity")
+                fade.fromValue = 1
+                fade.toValue = 0
+                fade.duration = 0.18
+                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                reveal.layer?.add(fade, forKey: "revealFade")
+                reveal.alphaValue = 0
+            }
+        case .collapsing, .collapsed:
+            reveal.layer?.removeAnimation(forKey: "revealFade")
+            fading = false
+            reveal.isHidden = false
+            reveal.alphaValue = 1
+        }
+        for button in buttons { button.isEnabled = content.enabled && !content.stage.moving }
+        buttons[3].isEnabled = content.enabled && content.stage == .collapsed
         needsLayout = true
     }
 
@@ -572,11 +601,17 @@ private final class SidebarBar: NSView {
         settings.frame = NSRect(x: visible - 48, y: 0, width: 36, height: 36)
         reveal.frame = NSRect(x: 4, y: y, width: 36, height: 36)
         let left = min(36, max(0, visible - 4))
-        let mask = CAShapeLayer()
-        mask.path = CGPath(rect: CGRect(x: left, y: 0, width: 36 - left, height: 36), transform: nil)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        reveal.layer?.mask = mask
+        // Mask only while the sidebar edge reveals the disabled control. A mask at
+        // rest clips the glass press effect to the control's bounds.
+        if occluding && left > 0 {
+            let mask = CAShapeLayer()
+            mask.path = CGPath(rect: CGRect(x: left, y: 0, width: 36 - left, height: 36), transform: nil)
+            reveal.layer?.mask = mask
+        } else {
+            reveal.layer?.mask = nil
+        }
         CATransaction.commit()
     }
 
@@ -590,21 +625,21 @@ private final class SidebarBar: NSView {
     }
 
     @objc private func showCreate(_ button: NSButton) {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.allowsContextMenuPlugIns = false
-        for (tag, title) in [(1, "New Bot"), (4, "New Group Chat")] {
-            let item = NSMenuItem(title: title, action: #selector(create(_:)), keyEquivalent: "")
+        let popup = NSMenu()
+        popup.autoenablesItems = false
+        popup.allowsContextMenuPlugIns = false
+        for (tag, action) in creations.enumerated() {
+            let item = NSMenuItem(title: action.title, action: #selector(create(_:)), keyEquivalent: "")
             item.target = self
             item.tag = tag
-            menu.addItem(item)
+            popup.addItem(item)
         }
         // Clear the menu's top inset as well as the button.
         let y = button.isFlipped ? button.bounds.maxY + 12 : button.bounds.minY - 12
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: y), in: button)
+        popup.popUp(positioning: nil, at: NSPoint(x: 0, y: y), in: button)
     }
 
-    @objc private func create(_ item: NSMenuItem) { actions[item.tag]() }
+    @objc private func create(_ item: NSMenuItem) { creations[item.tag].run() }
 }
 
 private final class SidebarClip: NSView {

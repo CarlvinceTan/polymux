@@ -21,6 +21,18 @@ BUILD_NUMBER=${POLYMUX_BUILD_NUMBER:-$(printf '%s' "$MARKETING_VERSION" | awk -F
 printf '%s\n' "$BUILD_NUMBER" | grep -Eq '^[0-9]+(\.[0-9]+){0,2}$' || {
   echo "Invalid build number: $BUILD_NUMBER" >&2; exit 1;
 }
+# Archive this build's symbols, which crash logs need to name its functions.
+symbols() {
+  built="$ROOT/.build/xcode-release/Build/Products/Release"
+  uuid=$(dwarfdump --uuid "$built/Polymux.app/Contents/MacOS/Polymux" | cut -d' ' -f2)
+  [ "$uuid" = "$(dwarfdump --uuid "$built/Polymux.app.dSYM" | cut -d' ' -f2)" ] || {
+    echo 'The dSYM does not match the app.' >&2; exit 1;
+  }
+  mkdir -p "$DIST/symbols"
+  ditto -c -k --keepParent "$built/Polymux.app.dSYM" \
+    "$DIST/symbols/Polymux-$MARKETING_VERSION-$BUILD_NUMBER-arm64.dSYM.zip"
+}
+
 # Developer ID-signed macOS client. No APNS entitlement is used.
 macos() {
   xcodebuild build \
@@ -36,6 +48,11 @@ macos() {
     ENABLE_HARDENED_RUNTIME=YES
   rm -rf "$DIST/macos" && mkdir -p "$DIST/macos"
   ditto "$ROOT/.build/xcode-release/Build/Products/Release/Polymux.app" "$DIST/macos/Polymux.app"
+  symbols
+  # The app runs this copy itself on a Mac with no other server.
+  server
+  mkdir -p "$DIST/macos/Polymux.app/Contents/Helpers"
+  cp "$DIST/server/polymux" "$DIST/macos/Polymux.app/Contents/Helpers/polymux"
   if [ -n "${POLYMUX_FEED_URL:-}" ]; then
     plist="$DIST/macos/Polymux.app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :SUFeedURL $POLYMUX_FEED_URL" "$plist"

@@ -13,7 +13,7 @@ struct ActivityDot: View {
             .frame(width: size, height: size)
             .opacity(reduceMotion || appeared ? 1 : 0)
             .onAppear {
-                withAnimation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.13)) {
+                withAnimation(Motion.quick.unless(reduceMotion)) {
                     appeared = true
                 }
             }

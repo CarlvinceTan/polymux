@@ -41,7 +41,7 @@ func (s *Server) syncProviders(reg *providers.Registry) {
 			continue
 		}
 		key, _ := reg.Secrets.Get(p.ID)
-		spec := agentruntime.ProviderSpec{ID: p.ID, Type: p.Type, BaseURL: p.BaseURL, Key: key, Headers: p.Headers, Session: p.SessionHeader, Windows: map[string]int{}}
+		spec := agentruntime.ProviderSpec{ID: p.ID, Type: p.Type, BaseURL: p.BaseURL, Key: key, Headers: p.Headers, Session: p.SessionHeader, Preferred: providers.Preferred(p.Type), Windows: map[string]int{}}
 		if builtin := providers.Builtin(p.Type); builtin != nil {
 			spec.Builtin, spec.Credentials = builtin, reg.Credentials()
 		}
@@ -118,7 +118,7 @@ func (s *Server) providerRoutes(reg *providers.Registry, mu *sync.Mutex) {
 		for i := range ordered {
 			ordered[i].Status, ordered[i].KeyHint = reg.Credentials().Describe(r.Context(), ordered[i].ID)
 		}
-		write(w, 200, ordered)
+		write(w, 200, providers.WithLevels(ordered))
 	})
 	s.mux.HandleFunc("PATCH /providers/groups/{type}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -162,7 +162,7 @@ func (s *Server) providerRoutes(reg *providers.Registry, mu *sync.Mutex) {
 		for i := range group {
 			group[i].Status, group[i].KeyHint = reg.Credentials().Describe(r.Context(), group[i].ID)
 		}
-		write(w, 200, group)
+		write(w, 200, providers.WithLevels(group))
 	})
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -176,7 +176,7 @@ func (s *Server) providerRoutes(reg *providers.Registry, mu *sync.Mutex) {
 			for i := range list {
 				list[i].Status, list[i].KeyHint = reg.Credentials().Describe(r.Context(), list[i].ID)
 			}
-			write(w, 200, list)
+			write(w, 200, providers.WithLevels(list))
 			return
 		}
 		id := r.PathValue("id")
@@ -321,7 +321,7 @@ func (s *Server) providerRoutes(reg *providers.Registry, mu *sync.Mutex) {
 			w.WriteHeader(204)
 		} else {
 			p.Status, p.KeyHint = reg.Credentials().Describe(r.Context(), p.ID)
-			write(w, 200, p)
+			write(w, 200, providers.WithLevels([]providers.Provider{p})[0])
 		}
 	}
 	for _, route := range []string{"GET /providers", "POST /providers", "PATCH /providers/{id}", "DELETE /providers/{id}", "POST /providers/{id}/test", "PUT /providers/{id}/key"} {

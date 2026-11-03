@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
@@ -28,6 +30,8 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/network"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/proxy"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
@@ -44,7 +48,16 @@ type Factory interface {
 	Open(context.Context, agentruntime.Definition, string) (agentruntime.Session, error)
 }
 type Config struct {
-	BuildSHA    string
+	BuildSHA string
+	ServerID string
+	// Mover hands this server\'s data to a worker that outlives it; nil means it can\'t move.
+	Mover func(target, drain string, merge bool) error
+	// Supervised says something restarts this server when it exits, which a target needs.
+	Supervised bool
+	// Exit stops the server, for its supervisor to start again.
+	Exit func()
+	// Address is where this server's own API listens, for links it makes without a request.
+	Address     string
 	DataDir     string
 	Model       string
 	Definitions []agentruntime.Definition
@@ -60,10 +73,20 @@ type Config struct {
 	BackgroundTimeout time.Duration
 	GroupCaps         *GroupCaps
 	VaultKeys         vaultstore.Keys
+	// PluginIndex overrides the default plugin index address.
+	PluginIndex string
+	// Publish is what transport plugins may expose.
+	Publish plugins.Publish
 }
 type Server struct {
+	peerOnce   sync.Once
+	peerLayer  *network.Manager
+	moveMu     sync.Mutex
+	moving     *moveState
+	moveKey    *ecdh.PrivateKey
 	drafts     sync.Map
 	Store      *store.Store
+	plugins    *plugins.Manager
 	memory     *memory.Store
 	settings   *settings.Store
 	secrets    *secrets.Store
@@ -87,6 +110,8 @@ type Server struct {
 	admission  admission
 	instance   string
 	closeOnce  sync.Once
+	sweepMu    sync.Mutex
+	sweepWake  chan struct{}
 	closeErr   error
 	mux        *http.ServeMux
 	sends      sync.Mutex
@@ -249,8 +274,11 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 	if err := s.Recover(ctx); err != nil {
 		return nil, err
 	}
+	if err := moveAgents(ctx, s, c.DataDir, definitions, c.Log); err != nil {
+		return nil, fmt.Errorf("move agent folders: %w", err)
+	}
 	ctx, cancel := context.WithCancel(ctx)
-	v := &Server{Store: s, settings: preferences, keys: providers.NewKeychain(filepath.Join(c.DataDir, "provider-keys")), memory: memory.New(filepath.Join(c.DataDir, "memory")), worktrees: agentruntime.NewWorktrees(filepath.Join(c.DataDir, "worktrees")), config: c, ctx: ctx, cancel: cancel, actors: map[string]*actor{}, groups: map[string]*groupActor{}, presence: map[string]int{}, deletes: map[string]*deletion{}, voices: map[string]*voiceWork{}, voiceSeen: map[string]bool{}, mux: http.NewServeMux(), slots: make(chan struct{}, 4)}
+	v := &Server{Store: s, settings: preferences, keys: providers.NewKeychain(filepath.Join(c.DataDir, "provider-keys")), memory: memory.New(filepath.Join(c.DataDir, "memory")), worktrees: agentruntime.NewWorktrees(filepath.Join(c.DataDir, "worktrees")), config: c, ctx: ctx, cancel: cancel, actors: map[string]*actor{}, groups: map[string]*groupActor{}, presence: map[string]int{}, deletes: map[string]*deletion{}, voices: map[string]*voiceWork{}, voiceSeen: map[string]bool{}, mux: http.NewServeMux(), slots: make(chan struct{}, 4), sweepWake: make(chan struct{}, 1)}
 	v.secrets = vault
 	v.instance = ID()
 	if err := v.loadDrain(); err != nil {
@@ -266,6 +294,11 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 		return nil, errors.Join(err, v.memory.Close())
 	}
 	v.vaultJobs = map[string]*vaultJob{}
+	v.plugins, err = plugins.New(ctx, plugins.Config{Dir: filepath.Join(c.DataDir, "plugins"), Index: c.PluginIndex, Publish: c.Publish, Store: s, Log: c.Log})
+	if err != nil {
+		cancel()
+		return nil, errors.Join(err, v.memory.Close())
+	}
 	// Only a runtime that runs commands needs a secret environment: the proxy for web requests
 	// and the local agent socket for SSH keys.
 	if runtime, ok := c.Factory.(shellRuntime); ok {
@@ -278,6 +311,7 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 		runtime.SetShellEnv(v.shellEnv)
 	}
 	v.outputs = &outputFiles{store: s, dir: filepath.Join(c.DataDir, "attachments")}
+	orphans := v.orphans(ctx)
 	for _, d := range definitions {
 		actorCtx, stop := context.WithCancel(ctx)
 		a := &actor{id: d.Agent.ID, definition: d, stop: stop, done: make(chan struct{})}
@@ -307,9 +341,15 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 	go v.runWatches(ctx)
 	v.workers.Add(1)
 	go v.runMedia(ctx)
+	v.workers.Add(1)
+	go v.runSweeps(ctx, orphans)
 	if c.Push != nil {
 		v.workers.Add(1)
 		go v.sendNotices(ctx)
+	}
+	if c.Devices != nil {
+		v.workers.Add(1)
+		go v.runPeers(ctx)
 	}
 	v.routes()
 	return v, nil
@@ -348,6 +388,7 @@ func (s *Server) Close() error {
 		for _, group := range groups {
 			errs = append(errs, group.close())
 		}
+		s.plugins.Close()
 		s.vault.Close()
 		if s.proxy != nil {
 			errs = append(errs, s.proxy.Close())
@@ -360,7 +401,7 @@ func (s *Server) Close() error {
 	})
 	return s.closeErr
 }
-func (s *Server) Handler() http.Handler { return s.config.Devices.Require(s) }
+func (s *Server) Handler() http.Handler { return AllowAppOrigins(s.config.Devices.Require(s)) }
 
 func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -368,7 +409,11 @@ func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "pair_unavailable", "Device pairing is unavailable.")
 		return
 	}
-	token, err := s.config.Devices.Invite(r.Context())
+	var grant device.Grant
+	if r.URL.Query().Get("role") == device.RolePeer {
+		grant.Role = device.RolePeer
+	}
+	token, err := s.config.Devices.Store().IssueGrant(r.Context(), grant)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not issue a pairing credential"})
 		return
@@ -377,11 +422,21 @@ func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 // invite carries the direct address and, when available, a tunnel ticket for other networks.
+// A transport plugin's address, like a configured public one, replaces both.
 func (s *Server) invite(r *http.Request, token string) map[string]string {
+	return s.inviteAt(r.Context(), r.Host, token)
+}
+
+func (s *Server) inviteAt(ctx context.Context, host, token string) map[string]string {
 	if s.config.PublicURL != "" {
 		return map[string]string{"url": s.config.PublicURL, "token": token}
 	}
-	value := map[string]string{"url": "http://" + r.Host, "token": token}
+	for _, transport := range s.plugins.Transports(ctx) {
+		if transport.State == contract.PluginStateReady && transport.API != "" {
+			return map[string]string{"url": transport.API, "token": token}
+		}
+	}
+	value := map[string]string{"url": "http://" + host, "token": token}
 	if s.config.Ticket != nil {
 		if ticket := s.config.Ticket(15 * time.Second); ticket != "" {
 			value["ticket"] = ticket
@@ -401,6 +456,20 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 	}
 	name, _ := os.Hostname()
 	online := s.clients.online()
+	peers, restricted, merged, title := []device.Peer{}, []device.Pairing{}, []string{}, ""
+	if s.config.Devices != nil {
+		store := s.config.Devices.Store()
+		title, _ = store.NetworkName(r.Context())
+		if listed, err := store.Peers(r.Context()); err == nil {
+			peers = listed
+		}
+		if listed, err := s.config.Devices.Restricted(r.Context()); err == nil {
+			restricted = listed
+		}
+		if listed, err := store.Merged(r.Context()); err == nil {
+			merged = listed
+		}
+	}
 	for i := range devices {
 		if devices[i].ID == host {
 			devices[i].Name = name
@@ -411,13 +480,19 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 	}
 	write(w, 200, map[string]any{
 		"server": map[string]any{
-			"name": name, "build": s.config.BuildSHA,
+			"id": s.config.ServerID, "name": name, "network": title, "build": s.config.BuildSHA,
 			"platform": runtime.GOOS, "role": "server",
 		},
-		"devices": devices,
-		"current": device.Self(r.Context()),
-		"host":    host,
-		"online":  online,
+		"devices":    devices,
+		"current":    device.Self(r.Context()),
+		"host":       host,
+		"online":     online,
+		"peers":      peers,
+		"restricted": restricted,
+		"empty":      s.empty(r.Context()),
+		"moving":     s.moveNow(),
+		"moveIssue":  s.moveProblem(),
+		"merged":     merged,
 	})
 }
 
@@ -428,13 +503,17 @@ func (s *Server) renameDevice(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Device pairing is unavailable.")
 		return
 	}
-	var input struct{ Name string }
+	var input struct{ Name, Client string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
 		fail(w, 400, "invalid", "Send a device name.")
 		return
 	}
 	if err := s.config.Devices.Rename(r.Context(), self, strings.TrimSpace(input.Name)); err != nil {
 		fail(w, 400, "invalid", err.Error())
+		return
+	}
+	if err := s.config.Devices.Store().Claim(r.Context(), self, input.Client); err != nil {
+		fail(w, 500, "invalid", "Couldn't save this device's ID.")
 		return
 	}
 	w.WriteHeader(204)
@@ -508,17 +587,26 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /client", s.reportClient)
 	s.mux.HandleFunc("GET /client/requests", s.clientStream)
 	s.mux.HandleFunc("POST /client/requests/{id}", s.answerClient)
+	s.pluginRoutes()
+	s.mux.HandleFunc("GET /work", s.recentWork)
 	s.mux.HandleFunc("GET /settings", s.getSettings)
 	s.mux.HandleFunc("PATCH /settings", s.updateSettings)
 	s.mux.HandleFunc("GET /speech/live", s.speechLive)
 	s.mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		write(w, 200, map[string]any{"status": "ok", "runtime": "PiG", "buildSHA": s.config.BuildSHA, "semanticSearch": s.config.Index.Embedder != nil, "maintenance": s.admission.snapshot()})
+		health := "ok"
+		maintenance := s.admission.snapshot()
+		if maintenance.State == "ready" {
+			health = "updating"
+		}
+		write(w, 200, map[string]any{"status": health, "runtime": "PiG", "buildSHA": s.config.BuildSHA, "semanticSearch": s.config.Index.Embedder != nil, "maintenance": maintenance})
 	})
 	s.mux.HandleFunc("GET /network", s.network)
 	s.mux.HandleFunc("GET /network/invite", s.networkInvite)
 	s.mux.HandleFunc("PATCH /network/devices/self", s.renameDevice)
 	s.mux.HandleFunc("PATCH /network/devices/{id}", s.labelDevice)
 	s.mux.HandleFunc("DELETE /network/devices/{id}", s.removeDevice)
+	s.networkRoutes()
+	s.moveRoutes()
 	s.mux.HandleFunc("GET /agents", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.Agents(r.Context())
 		s.respond(w, v, err)
@@ -538,11 +626,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /agents/{id}/proactivity", s.setProactivity)
 	s.sidebarRoutes()
 	s.mux.HandleFunc("GET /threads", func(w http.ResponseWriter, r *http.Request) {
-		v, err := s.Store.Threads(r.Context())
+		v, err := s.Store.Chats(r.Context())
 		s.respond(w, v, err)
 	})
 	s.mux.HandleFunc("POST /threads", s.createThread)
 	s.mux.HandleFunc("PATCH /threads/{id}", s.updateThread)
+	s.mux.HandleFunc("PATCH /threads/{id}/task", s.updateTask)
 	s.mux.HandleFunc("DELETE /threads/{id}", s.deleteThread)
 	s.mux.HandleFunc("GET /threads/{id}/messages", s.messages)
 	s.mux.HandleFunc("GET /threads/{id}/tool-runs", s.toolRuns)
@@ -551,7 +640,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/credential", s.answerCredential)
 	s.mux.HandleFunc("PUT /threads/{id}/messages/{messageID}/reaction", s.react)
 	s.mux.HandleFunc("POST /threads/{id}/voice", s.voice)
-	s.mux.HandleFunc("POST /threads/{id}/voice/stream", s.voiceStream)
 	s.mux.HandleFunc("GET /threads/{id}/events", s.events)
 	s.mux.HandleFunc("GET /threads/{id}/stream", s.stream)
 	s.mux.HandleFunc("POST /threads/{id}/read", s.read)
@@ -716,6 +804,27 @@ func (s *Server) withModel(d agentruntime.Definition) (agentruntime.Definition, 
 	return d, err
 }
 
+const maxFallbacks = 8
+
+// validFallback accepts enabled models, and listed ones since disabled so they can't block other edits.
+func (s *Server) validFallback(next contract.AgentFallback, current *contract.AgentFallback) bool {
+	if next.Mode != contract.AgentFallbackModeAuto && next.Mode != contract.AgentFallbackModeCustom && next.Mode != contract.AgentFallbackModeOff {
+		return false
+	}
+	if len(next.Models) > maxFallbacks {
+		return false
+	}
+	same := func(a, b contract.FallbackModel) bool { return a.Provider == b.Provider && a.Model == b.Model }
+	for i, m := range next.Models {
+		duplicate := slices.ContainsFunc(next.Models[:i], func(other contract.FallbackModel) bool { return same(m, other) })
+		listed := current != nil && slices.ContainsFunc(current.Models, func(other contract.FallbackModel) bool { return same(m, other) })
+		if duplicate || !settings.ValidReasoning(m.Reasoning) || !listed && !s.enabledModel(m.Provider, m.Model) {
+			return false
+		}
+	}
+	return true
+}
+
 // fallback reports whether the runtime's own endpoint can serve bots that name no provider.
 func fallback(f Factory) bool {
 	runtime, ok := f.(interface{ Fallback() bool })
@@ -727,6 +836,9 @@ func (s *Server) agentProfile(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "not_found", "Agent not found.")
 		return
+	}
+	if err == nil && profile.Prompt == "" {
+		profile.Prompt = agentruntime.DefaultPrompt
 	}
 	s.respond(w, profile, err)
 }
@@ -740,15 +852,16 @@ type updateAgentRequest struct {
 }
 
 type agentPatch struct {
-	TaskDelegation *bool                  `json:"task_delegation,omitempty"`
-	Name           *string                `json:"name,omitempty"`
-	Role           *string                `json:"role,omitempty"`
-	Prompt         *string                `json:"prompt,omitempty"`
-	Workspace      *string                `json:"workspace,omitempty"`
-	Avatar         *contract.AvatarDesign `json:"avatar,omitempty"`
-	Provider       *string                `json:"provider,omitempty"`
-	Model          *string                `json:"model,omitempty"`
-	Reasoning      *string                `json:"reasoning,omitempty"`
+	TaskDelegation *bool                   `json:"task_delegation,omitempty"`
+	Name           *string                 `json:"name,omitempty"`
+	Role           *string                 `json:"role,omitempty"`
+	Prompt         *string                 `json:"prompt,omitempty"`
+	Workspace      *string                 `json:"workspace,omitempty"`
+	Avatar         *contract.AvatarDesign  `json:"avatar,omitempty"`
+	Provider       *string                 `json:"provider,omitempty"`
+	Model          *string                 `json:"model,omitempty"`
+	Reasoning      *string                 `json:"reasoning,omitempty"`
+	Fallback       *contract.AgentFallback `json:"fallback,omitempty"`
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
@@ -758,7 +871,7 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	profile, err := s.editAgent(r.Context(), r.PathValue("id"), agentPatch{
 		Name: request.Name, Role: request.Role, Prompt: request.Prompt, Workspace: request.Workspace,
-		Provider: request.Provider, Model: request.Model, Reasoning: request.Reasoning,
+		Provider: request.Provider, Model: request.Model, Reasoning: request.Reasoning, Fallback: request.Fallback,
 	})
 	if !s.profileError(w, err) {
 		s.respond(w, profile, err)
@@ -810,8 +923,11 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 	if patch.Role != nil {
 		d.Agent.Role = strings.TrimSpace(*patch.Role)
 	}
+	shown := d.SystemPrompt()
 	if patch.Prompt != nil {
-		d.Prompt = strings.TrimSpace(*patch.Prompt)
+		// Echo what was saved, so a cleared editor stays clear instead of refilling mid-edit.
+		shown = strings.TrimSpace(*patch.Prompt)
+		d.Prompt = agentruntime.CustomPrompt(shown)
 	}
 	if patch.TaskDelegation != nil {
 		d.DelegationDisabled = !*patch.TaskDelegation
@@ -828,6 +944,14 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 	if patch.Reasoning != nil {
 		d.Agent.Reasoning = *patch.Reasoning
 	}
+	if patch.Fallback != nil {
+		if !s.validFallback(*patch.Fallback, d.Agent.Fallback) {
+			return empty, invalidProfile("Choose available fallback models.")
+		}
+		fallback := *patch.Fallback
+		fallback.Models = append([]contract.FallbackModel{}, fallback.Models...)
+		d.Agent.Fallback = &fallback
+	}
 	d.Agent.Active = false
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -838,7 +962,7 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		return empty, err
 	}
 	changedPrompt := a.definition.Prompt != d.Prompt
-	if changedPrompt || a.definition.DelegationDisabled != d.DelegationDisabled || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace || a.definition.Agent.Model != d.Agent.Model || a.definition.Agent.Provider != d.Agent.Provider || a.definition.Agent.Reasoning != d.Agent.Reasoning {
+	if changedPrompt || a.definition.DelegationDisabled != d.DelegationDisabled || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace || a.definition.Agent.Model != d.Agent.Model || a.definition.Agent.Provider != d.Agent.Provider || a.definition.Agent.Reasoning != d.Agent.Reasoning || !reflect.DeepEqual(a.definition.Agent.Fallback, d.Agent.Fallback) {
 		a.revision++
 	}
 	a.definition = d
@@ -851,7 +975,7 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 			return empty, err
 		}
 	}
-	return contract.AgentProfile{Agent: agent, Prompt: d.Prompt}, nil
+	return contract.AgentProfile{Agent: agent, Prompt: shown}, nil
 }
 
 func write(w http.ResponseWriter, status int, value any) {
@@ -1108,6 +1232,9 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	status := 200
 	if created {
 		status = 202
+		if err := s.Store.ReopenTask(r.Context(), t.ID); err != nil {
+			s.config.Log.Error("reopen task", "error", err)
+		}
 		// The store already applied the command, so cancel any review it left running.
 		if strings.ToLower(strings.TrimSpace(request.Text)) == store.PauseCommand {
 			s.stopReviews(r.Context(), t.AgentID)
@@ -1257,19 +1384,22 @@ func (s *Server) reply(ctx, turn context.Context, a *actor, id string) contract.
 func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) contract.Message {
 	timeout := 10 * time.Minute
 	if work.Trigger == contract.RunTriggerReview {
-		timeout = 2 * time.Minute
+		var done context.CancelFunc
+		turn, done = context.WithTimeout(turn, 2*time.Minute)
+		defer done()
 	}
-	background := work.Trigger == contract.RunTriggerPeer || work.Trigger == contract.RunTriggerHandoff || work.Trigger == contract.RunTriggerTask
+	background := work.Trigger == contract.RunTriggerPeer || work.Trigger == contract.RunTriggerHandoff || work.Trigger == contract.RunTriggerTask || work.Trigger == contract.RunTriggerAssigned
 	if background && s.config.BackgroundTimeout > 0 {
 		timeout = s.config.BackgroundTimeout
 	}
-	runCtx, cancel := context.WithTimeout(turn, timeout)
+	runCtx, stop := context.WithCancelCause(turn)
+	cancel := func() { stop(nil) }
 	defer cancel()
 	a.mu.Lock()
 	a.cancel = cancel
 	a.mu.Unlock()
 	defer func() { a.mu.Lock(); a.cancel = nil; a.mu.Unlock() }()
-	writeCtx, end := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
+	writeCtx, end := context.WithCancel(context.WithoutCancel(ctx))
 	defer end()
 	user := work.Message
 	run := store.NewRun(user.ID, user.ThreadID, a.id, work.Trigger)
@@ -1294,6 +1424,9 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	if release != nil {
 		defer release()
 	}
+	// The clock starts here so waiting for a slot never counts as silence.
+	quiet := newSilence(timeout, func() { stop(context.DeadlineExceeded) })
+	defer quiet.end()
 	now := store.Now()
 	run.Trigger, run.ParentRunID, run.RoutineID = work.Trigger, work.ParentRunID, work.RoutineID
 	if work.TaskID != "" {
@@ -1329,13 +1462,21 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 		}
 	}
 	runCtx = agentruntime.WithSteers(context.WithValue(runCtx, turnKey{}, state), func(ctx context.Context, persist func([]contract.Message) error) error {
-		return s.Store.DrainSteers(ctx, run.ID, persist)
+		return s.Store.DrainSteers(ctx, run.ID, func(messages []contract.Message) error {
+			for i := range messages {
+				note := agentruntime.SteerNote
+				messages[i].Parts = append([]contract.Part{{Kind: contract.PartKindText, Text: &note}}, messages[i].Parts...)
+			}
+			return persist(messages)
+		})
 	})
 	runCtx = agentruntime.WithShell(runCtx, s.shellHost(run))
 	// Memory is read again for every model request and never stored, so a correction applies at once and old
 	// copies don't pile up in the transcript. An introduction reads it too, to reflect what is already known.
+	// Direct chats speak through send_to_user, so each request repeats that as Grok's reminders do.
+	voiced := a.threadID == "" && !isolatedTurn(work.Trigger) && work.Trigger != contract.RunTriggerCreated
 	if work.Trigger != contract.RunTriggerChild {
-		runCtx = agentruntime.WithFresh(runCtx, s.freshMemory(run, store.Text(work.Message)))
+		runCtx = agentruntime.WithFresh(runCtx, s.freshMemory(run, store.Text(work.Message), voiced))
 	}
 	if err := s.Store.RunEvent(writeCtx, "run.update", &run, nil); err != nil {
 		s.config.Log.Error("start run", "error", err)
@@ -1380,9 +1521,10 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	runCtx = context.WithValue(runCtx, htmlKey{}, scope)
 	d, sess, isolated, err := s.turnSession(runCtx, writeCtx, a, work, run, state, err)
 	scope.cwd = outputCWD(d, s.config.DataDir)
+	err = errors.Join(err, s.bindGate(runCtx, state, scope.cwd))
 	var result agentruntime.Result
 	if err == nil {
-		err = runCtx.Err()
+		err = context.Cause(runCtx)
 	}
 	if err == nil {
 		err = st.setActivity(contract.RunActivityGenerating, "Composing reply")
@@ -1428,14 +1570,19 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 				}
 			}
 		}
-		result, err = turn(runCtx, user, func(delta agentruntime.Delta) error { return st.handle(runCtx, delta) })
+		result, err = turn(runCtx, user, func(delta agentruntime.Delta) error {
+			quiet.saw(delta)
+			return st.handle(runCtx, delta)
+		})
+		quiet.end()
 		if !stopAbort() {
 			<-aborted
 		}
 	}
-	if background && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		err = errors.Join(err, runCtx.Err())
-		if sess != nil {
+	if err != nil && errors.Is(context.Cause(runCtx), context.DeadlineExceeded) {
+		// Send reports a plain cancel, which would read as the user stopping it.
+		err = context.DeadlineExceeded
+		if background && sess != nil {
 			// Durable generation outlives Send's wait unless explicitly aborted.
 			abortCtx, stop := context.WithTimeout(writeCtx, 5*time.Second)
 			if e := sess.Abort(abortCtx); e != nil {
@@ -1461,7 +1608,7 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 		}
 	}
 	if err == nil {
-		err = runCtx.Err()
+		err = context.Cause(runCtx)
 	}
 	state.mu.Lock()
 	handed := state.handoff != nil
@@ -1469,6 +1616,7 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	checkpoint := state.checkpoint
 	taskTools := state.tools
 	posted := state.posts > 0
+	spoke := state.spoke
 	state.mu.Unlock()
 	if hookErr != nil {
 		err = errors.Join(err, hookErr)
@@ -1478,12 +1626,25 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 		st.mu.Unlock()
 		return contract.Message{}
 	}
+	// send_to_user is the voice of a direct chat, so what follows the last message stays private.
+	// Text after more work is kept: it may be a result the bot never sent.
+	if spoke && voiced {
+		result.Text = ""
+		st.content.Reset()
+	}
 	silent := !handed && (strings.TrimSpace(result.Text) == "NO_RESPONSE" || result.Text == "" && strings.TrimSpace(st.content.String()) == "NO_RESPONSE" || result.Text == "" && st.content.Len() == 0 && posted)
 	if silent {
-		m.Parts = []contract.Part{}
+		// Cards the bot published still reach the chat.
+		result.Text = ""
+		m.Parts = slices.DeleteFunc(m.Parts, func(part contract.Part) bool { return part.Attachment == nil })
+		silent = len(m.Parts) == 0
 	}
 	if !silent && result.Text != "" && result.Text != st.content.String() {
 		setText(&m, &result.Text)
+	}
+	// Models that skip send_to_user still reach the chat as separate messages.
+	if err == nil && voiced && !silent {
+		m.Parts = splitBeats(m.Parts)
 	}
 	if err == nil && !silent && !handed && work.Trigger != contract.RunTriggerReview && len(m.Parts) == 0 {
 		err = errEmptyReply
@@ -1611,6 +1772,8 @@ func (s *Server) afterTurn(ctx, writeCtx, turn context.Context, a *actor, done t
 			a.mu.Lock()
 			a.session = nil
 			a.mu.Unlock()
+		} else {
+			s.discard(writeCtx, done.session)
 		}
 	}
 	if done.finalized && store.Terminal(done.run.Status) && done.work.DeliveryID != "" {
@@ -1652,7 +1815,6 @@ func (s *Server) afterTurn(ctx, writeCtx, turn context.Context, a *actor, done t
 // turnSession reuses the actor's session when its definition and MCP scope are unchanged,
 // or opens one for this turn. It joins setup failures onto err and opens nothing after one.
 func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work store.Work, run contract.Run, state *turnState, err error) (agentruntime.Definition, agentruntime.Session, bool, error) {
-	delegated := work.Trigger == contract.RunTriggerChild
 	a.mu.Lock()
 	d, revision := a.definition, a.revision
 	a.mu.Unlock()
@@ -1673,7 +1835,7 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 	scopeHash := sha256.Sum256(configJSON)
 	a.mu.Lock()
 	sess := a.session
-	isolated := delegated || automatic(work.Trigger) && work.Trigger != contract.RunTriggerFollowUp
+	isolated := isolatedTurn(work.Trigger)
 	if isolated {
 		sess = nil
 	}
@@ -1736,6 +1898,14 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 				d.ExtraTools = append(d.ExtraTools[:0:0], &chatTool{store: s.Store, question: true})
 			} else {
 				d.ExtraTools = append(slices.Clone(d.ExtraTools), s.turnTools(a, work, state)...)
+				chat := a.threadID
+				if chat == "" {
+					chat = a.id
+				}
+				d.Skills = append(slices.Clone(d.Skills), s.plugins.SkillFiles(runCtx, chat)...)
+				if work.Trigger != contract.RunTriggerReview {
+					d.ExtraTools = append(d.ExtraTools, s.pluginTools(runCtx, chat, a.id, state)...)
+				}
 			}
 			if err == nil && !d.Intro && d.Workspace != "" {
 				// Prepare the conversation's checkout before a session opens; a
@@ -1848,6 +2018,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a := contract.Attachment{ID: id, Kind: kind, Name: name, MimeType: mimeType, Size: n, URL: "/attachments/" + id + "/content", IndexingState: contract.AttachmentIndexingStatePending}
+	if kind == "image" {
+		setImageSize(&a, path)
+	}
 	if kind == "image" || kind == "video" {
 		if err := makeThumbnail(r.Context(), path, path+".jpg", kind); err == nil {
 			url := "/attachments/" + id + "/thumbnail"

@@ -153,6 +153,18 @@ func notifyRetry(id string, attempt int) error {
 	return sink.send(Delta{Kind: "run.retrying", Attempt: attempt})
 }
 
+func notifySwitch(id, text string) error {
+	value, ok := retryNotices.Load(id)
+	if !ok {
+		return nil
+	}
+	sink, _ := value.(*retrySink)
+	if sink == nil {
+		return nil
+	}
+	return sink.send(Delta{Notice: text})
+}
+
 func notifyPartial(id, text string) error {
 	value, ok := retryNotices.Load(id)
 	if !ok {

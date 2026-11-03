@@ -2,11 +2,21 @@ import SwiftUI
 
 enum DropdownStyle {
     static let maximumHeight: CGFloat = 400
+    /// Searchable lists keep one width while their matches change.
+    static let listWidth: CGFloat = 320
     static var rowHeight: CGFloat {
         #if os(macOS)
         PanelStyle.contentInset + PanelStyle.rowInset
         #else
         PanelStyle.actionHeight + PanelStyle.headingInset
+        #endif
+    }
+    /// iPhone's system menus are rounder than a Mac's.
+    static var radius: CGFloat {
+        #if os(macOS)
+        PanelStyle.cardRadius
+        #else
+        24
         #endif
     }
 }
@@ -32,9 +42,10 @@ extension EnvironmentValues {
 }
 
 extension View {
-    func dropdown<Presented: View>(isPresented: Binding<Bool>, width: CGFloat = 200,
+    /// The menu is as wide as its content, up to the window's width.
+    func dropdown<Presented: View>(isPresented: Binding<Bool>, alignment: HorizontalAlignment = .trailing,
                                    @ViewBuilder content: @escaping () -> Presented) -> some View {
-        modifier(Dropdown(isPresented: isPresented, width: width, presented: content))
+        modifier(Dropdown(isPresented: isPresented, alignment: alignment, presented: content))
     }
 
     func dropdownHost() -> some View { modifier(DropdownHost()) }
@@ -43,7 +54,7 @@ extension View {
 private struct DropdownEntry: Identifiable {
     let id: UUID
     let anchor: Anchor<CGRect>
-    let width: CGFloat
+    let alignment: HorizontalAlignment
     let view: AnyView
     let close: PanelAction
 }
@@ -62,7 +73,7 @@ private struct DropdownIDs: PreferenceKey {
 
 private struct Dropdown<Presented: View>: ViewModifier {
     @Binding var isPresented: Bool
-    let width: CGFloat
+    let alignment: HorizontalAlignment
     @ViewBuilder let presented: () -> Presented
     @State private var id = UUID()
 
@@ -74,7 +85,7 @@ private struct Dropdown<Presented: View>: ViewModifier {
                 let view = presented()
                     .environment(\.dropdownClose, close)
                     .environment(\.isEnabled, true)
-                return [DropdownEntry(id: id, anchor: anchor, width: width, view: AnyView(view), close: close)]
+                return [DropdownEntry(id: id, anchor: anchor, alignment: alignment, view: AnyView(view), close: close)]
             }
             .preference(key: DropdownIDs.self, value: isPresented ? [id] : [])
             .onDisappear { isPresented = false }
@@ -94,7 +105,12 @@ private struct DropdownHost: ViewModifier {
             #endif
             .environment(\.dropdownOpen, active)
             .overlayPreferenceValue(DropdownEntries.self) { entries in
-                if let entry = entries.last { DropdownLayer(entry: entry).id(entry.id) }
+                ZStack {
+                    if let entry = entries.last {
+                        DropdownLayer(entry: entry).id(entry.id).transition(.opacity)
+                    }
+                }
+                .motion(value: entries.last?.id)
             }
             .onPreferenceChange(DropdownIDs.self) { ids in
                 let shown = !ids.isEmpty
@@ -121,10 +137,10 @@ private struct DropdownLayer: View {
                 .buttonStyle(.plain)
                 .focusable(false)
                 .accessibilityLabel("Dismiss menu")
-                DropdownLayout(anchor: proxy[entry.anchor], width: entry.width) {
+                DropdownLayout(anchor: proxy[entry.anchor], alignment: entry.alignment) {
                     entry.view
-                        .glassEffect(.regular, in: .rect(cornerRadius: PanelStyle.cardRadius))
-                        .shadow(color: .black.opacity(0.25), radius: PanelStyle.contentInset, y: PanelStyle.rowInset)
+                        .glassEffect(.regular, in: .rect(cornerRadius: DropdownStyle.radius))
+                        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
                 }
             }
         }
@@ -140,7 +156,7 @@ private struct DropdownLayer: View {
 
 private struct DropdownLayout: Layout {
     let anchor: CGRect
-    let width: CGFloat
+    let alignment: HorizontalAlignment
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -149,14 +165,19 @@ private struct DropdownLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let view = subviews.first else { return }
         let inset = PanelStyle.rowInset
-        let width = max(0, min(width, bounds.width - inset * 2))
-        let size = view.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let menuWidth = max(0, min(view.sizeThatFits(.unspecified).width.rounded(.up), bounds.width - inset * 2))
+        let size = view.sizeThatFits(ProposedViewSize(width: menuWidth, height: nil))
         let rect = anchor.offsetBy(dx: bounds.minX, dy: bounds.minY)
-        let x = max(bounds.minX + inset, min(rect.maxX - width, bounds.maxX - width - inset))
-        let y = rect.maxY + PanelStyle.cardInset
-        let height = max(0, min(size.height, bounds.maxY - y - inset))
+        let edge = alignment == .leading ? rect.minX : rect.maxX - menuWidth
+        let x = max(bounds.minX + inset, min(edge, bounds.maxX - menuWidth - inset))
+        let below = bounds.maxY - rect.maxY - PanelStyle.cardInset - inset
+        let above = rect.minY - bounds.minY - PanelStyle.cardInset - inset
+        // Opens toward the room it needs, so the list is never squeezed against an edge.
+        let upward = below < size.height && above > below
+        let height = max(0, min(size.height, upward ? above : below))
+        let y = upward ? rect.minY - PanelStyle.cardInset - height : rect.maxY + PanelStyle.cardInset
         view.place(at: CGPoint(x: x, y: y), anchor: .topLeading,
-                   proposal: ProposedViewSize(width: width, height: height))
+                   proposal: ProposedViewSize(width: menuWidth, height: height))
     }
 }
 
@@ -165,6 +186,7 @@ struct DropdownOptions: View {
     let options: [(String, String)]
     @Environment(\.dropdownClose) private var close
     @State private var highlighted: String?
+    @State private var keyed: String?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -181,14 +203,16 @@ struct DropdownOptions: View {
                             .padding(.horizontal, PanelStyle.rowInset)
                             .frame(minHeight: DropdownStyle.rowHeight)
                             .contentShape(.rect(cornerRadius: PanelStyle.rowRadius))
-                            .background(.primary.opacity(highlighted == value ? 0.1 : 0),
+                            .background(.primary.opacity(highlighted == value ? PanelStyle.selectedTint : 0),
                                         in: .rect(cornerRadius: PanelStyle.rowRadius))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(label)
                         .accessibilityValue(selection == value ? "Selected" : "")
                         .accessibilityAddTraits(selection == value ? .isSelected : [])
-                        .onHover { highlighted = $0 ? value : nil }
+                        .pointerHover { inside in
+                            if inside { highlighted = value } else if highlighted == value { highlighted = nil }
+                        }
                         .id(value)
                     }
                 }
@@ -196,9 +220,11 @@ struct DropdownOptions: View {
             }
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
-            .onChange(of: highlighted) { _, value in
+            // Only the keyboard scrolls: a row under the pointer is already in view.
+            .onChange(of: keyed) { _, value in
                 if let value { scroll.scrollTo(value) }
             }
+            .onAppear { scroll.scrollTo(selection, anchor: .center) }
         }
         .frame(idealHeight: height, maxHeight: height)
         #if os(macOS)
@@ -224,5 +250,6 @@ struct DropdownOptions: View {
         guard !options.isEmpty else { return }
         let index = options.firstIndex { $0.1 == (highlighted ?? selection) } ?? 0
         highlighted = options[max(0, min(options.count - 1, index + offset))].1
+        keyed = highlighted
     }
 }

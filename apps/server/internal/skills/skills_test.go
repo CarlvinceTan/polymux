@@ -64,7 +64,7 @@ func TestFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"html-cards/SKILL.md", "polymux/SKILL.md", "report/SKILL.md", "skill-creator/LICENSE.txt", "skill-creator/SKILL.md"}
+	want := []string{cardsFile, "plugin-creator/SKILL.md", "polymux/SKILL.md", "report/SKILL.md", "skill-creator/LICENSE.txt", "skill-creator/SKILL.md"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("embedded files = %v, want %v", paths, want)
 	}
@@ -76,11 +76,17 @@ func TestInstallListsSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(installed) != 4 {
+	if len(installed) != 5 {
 		t.Fatalf("installed %d skills", len(installed))
 	}
 	for _, skill := range installed {
 		body, err := os.ReadFile(skill.Path)
+		if skill.Name == CardsName {
+			if err != nil || !strings.Contains(string(body), "polymuxSend") {
+				t.Fatalf("card reference %+v unreadable: %v", skill, err)
+			}
+			continue
+		}
 		if err != nil || skill.Name == "" || skill.Description == "" || !strings.Contains(string(body), "name: "+skill.Name) {
 			t.Fatalf("skill %+v unreadable or undescribed: %v", skill, err)
 		}

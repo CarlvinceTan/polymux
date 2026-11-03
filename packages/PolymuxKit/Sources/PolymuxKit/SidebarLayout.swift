@@ -13,6 +13,8 @@ public final class SidebarLayout {
     /// Saves in flight, including ones that don't lock the sidebar.
     @ObservationIgnored private var pending = 0
     @ObservationIgnored private var retryAction: (() async -> Void)?
+    /// Wraps a local change, so the interface can move rows to their new places.
+    @ObservationIgnored public var animate: (() -> Void) -> Void = { $0() }
 
     public init(client: APIClient, cache: LocalCacheActor) {
         self.client = client
@@ -217,12 +219,12 @@ public final class SidebarLayout {
         defer { pending -= 1 }
         revision += 1
         let previous = snapshot
-        update(&snapshot)
+        animate { update(&snapshot) }
         issue = nil
         let result: T
         do { result = try await send() }
         catch {
-            snapshot = previous
+            animate { snapshot = previous }
             // Only a lost connection retries, silently; a change the server refused would fail again.
             if !error.isTransient { retryAction = nil; issue = error.reason(or: "Couldn’t save that change.") }
             if locking { isSaving = false }

@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,7 +25,7 @@ type invite struct {
 func pair(args []string) error {
 	flags := flag.NewFlagSet("pair", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	base := flags.String("url", "", "server base URL (defaults to this Mac's Tailscale or LAN address)")
+	base := flags.String("url", "", "server base URL (defaults to this Mac's loopback address)")
 	tokenFile := flags.String("token-file", "", "path to the server owner token")
 	noQR := flags.Bool("no-qr", false, "print only the link")
 	if err := flags.Parse(args); err != nil {
@@ -115,10 +114,7 @@ func connectLink(value invite) string {
 	return parts.String()
 }
 
-// defaultPairURL is where this Mac's server listens: its Tailscale address, else loopback.
+// defaultPairURL is where this Mac's server listens.
 func defaultPairURL() string {
-	if ip, err := tailnet(); err == nil {
-		return "http://" + net.JoinHostPort(ip, "7337")
-	}
 	return "http://127.0.0.1:7337"
 }

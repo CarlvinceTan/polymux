@@ -8,6 +8,8 @@ public final class NetworkStore {
     public private(set) var hasChecked = false
     public private(set) var issue: String?
     public private(set) var actionIssue: String?
+    /// True while this server refuses this device's credential.
+    public private(set) var denied = false
     @ObservationIgnored private let client: APIClient
     @ObservationIgnored private let cache: LocalCacheActor
     @ObservationIgnored private var loading: Task<Void, Never>?
@@ -35,6 +37,7 @@ public final class NetworkStore {
                 isConnected = true
                 hasChecked = true
                 issue = nil
+                denied = false
                 guard self.revision == revision, pending.isEmpty else { return }
                 value = fresh
                 checkedAt = .now
@@ -43,11 +46,28 @@ public final class NetworkStore {
                 isConnected = false
                 hasChecked = true
                 issue = error.isOffline ? nil : "Couldn’t load devices."
+                if case ClientError.response(401, _) = error { denied = true }
             }
         }
         loading = task
         await task.value
         loading = nil
+    }
+
+    public func name(_ network: String) async {
+        let before = value?.server.network
+        guard network != before, pending.insert("name").inserted else { return }
+        revision += 1
+        value?.server.network = network
+        actionIssue = nil
+        do { try await client.nameNetwork(network) }
+        catch {
+            value?.server.network = before
+            actionIssue = "Couldn’t rename this network."
+        }
+        pending.remove("name")
+        revision += 1
+        await persist()
     }
 
     public func rename(_ device: NetworkInfo.Device, label: String) async {
@@ -77,6 +97,24 @@ public final class NetworkStore {
             let insertion = min(index, value?.devices.count ?? 0)
             value?.devices.insert(device, at: insertion)
             actionIssue = "Couldn’t remove \(device.title)."
+        }
+        pending.remove(device.id)
+        revision += 1
+        await persist()
+    }
+
+    public func allow(_ device: NetworkInfo.Device) async {
+        guard let index = value?.restricted?.firstIndex(where: { $0.id == device.id }),
+              pending.insert(device.id).inserted else { return }
+        revision += 1
+        value?.restricted?.remove(at: index)
+        value?.devices.append(device)
+        actionIssue = nil
+        do { try await client.allowDevice(device.id) }
+        catch {
+            value?.devices.removeAll { $0.id == device.id }
+            value?.restricted?.insert(device, at: min(index, value?.restricted?.count ?? 0))
+            actionIssue = "Couldn’t allow \(device.title)."
         }
         pending.remove(device.id)
         revision += 1

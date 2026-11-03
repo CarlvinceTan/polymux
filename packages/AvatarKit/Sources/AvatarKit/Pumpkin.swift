@@ -19,10 +19,10 @@ enum Pumpkin {
         hypot(hypot(point.x, point.y), point.z) - radius(point)
     }
 
-    static func outline(_ rotation: Rotation, scale: Double = 1) -> [Point] {
+    static func outline(_ rotation: Rotation, scale: Double = 1, rays: Int = 256) -> [Point] {
         let inverse = rotation.transposed
-        return (0..<256).map { index in
-            let angle = Double(index) * TAU / 256
+        return (0..<rays).map { index in
+            let angle = Double(index) * TAU / Double(rays)
             let x = cos(angle), y = sin(angle)
             var reach = 0.0
             for step in -24...24 {
@@ -93,40 +93,37 @@ enum Pumpkin {
             rotation.apply(Vec3(x: point.x * sil.sx, y: point.y * sil.sy, z: point.z))
         }
         let side = CGMutablePath(), cap = CGMutablePath()
-        func add(_ indices: [Int], to path: CGMutablePath) {
-            let points = indices.map { vertices[$0] }
-            let center = Vec3(x: points.map(\.x).reduce(0, +) / 3,
-                              y: points.map(\.y).reduce(0, +) / 3,
-                              z: points.map(\.z).reduce(0, +) / 3)
-            let inverse = rotation.transposed
+        let inverse = rotation.transposed
+        func add(_ a: Int, _ b: Int, _ c: Int, to path: CGMutablePath) {
+            let p = vertices[a], q = vertices[b], r = vertices[c]
+            // The tube is closed, so faces turned away are always behind the near ones.
+            guard (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x) > 0 else { return }
+            let x = (p.x + q.x + r.x) / 3, y = (p.y + q.y + r.y) / 3
             // Occlude the stem root against the actual ribbed body, not its bounding sphere.
-            if center.x * center.x + center.y * center.y < 1.08 * 1.08 {
-                var z = center.z + 0.012
+            if x * x + y * y < 1.08 * 1.08 {
+                var z = (p.z + q.z + r.z) / 3 + 0.012
                 while z <= 1.08 {
-                    let point = inverse.apply(Vec3(x: center.x, y: center.y, z: z))
-                    if field(point) < 0 { return }
+                    let beyond = x * x + y * y + z * z >= reach * reach
+                    if beyond && z > 0 { break }
+                    if !beyond, field(inverse.apply(Vec3(x: x, y: y, z: z))) < 0 { return }
                     z += 0.02
                 }
             }
-            let area = (points[1].x - points[0].x) * (points[2].y - points[0].y)
-                - (points[1].y - points[0].y) * (points[2].x - points[0].x)
-            let loop = area < 0 ? Array(points.reversed()) : points
-            path.move(to: CGPoint(x: (sil.cx + loop[0].x) * scale, y: (sil.cy + loop[0].y) * scale))
-            for point in loop.dropFirst() {
-                path.addLine(to: CGPoint(x: (sil.cx + point.x) * scale, y: (sil.cy + point.y) * scale))
-            }
+            path.move(to: CGPoint(x: (sil.cx + p.x) * scale, y: (sil.cy + p.y) * scale))
+            path.addLine(to: CGPoint(x: (sil.cx + q.x) * scale, y: (sil.cy + q.y) * scale))
+            path.addLine(to: CGPoint(x: (sil.cx + r.x) * scale, y: (sil.cy + r.y) * scale))
             path.closeSubpath()
         }
         for row in 0..<72 {
             for col in 0..<48 {
                 let next = (col + 1) % 48, a = row * 48, b = (row + 1) * 48
-                add([a + col, a + next, b + next], to: side)
-                add([a + col, b + next, b + col], to: side)
+                add(a + col, a + next, b + next, to: side)
+                add(a + col, b + next, b + col, to: side)
             }
         }
         let tip = -65 * Double.pi / 180
         if rotation.apply(Vec3(x: sin(tip), y: -cos(tip), z: 0)).z > 0 {
-            for col in 0..<48 { add([3504, 3456 + col, 3456 + (col + 1) % 48], to: cap) }
+            for col in 0..<48 { add(3504, 3456 + col, 3456 + (col + 1) % 48, to: cap) }
         }
         return [CharacterLayer(path: side, color: "#4F7A34", front: true, surface: false),
                 CharacterLayer(path: cap, color: "#6A9646", front: true, surface: false)].filter { !$0.path.isEmpty }
@@ -143,6 +140,9 @@ enum Pumpkin {
         let dimple = y > 0 ? 0.2 * exp(-(1 - y) / 0.09) : 0.03 * exp(-(1 + y) / 0.03)
         return base * lobes * bottom * (1 - dimple)
     }
+
+    /// The furthest the body reaches from its centre.
+    private static let reach = Double(table.max() ?? 1)
 
     private static let table: [Float] = (0...160).flatMap { row in
         let latitude = -.pi / 2 + Double(row) / 160 * .pi

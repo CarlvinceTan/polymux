@@ -35,6 +35,11 @@ func (b *Broker) Require(next http.Handler) http.Handler {
 			http.Error(w, "device unauthorized", http.StatusUnauthorized)
 			return
 		}
+		if !peerRoute(pair, r.URL.Path) {
+			b.store.access.Unlock()
+			http.Error(w, "route unavailable to this device", http.StatusForbidden)
+			return
+		}
 		if b.store.requests == nil {
 			b.store.requests = make(map[*responseGuard]string)
 		}

@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "intents": [
+    {
+      "id": "new-bot-random-avatar",
+      "check": "structure_drift_*",
+      "element": "*avatar, Idle*",
+      "journey": "fixture-new-bot",
+      "reason": "New Bot opens with a random shape and colour from randomOptions()",
+      "paths": [
+        "apps/Polymux/Sources/Views/NewBotView.swift"
+      ],
+      "digest": "e537ffe506391ed3",
+      "confirmed": "2026-11-01"
+    },
+    {
+      "id": "new-bot-random-colour",
+      "check": "structure_drift_moved",
+      "element": "Button \"*\"",
+      "journey": "fixture-new-bot",
+      "reason": "New Bot starts on a random colour, and the selected swatch is drawn larger",
+      "paths": [
+        "apps/Polymux/Sources/Views/NewBotView.swift"
+      ],
+      "digest": "e537ffe506391ed3",
+      "confirmed": "2026-11-01"
+    },
+    {
+      "id": "save-failed-line",
+      "check": "structure_drift_*",
+      "element": "StaticText \"Couldn’t save that change.\"",
+      "reason": "A failed save shows one quiet line that clears itself, so it may already be gone",
+      "paths": [
+        "packages/PolymuxKit/Sources/PolymuxKit/SidebarLayout.swift"
+      ],
+      "digest": "0de88e4ef7dafacb",
+      "confirmed": "2026-11-01"
+    },
+    {
+      "id": "warning-dismiss-hit-area",
+      "check": "structure_ax_small_target",
+      "element": "Button \"Dismiss warning\"",
+      "reason": "tapArea(14) widens the hit area past the 8pt icon frame",
+      "paths": [
+        "apps/Polymux/Sources/Views/WarningBubble.swift"
+      ],
+      "digest": "d46cba17f8099853",
+      "confirmed": "2026-10-31"
+    }
+  ]
+}

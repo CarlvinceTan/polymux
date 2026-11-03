@@ -37,7 +37,7 @@ func TestMediaCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := api.Store.DeleteAgent(t.Context(), owned.Owner); err != nil {
+	if err := api.Store.DeleteAgent(t.Context(), owned.Owner); err != nil {
 		t.Fatal(err)
 	}
 	// A job already selected by the worker must stop at the deleted membership fence.

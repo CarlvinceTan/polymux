@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/MichaelKinsy/PiG/agent"
@@ -45,7 +46,11 @@ type turnState struct {
 	cancel     context.CancelFunc
 	removals   []string
 	posts      int
+	spoke      bool
 	status     func(string) error
+	// gate asks plugins about a tool call. chats are those whose rules bind this run.
+	gate  func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision
+	chats []string
 }
 
 func beforeTool(ctx context.Context, call, name string, args json.RawMessage) agent.ToolCallHookResult {
@@ -56,12 +61,21 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 	if state == nil {
 		return agent.ToolCallHookResult{Block: true, Reason: "No active Polymux run"}
 	}
+	// Asked outside the lock, since a plugin takes a moment to answer.
+	if state.gate != nil {
+		if decision := state.gate(ctx, name, args); !decision.Allow {
+			return agent.ToolCallHookResult{Block: true, Reason: decision.Reason}
+		}
+	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.handoff != nil || state.checkpoint != nil || state.notice != nil || state.hookErr != nil || state.work.Trigger == contract.RunTriggerCreated && name != "ask_user" {
 		return agent.ToolCallHookResult{Block: true, Terminate: true, Reason: "This stage cannot execute tools"}
 	}
 	state.tools++
+	if !slices.Contains(quietTools, name) {
+		state.spoke = false
+	}
 	if state.work.Trigger == contract.RunTriggerChild && (name == "task" || name == "message_agent" || name == "handoff_agent" || name == "manage_tasks") {
 		return agent.ToolCallHookResult{Block: true, Reason: "Child tasks cannot delegate or schedule continuations"}
 	}
@@ -140,12 +154,13 @@ func (t *peerTool) Description() string {
 			"request/question start a private consultation with its scoped memory and typed history; " +
 			"result/status add private notes for the spokesperson. Peer consultations cannot recursively request other peers. " +
 			"Findings return to the spokesperson; these exchanges do not appear in typed chats. " +
-			"Share relevant task context without copying unrelated private history."
+			"Share relevant task context without copying unrelated private history. " +
+			"Write the clear ask, the context they need and the result you expect, with no chatter."
 	}
 	if t.handoff {
-		return "Pass a task to a group member by stable ID and end your stage. Members can speak again when invited; do not hand straight back to the sender. Group delegation limits apply. An @Name in your final reply also invites that member to respond."
+		return "Pass a task to a group member by stable ID and end your stage. State the task, the context they need and the result you expect, with no chatter. Members can speak again when invited; do not hand straight back to the sender. Group delegation limits apply. An @Name in your final reply also invites that member to respond."
 	}
-	return "Message a bot by stable ID. request/question/result/status wake it in its own chat with its existing history; fyi only records a note. Messages appear in both chats. Results are returned automatically; chains allow up to six hops. Share relevant task context without copying unrelated private history."
+	return "Message a bot by stable ID. request/question/result/status wake it in its own chat with its existing history; fyi only records a note. Messages appear in both chats. Results are returned automatically; chains allow up to six hops. Share relevant task context without copying unrelated private history. Write the clear ask or info, the context they need and the result you expect, with no greetings, thanks or chatter. Message a bot only when it helps the user's goal, and contact several about one effort only if the user asked. Paraphrase the user rather than relaying their words."
 }
 func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
 	var input struct {
@@ -300,10 +315,10 @@ func (s *Server) peerContext(ctx context.Context, work store.Work) (contract.Mes
 		text += "\nPeer roster truncated to 64 entries. Do not guess unlisted IDs."
 	}
 	if work.Trigger == contract.RunTriggerPeer {
-		text += fmt.Sprintf("\nMessage from bot %s, delivery %s, hop %d of 6. Use your existing conversation context to address the task. You can consult another bot if needed. Your final result returns to the sender automatically; use fyi when no reply is needed.", work.FromAgentID, work.DeliveryID, work.Hops)
+		text += fmt.Sprintf("\nMessage from bot %s, delivery %s, hop %d of 6. Use your existing conversation context to address the task. You can consult another bot if needed. Your final reply returns to the sender automatically, so write it for them: the answer or result, the facts they need and any blocker, with no greetings, thanks or recap. If the message asks nothing of you, return NO_RESPONSE rather than acknowledging it. Use fyi when no reply is needed.", work.FromAgentID, work.DeliveryID, work.Hops)
 	}
 	if work.Trigger == contract.RunTriggerChild {
-		text += fmt.Sprintf("\nChild task, parent run %s. Complete only the explicit task in this fresh session; do not delegate or schedule continuations.", value(work.ParentRunID))
+		text += fmt.Sprintf("\nChild task, parent run %s. Complete only the explicit task in this fresh session; do not delegate or schedule continuations. End with a concise report of what you found or did, including the facts the parent needs.", value(work.ParentRunID))
 	}
 	m.Parts = append([]contract.Part{{Kind: contract.PartKindText, Text: &text}}, m.Parts...)
 	return m, nil

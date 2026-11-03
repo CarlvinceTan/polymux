@@ -40,10 +40,12 @@ private struct ReactionPicker: ViewModifier {
     }
 }
 
-private struct EmojiPicker: View {
+struct EmojiPicker: View {
     @State private var groups: [EmojiGroup] = []
     @State private var search = ""
     @State private var category: String?
+    /// What picking one does, for its accessible name.
+    var action = "React"
     let select: (String) -> Void
 
     private var matches: [EmojiGroup] {
@@ -75,7 +77,7 @@ private struct EmojiPicker: View {
                                 }
                                 .buttonStyle(.borderless)
                                 .help(entry.name)
-                                .accessibilityLabel("React \(entry.emoji)")
+                                .accessibilityLabel("\(action) \(entry.emoji)")
                             }
                         }
                     }
@@ -103,7 +105,8 @@ private struct EmojiPicker: View {
             }
             .padding(10)
         }
-        .frame(width: 346, height: 470)
+        .frame(width: 346)
+        .frame(idealHeight: 470, maxHeight: 470)
         .task { groups = await EmojiCatalogue.groups.value }
     }
 }
@@ -120,8 +123,11 @@ private struct EmojiEntry: Decodable, Sendable {
     let tone: Bool
 }
 
-private enum EmojiCatalogue {
-    static let groups = Task.detached(priority: .userInitiated) { () -> [EmojiGroup] in
+enum EmojiCatalogue {
+    /// Decoded ahead of the first reaction, so the picker opens filled.
+    static func warm() { _ = groups }
+
+    fileprivate static let groups = Task.detached(priority: .userInitiated) { () -> [EmojiGroup] in
         guard let url = Bundle.main.url(forResource: "Emoji", withExtension: "json"),
               let data = try? Data(contentsOf: url) else { return [] }
         return (try? JSONDecoder().decode([EmojiGroup].self, from: data)) ?? []

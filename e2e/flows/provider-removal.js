@@ -19,7 +19,7 @@ async function add(name) {
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
 await add("Removed QA");
-await app.click({ role: "button", name: "Default model" });
+await app.click({ role: "button", name: "Model" });
 await app.click({ role: "button", name: "Qa Model Custom" });
 await app.click({ role: "button", name: "Close Settings" });
 await app.click({ role: "button", name: "New chat" });

@@ -196,6 +196,9 @@ struct SpawnBlend {
     private var from = SpawnPose()
     private var exited: Double?
 
+    /// Not still springing back to the body.
+    var settled: Bool { exited == nil || last.amount <= 0.0001 }
+
     mutating func sample(elapsed: Double?, now: Double) -> SpawnPose {
         if let elapsed {
             let cycle = max(0, Int(elapsed / 3.5))

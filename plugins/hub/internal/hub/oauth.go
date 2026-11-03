@@ -207,14 +207,14 @@ func (m *mailbox) finishSignIn(ctx context.Context, id string, input contract.Hu
 	defer m.mu.Unlock()
 	item := mailAccount{ID: "mail-" + randomHex(8), Name: email, Email: email, Provider: pending.provider, IMAP: shape.imap, SMTP: shape.smtp,
 		secret: credential{Refresh: token.RefreshToken}}
-	// Signing in again replaces the mailbox's tokens.
+	// Signing in again replaces the mailbox's tokens and leaves everything else about it alone.
 	for _, saved := range m.list {
-		if saved.Provider == pending.provider && strings.EqualFold(saved.Email, email) {
-			item.ID, item.Name = saved.ID, saved.Name
+		if strings.EqualFold(saved.Email, email) {
+			item.ID, item.Name, item.Signatures, item.Default, item.FilesSent = saved.ID, saved.Name, saved.Signatures, saved.Default, saved.FilesSent
 		}
 	}
 	m.access[item.ID] = accessToken{value: token.AccessToken, expires: token.Expiry}
-	return contract.HubMailAccount{ID: item.ID, Name: item.Name, Email: item.Email}, m.keep(item)
+	return item.wire(""), m.keep(item)
 }
 
 // token returns a live access token, keeping any new refresh token a provider rotates in.

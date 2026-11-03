@@ -1,0 +1,644 @@
+{
+  "start": "3738bd4f93555c66",
+  "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+  "state": {
+    "w": 1920,
+    "h": 960,
+    "rows": [
+      "AXOutline|Sidebar|0,52,320,908|scrolled",
+      "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+      "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+      "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+      "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+      "AXButton|Edit Atlas’s profile|990,8,260,70",
+      "AXStaticText|# Oct, #.# pm|1078,114,85,13|scrolled",
+      "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|1351,153,549,56|scrolled",
+      "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,397,136|scrolled",
+      "AXButton|Add attachment|334,914,32,32",
+      "AXTextField|Message|378,914,1484,32",
+      "AXButton|Start dictation|1874,914,32,32",
+      "AXButton|Search|191,11,38,31",
+      "AXButton|New chat|227,9,38,34",
+      "AXButton|Settings|271,7,38,38",
+      "AXButton||1080,8,80,36",
+      "AXButton|Speech conversation|1876,8,36,36"
+    ]
+  },
+  "steps": [
+    {
+      "action": {
+        "ID": "scroll:AXScrollArea|#0",
+        "Kind": "scroll",
+        "Label": "scroll unnamed ScrollArea",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXScrollArea|#0",
+        "Text": "",
+        "Group": "scroll"
+      },
+      "signature": "3738bd4f93555c66",
+      "digest": "cd1ac6b88eb02eec",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|990,8,260,70",
+          "AXStaticText|# Oct, #.# pm|1078,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|1351,153,549,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,397,136|scrolled",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1484,32",
+          "AXButton|Start dictation|1874,914,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||1080,8,80,36",
+          "AXButton|Speech conversation|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "press:AXButton|Collapse Unassigned#0",
+        "Kind": "press",
+        "Label": "press Button \"Collapse Unassigned\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Collapse Unassigned#0",
+        "Text": "",
+        "Group": "list"
+      },
+      "signature": "634d5689231eb927",
+      "digest": "cd1ac6b88eb02eec",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXStaticText|Couldn’t save that change.|83,927,154,25",
+          "AXButton|Edit Atlas’s profile|990,8,260,70",
+          "AXStaticText|# Oct, #.# pm|1078,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|1351,153,549,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,397,136|scrolled",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1484,32",
+          "AXButton|Start dictation|1874,914,32,32",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||1080,8,80,36",
+          "AXButton|Speech conversation|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "press:AXButton|Edit Atlas’s profile#0",
+        "Kind": "press",
+        "Label": "press Button \"Edit Atlas’s profile\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Edit Atlas’s profile#0",
+        "Text": "",
+        "Group": "controls"
+      },
+      "signature": "c8ac1a9cdada5a34",
+      "digest": "3d3cdf02faed390c",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|810,8,260,70",
+          "AXStaticText|# Oct, #.# pm|898,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|991,153,549,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,397,136|scrolled",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1124,32",
+          "AXButton|Start dictation|1514,914,32,32",
+          "AXButton|Edit avatar|1690,52,100,100",
+          "AXTextField|Name|1710,164,61,21",
+          "AXTextField|Role|1717,201,47,16",
+          "AXButton|Work|1629,237,44,34",
+          "AXButton|Media|1677,237,48,34",
+          "AXButton|Files|1729,237,41,34",
+          "AXButton|Capabilities|1774,237,78,34",
+          "AXHeading|Schedule|1588,293,57,16",
+          "AXStaticText|#|1883,293,9,16",
+          "AXScrollArea|Schedule|1580,323,320,278",
+          "AXStaticText|No scheduled work.|1680,454,121,16|scrolled",
+          "AXHeading|Tasks|1588,627,35,16",
+          "AXStaticText|#|1883,627,9,16",
+          "AXScrollArea|Tasks|1580,657,320,277",
+          "AXStaticText|No tasks yet.|1701,788,79,16|scrolled",
+          "AXSlider|Resize side panel|1560,52,8,908",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||900,8,80,36",
+          "AXButton|Speech conversation|1516,8,36,36",
+          "AXButton|Mute notifications|1568,8,36,36",
+          "AXButton|Search this chat|1832,8,36,36",
+          "AXButton|Close side panel|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "fill:6:AXTextField|Name#0",
+        "Kind": "fill",
+        "Label": "fill TextField \"Name\" with a pasted block of lines",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXTextField|Name#0",
+        "Text": "Notes from today: - ship the release - review the rollout plan   - call back  ",
+        "Group": "fill"
+      },
+      "signature": "b5381ea4d344b98c",
+      "digest": "3d3cdf02faed390c",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,908|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|810,8,260,70",
+          "AXStaticText|# Oct, #.# pm|898,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|991,153,549,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,397,136|scrolled",
+          "AXButton|Add attachment|334,914,32,32",
+          "AXTextField|Message|378,914,1124,32",
+          "AXButton|Start dictation|1514,914,32,32",
+          "AXButton|Edit avatar|1690,52,100,100",
+          "AXTextField|Name|1710,164,61,21",
+          "AXTextField|Role|1717,201,47,16",
+          "AXButton|Work|1629,237,44,34",
+          "AXButton|Media|1677,237,48,34",
+          "AXButton|Files|1729,237,41,34",
+          "AXButton|Capabilities|1774,237,78,34",
+          "AXHeading|Schedule|1588,293,57,16",
+          "AXStaticText|#|1883,293,9,16",
+          "AXScrollArea|Schedule|1580,323,320,278",
+          "AXStaticText|No scheduled work.|1680,454,121,16|scrolled",
+          "AXHeading|Tasks|1588,627,35,16",
+          "AXStaticText|#|1883,627,9,16",
+          "AXScrollArea|Tasks|1580,657,320,277",
+          "AXStaticText|No tasks yet.|1701,788,79,16|scrolled",
+          "AXSlider|Resize side panel|1560,52,8,908",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||900,8,80,36",
+          "AXButton|Speech conversation|1516,8,36,36",
+          "AXButton|Mute notifications|1568,8,36,36",
+          "AXButton|Search this chat|1832,8,36,36",
+          "AXButton|Close side panel|1876,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "resize:640x480",
+        "Kind": "resize",
+        "Label": "resize the window to 640x480 to test its layout",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          640,
+          480
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "resize"
+      },
+      "signature": "03f50953e8c39567",
+      "digest": "c3df240d928aa6db",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|402,8,260,70",
+          "AXStaticText|# Oct, #.# pm|490,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|376,153,348,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,337,152|scrolled",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|894,164,61,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXStaticText|#|1067,293,9,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXStaticText|No scheduled work.|864,407,121,16|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "key:ESC",
+        "Kind": "key",
+        "Label": "press Escape to dismiss whatever is open",
+        "Key": "ESC",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "key"
+      },
+      "signature": "c914fe1151f3df9d",
+      "digest": "c3df240d928aa6db",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|402,8,260,70",
+          "AXStaticText|# Oct, #.# pm|490,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|376,153,348,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,337,152|scrolled",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|894,164,61,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXStaticText|#|1067,293,9,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXStaticText|No scheduled work.|864,407,121,16|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "idle",
+        "Kind": "idle",
+        "Label": "leave it alone and watch for repainting",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "idle"
+      },
+      "signature": "c914fe1151f3df9d",
+      "digest": "c3df240d928aa6db",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|402,8,260,70",
+          "AXStaticText|# Oct, #.# pm|490,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|376,153,348,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,337,152|scrolled",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|894,164,61,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXStaticText|#|1067,293,9,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXStaticText|No scheduled work.|864,407,121,16|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "fill:7:AXTextField|Name#0",
+        "Kind": "fill",
+        "Label": "fill TextField \"Name\" with one character",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXTextField|Name#0",
+        "Text": "k",
+        "Group": "fill"
+      },
+      "signature": "4a51efba862417e8",
+      "digest": "c3df240d928aa6db",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|402,8,260,70",
+          "AXStaticText|# Oct, #.# pm|490,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|376,153,348,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,337,152|scrolled",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|894,164,61,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXStaticText|#|1067,293,9,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXStaticText|No scheduled work.|864,407,121,16|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "press:AXButton|Work#0",
+        "Kind": "press",
+        "Label": "press Button \"Work\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Work#0",
+        "Text": "",
+        "Group": "controls"
+      },
+      "signature": "59735f6f4b54c9fb",
+      "digest": "c3df240d928aa6db",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|402,8,260,70",
+          "AXStaticText|# Oct, #.# pm|490,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|376,153,348,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,337,152|scrolled",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|894,164,61,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXStaticText|#|1067,293,9,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXStaticText|No scheduled work.|864,407,121,16|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "scroll:AXScrollArea|Schedule#0",
+        "Kind": "scroll",
+        "Label": "scroll ScrollArea \"Schedule\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXScrollArea|Schedule#0",
+        "Text": "",
+        "Group": "scroll"
+      },
+      "signature": "4a51efba862417e8",
+      "digest": "c3df240d928aa6db",
+      "scene": "Atlas, , Here’s a plan with a little breathing room:  14:30 · Review the website 15:30 · Write release notes 16:30 · Take a walk, phone away  Come back with changes. We can keep refining the plan here.",
+      "state": {
+        "w": 1104,
+        "h": 772,
+        "rows": [
+          "AXOutline|Sidebar|0,52,320,720|scrolled",
+          "AXButton|Collapse Unassigned|20,54,280,28|scrolled",
+          "AXButton|Atlas, , Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a wal|18,84,284,60|scrolled",
+          "AXButton|Nova, , Saved for this conversation. Your release notes should be short, put the changes first, and skip marketing langu|18,144,284,60|scrolled",
+          "AXButton|Fern, , Scheduled for Fridays at #:# in your local timezone. I’ll check in here so we can look back at what shipped and |18,204,284,60|scrolled",
+          "AXButton|Edit Atlas’s profile|402,8,260,70",
+          "AXStaticText|# Oct, #.# pm|490,114,85,13|scrolled",
+          "AXButton|Help me plan my afternoon: review the website, write release notes, and leave time for a walk.|376,153,348,56|scrolled",
+          "AXButton|Here’s a plan with a little breathing room: #:# · Review the website #:# · Write release notes #:# · Take a walk, phone |340,221,337,152|scrolled",
+          "AXButton|Add attachment|334,726,32,32",
+          "AXTextField|Message|378,726,308,32",
+          "AXButton|Start dictation|698,726,32,32",
+          "AXButton|Edit avatar|874,52,100,100",
+          "AXTextField|Name|894,164,61,21",
+          "AXTextField|Role|901,201,47,16",
+          "AXButton|Work|813,237,44,34",
+          "AXButton|Media|861,237,48,34",
+          "AXButton|Files|913,237,41,34",
+          "AXButton|Capabilities|958,237,78,34",
+          "AXHeading|Schedule|772,293,57,16",
+          "AXStaticText|#|1067,293,9,16",
+          "AXScrollArea|Schedule|764,323,320,184",
+          "AXStaticText|No scheduled work.|864,407,121,16|scrolled",
+          "AXHeading|Tasks|772,533,35,16",
+          "AXStaticText|#|1067,533,9,16",
+          "AXScrollArea|Tasks|764,563,320,183",
+          "AXStaticText|No tasks yet.|885,647,79,16|scrolled",
+          "AXSlider|Resize side panel|744,52,8,720",
+          "AXButton|Search|191,11,38,31",
+          "AXButton|New chat|227,9,38,34",
+          "AXButton|Settings|271,7,38,38",
+          "AXButton||492,8,80,36",
+          "AXButton|Speech conversation|700,8,36,36",
+          "AXButton|Mute notifications|752,8,36,36",
+          "AXButton|Search this chat|1016,8,36,36",
+          "AXButton|Close side panel|1060,8,36,36"
+        ]
+      }
+    }
+  ],
+  "approved": "2026-11-01",
+  "reason": "First baseline of the Polymux UI, reproduced in two runs"
+}

@@ -34,7 +34,6 @@ struct PolymuxApp: App {
         #if os(macOS)
         .defaultSize(width: 1060, height: 760)
         .commands {
-            CommandGroup(replacing: .sidebar) {}
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { Updates.shared.checkForUpdates() }
             }
@@ -54,17 +53,22 @@ final class AppSession {
     let settings: SettingsStore
     let avatars: AvatarStore
     let vault: VaultLibrary
+    let plugins: PluginStore
+    let hub: HubStore
     let providers: ProviderStore
     let network: NetworkStore
-    /// The chat selected on launch, read from cache before the first frame.
-    private(set) var initialChat: ChatStore?
+    let work: WorkStore
+    /// Recent chats stay in memory, so reopening one draws its messages in the first frame.
+    private var chats: [String: ChatStore] = [:]
+    private var recentChats: [String] = []
+    /// The message each chat was scrolled to, for chats left away from their end.
+    var places: [String: String] = [:]
     private var profiles: [String: ProfileStore] = [:]
     private var drafts: [String: DraftStore] = [:]
     let route: ServerRoute?
 
     init(address: String) async throws {
         self.address = address
-        initialChat = nil
         guard let url = ServerAddress.resolve(address, defaults: .standard) else {
             throw URLError(.badURL)
         }
@@ -92,7 +96,7 @@ final class AppSession {
         let selected = UserDefaults.standard.string(forKey: "lastChat.\(address)")
             .flatMap { id in store.displayed(id)?.id } ?? store.threads.first?.id
         let opening = selected.map {
-            ChatStore(client: api, actor: store.cacheActor, threadID: $0, sidebar: store)
+            ChatStore(client: api, actor: store.cacheActor, threadID: $0, sidebar: store, resumes: false)
         }
         async let chatCache: Void = opening?.ready() ?? ()
         layout = SidebarLayout(client: client, cache: sidebar.cacheActor)
@@ -101,13 +105,91 @@ final class AppSession {
         await settings.restore()
         avatars = AvatarStore(sidebar: sidebar)
         vault = VaultLibrary(client: client.vaultClient())
+        plugins = PluginStore(client: client, cache: sidebar.cacheActor, surfaces: PluginSurface.available)
+        await plugins.restore()
+        hub = HubStore(client: client, cache: sidebar.cacheActor)
+        await hub.restore()
         providers = ProviderStore(client: client, cache: sidebar.cacheActor)
         network = NetworkStore(client: client, cache: sidebar.cacheActor)
+        work = WorkStore(client: client, cache: sidebar.cacheActor)
         async let providerCache: () = providers.restore()
         async let deviceCache: () = network.restore()
         _ = await (providerCache, deviceCache)
         await chatCache
-        initialChat = opening
+        // The chat selected on launch is read from cache before the first frame.
+        if let opening {
+            chats[opening.threadID] = opening
+            recentChats = [opening.threadID]
+        }
+    }
+
+    func chat(_ id: String) -> ChatStore {
+        if let store = chats[id] {
+            if recentChats.last != id {
+                recentChats.removeAll { $0 == id }
+                recentChats.append(id)
+            }
+            return store
+        }
+        let store = ChatStore(client: client, actor: sidebar.cacheActor, threadID: id, sidebar: sidebar, resumes: false)
+        chats[id] = store
+        recentChats.append(id)
+        if recentChats.count > 12 { chats[recentChats.removeFirst()] = nil }
+        return store
+    }
+
+    /// Reads a chat the pointer settled on, or a neighbour of the open one, ahead of the click.
+    func warm(_ id: String) {
+        Task { await ready(id) }
+    }
+
+    private func ready(_ id: String) async {
+        await draft(id).restore()
+        await chat(id).warm()
+    }
+
+    /// Runs behind the launch animation, so what's likely to be opened first is ready when it ends.
+    func prepare() async {
+        EmojiCatalogue.warm()
+        Task { await prepareHub() }
+        await sidebar.refresh()
+        await layout.refresh()
+        let placed = sidebar.chats.map(layout.applying)
+        let open = UserDefaults.standard.string(forKey: "lastChat.\(address)").flatMap { sidebar.displayed($0)?.id }
+            ?? placed.first?.id
+        let likely = [open].compactMap { $0 } + placed.filter { $0.pinned == true }.map(\.id) + placed.prefix(6).map(\.id)
+        var seen: Set<String> = []
+        await withTaskGroup(of: Void.self) { group in
+            for id in likely.prefix(10) where seen.insert(id).inserted {
+                group.addTask { await self.ready(id) }
+            }
+        }
+        guard let open else { return }
+        let members = sidebar.displayed(open)?.participantIDs ?? []
+        await withTaskGroup(of: Void.self) { group in
+            for id in members where !id.hasPrefix("local-") {
+                group.addTask { await self.profile(id).refresh() }
+            }
+            let images = chat(open).messages.suffix(30).flatMap(\.attachments).filter { $0.kind == AttachmentKind.image }
+            for image in images.suffix(8) {
+                group.addTask { await DecodedImages.warm(image, client: self.client) }
+            }
+        }
+    }
+
+    /// Hub's recent chats, faces and images, so opening it shows them at once. Nothing here marks a chat read.
+    private func prepareHub() async {
+        await plugins.refresh()
+        guard plugins.plugin(named: HubStore.plugin)?.state == PluginState.ready else { return }
+        let recent = await hub.preload()
+        for chat in hub.chats.filter({ !$0.avatar.isEmpty }).sorted(by: { $0.at > $1.at }).prefix(40) {
+            await DecodedImages.warm(HubAvatar.address(chat.avatar, client: client), name: HubAvatar.file(chat.name), client: client)
+        }
+        for chat in recent.prefix(3) {
+            let messages = (hub.messages[chat.id] ?? []).suffix(30).map(\.bubble)
+            let images = messages.flatMap(\.attachments).filter { $0.kind == AttachmentKind.image }
+            for image in images.suffix(8) { await DecodedImages.warm(image, client: client) }
+        }
     }
 
     func profile(_ agentID: String) -> ProfileStore {
@@ -126,7 +208,8 @@ final class AppSession {
 
     private static func connect(_ address: String, url: URL) async -> (APIClient, ServerRoute) {
         let credential = await Task.detached { try? ServerCredential.load(address) }.value
-        let route = ServerRoute(url: url, ticket: credential?.ticket, token: credential?.token)
+        let route = ServerRoute(url: url, ticket: credential?.ticket, token: credential?.token,
+                                also: credential?.also.flatMap(URL.init(string:)))
         let client = APIClient(baseURL: url, token: credential?.token,
                                endpoint: { try await route.resolve() }, recover: { await route.recover() })
         return (client, route)
@@ -134,15 +217,15 @@ final class AppSession {
 }
 
 struct AppRoot: View {
-    @AppStorage("serverAddress") private var address = "http://127.0.0.1:7337"
-    @State private var servers = ServerStore()
-    @State private var session: AppSession?
-    @State private var error: String?
+    @AppStorage("serverAddress") private var address = ServerHost.address
+    @State private var pool = SessionPool(servers: ServerStore())
     @State private var showSettings = false
-    /// Changes on every pairing link, so re-pairing the current server reconnects with the new credential.
-    @State private var pairing = 0
+    @State private var joinChoice: String?
+    /// Kept here because a change of server rebuilds Settings.
+    @State private var settingsTab = SettingsTab.general
     @State private var pairingTask: Task<Void, Error>?
     @State private var pairingIssue: String?
+    @State private var splashDone = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -162,9 +245,12 @@ struct AppRoot: View {
         #if os(macOS)
         .allowsWindowActivationEvents()
         .focusedSceneValue(\.settingsPanel, $showSettings)
+        #else
+        // Phone test runs pass this so auto-lock can't interrupt them.
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = CommandLine.arguments.contains("--keep-awake") }
         #endif
         .neutralBackground()
-        .task(id: "\(address)#\(pairing)") {
+        .task(id: address) {
             #if DEBUG
             guard !CommandLine.arguments.contains("--verify-approval"),
                   !CommandLine.arguments.contains("--verify-status") else { return }
@@ -172,52 +258,20 @@ struct AppRoot: View {
                 try? await Task.sleep(for: .seconds(8))
                 guard !Task.isCancelled else { return }
             }
+            if let second = VerifyFixture.secondServer {
+                pool.servers.remember(address)
+                pool.servers.remember(second)
+            }
             #endif
-            servers.remember(address)
-            let target = address
-            var current: AppSession?
-            defer {
-                let retired = current?.route
-                Task { await retired?.stop() }
-            }
-            while !Task.isCancelled {
-                do {
-                    let opened = try await AppSession(address: target)
-                    current = opened
-                    try Task.checkCancellation()
-                    session = opened
-                    error = nil
-                    Task { await announce(opened) }
-                    #if DEBUG
-                    if !VerifyFixture.local {
-                        Notifications.shared.connect(opened.client, address: target)
-                        Connections.shared.connect(opened.client, address: target)
-                    }
-                    #else
-                    Notifications.shared.connect(opened.client, address: target)
-                    Connections.shared.connect(opened.client, address: target)
-                    #endif
-                    while !Task.isCancelled {
-                        await opened.settings.refresh()
-                        if !opened.settings.isConnected { await opened.route?.recover() }
-                        do { try await Task.sleep(for: .seconds(3)) }
-                        catch { break }
-                    }
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    session = nil
-                    self.error = error.isOffline ? "Polymux keeps trying to reconnect." : "Check the server in Connection settings."
-                }
-                if Task.isCancelled { break }
-                try? await Task.sleep(for: .seconds(2))
-            }
+            await ServerHost.shared.prepare()
+            pool.show(address)
         }
         .onOpenURL { handleConnect($0) }
         .task(id: activeSession?.client.id) {
             guard let session = activeSession else { return }
             while !Task.isCancelled {
                 await session.network.refresh()
-                if let network = session.network.value { servers.remember(session.address, name: network.server.name) }
+                pool.report(session)
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
@@ -236,17 +290,20 @@ struct AppRoot: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, let route = session?.route { Task { await route.resume() } }
+            if phase == .active { pool.resume() }
         }
         .onAppear {
             URLRouter.shared.handler = { handleConnect($0) }
         }
         .onDisappear { pairingTask?.cancel() }
-        .panel(isPresented: $showSettings) {
-            ConnectionView(address: $address, servers: servers, settings: activeSession?.settings,
+        .onChange(of: showSettings) { _, shown in if !shown { settingsTab = .general } }
+        .panel(isPresented: $showSettings, page: true) {
+            ConnectionView(pool: pool, settings: activeSession?.settings,
                             client: activeSession?.client,
                             join: join,
                             joinIssue: pairingIssue,
+                            joined: $joinChoice,
+                            category: $settingsTab,
                            onClose: { showSettings = false })
                 .id(activeSession?.client.id)
         }
@@ -254,13 +311,19 @@ struct AppRoot: View {
         #if os(macOS)
         .toolbar(removing: .title)
         #endif
-        .environment(session?.avatars)
+        .environment((activeSession ?? pool.latest)?.avatars)
         .environment(activeSession?.vault)
+        .environment(activeSession?.plugins)
+        .environment(activeSession?.hub)
+        .environment(activeSession?.sidebar)
         .environment(activeSession?.providers)
         .environment(activeSession?.network)
         .appAppearance(appearance)
         #if os(macOS)
-        .background { InputFocus().frame(width: 0, height: 0).accessibilityHidden(true) }
+        .background {
+            WindowFill().frame(width: 0, height: 0).accessibilityHidden(true)
+            InputFocus().frame(width: 0, height: 0).accessibilityHidden(true)
+        }
         #endif
     }
 
@@ -280,7 +343,7 @@ struct AppRoot: View {
     }
 
     private func join(_ url: URL) async throws {
-        guard let invite = Invite(link: url), let parsed = ServerAddress.parse(invite.url) else {
+        guard let invite = Invite(link: url) else {
             throw ClientError.response(400, "Paste a valid Polymux pairing link.")
         }
         let previous = pairingTask
@@ -289,27 +352,12 @@ struct AppRoot: View {
             // Finish any earlier write before this invite replaces it.
             _ = await previous?.result
             try Task.checkCancellation()
-            let token = try await Pairing.redeem(invite)
-            let known = await Task.detached {
-                try? ServerCredential.load(parsed.absoluteString)?.ticket
-            }.value
-            let kept = await Tunnel.address(for: parsed, ticket: invite.ticket, token: token, knownTicket: known)
-            try Task.checkCancellation()
-            let target = kept.absoluteString
-            do {
-                try await ServerCredential(token: token, ticket: invite.ticket).save(target)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                throw ClientError.response(0, "Couldn’t save this connection on this device.")
-            }
-            // Publishing is the commit point; even cancellation must reconnect once it succeeds.
-            // A tunnel-only server's name arrives once connected.
-            servers.remember(target, name: kept == parsed ? nil : "Server")
+            let target = try await pool.pair(invite)
+            // Asked first: switching rebuilds Settings, which cancels this task's view.
+            if await pool.keepsData(joined: target) { joinChoice = target }
             address = target
-            pairing += 1
             pairingIssue = nil
-            await Pairing.finish(invite)
+            await pool.retireEmptyHost(joined: target)
         }
         pairingTask = task
         try await withTaskCancellationHandler {
@@ -319,19 +367,8 @@ struct AppRoot: View {
         }
     }
 
-    /// Names this device on the server so the Devices list can tell it apart.
-    private func announce(_ session: AppSession) async {
-        #if os(macOS)
-        let name = await Task.detached { Host.current().localizedName ?? "Mac" }.value
-        #else
-        let name = UIDevice.current.name
-        #endif
-        try? await session.client.renameDevice(name)
-        await session.network.refresh()
-        if let network = session.network.value { servers.remember(session.address, name: network.server.name) }
-    }
-
-    private var activeSession: AppSession? { session?.address == address ? session : nil }
+    private var activeSession: AppSession? { pool.sessions[address] }
+    private var error: String? { pool.issues[address] }
 
     private var appearance: String {
         #if DEBUG
@@ -342,15 +379,16 @@ struct AppRoot: View {
             return CommandLine.arguments.contains("--approval-dark") ? "dark" : "light"
         }
         #endif
-        return session?.settings.value?.appearance ?? "system"
+        return activeSession?.settings.value?.appearance ?? "system"
     }
 
     private var content: some View {
         Group {
-            if let session = activeSession {
-                ShellView(session: session, showSettings: $showSettings)
+            if let session = activeSession, splashDone {
+                ShellView(session: session, pool: pool, showSettings: $showSettings)
                     .id(session.client.id)
-            } else if let error {
+                    .transition(.opacity)
+            } else if let error, activeSession == nil {
                 ContentUnavailableView {
                     Label("Can’t reach your server", systemImage: "network")
                 } description: {
@@ -359,71 +397,83 @@ struct AppRoot: View {
                     Button("Connection settings") { showSettings = true }
                 }
             } else {
-                Image("Logo")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 96, height: 96)
-                    .foregroundStyle(.primary)
-                    .accessibilityLabel("Polymux")
-                    .accessibilityValue("Connecting")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                SplashView { splashDone = true }
+                    .onAppear { splashDone = false }
+                    .transition(.opacity)
             }
         }
+        .motion(Motion.fade, value: splashDone)
     }
 }
 
 struct ConnectionView: View {
-    @Binding var address: String
-    let servers: ServerStore
+    let pool: SessionPool
     let settings: SettingsStore?
     let client: APIClient?
     let join: (URL) async throws -> Void
     let joinIssue: String?
+    @Binding var joined: String?
+    @Binding var category: SettingsTab
     let onClose: () -> Void
     @Environment(NetworkStore.self) private var networkStore: NetworkStore?
     @Environment(ProviderStore.self) private var providerStore: ProviderStore?
+    @Environment(PluginStore.self) private var plugins: PluginStore?
     private var network: NetworkInfo? { networkStore?.value }
-    private var networkIssue: String? { networkStore?.issue }
-    private var deviceIssue: String? { networkStore?.actionIssue }
-    private var unreachable: Bool { networkStore?.isConnected != true }
     private var providers: [Provider] { providerStore?.providers ?? [] }
-    @State private var renaming: NetworkInfo.Device?
-    @State private var adding = false
+    @State private var networkPage: String?
+    @State private var joining = false
     @State private var providerTarget: ProviderTarget?
-    @State private var category = SettingsTab.general
+    @State private var pluginTarget: String?
+    @State private var arrangingPlugins = false
+    @State private var editingVoice = false
+    @State private var editingMedia: MediaKind?
+    @State private var hoveredTab: SettingsTab?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     /// The settings modal's left tab column, matching the macOS Settings shape.
     static let navWidth: CGFloat = 200
 
-    init(address: Binding<String>, servers: ServerStore, settings: SettingsStore?, client: APIClient?,
-         join: @escaping (URL) async throws -> Void, joinIssue: String?,
-         onClose: @escaping () -> Void) {
-        _address = address
-        self.servers = servers
+    init(pool: SessionPool, settings: SettingsStore?, client: APIClient?,
+         join: @escaping (URL) async throws -> Void, joinIssue: String?, joined: Binding<String?>,
+         category: Binding<SettingsTab>, onClose: @escaping () -> Void) {
+        self.pool = pool
         self.settings = settings
         self.client = client
         self.join = join
         self.joinIssue = joinIssue
+        _joined = joined
+        _category = category
         self.onClose = onClose
     }
 
     var body: some View {
         // One container, so returning from a sub-view doesn't refetch over optimistic edits.
         ZStack {
-            if adding {
-                AddDevice(client: client, onBack: { adding = false }) { link in
-                    try await join(link)
+            if let joined {
+                JoinChoice(pool: pool, joined: joined) {
+                    self.joined = nil
                     onClose()
+                }
+            } else if joining {
+                AddDevice(client: client, onBack: { joining = false }) { link in
+                    try await join(link)
+                    if joined == nil { onClose() }
                 }
             } else if let target = providerTarget {
                 ProviderEditor(client: client, original: target.provider, onBack: { providerTarget = nil }) {
                     providerStore?.accept($0)
                     Task { await settings?.refresh() }
                 }
-            } else if let renaming {
-                DeviceView(device: renaming, onBack: { self.renaming = nil }) { rename(renaming, to: $0) }
+            } else if let pluginTarget {
+                PluginDetail(name: pluginTarget) { self.pluginTarget = nil }
+            } else if arrangingPlugins, let plugins {
+                PluginLayoutEditor(store: plugins) { arrangingPlugins = false }
+            } else if let kind = editingMedia, let settings {
+                MediaOrderView(kind: kind, store: settings, providers: providers, onBack: { editingMedia = nil })
+            } else if editingVoice, let settings {
+                VoiceFallback(store: settings, providers: providers, onBack: { editingVoice = false })
+            } else if let networkPage, let server = pool.servers.devices.first(where: { $0.address == networkPage }) {
+                NetworkPage(pool: pool, server: server) { self.networkPage = nil }
             } else {
                 settingsPanel
             }
@@ -454,6 +504,7 @@ struct ConnectionView: View {
             PillPicker("Settings tab", selection: $category,
                        options: SettingsTab.allCases.map { ($0.title, $0) })
         }
+        .edgeFade()
         .scrollIndicators(.hidden)
         .padding(.horizontal, 14)
     }
@@ -476,29 +527,33 @@ struct ConnectionView: View {
             category = tab
         } label: {
             HStack(spacing: 9) {
-                Image(systemName: tab.symbol).frame(width: 20)
+                tab.icon.frame(width: 20)
                 Text(tab.title)
             }
             .font(.body)
             .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             .padding(.horizontal, 10)
             .background {
-                if category == tab {
-                    RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.16))
-                }
+                RoundedRectangle(cornerRadius: PanelStyle.rowRadius)
+                    .fill(.primary.opacity(category == tab ? PanelStyle.selectedTint : hoveredTab == tab ? PanelStyle.hoverTint : 0))
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointerHover { inside in
+            if inside { hoveredTab = tab } else if hoveredTab == tab { hoveredTab = nil }
+        }
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(category == tab ? [.isSelected] : [])
     }
 
     @ViewBuilder private var settingsPane: some View {
-        if category == .vault {
-            VaultSettings()
-        } else {
-            settingsForm
+        switch category {
+        case .vault: VaultSettings()
+        case .network:
+            NetworkSettings(pool: pool, joinIssue: joinIssue, open: { networkPage = $0 }, join: { joining = true })
+        case .plugins: PluginSettings(open: { pluginTarget = $0 }, arrange: { arrangingPlugins = true })
+        default: settingsForm
         }
     }
 
@@ -508,19 +563,13 @@ struct ConnectionView: View {
             case .general: generalSections
             case .models:
                 ProviderSettings(client: client, settings: settings) { providerTarget = ProviderTarget(provider: $0) }
-                if let settings { VoiceSettings(store: settings, providers: providers) }
-            case .vault: EmptyView()
-            case .updates: UpdatesSettings(server: network?.server)
+                if let settings { MediaSettings(store: settings) { editingMedia = $0 } }
+                if let settings { VoiceSettings(store: settings, providers: providers) { editingVoice = true } }
+            case .vault, .plugins, .network: EmptyView()
+            case .updates: UpdatesSettings(network: network, settings: settings)
             }
         }
-        .formStyle(.grouped)
-        #if os(macOS)
-        // Grouped forms keep an internal inset on macOS.
-        .padding(.top, -PanelStyle.formInset)
-        #else
-        .contentMargins(.top, 0, for: .scrollContent)
-        #endif
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .settingsForm()
         .id(category)
     }
 
@@ -530,29 +579,19 @@ struct ConnectionView: View {
                                                       set: { settings?.edit(SettingsPatch(appearance: $0)) }),
                            options: [("Light", "light"), ("Dark", "dark"), ("System", "system")])
             .disabled(settings?.value == nil)
+            LogoPicker()
+            if plugins?.tabs.isEmpty == false || !pool.tabs.isEmpty {
+                Toggle("Switcher badges", isOn: Binding(get: { settings?.value?.switcherBadges ?? true },
+                                                        set: { settings?.edit(SettingsPatch(switcherBadges: $0)) }))
+                    .accessibilityLabel("Switcher badges")
+                    .disabled(settings?.value == nil)
+            }
         }
         .panelRow()
         if let issue = settings?.error {
             Section { Text(issue).font(.footnote).foregroundStyle(.muted) }
                 .panelRow()
         }
-        Section {
-            devices
-        } header: {
-            HStack {
-                Text("Devices").foregroundStyle(Color.primary)
-                Spacer()
-                Button("Add device", systemImage: "plus") { adding = true }
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-        } footer: {
-            if let issue = deviceIssue ?? networkIssue {
-                Text(issue).font(.footnote).foregroundStyle(.muted)
-            }
-            if let joinIssue { Text(joinIssue).font(.footnote).foregroundStyle(.primary) }
-        }
-        .panelRow()
         Section("Notifications") {
             Toggle("Allow notifications", isOn: Binding(get: { Notifications.shared.enabled },
                 set: { enabled in Task { await Notifications.shared.allow(enabled) } }))
@@ -567,10 +606,6 @@ struct ConnectionView: View {
                 Toggle(Connections.title(capability), isOn: Binding(get: { Connections.shared.enabled.contains(capability) },
                     set: { on in Task { await Connections.shared.allow(capability, on) } }))
                     .accessibilityLabel(Connections.title(capability))
-                if capability == "location" {
-                    Text("Lets bots on this server request this device’s current location and address.")
-                        .font(.footnote).foregroundStyle(.muted)
-                }
             }
             if let issue = Connections.shared.issue {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
@@ -580,97 +615,6 @@ struct ConnectionView: View {
         }
         .panelRow()
     }
-
-    /// Client devices, this one first.
-    @ViewBuilder private var devices: some View {
-        if network == nil && networkIssue == nil && networkStore?.hasChecked != true {
-            ProgressView().frame(maxWidth: .infinity).accessibilityLabel("Loading devices")
-        } else if network == nil && unreachable {
-            Text("Offline").foregroundStyle(.muted).frame(maxWidth: .infinity)
-        }
-        // Switching only matters once this app knows more than one server.
-        if servers.devices.count > 1 {
-            SettingsPicker("Server", selection: $address, options: servers.devices.map { ($0.name, $0.address) })
-            .pickerStyle(.menu)
-            .accessibilityIdentifier("settings.server")
-        }
-        ForEach((network?.devices ?? []).sorted { $0.id == network?.current && $1.id != network?.current }) { device in
-            HStack {
-                Button { renaming = device } label: {
-                    LabeledContent {
-                        if device.id == network?.current { Text("This device") }
-                    } label: {
-                        HStack(spacing: 10) {
-                            StatusDot(state: status(device))
-                            VStack(alignment: .leading) {
-                                HStack(spacing: 6) {
-                                    Text(device.title).lineLimit(1)
-                                    if device.id == network?.host {
-                                        Image(systemName: "server.rack").foregroundStyle(.muted).offset(y: 1).accessibilityLabel("Server")
-                                    }
-                                }
-                                if device.title != device.name { Text(device.name).lineLimit(1) }
-                            }
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel(device.title)
-                .accessibilityValue(details(device))
-                .appMenu {
-                    Button("Rename", systemImage: "pencil") { renaming = device }
-                    if removable(device) {
-                        Button("Remove", systemImage: "trash", role: .destructive) { remove(device) }
-                    }
-                }
-                if removable(device) {
-                    Button("Remove", role: .destructive) { remove(device) }
-                        .buttonStyle(.bordered)
-                        .buttonBorderShape(.roundedRectangle)
-                        .accessibilityLabel("Remove \(device.title)")
-                        .help("Remove device")
-                }
-            }
-        }
-    }
-
-    private func removable(_ device: NetworkInfo.Device) -> Bool {
-        device.id != network?.current && device.id != network?.host
-    }
-
-    /// What a device row shows besides its name, for VoiceOver.
-    private func details(_ device: NetworkInfo.Device) -> String {
-        let state: String? = switch status(device) {
-        case .online: "Online"
-        case .offline: "Offline"
-        case .pairing: "Pairing"
-        case .checking: "Checking"
-        case .unknown: nil
-        }
-        return [device.id == network?.host ? "Server" : nil, state, device.id == network?.current ? "This device" : nil,
-                device.title != device.name ? device.name : nil]
-            .compactMap { $0 }.joined(separator: ", ")
-    }
-
-    private func status(_ device: NetworkInfo.Device) -> StatusDot.State {
-        if device.paired == false { return .pairing }
-        // The list is from the cache when the server can't be reached, so presence is unknown.
-        if unreachable || networkIssue != nil { return .unknown }
-        return device.id == network?.current || network?.online?.contains(device.id) == true ? .online : .offline
-    }
-
-    private func rename(_ device: NetworkInfo.Device, to name: String) {
-        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard label != (device.label ?? "") else { return }
-        Task { await networkStore?.rename(device, label: label) }
-    }
-
-    private func remove(_ device: NetworkInfo.Device) {
-        guard removable(device) else { return }
-        Task { await networkStore?.remove(device) }
-    }
 }
 
 /// The provider being added (nil) or edited.
@@ -678,19 +622,22 @@ private struct ProviderTarget {
     let provider: Provider?
 }
 
-private enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, models, vault, updates
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general, network, models, vault, plugins, updates
 
     var id: String { rawValue }
 
     var title: String { rawValue.capitalized }
 
-    var symbol: String {
+    /// Plugins draws its own plug, because SF Symbols has none at this angle.
+    var icon: Image {
         switch self {
-        case .general: "gearshape"
-        case .models: "cpu"
-        case .vault: "lock"
-        case .updates: "arrow.down.circle"
+        case .general: Image(systemName: "gearshape")
+        case .network: Image(systemName: "network")
+        case .models: Image(systemName: "cpu")
+        case .vault: Image(systemName: "lock")
+        case .plugins: Image("plug")
+        case .updates: Image(systemName: "arrow.down.circle")
         }
     }
 }
@@ -700,8 +647,20 @@ private struct SettingsKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
-private extension FocusedValues {
-    var settingsPanel: Binding<Bool>? {
+private struct SearchPanelKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+extension FocusedValues {
+    @Entry var findInChat: (() -> Void)?
+    @Entry var toggleSidebar: (() -> Void)?
+
+    var searchPanel: Binding<Bool>? {
+        get { self[SearchPanelKey.self] }
+        set { self[SearchPanelKey.self] = newValue }
+    }
+
+    fileprivate var settingsPanel: Binding<Bool>? {
         get { self[SettingsKey.self] }
         set { self[SettingsKey.self] = newValue }
     }
@@ -709,8 +668,24 @@ private extension FocusedValues {
 
 private struct SettingsCommands: Commands {
     @FocusedValue(\.settingsPanel) private var settings
+    @FocusedValue(\.searchPanel) private var search
+    @FocusedValue(\.findInChat) private var find
+    @FocusedValue(\.toggleSidebar) private var sidebar
 
     var body: some Commands {
+        CommandGroup(replacing: .sidebar) {
+            Button("Toggle Sidebar") { sidebar?() }
+                .keyboardShortcut("s", modifiers: [.control, .command])
+                .disabled(sidebar == nil)
+        }
+        CommandGroup(after: .textEditing) {
+            Button("Search…") { search?.wrappedValue = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(search == nil)
+            Button("Find in Chat") { find?() }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(find == nil)
+        }
         CommandGroup(replacing: .appSettings) {
             Button("Settings…") { settings?.wrappedValue = true }
                 .keyboardShortcut(",", modifiers: .command)

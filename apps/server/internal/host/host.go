@@ -1,255 +1,197 @@
+// Package host runs the server as a launchd job, so it starts at login and outlives the app.
 package host
 
 import (
-	"context"
-	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
-	"syscall"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
-
-	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
-type Config struct {
-	Binary  string
-	Args    []string
-	Dir     string
-	Output  *os.File
-	Restart time.Duration
+const Label = "com.flarehq.polymux.server"
+
+// passed are the settings a throwaway instance keeps out of the real server's. Nothing secret
+// belongs here: a launchd job's file is readable and outlives the process.
+var passed = []string{"POLYMUX_DATA_DIR", "POLYMUX_DEV", "POLYMUX_HOST_DIR", "POLYMUX_HOST_LABEL", "POLYMUX_LISTEN", "POLYMUX_LOG_DIR", "POLYMUX_NO_MDNS", "POLYMUX_TUNNEL"}
+
+// Service is the launchd job. POLYMUX_HOST_LABEL and POLYMUX_HOST_DIR point a test instance at
+// its own job, so nothing it does can touch the real one.
+type Service struct {
+	Label  string
+	Path   string
+	Log    string
+	domain string
 }
 
-type Controller struct {
-	mu     sync.Mutex
-	state  contract.HostState
-	config Config
-	wake   chan struct{}
+func Open() (Service, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Service{}, err
+	}
+	label := os.Getenv("POLYMUX_HOST_LABEL")
+	if label == "" {
+		label = Label
+	}
+	dir := os.Getenv("POLYMUX_HOST_DIR")
+	if dir == "" {
+		dir = filepath.Join(home, "Library", "LaunchAgents")
+	}
+	logs := os.Getenv("POLYMUX_LOG_DIR")
+	if logs == "" {
+		logs = filepath.Join(home, ".polymux", "logs")
+	}
+	return Service{Label: label, Path: filepath.Join(dir, label+".plist"), Log: filepath.Join(logs, "launchd.log"),
+		domain: "gui/" + strconv.Itoa(os.Getuid())}, nil
 }
 
-func Open(config Config) (*Controller, error) {
-	if !filepath.IsAbs(config.Binary) || !filepath.IsAbs(config.Dir) {
-		return nil, errors.New("host paths must be absolute")
-	}
-	if config.Restart <= 0 {
-		config.Restart = 5 * time.Second
-	}
-	if config.Output == nil {
-		config.Output = os.Stderr
-	}
-	c := &Controller{config: config, state: contract.HostState{Enabled: true}, wake: make(chan struct{}, 1)}
-	data, err := os.ReadFile(filepath.Join(config.Dir, "host.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		if err := c.save(true); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
-		return nil, err
-	} else {
-		var persisted struct {
-			Enabled *bool `json:"enabled"`
-		}
-		if json.Unmarshal(data, &persisted) != nil || persisted.Enabled == nil {
-			return nil, errors.New("invalid host configuration")
-		}
-		c.state.Enabled = *persisted.Enabled
-	}
-	return c, nil
+func (s Service) Installed() bool {
+	_, err := os.Stat(s.Path)
+	return err == nil
 }
 
-func (c *Controller) Snapshot() contract.HostState {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.state
+// Binary is the program the installed job runs.
+func (s Service) Binary() (string, error) {
+	output, err := exec.Command("/usr/bin/plutil", "-extract", "ProgramArguments.0", "raw", "-o", "-", s.Path).Output()
+	return strings.TrimSpace(string(output)), err
 }
 
-func (c *Controller) Enable(enabled bool) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := c.save(enabled); err != nil {
+// Install writes the job and starts it, replacing any job already loaded.
+func (s Service) Install(binary string) error {
+	unit, err := Unit(s.Label, binary, s.Log, environment())
+	if err != nil {
 		return err
 	}
-	c.state.Enabled = enabled
-	c.state.Error = ""
-	select {
-	case c.wake <- struct{}{}:
-	default:
+	for _, dir := range []string{filepath.Dir(s.Path), filepath.Dir(s.Log)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	if err := s.stop(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(s.Path, unit, 0o600); err != nil {
+		return err
+	}
+	return s.start()
+}
+
+// Remove stops the job and deletes it. The server's data stays.
+func (s Service) Remove() error {
+	if err := s.stop(); err != nil {
+		return err
+	}
+	if err := os.Remove(s.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }
 
-func (c *Controller) save(enabled bool) error {
-	if err := os.MkdirAll(c.config.Dir, 0700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(c.config.Dir, ".host-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	err = json.NewEncoder(f).Encode(contract.HostPatch{Enabled: enabled})
-	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(f.Name(), filepath.Join(c.config.Dir, "host.json"))
+// Restart replaces the running process with whatever the job's binary now is.
+func (s Service) Restart() error {
+	return exec.Command("/bin/launchctl", "kickstart", "-k", s.domain+"/"+s.Label).Run()
 }
 
-func (c *Controller) Run(ctx context.Context) {
-	var process *exec.Cmd
-	var exited chan error
-	var next time.Time
-	stop := func() {
-		if process == nil {
-			return
-		}
-		_ = process.Process.Signal(syscall.SIGTERM)
-		select {
-		case <-exited:
-		case <-time.After(20 * time.Second):
-			_ = process.Process.Kill()
-			<-exited
-		}
-		process, exited = nil, nil
-		c.mu.Lock()
-		c.state.Running = false
-		c.state.Pid = 0
-		c.mu.Unlock()
-	}
-	defer stop()
-	for {
-		state := c.Snapshot()
-		if !state.Enabled {
-			stop()
-			next = time.Time{}
-		}
-		if state.Enabled && process == nil && !time.Now().Before(next) && ctx.Err() == nil {
-			process = exec.Command(c.config.Binary, c.config.Args...)
-			process.Stdout, process.Stderr = c.config.Output, c.config.Output
-			err := process.Start()
-			c.mu.Lock()
-			if err != nil {
-				c.state.Error = "Couldn’t start the server. Check the host log."
-				process = nil
-				next = time.Now().Add(c.config.Restart)
-			} else {
-				c.state.Running = true
-				c.state.Pid = int64(process.Process.Pid)
-				c.state.Error = ""
-				exited = make(chan error, 1)
-				go func(cmd *exec.Cmd, done chan error) { done <- cmd.Wait() }(process, exited)
-			}
-			c.mu.Unlock()
-		}
-		// Only a failed or exited server waits on a timer: its restart backoff.
-		var retry <-chan time.Time
-		if state.Enabled && process == nil {
-			retry = time.After(time.Until(next))
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.wake:
-		case <-retry:
-		case <-exited:
-			process, exited = nil, nil
-			c.mu.Lock()
-			c.state.Running = false
-			c.state.Pid = 0
-			c.state.Error = "Server exited; restarting shortly."
-			c.mu.Unlock()
-			next = time.Now().Add(c.config.Restart)
-		}
-	}
+func (s Service) loaded() bool {
+	return exec.Command("/bin/launchctl", "print", s.domain+"/"+s.Label).Run() == nil
 }
 
-func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.URL.Path != "/host" {
-		http.NotFound(w, r)
-		return
+func (s Service) stop() error {
+	if !s.loaded() {
+		return nil
 	}
-	if r.Method == http.MethodPatch {
-		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || !loopback(r.RemoteAddr) {
-			w.WriteHeader(403)
-			return
+	// A job can report an error while stopping, so only its absence counts.
+	_ = exec.Command("/bin/launchctl", "bootout", s.domain+"/"+s.Label).Run()
+	for range 50 {
+		if !s.loaded() {
+			return nil
 		}
-		var patch struct {
-			Enabled *bool `json:"enabled"`
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1024)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&patch) != nil || patch.Enabled == nil || decoder.Decode(new(any)) != io.EOF {
-			w.WriteHeader(400)
-			return
-		}
-		if err := c.Enable(*patch.Enabled); err != nil {
-			w.WriteHeader(500)
-			_ = json.NewEncoder(w).Encode(contract.Error{Code: "host", Message: "Couldn’t save server state."})
-			return
-		}
-	} else if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET, PATCH")
-		w.WriteHeader(405)
-		return
+		time.Sleep(200 * time.Millisecond)
 	}
-	_ = json.NewEncoder(w).Encode(c.Snapshot())
+	return errors.New("the server didn't stop")
 }
 
-// loopback reports whether a request came from this machine.
-func loopback(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
+func (s Service) start() error {
+	var failure []byte
+	// launchd can still be releasing the job's old slot just after a stop.
+	for range 5 {
+		output, err := exec.Command("/bin/launchctl", "bootstrap", s.domain, s.Path).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		failure = output
+		time.Sleep(time.Second)
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return fmt.Errorf("the server didn't start: %s", strings.TrimSpace(string(failure)))
 }
 
-const Label = "com.flarehq.polymux.app.host"
+func environment() map[string]string {
+	values := map[string]string{}
+	for _, name := range passed {
+		if value := os.Getenv(name); value != "" {
+			values[name] = value
+		}
+	}
+	return values
+}
 
-func Unit(binary, dir, listen, control string) ([]byte, error) {
-	for _, path := range []string{binary, dir} {
+// Unit is the launchd job: the server, kept running, with no shell in between.
+func Unit(label, binary, log string, env map[string]string) ([]byte, error) {
+	for _, path := range []string{binary, log} {
 		if !filepath.IsAbs(path) {
-			return nil, fmt.Errorf("service paths must be absolute")
+			return nil, errors.New("service paths must be absolute")
 		}
 	}
-	escape := func(s string) string {
-		var b []byte
-		for _, r := range s {
-			switch r {
-			case '&':
-				b = append(b, "&amp;"...)
-			case '<':
-				b = append(b, "&lt;"...)
-			case '>':
-				b = append(b, "&gt;"...)
-			case '"':
-				b = append(b, "&quot;"...)
-			default:
-				b = append(b, []byte(string(r))...)
+	value := func(tag, text string) (string, error) {
+		var escaped strings.Builder
+		if err := xml.EscapeText(&escaped, []byte(text)); err != nil {
+			return "", err
+		}
+		return "<" + tag + ">" + escaped.String() + "</" + tag + ">", nil
+	}
+	var body strings.Builder
+	write := func(key, tag, text string) error {
+		item, err := value(tag, text)
+		if err == nil {
+			body.WriteString("<key>" + key + "</key>" + item)
+		}
+		return err
+	}
+	if err := write("Label", "string", label); err != nil {
+		return nil, err
+	}
+	body.WriteString("<key>ProgramArguments</key><array>")
+	for _, argument := range []string{binary, "serve"} {
+		item, err := value("string", argument)
+		if err != nil {
+			return nil, err
+		}
+		body.WriteString(item)
+	}
+	body.WriteString("</array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer>")
+	for _, key := range []string{"StandardOutPath", "StandardErrorPath"} {
+		if err := write(key, "string", log); err != nil {
+			return nil, err
+		}
+	}
+	if len(env) > 0 {
+		names := make([]string, 0, len(env))
+		for name := range env {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		body.WriteString("<key>EnvironmentVariables</key><dict>")
+		for _, name := range names {
+			if err := write(name, "string", env[name]); err != nil {
+				return nil, err
 			}
 		}
-		return string(b)
+		body.WriteString("</dict>")
 	}
-	args := ""
-	for _, value := range []string{binary, "host", "run", "-data", dir, "-listen", listen, "-control", control} {
-		args += "<string>" + escape(value) + "</string>"
-	}
-	return []byte(`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>` + Label + `</string><key>ProgramArguments</key><array>` + args + `</array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer><key>StandardOutPath</key><string>` + escape(filepath.Join(dir, "host.log")) + `</string><key>StandardErrorPath</key><string>` + escape(filepath.Join(dir, "host.log")) + `</string></dict></plist>`), nil
+	return []byte(`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>` + body.String() + `</dict></plist>`), nil
 }

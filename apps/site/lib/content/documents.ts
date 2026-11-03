@@ -1,5 +1,4 @@
 import {parse as parseYaml} from 'yaml';
-import type {ProductFeature, ProductFeatureIcon} from './types.ts';
 
 export function readDocument(source: string, filename: string) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
@@ -52,46 +51,4 @@ export function integer(value: unknown, field: string, filename: string): number
     throw new Error(`${filename} requires a positive integer ${field}.`);
   }
   return value;
-}
-
-function record(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Product ${field} must be an object.`);
-  return value as Record<string, unknown>;
-}
-
-function list(value: unknown, field: string): unknown[] {
-  if (!Array.isArray(value) || !value.length) throw new Error(`Product ${field} must be a nonempty array.`);
-  return value;
-}
-
-export function readFeatures(value: unknown): ProductFeature[] {
-  const icons = new Set<ProductFeatureIcon>(['workspace', 'hub', 'drive', 'browser', 'memory', 'tasks', 'models', 'skills']);
-  const features = list(value, 'features').map((item) => {
-    const feature = record(item, 'feature');
-    const name = slug(feature.slug, 'Product feature');
-    const string = (key: string) => text(feature[key], key, name);
-    if (feature.group !== 'app' && feature.group !== 'agent') throw new Error(`${name} has an invalid group.`);
-    if (!icons.has(feature.icon as ProductFeatureIcon)) throw new Error(`${name} has an invalid icon.`);
-    const details = (key: string) => list(feature[key], key).map((item) => {
-      const entry = record(item, key);
-      return {title: text(entry.title, 'title', name), description: text(entry.description, 'description', name)};
-    });
-    const demoItems = list(feature.demoItems, 'demoItems').map((item) => {
-      const entry = record(item, 'demo item');
-      return {label: text(entry.label, 'label', name), title: text(entry.title, 'title', name), description: text(entry.description, 'description', name)};
-    });
-    const example = record(feature.example, 'example');
-    const docsPath = string('docsPath');
-    if (!/^\/docs\/(?:[a-z0-9]+(?:-[a-z0-9]+)*\/)?(?:#[a-z0-9-]+)?$/.test(docsPath)) throw new Error(`${name} has an invalid docsPath.`);
-    return {
-      group: feature.group, slug: name, icon: feature.icon as ProductFeatureIcon,
-      name: string('name'), menuDescription: string('menuDescription'), title: string('title'),
-      description: string('description'), intro: string('intro'), demoTitle: string('demoTitle'),
-      demoItems, benefits: details('benefits'), steps: list(feature.steps, 'steps').map((step) => text(step, 'step', name)),
-      example: {title: text(example.title, 'title', name), description: text(example.description, 'description', name)},
-      docsPath, updated: updated(feature.updated, name),
-    } satisfies ProductFeature;
-  });
-  unique(features.map((feature) => feature.slug), 'product slug');
-  return features;
 }

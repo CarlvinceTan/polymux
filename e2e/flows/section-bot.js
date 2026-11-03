@@ -1,3 +1,4 @@
+// @cua
 // A section's New Bot action retains its destination across relaunch without affecting global creation.
 let app = await cua.getApp(APP);
 const [close] = await app.query({ role: "button", name: "Close side panel" });

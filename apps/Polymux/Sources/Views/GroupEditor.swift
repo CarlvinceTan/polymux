@@ -152,14 +152,15 @@ struct GroupEditor: View {
                 .accessibilityLabel("Remove \(memberName(id)) from chat")
                 .accessibilityHint(selected.count == 1 ? "A chat needs at least one agent" : "")
                 .opacity(showsRemove ? 1 : 0)
+                .motion(value: showsRemove)
                 .allowsHitTesting(showsRemove)
                 .accessibilityHidden(!showsRemove)
-                .onHover { inside in
+                .pointerHover { inside in
                     if inside { hoveredRemove = id }
                     else if hoveredRemove == id { hoveredRemove = nil }
                 }
             }
-            .onHover { inside in
+            .pointerHover { inside in
                 if inside { hovered = id }
                 else if hovered == id { hovered = nil }
             }

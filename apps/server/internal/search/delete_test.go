@@ -44,7 +44,7 @@ func TestDeletedAgentCannotBeReindexedAfterEmbedding(t *testing.T) {
 	finished := make(chan error, 1)
 	go func() { finished <- index.Ingest(t.Context(), m) }()
 	<-embedding.started
-	if _, _, err := s.DeleteAgent(t.Context(), "a"); err != nil {
+	if err := s.DeleteAgent(t.Context(), "a"); err != nil {
 		t.Fatal(err)
 	}
 	close(embedding.release)
@@ -89,7 +89,7 @@ func TestDeletedAttachmentCannotReturnAfterExtraction(t *testing.T) {
 	finished := make(chan error, 1)
 	go func() { _, err := index.Prepare(t.Context(), m); finished <- err }()
 	<-started
-	if _, _, err := s.DeleteAgent(t.Context(), "a"); err != nil {
+	if err := s.DeleteAgent(t.Context(), "a"); err != nil {
 		t.Fatal(err)
 	}
 	close(release)

@@ -110,7 +110,11 @@ func (s *Store) UpdateThread(ctx context.Context, id string, request contract.Up
 		title = *request.Title
 	}
 	if request.AgentIDs != nil {
-		if primary == id {
+		var task bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_threads WHERE thread_id=?)`, id).Scan(&task); err != nil {
+			return err
+		}
+		if primary == id || task {
 			return ErrMembers
 		}
 		if _, err := memberNames(ctx, tx, request.AgentIDs, 1); err != nil {
@@ -242,40 +246,40 @@ ORDER BY d.rowid`, thread, job, job)
 // ErrNotGroup rejects deleting a bot's own chat as a group; delete the bot instead.
 var ErrNotGroup = errors.New("not a group chat")
 
-// DeleteGroup removes a group chat and the attachments only it references, returning their
-// files. Its members keep their own chats.
-func (s *Store) DeleteGroup(ctx context.Context, id string) ([]string, error) {
+// DeleteGroup removes a group chat and the attachments only it references, queueing their files.
+// Its members keep their own chats.
+func (s *Store) DeleteGroup(ctx context.Context, id string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer tx.Rollback()
 	before, err := sidebarSnapshot(ctx, tx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var agent string
 	if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM threads WHERE id=?`, id).Scan(&agent); err != nil {
-		return nil, err
+		return err
 	}
 	if agent == id {
-		return nil, ErrNotGroup
+		return ErrNotGroup
 	}
 	if _, err := s.closePeers(ctx, tx, `SELECT data,input FROM deliveries WHERE thread_id=? AND json_extract(data,'$.status')='queued'`, id); err != nil {
-		return nil, err
+		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.path FROM attachments a
 WHERE EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.thread_id=? AND json_extract(p.value,'$.attachment.id')=a.id)
 AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.thread_id<>? AND json_extract(p.value,'$.attachment.id')=a.id)`, id, id)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var files, attachments []string
 	for rows.Next() {
 		var attachment, path string
 		if err := rows.Scan(&attachment, &path); err != nil {
 			rows.Close()
-			return nil, err
+			return err
 		}
 		attachments = append(attachments, attachment)
 		files = append(files, path)
@@ -283,10 +287,12 @@ AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.t
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// Members, sessions, notices, deliveries and search entries cascade with the thread.
 	for _, query := range []string{
+		`INSERT OR IGNORE INTO cleanups(kind,target) VALUES('group',?)`,
+		`INSERT OR IGNORE INTO cleanups(kind,target) SELECT 'transcript',path FROM group_sessions WHERE thread_id=?`,
 		`DELETE FROM runs WHERE thread_id=?`,
 		`DELETE FROM jobs WHERE thread_id=?`,
 		`DELETE FROM media_vectors WHERE thread_id=?`,
@@ -297,13 +303,18 @@ AND NOT EXISTS(SELECT 1 FROM messages m, json_each(m.data,'$.parts') p WHERE m.t
 		`DELETE FROM threads WHERE id=?`,
 	} {
 		if _, err := tx.ExecContext(ctx, query, id); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for _, attachment := range attachments {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM attachments WHERE id=?`, attachment); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return files, s.sidebarCommit(ctx, tx, before, "Deleted chat", nil, nil)
+	for _, file := range files {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO cleanups(kind,target) VALUES('attachment',?)`, file); err != nil {
+			return err
+		}
+	}
+	return s.sidebarCommit(ctx, tx, before, "Deleted chat", nil, nil)
 }

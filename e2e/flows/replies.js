@@ -1,3 +1,4 @@
+// @cua
 // Replies and reactions keep their identity after an app relaunch.
 let app = await cua.getApp(APP);
 const name = "Replies" + Date.now();
@@ -13,7 +14,7 @@ async function message() {
 }
 // Row two of the reaction menu: picks, then system recents, then defaults.
 async function recents() {
-  const labels = (await app.query({ role: "menuitem" })).map(row => row.label);
+  const labels = (await app.query({ role: "menuitem" })).map(row => row.label?.replace(/^React /, "") ?? "");
   return labels.filter(label => /\p{Extended_Pictographic}/u.test(label) && !["❤️", "👍", "👎", "😂", "‼️", "❓"].includes(label));
 }
 async function choose(item) {
@@ -39,7 +40,7 @@ await app.waitFor({ role: "button", name: "Cancel reply", gone: true });
 await app.rightClick(await message());
 const menu = await app.query({ role: "menuitem" });
 for (const emoji of ["❤️", "👍", "👎", "😂", "‼️", "❓"]) {
-  if (!menu.some(row => row.label === emoji)) throw new Error("Quick reaction missing: " + emoji);
+  if (!menu.some(row => row.label === "React " + emoji)) throw new Error("Quick reaction missing: " + emoji);
 }
 await choose("👍");
 await app.waitFor({ role: "checkbox", name: "Reaction 👍, 1, You" });
@@ -80,7 +81,8 @@ return { name, source, recent };
 
 // @relaunch
 const app = await cua.getApp(APP);
-await app.click({ role: "button", name: PREVIOUS.name + ", " });
+await app.waitFor({ role: "button", name: PREVIOUS.name + ", ", timeout_ms: 10000 });
+await app.click({ role: "button", name: PREVIOUS.name + ", ", nth: 0 });
 await app.waitFor({ role: "button", name: "Reply to You: " + PREVIOUS.source });
 await app.waitFor({ role: "checkbox", name: "Reaction ❤️, 1, You" });
 await app.waitFor({ role: "checkbox", name: "Reaction " + PREVIOUS.recent + ", 1, You" });

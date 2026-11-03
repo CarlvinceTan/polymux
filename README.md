@@ -18,8 +18,8 @@ separated into Go packages that other projects can use without running Polymux.
 - **Memory:** agent-and-conversation-scoped memory stored in SQLite on the server.
 - **Server:** runs the agents, stores history, connects tools, and runs schedules.
 
-The app is a client only. Install the server CLI on a Mac or Linux machine, pair
-the app with it, and start talking.
+The Mac app runs its own server by default. You can also install the server CLI
+on a Mac or Linux machine and pair the app with it.
 
 ## Repository
 

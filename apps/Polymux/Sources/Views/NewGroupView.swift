@@ -11,7 +11,6 @@ struct NewGroupView: View {
     @State private var creating = false
     @State private var adding = false
     @State private var focused = false
-    @State private var recipientHeight: CGFloat = 28
 
     var body: some View {
         Group {
@@ -80,46 +79,10 @@ struct NewGroupView: View {
 
     private var header: some View {
         VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
-                Text("To:").foregroundStyle(.muted).frame(height: 28)
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical) {
-                        RecipientFlow {
-                            ForEach(recipients) { agent in
-                                Button { remove(agent.id) } label: {
-                                    HStack(spacing: 5) {
-                                        Text(agent.name).lineLimit(1)
-                                        Image(systemName: "xmark").font(.caption2.weight(.semibold))
-                                    }
-                                    .padding(.horizontal, 10).padding(.vertical, 5)
-                                    .background(.quaternary, in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .frame(maxWidth: 170)
-                                .accessibilityLabel("Remove \(memberName(agent))")
-                            }
-                            RecipientField(text: $query, focused: $focused,
-                                           placeholder: selected.isEmpty ? "Add bot" : "",
-                                           onSubmit: chooseFirst, onDelete: removeLast)
-                                .frame(minWidth: 80, minHeight: 28)
-                                .accessibilityLabel("To")
-                                .id("recipientInput")
-                        }
-                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { recipientHeight = $0 }
-                    }
-                    .scrollIndicators(.hidden)
-                    .frame(height: min(136, max(28, recipientHeight)))
-                    .onChange(of: recipientHeight) { _, _ in
-                        if focused { proxy.scrollTo("recipientInput", anchor: .bottom) }
-                    }
-                    .onChange(of: focused) { _, value in
-                        if value { proxy.scrollTo("recipientInput", anchor: .bottom) }
-                    }
-                }
+            RecipientBox(items: recipients, title: \.name, label: memberName, query: $query, focused: $focused,
+                         placeholder: selected.isEmpty ? "Add bot" : "", onSubmit: chooseFirst, onDelete: removeLast) {
+                remove($0.id)
             }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .glassEffect(.regular, in: .rect(cornerRadius: 22))
             if selected.count > 1 {
                 TextField("Chat name (optional)", text: $name)
                     .accessibilityLabel("Chat name (optional)")

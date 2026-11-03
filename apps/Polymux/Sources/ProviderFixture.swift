@@ -15,6 +15,7 @@ final class ProviderFixture: @unchecked Sendable {
                 if request.httpMethod == "PATCH" {
                     let patch = try JSONDecoder().decode(SettingsPatch.self, from: body(request))
                     if let value = patch.appearance { settings.appearance = value }
+                    if let value = patch.switcherBadges { settings.switcherBadges = value }
                     if let value = patch.defaultModel { settings.defaultModel = value }
                     if let value = patch.defaultProvider { settings.defaultProvider = value }
                     settings.revision += 1

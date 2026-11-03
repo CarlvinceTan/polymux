@@ -157,6 +157,10 @@ func (s *Store) List(owner string) []Credential {
 	return s.list(owner, false)
 }
 
+// All returns every unexpired credential the owner has, with values, whatever its kind. Callers
+// must never return them to the model.
+func (s *Store) All(owner string) []Credential { return s.list(owner, true) }
+
 // Values returns the owner's unexpired credentials of kind with their values, for the SSH
 // agent to sign with; callers must never return them to the model.
 func (s *Store) Values(owner, kind string) []Credential {

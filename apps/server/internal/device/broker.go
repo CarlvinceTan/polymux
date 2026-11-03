@@ -22,6 +22,9 @@ func (b *Broker) Issue(ctx context.Context, name string) (string, error) {
 
 func (b *Broker) Invite(ctx context.Context) (string, error) { return b.store.IssueInvite(ctx) }
 
+// Store is the pairing database, for the network layer.
+func (b *Broker) Store() *Store { return b.store }
+
 func (b *Broker) pair(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Header.Get("Origin") != "" || r.Header.Get("X-Polymux-Client") != "polymux-kit" || !b.limit.Allow(Caller(r), time.Now()) {
@@ -77,7 +80,7 @@ func (b *Broker) Host(ctx context.Context, dir string) string {
 	return b.store.Host(ctx, dir)
 }
 
-// All lists every device that can still be used, including other apps.
+// All lists every device that can still be used, including other apps. Linked servers aren't devices.
 func (b *Broker) All(ctx context.Context) ([]Pairing, error) {
 	pairs, err := b.store.List(ctx)
 	if err != nil {
@@ -85,7 +88,22 @@ func (b *Broker) All(ctx context.Context) ([]Pairing, error) {
 	}
 	out := []Pairing{}
 	for _, p := range pairs {
-		if !p.Revoked {
+		if !p.Revoked && !p.IsPeer() {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// Restricted lists devices kept off this server that can be allowed back.
+func (b *Broker) Restricted(ctx context.Context) ([]Pairing, error) {
+	pairs, err := b.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []Pairing{}
+	for _, p := range pairs {
+		if p.Revoked && p.Client != "" && !p.IsPeer() {
 			out = append(out, p)
 		}
 	}

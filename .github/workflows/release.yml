@@ -95,6 +95,10 @@ jobs:
           echo "POLYMUX_TEAM_ID=$TEAM_ID" >> "$GITHUB_ENV"
           rm -f "$CERT_PATH"
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
       - name: Build signed app
         run: scripts/build.sh macos
 
@@ -143,7 +147,7 @@ jobs:
           test -d "$APP/Contents/Frameworks/Sparkle.framework"
           dyld_info -rpaths "$APP/Contents/MacOS/Polymux" | grep -q '@executable_path/../Frameworks'
           SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
-          for item in "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" \
+          for item in "$APP/Contents/Helpers/polymux" "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" \
             "$SPARKLE/XPCServices/Downloader.xpc" "$SPARKLE/XPCServices/Installer.xpc"; do
             codesign -dv --verbose=4 "$item" 2>&1 | grep -q '^Timestamp='
           done
@@ -183,6 +187,7 @@ jobs:
             dist/macos/Polymux-${{ env.VERSION }}-arm64.dmg
             dist/macos/Polymux-${{ env.VERSION }}-arm64.dmg.sha256
             dist/macos/appcast.xml
+            dist/symbols/*.dSYM.zip
           if-no-files-found: error
 
       - name: Publish release
@@ -197,6 +202,7 @@ jobs:
               "dist/macos/Polymux-$VERSION-arm64.dmg" \
               "dist/macos/Polymux-$VERSION-arm64.dmg.sha256" \
               "dist/macos/appcast.xml" \
+              dist/symbols/*.dSYM.zip \
               --clobber
             gh release edit "$TAG" \
               --title "Polymux $VERSION" \
@@ -207,6 +213,7 @@ jobs:
               "dist/macos/Polymux-$VERSION-arm64.dmg" \
               "dist/macos/Polymux-$VERSION-arm64.dmg.sha256" \
               "dist/macos/appcast.xml" \
+              dist/symbols/*.dSYM.zip \
               --title "Polymux $VERSION" \
               --notes-file "$RUNNER_TEMP/release-notes.md" \
               --verify-tag \

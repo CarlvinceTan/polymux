@@ -46,7 +46,6 @@ dialog::backdrop { background: var(--scrim); }
 }
 .skip-link:focus { transform: translateY(0); }
 .download-icon { width: 16px; height: 16px; flex: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.feature-icon { width: 24px; height: 24px; flex: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .eyebrow { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
 
 @media (prefers-reduced-motion: reduce) {

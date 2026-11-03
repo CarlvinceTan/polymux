@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/settings"
 )
 
@@ -102,20 +103,24 @@ func TestMediaSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	tool := &mediaTool{server: api, files: api.outputs, kind: "image"}
-	provider, model, err := tool.selection()
-	if err != nil || provider.ID != "supported" || model != "supported-image" {
-		t.Fatal("auto selection did not use supported tagged model", provider, model, err)
+	choices, err := tool.candidates()
+	if err != nil || len(choices) != 1 || choices[0].provider.ID != "supported" || choices[0].model != "supported-image" {
+		t.Fatal("auto selection did not use supported tagged model", choices, err)
 	}
-	for _, fallback := range []bool{false, true} {
-		if err := api.settings.SetCapabilities(map[string]settings.Capability{"image-gen": {Choice: json.RawMessage(`{"provider":"missing","model":"missing"}`), Fallback: fallback}}); err != nil {
+	order := func(models ...contract.MediaStep) {
+		t.Helper()
+		custom := contract.MediaOrder{Mode: contract.MediaOrderModeCustom, Models: models}
+		if _, err := api.settings.Update(contract.SettingsPatch{ImageOrder: &custom}); err != nil {
 			t.Fatal(err)
 		}
-		provider, _, err = tool.selection()
-		if fallback && (err != nil || provider.ID != "supported") {
-			t.Fatal("configured fallback failed", provider, err)
-		}
-		if !fallback && err == nil {
-			t.Fatal("explicit provider choice silently fell back")
-		}
+	}
+	order(contract.MediaStep{Provider: "missing", Model: "missing"})
+	if _, err := tool.candidates(); err == nil {
+		t.Fatal("custom order silently fell back to another model")
+	}
+	order(contract.MediaStep{Provider: "unsupported", Model: "unsupported-image"}, contract.MediaStep{Provider: "supported", Model: "supported-image"})
+	choices, err = tool.candidates()
+	if err != nil || len(choices) != 1 || choices[0].provider.ID != "supported" {
+		t.Fatal("custom order did not skip the unsupported step", choices, err)
 	}
 }

@@ -30,7 +30,7 @@ struct AgentAvatar: View {
                    playing: view.animating,
                    overlapGap: overlapGap, repeating: view.working || speaking, cueID: view.cueID,
                    poke: avatars.pokes[agentID], mood: view.mood == "idle" ? nil : view.mood.flatMap(MoodID.init(rawValue:)),
-                   interactive: view.mood == "idle" && view.expression == nil, personality: agentID, showsProps: true)
+                   interactive: view.mood == "idle" && view.expression == nil, personality: agentID)
             .activityBadge(showsMarker ? view.marker : nil)
             .anchorPreference(key: AvatarAnchors.self, value: .bounds) {
                 avatars.options(for: agentID).animates ? [agentID: $0] : [:]

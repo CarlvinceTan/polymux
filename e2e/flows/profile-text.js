@@ -1,3 +1,4 @@
+// @cua
 // Inline profile edits replace on first focus and keep spaces through autosave acknowledgements.
 let app = await cua.getApp(APP);
 const original = "ProfileBot" + Date.now();

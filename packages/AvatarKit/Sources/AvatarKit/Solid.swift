@@ -319,10 +319,8 @@ public func solidPath(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotation, s
 public func solidOutline(_ sil: Silhouette, _ solid: Solid, _ rotation: Rotation, scale: Double,
                          smooth: Bool = false) -> [Point] {
     if solid == .pumpkin {
-        let outline = Pumpkin.outline(rotation)
-        return stride(from: 0, to: outline.count, by: 2).map {
-            Point(x: (outline[$0].x * sil.sx + sil.cx) * scale,
-                  y: (outline[$0].y * sil.sy + sil.cy) * scale)
+        return Pumpkin.outline(rotation, rays: 128).map {
+            Point(x: ($0.x * sil.sx + sil.cx) * scale, y: ($0.y * sil.sy + sil.cy) * scale)
         }
     }
     let center = Point(x: sil.cx, y: sil.cy)

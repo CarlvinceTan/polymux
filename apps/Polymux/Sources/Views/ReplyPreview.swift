@@ -33,7 +33,7 @@ struct ReplyPreview: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(author).font(.caption.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                 Text(summary).font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(3).multilineTextAlignment(.leading)
+                    .lineLimit(1).multilineTextAlignment(.leading)
             }
             if let attachment = reply.attachment {
                 AttachmentPreview(attachment: attachment, client: client, showsName: false, square: 52)
@@ -64,6 +64,7 @@ struct ReplyBubble: View {
                         AttachmentPreview(attachment: attachment, client: client, showsName: false, square: 48)
                     } else {
                         Text(reply.text)
+                            .lineLimit(1)
                             .multilineTextAlignment(.leading)
                     }
                 }

@@ -64,3 +64,17 @@ struct SettingsPicker: View {
         }
     }
 }
+
+extension View {
+    /// A Settings tab's form, flush with the top of its pane.
+    func settingsForm() -> some View {
+        formStyle(.grouped)
+            #if os(macOS)
+            // Grouped forms keep an internal inset on macOS.
+            .padding(.top, -PanelStyle.formInset)
+            #else
+            .contentMargins(.top, 0, for: .scrollContent)
+            #endif
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}

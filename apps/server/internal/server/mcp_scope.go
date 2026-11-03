@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -274,7 +273,7 @@ func (s *Server) agentMCPStatus(w http.ResponseWriter, r *http.Request) {
 	s.actorsMu.RUnlock()
 	// Probes run unlocked; one slow connection must not stall the actor.
 	if workdir == "" {
-		workdir = filepath.Join(s.config.DataDir, a.id)
+		workdir = agentruntime.AgentDir(s.config.DataDir, a.id)
 	}
 	items, err := s.mcpStatus(r.Context(), a.id, local, workdir)
 	s.respond(w, items, err)

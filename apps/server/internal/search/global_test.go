@@ -179,7 +179,7 @@ func TestGlobalMetadata(t *testing.T) {
 	if err != nil || len(hits) != 1 || hits[0].Title != "Renamed" {
 		t.Fatalf("renamed=%+v err=%v", hits, err)
 	}
-	if _, _, err := index.Store.DeleteAgent(t.Context(), "a"); err != nil {
+	if err := index.Store.DeleteAgent(t.Context(), "a"); err != nil {
 		t.Fatal(err)
 	}
 	hits, _, err = index.Global(t.Context(), "Renamed", "all", "")

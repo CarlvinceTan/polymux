@@ -2,6 +2,13 @@ import Foundation
 import Observation
 import PolymuxKit
 
+/// One provider, model and voice a live session can run on.
+struct LiveAttempt {
+    let options: LiveOptions
+    let makeProvider: () throws -> any LiveProvider
+    let key: () throws -> String
+}
+
 @MainActor
 @Observable
 final class LiveStore: VoiceSession {
@@ -13,11 +20,14 @@ final class LiveStore: VoiceSession {
     private(set) var muted = false
     private(set) var silenced = false
     private(set) var usage: LiveUsage?
-    private let options: LiveOptions
+    private(set) var connected: Date?
+    var working: Int { jobs.count }
+    private let attempts: [LiveAttempt]
     private let reply: any VoiceReply
     private let sound: any LiveSound
-    private let makeProvider: () throws -> any LiveProvider
-    private let key: () throws -> String
+    /// The attempt in use; a failure moves on to the next.
+    private var index = 0
+    private var switching = false
     private var provider: (any LiveProvider)?
     private var startup: Task<Void, Never>?
     private var shutdown: Task<Void, Never>?
@@ -32,17 +42,23 @@ final class LiveStore: VoiceSession {
     private var freshTranscript = true
     private var idle = true
 
-    init(options: LiveOptions, reply: any VoiceReply, sound: (any LiveSound)? = nil,
-         makeProvider: @escaping () throws -> any LiveProvider, key: @escaping () throws -> String) {
-        self.options = options
+    init(attempts: [LiveAttempt], reply: any VoiceReply, sound: (any LiveSound)? = nil) {
+        self.attempts = attempts
         self.reply = reply
         self.sound = sound ?? NativeSound()
-        self.makeProvider = makeProvider
-        self.key = key
         self.sound.drained = { [weak self] in
             guard let self, !self.closed else { return }
             self.phase = self.idle ? .listening : .thinking
         }
+        self.sound.onInterruption { [weak self] began in
+            guard let self, !self.closed, self.phase != .failed else { return }
+            self.phase = began ? .interrupted : (self.idle ? .listening : .thinking)
+        }
+    }
+
+    convenience init(options: LiveOptions, reply: any VoiceReply, sound: (any LiveSound)? = nil,
+                     makeProvider: @escaping () throws -> any LiveProvider, key: @escaping () throws -> String) {
+        self.init(attempts: [LiveAttempt(options: options, makeProvider: makeProvider, key: key)], reply: reply, sound: sound)
     }
 
     func start() async {
@@ -50,6 +66,7 @@ final class LiveStore: VoiceSession {
         guard !Task.isCancelled else { return }
         if let startup { await startup.value; return }
         guard closed else { return }
+        if !switching { index = 0 }
         closed = false
         issue = nil
         muted = false
@@ -57,6 +74,7 @@ final class LiveStore: VoiceSession {
         transcript = ""
         response = ""
         usage = nil
+        if !switching { connected = nil }
         freshResponse = true
         freshTranscript = true
         idle = true
@@ -77,11 +95,12 @@ final class LiveStore: VoiceSession {
 
     private func prepare(_ current: UUID) async {
         do {
-            let provider = try makeProvider()
+            let attempt = attempts[index]
+            let provider = try attempt.makeProvider()
             self.provider = provider
-            var config = options
+            var config = attempt.options
             config.tools = [Self.agentTool]
-            let events = try await provider.start(options: config, key: key())
+            let events = try await provider.start(options: config, key: attempt.key())
             try Task.checkCancellation()
             guard token == current, !closed else { return }
             let frames = try await sound.start(rate: provider.inputRate)
@@ -89,6 +108,10 @@ final class LiveStore: VoiceSession {
             guard token == current, !closed else { sound.stop(); return }
             sound.setMuted(muted)
             phase = .listening
+            if connected == nil {
+                connected = Date()
+                sound.tone(.connect)
+            }
             microphone = Task { [weak self] in
                 do {
                     for try await event in frames {
@@ -123,6 +146,11 @@ final class LiveStore: VoiceSession {
             guard token == current else { return }
             sound.stop()
             await provider?.stop()
+            if !Task.isCancelled, index + 1 < attempts.count {
+                index += 1
+                await prepare(current)
+                return
+            }
             closed = true
             if !Task.isCancelled { phase = .failed; issue = error.voiceIssue }
         }
@@ -146,6 +174,7 @@ final class LiveStore: VoiceSession {
         let cancelling = cancellation
         cancellation = nil
         sound.stop()
+        if connected != nil, !switching { sound.tone(.end) }
         level = 0
         let provider = self.provider
         self.provider = nil
@@ -275,6 +304,16 @@ final class LiveStore: VoiceSession {
     }
 
     private func fail(_ error: Error) async {
+        // A provider that drops mid-session hands over to the next one; the conversation starts fresh.
+        if error is LiveFailure, index + 1 < attempts.count {
+            switching = true
+            await stop()
+            index += 1
+            // The caller is a task stop() cancelled, so the next session starts on a fresh one.
+            await Task { await start() }.value
+            switching = false
+            return
+        }
         phase = .failed
         issue = error.voiceIssue
         await stop()

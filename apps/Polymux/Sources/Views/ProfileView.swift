@@ -9,6 +9,7 @@ struct ProfileView: View {
     /// The chat's runs, live, for the Work tab's tasks.
     var runs: [Run] = []
     var jump: (String) -> Void = { _ in }
+    var show: (String) -> Void = { _ in }
     var locate: (Attachment) -> Void = { _ in }
     /// Embedded beside the chat or on its own navigation page, with avatar editing and search as modals.
     var inspector = false
@@ -22,6 +23,7 @@ struct ProfileView: View {
     @State private var role: String
     /// The agent's instructions, saved with the name and role.
     @State private var prompt = ""
+    @State private var expanding = false
     /// The model this agent runs on, as the server reports it.
     @State private var model: String
     @State private var provider: String
@@ -29,6 +31,8 @@ struct ProfileView: View {
     private var providers: [Provider] { session.providers.providers ?? [] }
     private var providersLoaded: Bool { session.providers.providers != nil }
     @State private var choosingModel = false
+    @State private var fallback: AgentFallback
+    @State private var editingFallbacks = false
     @State private var modelSaving = false
     @State private var modelIssue: String?
     @State private var saved: ProfileValues
@@ -45,11 +49,12 @@ struct ProfileView: View {
     @State private var mcpTools: [String: [String]] = [:]
     @State private var notificationNote: Bool?
     @State private var retries = 0
+    @State private var taskIssue: String?
     /// Whether an unsaved edit kept from last time has been put back.
     @State private var restored = false
 
     init(agent: Agent, session: AppSession, threadID: String? = nil, attachments: [Attachment] = [],
-         runs: [Run] = [], inspector: Bool = false, onBack: (() -> Void)? = nil, locate: @escaping (Attachment) -> Void = { _ in },
+         runs: [Run] = [], inspector: Bool = false, onBack: (() -> Void)? = nil, show: @escaping (String) -> Void = { _ in }, locate: @escaping (Attachment) -> Void = { _ in },
          jump: @escaping (String) -> Void = { _ in }) {
         self.agent = agent
         self.session = session
@@ -58,6 +63,7 @@ struct ProfileView: View {
         self.runs = runs
         self.inspector = inspector
         self.onBack = onBack
+        self.show = show
         self.locate = locate
         self.jump = jump
         _tab = State(initialValue: inspector ? .work : .capabilities)
@@ -65,6 +71,7 @@ struct ProfileView: View {
         _model = State(initialValue: agent.model)
         _provider = State(initialValue: agent.provider ?? "")
         _reasoning = State(initialValue: agent.reasoning ?? "off")
+        _fallback = State(initialValue: agent.fallbacks)
         _role = State(initialValue: agent.role)
         let store = session.profile(agent.id)
         _store = State(initialValue: store)
@@ -97,6 +104,7 @@ struct ProfileView: View {
             model = fresh.model
             provider = fresh.provider ?? ""
             reasoning = fresh.reasoning ?? "off"
+            fallback = fresh.fallbacks
         }
         .task(id: scenePhase == .background) {
             while !Task.isCancelled {
@@ -140,6 +148,7 @@ struct ProfileView: View {
                 model = agent.model
                 provider = agent.provider ?? ""
                 reasoning = agent.reasoning ?? "off"
+                fallback = agent.fallbacks
             }
         }
         .task(id: choosingModel) {
@@ -151,7 +160,7 @@ struct ProfileView: View {
 
     /// The right-hand panel on macOS, its own page on iPhone; search sits in its bar.
     private var sidePanel: some View {
-        details
+        noted
             #if os(macOS)
             .panelBar(value: BarState(muted: Notifications.shared.isMuted(agent.id),
                                      notice: notificationNote, back: onBack != nil, search: threadID != nil)) {
@@ -171,8 +180,9 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { notificationButton }
-                    .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(bellLabel, systemImage: bellSymbol, action: toggleBell)
+                }
                 ToolbarItem(placement: .primaryAction) {
                     if threadID != nil {
                         Button("Search this chat", systemImage: "magnifyingglass") { searching = true }
@@ -221,27 +231,56 @@ struct ProfileView: View {
         PanelView("Profile", onClose: { dismiss() },
                   accessory: threadID == nil ? nil : PanelAccessory(symbol: "magnifyingglass", label: "Search this chat") { page = .search },
                   width: ProfileSize.width, height: ProfileSize.height) {
-            details
+            noted
         }
         .panelDismiss(onClose: { dismiss() })
     }
 
-    private var notificationButton: some View {
+    private var bellSymbol: String { Notifications.shared.isMuted(agent.id) ? "bell.slash" : "bell" }
+    private var bellLabel: String { Notifications.shared.isMuted(agent.id) ? "Unmute notifications" : "Mute notifications" }
+
+    private func toggleBell() {
         let muted = Notifications.shared.isMuted(agent.id)
-        return HStack(spacing: 8) {
-            PanelNavButton(symbol: muted ? "bell.slash" : "bell", label: muted ? "Unmute notifications" : "Mute notifications") {
-                Notifications.shared.setMuted(!muted, agent: agent.id)
-                notificationNote = !muted
-            }
-            if let notificationNote {
-                Text(notificationNote ? "Notifications turned off" : "Notifications turned on")
-                    .font(.caption).foregroundStyle(.muted).lineLimit(1)
-                    .task(id: notificationNote) {
-                        try? await Task.sleep(for: .seconds(1.5))
-                        if !Task.isCancelled { self.notificationNote = nil }
-                    }
-            }
+        Notifications.shared.setMuted(!muted, agent: agent.id)
+        notificationNote = !muted
+    }
+
+    private var notificationButton: some View {
+        HStack(spacing: 8) {
+            PanelNavButton(symbol: bellSymbol, label: bellLabel, action: toggleBell)
+            bellNote
         }
+    }
+
+    private var bellText: String? {
+        notificationNote.map { $0 ? "Notifications turned off" : "Notifications turned on" }
+    }
+
+    @ViewBuilder private var bellNote: some View {
+        if let bellText {
+            Text(bellText).font(.caption).foregroundStyle(.muted).lineLimit(1)
+        }
+    }
+
+    /// The details, with any note floating over them so it never pushes the tabs down.
+    private var noted: some View {
+        #if os(macOS)
+        let bell: String? = nil
+        #else
+        // The iPhone's toolbar has no room for the bell's note.
+        let bell = inspector ? bellText : nil
+        #endif
+        let note = issue ?? taskIssue ?? store.cancelIssue ?? store.issue ?? bell
+        return details
+            .overlay(alignment: .bottom) {
+                if let note { QuietNote(text: note).padding(.bottom, 12) }
+            }
+            .motion(Motion.fade, value: note)
+            .task(id: notificationNote) {
+                guard notificationNote != nil else { return }
+                try? await Task.sleep(for: .seconds(1.5))
+                if !Task.isCancelled { notificationNote = nil }
+            }
     }
 
     private var details: some View {
@@ -255,13 +294,10 @@ struct ProfileView: View {
                 }
                 .buttonStyle(AvatarEditStyle(hovered: $avatarHovered))
                 .accessibilityLabel("Edit avatar")
-                .onHover { avatarHovered = $0 }
+                .pointerHover { avatarHovered = $0 }
                 InlineText(text: $name, prompt: "Name", font: .title2.weight(.semibold))
                     .autocorrectionDisabled()
                 InlineText(text: $role, prompt: "Role", font: .body, tint: .secondary)
-                if let issue = issue ?? store.cancelIssue ?? store.issue {
-                    Text(issue).font(.footnote).foregroundStyle(.muted)
-                }
                 PillPicker("Section", selection: $tab, options: tabs.map { ($0.rawValue, $0) }, compact: compactTabs)
                     .padding(.top, 8)
             }
@@ -273,7 +309,7 @@ struct ProfileView: View {
                 case .capabilities: capabilities
                 case .work: work
                 case .media: mediaGallery
-                case .files: gallery(files, empty: "No files yet")
+                case .files: gallery(files, empty: "No files yet.")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -284,10 +320,10 @@ struct ProfileView: View {
 
     private var work: some View { workSection }
 
-    /// What shapes how the bot works: its instructions, MCP connections, skills and tools.
+    /// What shapes how the bot works: its instructions, skills and MCP connections.
     private var capabilities: some View {
         VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
-            PanelSection("Model") {
+            PanelSection("Model", accessory: loaded ? fallbackAccessory : nil) {
                 Button { choosingModel = true } label: {
                     HStack {
                         Label {
@@ -305,13 +341,13 @@ struct ProfileView: View {
                 .accessibilityLabel("Model")
                 .accessibilityValue(modelName.title)
                 .disabled(!loaded || modelSaving)
-                .dropdown(isPresented: $choosingModel, width: 280) {
+                .dropdown(isPresented: $choosingModel) {
                     ModelPicker(providers: providers, provider: provider, model: model, choose: remap)
                 }
                 Divider().padding(.horizontal, PanelStyle.rowInset)
                 ReasoningPicker(selection: Binding(get: { reasoning }, set: {
                     saveModel(UpdateAgentRequest(reasoning: $0))
-                }), inset: true)
+                }), inset: true, levels: providers.levels(provider: provider, model: model))
                 .disabled(!loaded || modelSaving)
                 if let modelIssue {
                     Text(modelIssue).font(.footnote).foregroundStyle(.muted)
@@ -319,17 +355,22 @@ struct ProfileView: View {
                     Text("Provider unavailable. Choose another model.").font(.footnote).foregroundStyle(.muted)
                 }
             }
+            .panel(isPresented: $editingFallbacks) {
+                FallbackPanel(fallback: fallback, reasoning: reasoning, providers: providers, saving: modelSaving, issue: modelIssue) {
+                    saveModel(UpdateAgentRequest(fallback: $0))
+                }
+            }
             VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
                 instructions
                 sectionCard("Skills", count: configuration == nil ? nil : skillNames.count, empty: skillNames.isEmpty) {
-                    if skillNames.isEmpty { Text(configuration == nil ? "Loading" : "No skills").foregroundStyle(.muted) }
+                    if configuration == nil { sectionLoad }
+                    else if skillNames.isEmpty { Text("No skills.").foregroundStyle(.muted) }
                     ForEach(skillNames, id: \.self) { Label($0, systemImage: "sparkles").sectionRow() }
                 }
-                sectionCard("Tools", count: toolCount, empty: configuration?.tools.isEmpty != false && activeConnections.isEmpty) {
+                sectionCard("MCPs", count: store.connections == nil ? nil : activeConnections.count, empty: activeConnections.isEmpty) {
+                    if store.connections == nil { sectionLoad }
+                    else if activeConnections.isEmpty { Text("No MCPs.").foregroundStyle(.muted) }
                     ForEach(activeConnections, id: \.name) { connection in mcpRow(connection) }
-                    if configuration == nil { Text("Loading").foregroundStyle(.muted) }
-                    else if configuration?.tools.isEmpty == true { Text("Standard").foregroundStyle(.muted) }
-                    ForEach(configuration?.tools ?? [], id: \.self) { Label($0, systemImage: "wrench.and.screwdriver").sectionRow() }
                 }
             }
             .frame(maxHeight: .infinity)
@@ -337,43 +378,30 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Edits in place, with its hint where the first line starts.
+    /// Edits in place; the heading's button opens the same text in a larger editor.
     private var instructions: some View {
-        PanelSection("Instructions", fills: true) {
-            TextEditor(text: $prompt)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .scrollIndicators(.hidden)
-                // AppKit draws scrolled text past the editor's bounds otherwise.
-                .clipped()
-                .overlay(alignment: .topLeading) {
-                    if prompt.isEmpty, store.prompt != nil {
-                        Text("Add instructions").foregroundStyle(.muted)
-                            .padding(.leading, Self.editorInset.leading)
-                            .padding(.top, Self.editorInset.top)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .padding(.horizontal, PanelStyle.rowInset - Self.editorInset.leading)
-                .padding(.vertical, max(0, PanelStyle.rowPadding - Self.editorInset.top))
-                .accessibilityLabel("Instructions")
+        PanelSection("Instructions", fills: true, accessory: store.prompt == nil ? nil : expandAccessory) {
+            PromptEditor(text: $prompt, hinted: store.prompt != nil)
                 .disabled(store.prompt == nil)
                 .overlay {
-                    if store.prompt == nil, prompt.isEmpty { Text("Loading").foregroundStyle(.muted) }
+                    if store.prompt == nil, prompt.isEmpty { sectionLoad }
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .panel(isPresented: $expanding) { PromptPanel(text: $prompt) }
     }
 
-    /// Where TextEditor's own text container starts the first line.
-    #if os(macOS)
-    private static let editorInset = EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5)
-    #else
-    private static let editorInset = EdgeInsets(top: 8, leading: 5, bottom: 8, trailing: 5)
-    #endif
+    private var fallbackAccessory: PanelAccessory {
+        PanelAccessory(symbol: "gearshape", label: "Fallback settings") { editingFallbacks = true }
+    }
+
+    private var expandAccessory: PanelAccessory {
+        PanelAccessory(symbol: "arrow.up.left.and.arrow.down.right", label: "Expand instructions") { expanding = true }
+    }
 
     private var activeConnections: [MCPConnection] { connections.filter { $0.enabled && !$0.hidden } }
+
+    private var sectionLoad: SectionLoad { SectionLoad(failed: store.settled, offline: !session.sidebar.isConnected) }
 
     private var skillNames: [String] {
         var seen: Set<String> = []
@@ -381,16 +409,10 @@ struct ProfileView: View {
         return names.filter { seen.insert($0).inserted }
     }
 
-    private var toolCount: Int? {
-        guard configuration != nil, store.connections != nil,
-              activeConnections.allSatisfy({ mcpTools[$0.name] != nil }) else { return nil }
-        return (configuration?.tools.count ?? 0) + activeConnections.reduce(0) { $0 + (mcpTools[$1.name]?.count ?? 0) }
-    }
-
     private func mcpRow(_ connection: MCPConnection) -> some View {
         DisclosureGroup {
             if let tools = mcpTools[connection.name] {
-                if tools.isEmpty { Text("No tools").foregroundStyle(.muted).sectionRow() }
+                if tools.isEmpty { Text("No tools.").foregroundStyle(.muted).sectionRow() }
                 ForEach(tools, id: \.self) { Label($0, systemImage: "wrench.and.screwdriver").sectionRow() }
             } else {
                 Text(statuses[connection.name] == nil ? "Checking" : "Unavailable")
@@ -423,7 +445,7 @@ struct ProfileView: View {
     private var mediaGallery: some View {
         sectionCard("Media", count: media.count, label: "Media gallery", empty: media.isEmpty) {
             if media.isEmpty {
-                Text("No media yet").foregroundStyle(.muted)
+                Text("No media yet.").foregroundStyle(.muted)
             } else {
                 MediaGrid(attachments: media.filter { $0.kind != AttachmentKind.audio }, client: session.client, choose: locate)
                 ForEach(media.filter { $0.kind == AttachmentKind.audio }, id: \.id) {
@@ -467,7 +489,8 @@ struct ProfileView: View {
     @ViewBuilder private var workSection: some View {
         VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
             sectionCard("Schedule", count: store.routines?.count, empty: routines.isEmpty) {
-                if routines.isEmpty { Text(store.routines == nil ? "Loading" : "No scheduled work").foregroundStyle(.muted) }
+                if store.routines == nil { sectionLoad }
+                else if routines.isEmpty { Text("No scheduled work.").foregroundStyle(.muted) }
                 ForEach(routines, id: \.id) { routine in
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -485,12 +508,37 @@ struct ProfileView: View {
                     .sectionRow()
                 }
             }
-            sectionCard("Tasks", count: tasks.count, empty: tasks.isEmpty) {
-                if tasks.isEmpty { Text("No tasks yet").foregroundStyle(.muted) }
+            let threads = session.sidebar.tasks(of: agent.id)
+            sectionCard("Tasks", count: threads.count + tasks.count, empty: threads.isEmpty && tasks.isEmpty) {
+                if threads.isEmpty && tasks.isEmpty { Text("No tasks yet.").foregroundStyle(.muted) }
+                ForEach(threads) { thread in
+                    TaskThreadRow(thread: thread, marker: taskMarker(thread), open: { show(thread.id) },
+                                  pin: { updateTask(thread, pinned: thread.task?.pinnedAt == nil) },
+                                  finish: { finish(thread) })
+                        .sectionRow()
+                }
                 ForEach(tasks, id: \.id) { run in TaskRow(run: run).sectionRow() }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func taskMarker(_ thread: PolymuxKit.Thread) -> ActivityMarker? {
+        session.sidebar.activity.marker(conversationID: thread.id, agentIDs: [agent.id], unread: thread.unreadCount > 0)
+    }
+
+    private func updateTask(_ thread: PolymuxKit.Thread, pinned: Bool? = nil, status: String? = nil) {
+        taskIssue = nil
+        Task {
+            do { try await session.sidebar.updateTask(thread.id, pinned: pinned, status: status) }
+            catch { taskIssue = error.isOffline ? "Not saved yet." : error.reason(or: "Couldn’t update that task.") }
+        }
+    }
+
+    /// A finished task's thread closes, like Grok Bot's.
+    private func finish(_ thread: PolymuxKit.Thread) {
+        if threadID == thread.id { show(agent.id) }
+        updateTask(thread, status: TaskInfoStatus.done)
     }
 
     /// Delegated work only, active first and then newest.
@@ -581,10 +629,11 @@ struct ProfileView: View {
 
     private func saveModel(_ patch: UpdateAgentRequest) {
         guard !modelSaving else { return }
-        let previous = (provider, model, reasoning)
+        let previous = (provider, model, reasoning, fallback)
         if let value = patch.provider { provider = value }
         if let value = patch.model { model = value }
         if let value = patch.reasoning { reasoning = value }
+        if let value = patch.fallback { fallback = value }
         modelSaving = true
         modelIssue = nil
         Task {
@@ -595,10 +644,11 @@ struct ProfileView: View {
                 provider = profile.agent.provider ?? ""
                 model = profile.agent.model
                 reasoning = profile.agent.reasoning ?? "off"
+                fallback = profile.agent.fallbacks
                 await store.accept(profile)
                 await session.sidebar.accept(profile.agent)
             } catch {
-                (provider, model, reasoning) = previous
+                (provider, model, reasoning, fallback) = previous
                 modelIssue = error.isOffline ? "Not saved. Connect before changing model settings." : error.reason(or: "Couldn’t save model settings.")
             }
         }
@@ -651,6 +701,8 @@ struct InlineText: View {
     let prompt: String
     let font: Font
     var tint: Color = .primary
+    var placeholder: String?
+    var autofocus = false
     @State private var hovered = false
     #if os(macOS)
     @State private var focused = false
@@ -660,14 +712,14 @@ struct InlineText: View {
     #endif
 
     var body: some View {
-        Text(text.isEmpty ? prompt : text)
+        Text(text.isEmpty ? placeholder ?? prompt : text)
             .lineLimit(1)
             .hidden()
             .padding(.horizontal, 10).padding(.vertical, 4)
             .overlay {
                 Group {
                     #if os(macOS)
-                    InlineInput(text: $text, focused: $focused, prompt: prompt, font: font, tint: tint)
+                    InlineInput(text: $text, focused: $focused, prompt: prompt, font: font, tint: tint, autofocus: autofocus)
                     #else
                     TextField("", text: $text, selection: $selection)
                         .labelsHidden()
@@ -681,7 +733,7 @@ struct InlineText: View {
                 }
                 .overlay {
                     if text.isEmpty && !focused {
-                        Text(prompt).foregroundStyle(.muted)
+                        Text(placeholder ?? prompt).foregroundStyle(.muted)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
@@ -705,7 +757,60 @@ struct InlineText: View {
             }
             .font(font)
             .background(.quaternary.opacity(hovered && !focused ? 1 : 0), in: RoundedRectangle(cornerRadius: 8))
-            .onHover { hovered = $0 }
+            .motion(value: hovered)
+            .pointerHover { hovered = $0 }
+    }
+}
+
+/// A bot's instructions, with the hint where the first line starts.
+private struct PromptEditor: View {
+    @Binding var text: String
+    var hinted = true
+
+    /// Where TextEditor's own text container starts the first line.
+    #if os(macOS)
+    private static let inset = EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5)
+    #else
+    private static let inset = EdgeInsets(top: 8, leading: 5, bottom: 8, trailing: 5)
+    #endif
+
+    var body: some View {
+        TextEditor(text: $text)
+            .font(.body)
+            .scrollContentBackground(.hidden)
+            .scrollIndicators(.hidden)
+            // AppKit draws scrolled text past the editor's bounds otherwise.
+            .clipped()
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty, hinted {
+                    Text("Add instructions").foregroundStyle(.muted)
+                        .padding(.leading, Self.inset.leading)
+                        .padding(.top, Self.inset.top)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, PanelStyle.rowInset - Self.inset.leading)
+            .padding(.vertical, max(0, PanelStyle.rowPadding - Self.inset.top))
+            .accessibilityLabel("Instructions")
+    }
+}
+
+/// The instructions in a larger editor over the window. It edits the same text as the field.
+private struct PromptPanel: View {
+    @Binding var text: String
+    @Environment(\.panelClose) private var dismiss
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        PanelView("Instructions", onClose: { dismiss() }, scrollUnder: false, height: PanelSize.maximumHeight) {
+            PanelSection(fills: true) {
+                PromptEditor(text: $text).focused($focused)
+            }
+            .padding(.horizontal, PanelStyle.contentInset)
+        }
+        .panelDismiss(onClose: { dismiss() })
+        .onAppear { focused = true }
     }
 }
 
@@ -728,6 +833,74 @@ private struct AvatarEditStyle: ButtonStyle {
 }
 
 
+/// A bot's task: opens its thread, with its state and actions beside the name.
+private struct TaskThreadRow: View {
+    let thread: PolymuxKit.Thread
+    let marker: ActivityMarker?
+    let open: () -> Void
+    let pin: () -> Void
+    let finish: () -> Void
+
+    private var done: Bool { thread.task?.status == TaskInfoStatus.done }
+    private var pinned: Bool { thread.task?.pinnedAt != nil }
+
+    private var label: String {
+        let name = done ? "Open done task \(thread.title)" : "Open task \(thread.title)"
+        switch marker {
+        case .attention: return "\(name), needs attention"
+        case .unread: return "\(name), new reply"
+        case nil: return name
+        }
+    }
+
+    @ViewBuilder private var actions: some View {
+        Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin", action: pin)
+        if !done { Button("Finish", systemImage: "checkmark", action: finish) }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    Group {
+                        if thread.isWorking {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: done ? "checkmark" : "bubble.left.and.bubble.right")
+                                .foregroundStyle(.muted)
+                        }
+                    }
+                    .frame(width: 20)
+                    Text(thread.title)
+                        .lineLimit(1)
+                        .foregroundStyle(done ? AnyShapeStyle(.muted) : AnyShapeStyle(.primary))
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .contextMenu { actions }
+            if let marker { ActivityDot(marker: marker) }
+            Menu { actions } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(.muted)
+                    #if os(iOS)
+                    .frame(width: 44, height: 44)
+                    #else
+                    .frame(width: 20, height: 20)
+                    #endif
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            .fixedSize()
+            .accessibilityLabel("More actions for \(thread.title)")
+        }
+    }
+}
+
 private struct TaskRow: View {
     let run: Run
 
@@ -743,6 +916,22 @@ private struct TaskRow: View {
             Text(Self.active(run) && !run.activity.isEmpty ? run.activity : run.summary)
                 .lineLimit(2)
             Spacer(minLength: 0)
+        }
+    }
+}
+
+/// Stands in for a section with no data: a spinner, then an icon if it couldn't load. The panel keeps retrying.
+private struct SectionLoad: View {
+    let failed: Bool
+    let offline: Bool
+
+    var body: some View {
+        if failed {
+            Image(systemName: offline ? "wifi.slash" : "exclamationmark.triangle")
+                .foregroundStyle(.muted)
+                .accessibilityLabel(offline ? "Offline" : "Couldn’t load")
+        } else {
+            ProgressView().controlSize(.small).accessibilityLabel("Loading")
         }
     }
 }

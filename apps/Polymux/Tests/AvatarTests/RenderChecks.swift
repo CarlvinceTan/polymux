@@ -12,15 +12,19 @@ struct RenderChecks {
         tiled()
         stacks()
         meshStacks()
+        gapPlacement()
         rasters()
         updated()
         resized()
+        clipping()
         clocks()
         interactions()
         proximity()
+        interrupted()
+        restyled()
         stateFaces()
         released()
-        print("Avatar rendering: placement, stacks, layer reuse, resize, clocks, proximity, state expressions and teardown passed")
+        print("Avatar rendering: placement, stacks, layer reuse, resize, clipping, clocks, proximity, state expressions and teardown passed")
     }
 
     static func input(_ hex: String = "#E05020") -> AvatarInput {
@@ -28,8 +32,8 @@ struct RenderChecks {
         let paper = CGColor(gray: 1, alpha: 1)
         return AvatarInput(options: .default, state: .idle, expression: nil, playing: false,
                            frozenAt: 0, timeline: nil, time: nil, repeating: false, cueID: nil,
-                           mood: nil, interactive: false, personality: "test", showsProps: false,
-                           prop: nil, reduceMotion: false, running: false, settles: false, gazing: false, ink: ink, markInk: ink,
+                           mood: nil, interactive: false, personality: "test",
+                           reduceMotion: false, running: false, settles: false, gazing: false, ink: ink, markInk: ink,
                            backing: paper, eye: paper, dark: false)
     }
 
@@ -137,20 +141,54 @@ struct RenderChecks {
         precondition(revealed > 10, "No background was revealed through the stack gap")
     }
 
+    /// Every avatar in front of another: cutting its gap must stay quick, and later updates must cost nothing.
     static func meshStacks() {
-        for shape in [ShapeID.cupcake, .hamburger, .palm, .octopus] {
+        for shape in ShapeID.allCases {
             let start = Date()
             for side in [44.0, 120.0] {
                 var choice = input()
                 choice.options.shape = shape
+                let id = UUID()
                 let rect = CGRect(x: 20, y: 20, width: side, height: side)
                 let tile = AvatarSlot(canvas: AvatarCanvasState(motion: AvatarMotion()), input: choice,
-                                      rect: rect, group: UUID(), gap: 2)
-                let image = batch([tile])
-                precondition(image.contains { $0 != 0 }, "\(shape.label) rendered an empty image")
+                                      rect: rect, group: id, gap: 2)
+                let behind = slot(rect.offsetBy(dx: side / 4, dy: side / 4), group: id, order: 1)
+                let view = AvatarSurfaceView()
+                view.frame = CGRect(origin: .zero, size: size)
+                view.update([tile, behind])
+                view.update([tile, behind])
+                precondition(bitmap(view.layer!).contains { $0 != 0 }, "\(shape.label) rendered an empty image")
             }
             precondition(Date().timeIntervalSince(start) < 2, "\(shape.label) stack rendering stalled")
         }
+    }
+
+    /// The gap falls where the front avatar is, on all sides, and not mirrored or offset.
+    static func gapPlacement() {
+        let id = UUID()
+        let front = slot(CGRect(x: 30, y: 20, width: 100, height: 100), group: id, gap: 6)
+        let back = slot(CGRect(x: 30, y: 20, width: 140, height: 170), group: id, order: 1)
+        let image = [UInt8](batch([front, back]))
+        let shape = front.canvas.frame!.bodyPath
+        let scale = 100 / BotEngine.FRAME_SIZE
+        func inside(_ x: Double, _ y: Double, _ grow: Double) -> Bool {
+            let reach = shape.boundingBoxOfPath.width / 2 * scale + grow
+            let center = shape.boundingBoxOfPath
+            return hypot(x - (80 + center.midX * scale), y - (70 + center.midY * scale)) <= reach
+        }
+        var hidden = 0
+        for y in stride(from: 21, to: 189, by: 3) {
+            for x in stride(from: 31, to: 169, by: 3) {
+                // The compositor's rows run from the bottom up.
+                let alpha = image[((Int(size.height) - 1 - y) * Int(size.width) + x) * 4 + 3]
+                // Just outside the front avatar is the gap; clear of it, the back avatar shows as usual.
+                if inside(Double(x), Double(y), 4), !inside(Double(x), Double(y), 1) {
+                    precondition(alpha == 0, "The stack gap isn't around the front avatar at \(x), \(y)")
+                    hidden += 1
+                }
+            }
+        }
+        precondition(hidden > 5, "The stack gap wasn't checked")
     }
 
     static func updated() {
@@ -159,15 +197,8 @@ struct RenderChecks {
         view.frame = tile.rect
         view.update([tile])
         let first = view.layer!.sublayers!.first!
-        let expected = bitmap(view.layer!)
         view.update([tile])
         precondition(view.layer!.sublayers!.first === first, "An update replaced the tile's layers")
-        var working = tile.input
-        working.prop = .keyboard
-        view.update([AvatarSlot(canvas: tile.canvas, input: working, rect: tile.rect)])
-        precondition(bitmap(view.layer!) != expected, "Work props are missing")
-        view.update([tile])
-        precondition(bitmap(view.layer!) == expected, "A removed prop left stale layers or transforms")
         view.update([])
         precondition(view.layer!.sublayers?.isEmpty != false, "Removed tiles left stale layers")
     }
@@ -180,6 +211,39 @@ struct RenderChecks {
         view.layout()
         precondition(tile.canvas.motion.size == view.bounds.size, "A still avatar did not resize")
         precondition(tile.canvas.frame != nil, "A zero-sized initial avatar stayed blank")
+    }
+
+    static func clipping() {
+        // A cupcake spin reaches past the frame; the compositor must shrink it back inside.
+        let canvas = AvatarCanvasState(motion: AvatarMotion())
+        var moving = input()
+        moving.options.shape = .cupcake
+        moving.playing = true
+        moving.frozenAt = nil
+        moving.running = true
+        moving.interactive = true
+        canvas.input = moving
+        let layers = AvatarLayers()
+        let box = CGRect(origin: .zero, size: size)
+        var spun = false
+        for frame in 0..<60 {
+            if frame == 6 { canvas.motion.twirling = true }
+            canvas.update(Date(timeIntervalSince1970: 1_700_000_000 + Double(frame) / 60), size: size)
+            spun = spun || canvas.frame?.transform != .identity
+            guard frame >= 8 else { continue }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layers.apply(canvas, in: box, scale: 2)
+            CATransaction.commit()
+            let data = bitmap(layers.root)
+            let width = Int(size.width), height = Int(size.height)
+            for y in 0..<height {
+                for x in 0..<width where x == 0 || y == 0 || x == width - 1 || y == height - 1 {
+                    precondition(data[(y * width + x) * 4 + 3] == 0, "Avatar is clipped at frame \(frame)")
+                }
+            }
+        }
+        precondition(spun, "The avatar never spun")
     }
 
     static func clocks() {
@@ -299,6 +363,102 @@ struct RenderChecks {
         surface.update([first])
         advance(180, from: 9)
         precondition(!first.canvas.moving, "The avatar kept animating after work ended")
+    }
+
+    /// A move cut off by the window going inactive finishes when it comes back, instead of holding that pose.
+    static func interrupted() {
+        let surface = AvatarSurfaceView()
+        surface.frame = CGRect(origin: .zero, size: size)
+        let canvas = AvatarCanvasState(motion: AvatarMotion())
+        let rect = CGRect(x: 10, y: 10, width: 60, height: 60)
+        var active = input()
+        active.frozenAt = nil
+        active.settles = true
+        active.playing = true
+        active.running = true
+        active.state = .swirl
+        active.mood = .working
+        surface.update([AvatarSlot(canvas: canvas, input: active, rect: rect)])
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func advance(_ count: Int, from time: Double) {
+            for frame in 0..<count { canvas.update(start.addingTimeInterval(time + Double(frame) / 60), size: rect.size) }
+        }
+        advance(30, from: 0)
+        var inactive = input()
+        inactive.frozenAt = nil
+        var back = inactive
+        back.settles = true
+        surface.update([AvatarSlot(canvas: canvas, input: back, rect: rect)])
+        advance(3, from: 1)
+        precondition(canvas.moving, "An avatar didn't ease to rest when work ended")
+        surface.update([AvatarSlot(canvas: canvas, input: inactive, rect: rect)])
+        precondition(!canvas.moving, "An inactive window kept animating")
+        surface.update([AvatarSlot(canvas: canvas, input: back, rect: rect)])
+        precondition(canvas.moving, "An interrupted avatar stayed stuck in its pose")
+        advance(240, from: 2)
+        precondition(!canvas.moving, "An interrupted avatar never settled")
+    }
+
+    /// A new look on a resting avatar finishes its morph, or lands at once where nothing can draw it.
+    static func restyled() {
+        let rect = CGRect(x: 10, y: 10, width: 120, height: 120)
+        var cupcake = AvatarOptions.default
+        cupcake.shape = .cupcake
+        func resting(_ options: AvatarOptions, settles: Bool) -> AvatarInput {
+            var value = input()
+            value.frozenAt = nil
+            value.options = options
+            value.settles = settles
+            value.mood = .failed
+            return value
+        }
+        func picture(_ canvas: AvatarCanvasState) -> [UInt8] {
+            let layers = AvatarLayers()
+            layers.apply(canvas, in: rect, scale: 2)
+            return [UInt8](bitmap(layers.root))
+        }
+        func matches(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+            zip(a, b).filter { abs(Int($0) - Int($1)) > 64 }.count < 200
+        }
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let expected = AvatarCanvasState(motion: AvatarMotion())
+        expected.input = resting(cupcake, settles: false)
+        expected.update(start, size: rect.size)
+        let wanted = picture(expected)
+
+        let surface = AvatarSurfaceView()
+        surface.frame = CGRect(origin: .zero, size: size)
+        for settles in [true, false] {
+            let canvas = AvatarCanvasState(motion: AvatarMotion())
+            surface.update([AvatarSlot(canvas: canvas, input: resting(.default, settles: settles), rect: rect)])
+            precondition(!canvas.moving, "A resting avatar kept drawing")
+            surface.update([AvatarSlot(canvas: canvas, input: resting(cupcake, settles: settles), rect: rect)])
+            precondition(canvas.moving == settles, "A restyled avatar didn't match its window's state")
+            var frame = 0
+            while canvas.moving && frame < 120 {
+                frame += 1
+                canvas.update(start.addingTimeInterval(Double(frame) / 60), size: rect.size)
+            }
+            precondition(!canvas.moving, "A restyled avatar never settled")
+            precondition(matches(picture(canvas), wanted), "A restyled avatar kept its old body")
+        }
+
+        let canvas = AvatarCanvasState(motion: AvatarMotion())
+        var thinking = resting(cupcake, settles: true)
+        thinking.mood = .thinking
+        thinking.playing = true
+        thinking.running = true
+        surface.update([AvatarSlot(canvas: canvas, input: thinking, rect: rect)])
+        for frame in 0..<60 { canvas.update(start.addingTimeInterval(Double(frame) / 60), size: rect.size) }
+        precondition(canvas.frame?.parts.isEmpty == true, "A thinking avatar kept its parts")
+        surface.update([AvatarSlot(canvas: canvas, input: resting(cupcake, settles: true), rect: rect)])
+        precondition(canvas.moving, "A bot that stopped thinking stayed as dots")
+        var frame = 60
+        while canvas.moving && frame < 240 {
+            frame += 1
+            canvas.update(start.addingTimeInterval(Double(frame) / 60), size: rect.size)
+        }
+        precondition(!canvas.moving && canvas.frame?.parts.isEmpty == false, "A bot never came back from thinking")
     }
 
     static func stateFaces() {

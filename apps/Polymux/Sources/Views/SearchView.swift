@@ -71,10 +71,8 @@ struct SearchView: View {
             .overlay {
                 if store.results.isEmpty && store.isSearching {
                     Text("Searching…").foregroundStyle(.muted)
-                } else if store.results.isEmpty {
-                    ContentUnavailableView {
-                        Label(query.isEmpty ? "Find a message" : "No messages found", systemImage: "magnifyingglass")
-                    }
+                } else if store.results.isEmpty, !query.isEmpty {
+                    Text("No messages found.").foregroundStyle(.muted)
                 }
             }
         }

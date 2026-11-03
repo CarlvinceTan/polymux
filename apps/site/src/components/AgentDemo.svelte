@@ -86,14 +86,14 @@
   .preview-tools { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
   .agent-choices { display: flex; gap: 8px; }
   .preview-tools button, .capture-dialog header button { min-height: 44px; padding: 0 18px; border: 1px solid var(--focus); border-radius: 8px; color: var(--ink); background: transparent; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .preview-tools button:hover, .capture-dialog header button:hover { background: var(--soft); }
+  @media (hover: hover) and (pointer: fine) { .preview-tools button:hover, .capture-dialog header button:hover { background: var(--soft); } }
   .agent-choices button.selected { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
   .demo-note { margin: 14px 0 0; font-size: 12px; line-height: 1.65; }
   .demo-caption { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; min-height: 130px; padding: 28px 0 0; }
   .demo-caption h2 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 550; letter-spacing: -.025em; }
   .demo-caption p { max-width: 510px; margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
   .demo-guide { display: inline-flex; align-items: center; justify-content: center; gap: 16px; min-height: 44px; padding: 0 16px; border: 1px solid var(--focus); border-radius: 8px; font-size: 12px; font-weight: 600; }
-  .demo-guide:hover { background: var(--soft); }
+  @media (hover: hover) and (pointer: fine) { .demo-guide:hover { background: var(--soft); } }
   .transcript { border-top: 1px solid var(--line); }
   .transcript summary { display: flex; align-items: center; min-height: 44px; font-size: 12px; cursor: pointer; }
   .transcript summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

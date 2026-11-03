@@ -2,9 +2,6 @@
 
 Voice is a private conversation that never enters typed chat or search.
 
-- Cascaded: Apple recognition → the chat's agent → Apple synthesis. The transcript goes
-  straight to `POST /threads/{id}/voice/stream`; the agent replies in spoken style and its
-  text streams as server-sent events, so speech starts at the first sentence. Any provider works.
 - Live (full duplex): a native-audio model (Gemini Live or OpenAI Realtime) is a spokesperson
   that consults the chat's agents through `ask_agent` → `VoiceBridge` → `POST /threads/{id}/voice`.
 - Voice turns run in isolated, non-persisted sessions with the agent's configured model, identity,
@@ -12,6 +9,16 @@ Voice is a private conversation that never enters typed chat or search.
   when the turn ends. Agents use `send_to_user` or `show_html` to publish into typed chat on purpose.
 - Closing or cancelling a voice turn never stops the typed thread. Voice turns are not queued
   offline or replayed automatically; a failed session retries itself a few times.
+
+## Call behaviour
+
+- A live conversation behaves like a call: a connect and end chime, an elapsed timer from connection,
+  "Agent is working" while `ask_agent` runs, and a hold state when the system interrupts audio.
+- iOS keeps the call alive in the background (`UIBackgroundModes: audio`) and shows a Live Activity
+  (lock screen and Dynamic Island) with the timer, status and an End button. `CallActivity` drives it;
+  the `PolymuxLive` extension (`Call/`) renders it; `PolymuxCall` holds the shared attributes and `EndCall`.
+- The agent keeps working while the spokesperson talks (`NON_BLOCKING`); its result is spoken when the
+  model is idle. One task runs at a time.
 
 ## Adding a live provider
 
@@ -21,7 +28,7 @@ Implement `LiveProvider` in PolymuxKit (setup, wire encoding, normalized `LiveEv
 PCM16 little-endian bytes with explicit sample rates, keep tool-call IDs, and distinguish turn
 completion from an idle session. Never expose credentials in errors.
 
-Voice mode, live provider, model, voice, language and instructions are server settings. Keys come
+Live provider, model, voice, language and instructions are server settings. Keys come
 from the connected provider of the same type in Settings → Providers; the server adds them
 upstream, so the app never holds them.
 `/speech/live` rejects browser-origin requests and relies on the same network boundary as the

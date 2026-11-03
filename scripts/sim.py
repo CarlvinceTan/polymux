@@ -45,14 +45,21 @@ def capture(output, flags):
             plist = bundle / "Info.plist"
             values = plistlib.loads(plist.read_bytes())
             identifier = f"com.flarehq.polymux.app.test.sim.{os.getpid()}"
+            original = values["CFBundleIdentifier"]
             values.update(CFBundleIdentifier=identifier, CFBundleName=name, CFBundleDisplayName=name)
             plist.write_bytes(plistlib.dumps(values))
+            # simctl refuses an extension whose identifier isn't under its app's.
+            for extension in bundle.glob("PlugIns/*.appex/Info.plist"):
+                nested = plistlib.loads(extension.read_bytes())
+                nested["CFBundleIdentifier"] = identifier + nested["CFBundleIdentifier"].removeprefix(original)
+                extension.write_bytes(plistlib.dumps(nested))
             command("xcrun", "simctl", "boot", device)
             command("xcrun", "simctl", "bootstatus", device, "-b")
             command("xcrun", "simctl", "install", device, str(bundle))
             command("xcrun", "simctl", "launch", device, identifier, *flags)
             time.sleep(float(os.environ.get("SIM_WAIT", "25")))
-            command("xcrun", "simctl", "io", device, "screenshot", str(output))
+            # iPhone Duo has two displays, and simctl won't choose one on its own.
+            command("xcrun", "simctl", "io", device, "screenshot", "--display=primary", str(output))
     finally:
         # A second signal must not interrupt cleanup of the device we created.
         previous = {number: signal.signal(number, signal.SIG_IGN)

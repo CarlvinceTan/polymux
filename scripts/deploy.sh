@@ -1,5 +1,6 @@
 #!/bin/sh
-# Keep this Mac's server on the newest dev commit whose server tests passed in CI.
+# Keep this Mac's server on its update channel, chosen in Settings: Nightly is the newest dev
+# commit whose server tests passed in CI, and Stable is the latest published release.
 # Usage: scripts/deploy.sh setup   once, from a checkout; it then runs every five minutes
 #        polymux-deploy            one deploy pass, as the login job runs it
 set -eu
@@ -40,10 +41,17 @@ PLIST_EOF
   echo "Deploying $BRANCH every five minutes. Log: ~/.polymux/logs/deploy.log"
 }
 
+repository() {
+  git -C "$SRC" remote get-url origin | sed -E 's#^.*github\.com[:/]##; s#\.git$##'
+}
+
+channel() {
+  plutil -extract settings.updateChannel raw -o - "$HOME/.polymux/data/settings.json" 2>/dev/null || echo nightly
+}
+
 # Prints success, pending, or the failed conclusion of the commit's CI check.
 ci() {
-  slug=$(git -C "$SRC" remote get-url origin | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
-  gh api "repos/$slug/commits/$1/check-runs?check_name=$CHECK" \
+  gh api "repos/$(repository)/commits/$1/check-runs?check_name=$CHECK" \
     --jq '.check_runs[0] | if . == null or .status != "completed" then "pending" else .conclusion end'
 }
 
@@ -54,8 +62,7 @@ rollback() {
   LABEL=$SERVER
   PLIST="$AGENTS/$SERVER.plist"
   DRAIN_ID=$(cat "$HOME/.polymux/data/maintenance" 2>/dev/null) || return 1
-  host=$(ifconfig | awk '/inet 100\./ { split($2, o, "."); if (o[2] >= 64 && o[2] <= 127) { print $2; exit } }')
-  DRAIN_URL="http://${host:-127.0.0.1}:7337"
+  DRAIN_URL="http://127.0.0.1:7337"
   DRAIN_BINARY="$STATE/polymux.prev"
   "$DRAIN_BINARY" drain --url "$DRAIN_URL" --id "$DRAIN_ID" || return 1
   launchctl bootout "$DOMAIN/$SERVER" || return 1
@@ -68,12 +75,22 @@ deploy() {
   mkdir -p "$STATE"
   shlock -f "$STATE/lock" -p $$ || return 0
   trap 'rm -f "$STATE/lock"' EXIT
-  git -C "$SRC" fetch --quiet origin "$BRANCH"
-  sha=$(git -C "$SRC" rev-parse FETCH_HEAD)
   last=$(cat "$STATE/sha" 2>/dev/null || true)
+  if [ "$(channel)" = stable ]; then
+    tag=$(gh release view --repo "$(repository)" --json tagName --jq .tagName) || return 0
+    git -C "$SRC" fetch --quiet --force origin "refs/tags/$tag:refs/tags/$tag"
+    sha=$(git -C "$SRC" rev-list -n 1 "$tag")
+    # Newer data can't run on older code, so switching to Stable waits for the next release.
+    if [ -n "$last" ] && git -C "$SRC" merge-base --is-ancestor "$sha" "$last" 2>/dev/null; then return 0; fi
+  else
+    git -C "$SRC" fetch --quiet origin "$BRANCH"
+    sha=$(git -C "$SRC" rev-parse FETCH_HEAD)
+  fi
   [ "$sha" != "$last" ] || return 0
   [ "$sha" != "$(cat "$STATE/failed-sha" 2>/dev/null || true)" ] || return 0
-  result=$(ci "$sha")
+  # A published release has already passed its own checks.
+  result=success
+  if [ "$(channel)" != stable ]; then result=$(ci "$sha"); fi
   [ "$result" != pending ] || return 0
   if [ "$result" != success ]; then
     log "Skipped $sha: CI $CHECK $result"

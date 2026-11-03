@@ -33,6 +33,36 @@ func NewDurableStorage(dir string) (durable.Storage, func() error, error) {
 	return storage, func() error { return storage.Close(context.Background()) }, nil
 }
 
+// Transcripts lists the path of every conversation no other conversation owns.
+func (r *DurableRuntime) Transcripts(ctx context.Context) ([]string, error) {
+	file := filepath.Join(r.dir, "durable.db")
+	if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
+		return nil, nil // In-memory storage keeps nothing to list.
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	connection, err := node.NewDatabaseSync(file, node.DatabaseSyncOptions{TimeoutMs: 5000})
+	if err != nil {
+		return nil, err
+	}
+	db := node.NewNodeSqliteDatabase(connection)
+	defer db.Close()
+	rows, err := db.All(`SELECT id FROM conversations WHERE owner_conversation_id IS NULL AND owner_task_id IS NULL ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(rows))
+	for _, row := range rows {
+		id, ok := row["id"].(int64)
+		if !ok {
+			return nil, errors.New("conversation id is not an integer")
+		}
+		paths = append(paths, durablePath(durable.ConversationId(id)))
+	}
+	return paths, nil
+}
+
 // Forget deletes a closed conversation's durable records, with the conversations it owns.
 // PiG has no deletion API, so this edits its tables directly; the conversation must not be in use.
 func (r *DurableRuntime) Forget(ctx context.Context, path string) error {
@@ -43,6 +73,10 @@ func (r *DurableRuntime) Forget(ctx context.Context, path string) error {
 	file := filepath.Join(r.dir, "durable.db")
 	if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
 		return nil // In-memory storage keeps nothing to forget.
+	}
+	// A task that outlives its rows fails its next commit, and with it every conversation.
+	if conversation, err := r.harness.Conversation(ctx, id); err == nil && conversation != nil {
+		_ = conversation.Abort(ctx, &durable.ConversationAbortOptions{Background: true})
 	}
 	if err := ctx.Err(); err != nil {
 		return err

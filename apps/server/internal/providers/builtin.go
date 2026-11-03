@@ -64,6 +64,31 @@ func Options() []contract.ProviderOption {
 	return out
 }
 
+// WithLevels adds the reasoning levels PiG lists for each provider's models.
+func WithLevels(list []Provider) []Provider {
+	out := slices.Clone(list)
+	for i, p := range out {
+		builtin := Builtin(p.Type)
+		if builtin == nil {
+			continue
+		}
+		all, _ := builtin.GetModels()
+		out[i].Models = slices.Clone(p.Models)
+		for n, model := range out[i].Models {
+			index := slices.IndexFunc(all, func(m *ai.Model) bool { return m.ID == model.ID })
+			if index < 0 {
+				continue
+			}
+			levels := ai.GetSupportedThinkingLevels(all[index])
+			out[i].Models[n].Reasoning = make([]string, len(levels))
+			for l, level := range levels {
+				out[i].Models[n].Reasoning[l] = string(level)
+			}
+		}
+	}
+	return out
+}
+
 // Models lists the chat models a PiG provider offers to a credential, keeping earlier choices.
 // PiG lists only chat models, so earlier non-chat models and tags, and the recommended
 // generation models, are kept alongside them.

@@ -12,7 +12,7 @@ case "${1:-}" in
       '  --fps 20|25|50         Playback frame rate (default: 25)' \
       '  --appearance light|dark' \
       '  --color NAME           Palette for original geometric shapes' \
-      '  --sections LIST        moods,states,expressions,interactions,props (default: all five)' \
+      '  --sections LIST        moods,states,expressions,interactions (default: all four)' \
       '  --moods LIST           Filter the moods section, e.g. thinking,happy,blocked' \
       '  --seconds NUMBER       Override each segment duration; otherwise use native timings' \
       '  --output PATH --force  Explicitly replace a previous export and its JSON manifest' \

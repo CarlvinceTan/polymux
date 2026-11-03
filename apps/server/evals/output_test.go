@@ -54,7 +54,7 @@ func TestOUT1GeneratedFile(t *testing.T) {
 		h.die(fmt.Sprintf("generated attachment missing: %+v", attachments))
 	}
 	assertOutput(t, h, attachments[0], []byte(report))
-	source, err := os.ReadFile(filepath.Join(h.Dir, agentID, "report.txt"))
+	source, err := os.ReadFile(filepath.Join(h.Dir, "agents", agentID, "report.txt"))
 	if err != nil || string(source) != report {
 		h.die("generated workspace source was not preserved")
 	}

@@ -1,3 +1,4 @@
+// @cua
 // A chat and its messages survive an app relaunch. The harness relaunches the app at the marker and passes the first part's result as PREVIOUS.
 let app = await cua.getApp(APP);
 const name = "Keep" + Date.now();

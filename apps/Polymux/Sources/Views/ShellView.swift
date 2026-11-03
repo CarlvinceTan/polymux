@@ -8,6 +8,7 @@ import AppKit
 
 struct ShellView: View {
     let session: AppSession
+    let pool: SessionPool
     @Binding var showSettings: Bool
     @State private var selection: String?
     @AppStorage private var lastChat: String?
@@ -16,13 +17,19 @@ struct ShellView: View {
     @AppStorage private var botSection: String?
     /// Whether the chat's side panel was open, so a relaunch reopens it.
     @AppStorage private var lastPanel: Bool
+    /// The switcher entry on show: chats, or a Global plugin.
+    @AppStorage private var surface: String
+    /// The Scoped plugin in the side panel; the profile when nil.
+    @State private var panelPlugin: String?
     @Environment(\.scenePhase) private var scenePhase
     @State private var windowID = UUID()
     @State private var visibility = NavigationSplitViewVisibility.all
     @State private var connectionDismissed = false
     @State private var searching = false
     @State private var searchTarget: SearchDestination?
-    @State private var hovered: String?
+    @State private var hover = RowHover()
+    @State private var order = ChatOrder()
+    @State private var geometry = SidebarGeometry()
     @State private var creation: ChatCreation?
     @State private var editing: AvatarContact?
     @State private var profileOpen = false
@@ -42,7 +49,8 @@ struct ShellView: View {
     @State private var files: [String: [DraftFile]] = [:]
     @State private var dragging: SidebarItem?
     @State private var dropTarget: SidebarDestination?
-    @State private var sidebarFrames: [SidebarArea: CGRect] = [:]
+    /// Filled only while a drag needs them; a scroll must not update the whole window.
+    @State private var dragFrames: [SidebarArea: CGRect] = [:]
     @State private var pinFrames: [SidebarArea: CGRect] = [:]
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -53,19 +61,23 @@ struct ShellView: View {
     @State private var sidebar = SidebarState()
     @State private var sidebarOpening = false
     @State private var dropFolder: URL?
-    @State private var chatFrames: [String: CGRect] = [:]
     @State private var dropWindow: NSWindow?
+    @State private var dropDwell = DropDwell()
     #endif
 
     @AppStorage("sidebarWidth") private var sidebarWidth = SidebarWidth.initial
     @AppStorage("profileWidth") private var profileWidth = 360.0
 
-    init(session: AppSession, showSettings: Binding<Bool>) {
+    init(session: AppSession, pool: SessionPool, showSettings: Binding<Bool>) {
         self.session = session
+        self.pool = pool
         _showSettings = showSettings
         let saved = AppStorage<String?>("lastChat.\(session.address)")
         _lastChat = saved
         _selection = State(initialValue: saved.wrappedValue)
+        #if DEBUG
+        if CallFixture.enabled { _selection = State(initialValue: "t-chief") }
+        #endif
         let creation = AppStorage<String?>("lastCreation.\(session.address)")
         _lastCreation = creation
         _botSection = AppStorage<String?>("botSection.\(session.address)")
@@ -73,9 +85,11 @@ struct ShellView: View {
         let panel = AppStorage(wrappedValue: false, "lastPanel.\(session.address)")
         _lastPanel = panel
         _profileOpen = State(initialValue: panel.wrappedValue)
+        _surface = AppStorage(wrappedValue: PluginTab.chats, "lastSurface.\(session.address)")
         #if DEBUG
         // Screenshots of a chat's side panel need it open without a click: --verify-panel <chat id>.
         let arguments = CommandLine.arguments
+        if arguments.contains("--verify-hub-mail-view") { UserDefaults.standard.set(HubStore.plugin, forKey: "lastSurface.\(session.address)") }
         #if os(macOS)
         if arguments.contains("--verify-sidebar-collapsed") {
             _visibility = State(initialValue: .detailOnly)
@@ -92,7 +106,7 @@ struct ShellView: View {
     private var chatSelection: Binding<String?> {
         Binding(get: {
             #if os(macOS)
-            selectedChat?.id
+            pluginView.map { PluginStore.viewID($0.name) } ?? selectedChat?.id
             #else
             selection
             #endif
@@ -104,7 +118,14 @@ struct ShellView: View {
         })
     }
 
+    /// The global view chosen in place of a chat. Its row stays until the plugin list says otherwise.
+    private var pluginView: Plugin? {
+        session.plugins.views.first { PluginStore.viewID($0.name) == selection }
+    }
+
     private var selectedChat: PolymuxKit.Thread? {
+        if PluginStore.isView(selection), session.plugins.list == nil || pluginView != nil { return nil }
+        if let task = session.sidebar.displayed(selection), task.isTask { return task }
         let available = conversations
         if let id = session.sidebar.displayed(selection)?.id,
            let thread = available.first(where: { $0.id == id }) { return thread }
@@ -124,14 +145,71 @@ struct ShellView: View {
     }
 
     /// The chat's panel: an agent's profile, or a group chat's editor.
-    private var profileShown: Bool { profileOpen && selectedChat != nil }
+    private var profileShown: Bool { profileOpen && selectedChat != nil && globalPlugin == nil }
 
     private var profileBinding: Binding<Bool> {
-        Binding(get: { profileOpen }, set: { value in
-            guard value != profileOpen else { return }
-            if value { profileID = UUID() }
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { profileOpen = value }
+        Binding(get: { profileOpen && panelPlugin == nil }, set: { value in
+            // The avatar swaps a plugin's panel for the profile at the same width.
+            if value { panelPlugin = nil }
+            setPanel(open: value)
         })
+    }
+
+    private func setPanel(open: Bool) {
+        guard open != profileOpen else { return }
+        if open { profileID = UUID() }
+        withAnimation(Motion.move.unless(reduceMotion)) { profileOpen = open }
+    }
+
+    /// Whichever Scoped plugin the side panel shows, opening the panel as needed.
+    private var pluginBinding: Binding<String?> {
+        #if os(macOS)
+        Binding(get: { profileOpen ? panelPlugin : nil }, set: { name in
+            if let name { panelPlugin = name }
+            setPanel(open: name != nil)
+        })
+        #else
+        $panelPlugin
+        #endif
+    }
+
+    private var tabs: [PluginTab] { pool.tabs.isEmpty ? session.plugins.tabs : pool.tabs }
+
+    /// A tab on another server moves the app there, opening that server on the tab.
+    private var tabSelection: Binding<String> {
+        Binding(get: {
+            pool.tabs.isEmpty ? surface : "\(session.address)#\(surface)"
+        }, set: { id in
+            guard let tab = tabs.first(where: { $0.id == id }) else { return }
+            if let server = tab.server, server != session.address {
+                UserDefaults.standard.set(tab.name, forKey: "lastSurface.\(server)")
+                pool.select(server)
+            } else {
+                surface = tab.name
+            }
+        })
+    }
+
+    private func unread(_ tab: PluginTab) -> Int {
+        tab.server == nil ? PluginSurface.unread(tab, session: session) : pool.unread(tab)
+    }
+
+    /// The iPhone's tab bar replaces the sidebar's switcher.
+    private var usesTabBar: Bool {
+        #if os(iOS)
+        sizeClass == .compact && !tabs.isEmpty
+        #else
+        false
+        #endif
+    }
+
+    private var globalPlugin: Plugin? {
+        usesTabBar ? nil : session.plugins.tabs.first { $0.id == surface }?.plugin
+    }
+
+    private func panelContent(_ thread: PolymuxKit.Thread) -> Plugin? {
+        session.plugins.buttons(chat: thread.isTask ? thread.agentID : thread.id).joined()
+            .first { $0.name == panelPlugin }
     }
 
     #if os(macOS)
@@ -146,30 +224,127 @@ struct ShellView: View {
     }
     #endif
 
+    /// Hub's sync runs whenever it's installed, so its count stays right with Hub closed.
+    private var hubActive: Bool {
+        session.plugins.plugin(named: HubStore.plugin)?.state == PluginState.ready && scenePhase != .background
+    }
+
     var body: some View {
-        NavigationSplitView(columnVisibility: $visibility) {
+        root.task(id: hubActive) {
+            if hubActive { await session.hub.run() }
+        }
+        #if os(iOS)
+        .onChange(of: place) { Keyboard.close() }
+        #endif
+    }
+
+    /// The tab, chat and side panel on show.
+    private var place: [String?] { [surface, selection, panelPlugin, profileOpen ? "profile" : nil] }
+
+    /// What + offers: a Global plugin's own actions while it's on show.
+    private var createActions: [PluginAction] {
+        if let globalPlugin { return PluginSurface.actions(globalPlugin, session: session) }
+        return [botAction(), PluginAction(title: "New Group Chat", symbol: "person.2", icon: .group) { creation = .group }]
+    }
+
+    private func botAction(in section: String? = nil) -> PluginAction {
+        PluginAction(title: "New Bot", symbol: "face.smiling", icon: .bot) { newBot(in: section) }
+    }
+
+    @ViewBuilder private func createRow(_ item: PluginAction) -> some View {
+        #if os(iOS)
+        if let icon = item.icon {
+            Button(action: item.run) {
+                Label { Text(item.title) } icon: { icon.image(colorScheme) }
+            }
+        } else {
+            Button(item.title, systemImage: item.symbol, action: item.run)
+        }
+        #else
+        Button(item.title, systemImage: item.symbol, action: item.run)
+        #endif
+    }
+
+    private func openSearch() {
+        if let globalPlugin { PluginSurface.search(globalPlugin, session: session) } else { searching = true }
+    }
+
+    @ViewBuilder private var root: some View {
+        #if os(iOS)
+        if usesTabBar {
+            TabView(selection: tabSelection) {
+                ForEach(tabs) { tab in
+                    Tab(value: tab.id) {
+                        // A tab's content doesn't reach the app's host.
+                        if tab.server != nil, tab.server != session.address {
+                            Color.clear
+                        } else if let plugin = tab.plugin {
+                            PluginSurface.page(plugin, session: session) { showSettings = true }.dropdownHost()
+                        } else {
+                            shell.dropdownHost()
+                        }
+                    } label: {
+                        let symbol = PluginSwitcher.symbol(tab, selected: tab.id == tabSelection.wrappedValue)
+                        if tab.plugin == nil, let name = tab.serverName {
+                            Label(name, systemImage: symbol)
+                                .environment(\.symbolVariants, .none)
+                                .accessibilityLabel(PluginSwitcher.title(tab))
+                        } else {
+                            Image(systemName: symbol)
+                                .environment(\.symbolVariants, .none)
+                                .accessibilityLabel(PluginSwitcher.title(tab))
+                        }
+                    }
+                    .badge(unread(tab))
+                }
+            }
+        } else {
+            shell
+        }
+        #else
+        shell
+        #endif
+    }
+
+    private var shell: some View {
+        #if DEBUG
+        let _ = RenderCount.hit("shell")
+        #endif
+        return NavigationSplitView(columnVisibility: $visibility) {
             List(selection: chatSelection) {
                 sidebarContent
             }
             .coordinateSpace(name: "chatList")
-            .onPreferenceChange(SidebarFrames.self) { sidebarFrames = $0 }
+            .onPreferenceChange(SidebarFrames.self) { frames in
+                geometry.areas = frames
+                if dragging != nil { dragFrames = frames }
+            }
             .overlay {
                 GeometryReader { geometry in
                     let origin = geometry.frame(in: .named("chatList")).origin
+                    let frames = dropFrames(origin: origin, width: geometry.size.width)
                     Color.clear.contentShape(Rectangle())
                         .onDrop(of: [SidebarItem.contentType.identifier],
-                                delegate: SidebarDrop(item: dragging, origin: origin,
-                                                      frames: sidebarFrames.merging(pinFrames) { _, fixed in fixed },
+                                delegate: SidebarDrop(item: dragging, origin: origin, frames: frames,
                                                       sections: dropSections.map(\.id), pins: pinnedChats.map(\.id),
                                                       target: $dropTarget, receive: dropSidebar))
                         .allowsHitTesting(dragging != nil)
-                    SidebarFeedback(frames: sidebarFrames, target: dropTarget)
+                    SidebarFeedback(frames: frames, target: dropTarget)
                         .offset(x: -origin.x, y: -origin.y)
+                    if pinZoneShown {
+                        Text("Pinned").foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity).frame(height: pinZone)
+                            .background(sidebarSurface)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
             .onChange(of: dragging) { _, active in
-                if active == nil { dropTarget = nil; pinFrames = [:] }
-                else { pinFrames = sidebarFrames.filter { if case .pin = $0.key { true } else { false } } }
+                if active == nil { dropTarget = nil; dragFrames = [:]; pinFrames = [:] }
+                else {
+                    dragFrames = geometry.areas
+                    pinFrames = geometry.areas.filter { if case .pin = $0.key { true } else { false } }
+                }
             }
             .overlayPreferenceValue(AvatarAnchors.self) { anchors in
                 HandoffOverlay(handoffs: session.sidebar.activity.handoffs, anchors: anchors)
@@ -180,8 +355,9 @@ struct ShellView: View {
             }
             #if os(macOS)
             .listStyle(.sidebar)
+            .overlay { ChatDropZone(drop: chatDrop) }
             .background { DropOrigin { dropWindow = $0 }.frame(width: 0, height: 0) }
-            .onPreferenceChange(ChatFrames.self) { chatFrames = $0 }
+            .onPreferenceChange(ChatFrames.self) { geometry.chats = $0 }
             .tint(Color(white: colorScheme == .dark ? 0.24 : 0.87))
             .scrollContentBackground(.hidden)
             .scrollEdgeEffectHidden()
@@ -193,15 +369,49 @@ struct ShellView: View {
             .listStyle(.plain)
             #endif
             .scrollIndicators(.hidden)
+            #if os(iOS)
             .overlay {
-                if session.sidebar.isConnected && session.sidebar.threads.isEmpty && dropSections.isEmpty {
+                if session.sidebar.isConnected && session.sidebar.chats.isEmpty && dropSections.isEmpty {
                     Text("No chats yet.").foregroundStyle(.muted)
                 }
             }
+            #endif
+            #if os(macOS)
+            .sidebarFade(bottom: tabs.isEmpty ? SidebarFade.plain : SidebarFade.switcher)
+            #endif
+            // Floats over the list, so a note arriving never pushes the chats down.
             .overlay(alignment: .bottom) {
-                if selectedChat == nil {
-                    ConnectionStatus(connected: session.sidebar.isConnected, dismissed: $connectionDismissed)
-                        .padding(.horizontal, 12).padding(.bottom, 8)
+                VStack(spacing: 8) {
+                    if !usesTabBar { sidebarNote }
+                    if selectedChat == nil {
+                        ConnectionStatus(connected: session.sidebar.isConnected, dismissed: $connectionDismissed)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.bottom, 8)
+                .motion(Motion.fade, value: sidebarIssue)
+            }
+            #if os(iOS)
+            // The tab bar owns the bottom edge, so the note floats under the title bar instead.
+            .overlay(alignment: .top) {
+                VStack {
+                    if usesTabBar { sidebarNote }
+                }
+                .padding(.horizontal, 12).padding(.top, 8)
+                .motion(Motion.fade, value: sidebarIssue)
+                .allowsHitTesting(false)
+            }
+            #endif
+            .accessibilityHidden(globalPlugin != nil)
+            .overlay {
+                if let globalPlugin {
+                    PluginSurface.sidebar(globalPlugin, session: session)
+                        .background(sidebarSurface)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !tabs.isEmpty && !usesTabBar {
+                    PluginSwitcher(tabs: tabs, selection: tabSelection,
+                                   unread: Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, unread($0)) }))
                 }
             }
             #if os(macOS)
@@ -233,13 +443,12 @@ struct ShellView: View {
                 }
                 .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
-                    toolbarButton("Search", symbol: "magnifyingglass") { searching = true }
+                    toolbarButton("Search", symbol: "magnifyingglass") { openSearch() }
                 }
                 .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu("New chat", systemImage: "plus") {
-                        Button("New Bot", systemImage: "face.smiling") { newBot() }
-                        Button("New Group Chat", systemImage: "person.2") { creation = .group }
+                        ForEach(createActions, id: \.title) { createRow($0) }
                     }
                     .labelStyle(.iconOnly)
                     .font(.system(size: 18, weight: .regular))
@@ -254,18 +463,21 @@ struct ShellView: View {
             .toolbar(removing: .sidebarToggle)
             .toolbar(removing: .title)
         } detail: {
-            if let thread = selectedChat,
+            if let globalPlugin {
+                PluginSurface.detail(globalPlugin, session: session)
+            } else if let pluginView {
+                PluginSurface.view(pluginView, session: session) { selection = $0 }
+            } else if let thread = selectedChat,
                let agent = participants(thread).first {
                 chatPane(thread, agent: agent)
             } else if let notice = session.sidebar.notice {
-                ContentUnavailableView(notice, systemImage: "exclamationmark.bubble")
+                Text(notice).foregroundStyle(.muted).multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 16) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 58, weight: .regular))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    if session.sidebar.threads.isEmpty {
+                    // Waits for the server, so a first launch never claims there are no chats.
+                    if session.sidebar.isConnected && session.sidebar.chats.isEmpty {
                         Text("No chats yet.").foregroundStyle(.muted)
                         Button("New Bot", systemImage: "plus") { newBot() }
                             .buttonStyle(.glass)
@@ -281,15 +493,42 @@ struct ShellView: View {
         .panelBarHost()
         #endif
         .navigationTitle("")
+        #if DEBUG
+        .background { RenderProbe() }
+        #endif
         .background {
             Text("Application status")
                 .font(.system(size: 1)).opacity(0.01)
                 .accessibilityIdentifier("app.status")
-                .accessibilityValue("connected=\(session.sidebar.isConnected ? 1 : 0), cache=\(session.sidebar.error == nil && !session.sidebar.threads.isEmpty ? "warm" : "cold")")
+                .accessibilityValue("connected=\(session.sidebar.isConnected ? 1 : 0), cache=\(session.sidebar.error == nil && !session.sidebar.chats.isEmpty ? "warm" : "cold")")
         }
         .onChange(of: selection, initial: true) { _, value in
-            if let thread = session.sidebar.displayed(value) { lastChat = thread.id }
+            if PluginStore.isView(value) {
+                lastChat = value
+            } else if let thread = session.sidebar.displayed(value) {
+                lastChat = thread.id
+            }
+            if let thread = selectedChat, panelContent(thread) == nil { panelPlugin = nil }
             Notifications.shared.visible(scenePhase == .active ? selectedChat?.id : nil, window: windowID)
+            warmNeighbours()
+        }
+        .task {
+            openChat.show = { id in
+                #if os(iOS)
+                profileBinding.wrappedValue = false
+                #endif
+                selection = id
+            }
+            PointerIntent.start()
+            hover.settled = { [session] id in
+                if id != session.sidebar.displayed(selection)?.id { session.warm(id) }
+            }
+            // Rows slide to their new place instead of jumping when a section or chat changes.
+            let rows: (() -> Void) -> Void = { [reduceMotion] change in
+                withAnimation(Motion.move.unless(reduceMotion), change)
+            }
+            session.layout.animate = rows
+            session.sidebar.animate = rows
         }
         .onChange(of: creation) { _, value in lastCreation = value?.rawValue }
         .onChange(of: profileOpen) { _, open in lastPanel = open }
@@ -301,16 +540,14 @@ struct ShellView: View {
         }
         .onDisappear { Notifications.shared.visible(nil, window: windowID) }
         .onChange(of: Notifications.shared.routeID, initial: true) { _, _ in
-            if let thread = Notifications.shared.destination { selection = thread }
+            if let thread = Notifications.shared.take(session.address) { selection = thread }
         }
         .toolbar(removing: .sidebarToggle)
         #if os(macOS)
         .task { dropFolder = try? await DroppedFile.prepare() }
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .background {
-            SidebarControl(state: sidebar,
-                           reveal: showSidebar, search: { searching = true }, add: { newBot() },
-                           group: { creation = .group },
+            SidebarControl(state: sidebar, reveal: showSidebar, search: openSearch, menu: createActions,
                            settings: { showSettings = true }).frame(width: 0, height: 0)
         }
         .onChange(of: sidebar.stage, initial: true) { _, stage in
@@ -323,15 +560,16 @@ struct ShellView: View {
             }
         }
         #endif
+        #if os(macOS)
+        .focusedSceneValue(\.searchPanel, $searching)
+        .focusedSceneValue(\.toggleSidebar, toggleSidebar)
+        #endif
         .panel(isPresented: $searching) {
             SearchPanel(session: session, close: { searching = false }) { result in
                 searchTarget = SearchDestination(threadID: result.threadID, messageID: result.messageID)
                 selection = result.threadID
                 searching = false
             }
-        }
-        .onChange(of: searching) { _, shown in
-            if shown { profileBinding.wrappedValue = false }
         }
         .panel(item: $creation) { kind in
             switch kind {
@@ -387,6 +625,7 @@ struct ShellView: View {
             while !Task.isCancelled {
                 await session.sidebar.refresh()
                 await session.layout.refresh()
+                await session.plugins.refresh()
                 if session.sidebar.isConnected {
                     session.avatars.sync(agents: session.sidebar.agents)
                     await session.avatars.flush(client: session.client)
@@ -399,22 +638,30 @@ struct ShellView: View {
     private func chatPane(_ thread: PolymuxKit.Thread, agent: Agent) -> some View {
         let pane = ChatPane(agent: agent, thread: thread, session: session,
                             drops: chatDrops(thread.id), files: chatFiles(thread.id),
-                            showProfile: profileBinding, openChat: openChat, destination: searchTarget,
-                            store: session.initialChat?.threadID == thread.id ? session.initialChat : nil)
+                            showProfile: profileBinding, pluginPanel: pluginBinding, openChat: openChat,
+                            destination: searchTarget, store: session.chat(thread.id))
             .id(thread.id)
         #if os(macOS)
         return HStack(spacing: 0) {
             pane.frame(minWidth: PaneWidth.chat, maxWidth: .infinity, maxHeight: .infinity)
             if profileShown {
-                ProfilePanel(agent: agent, thread: thread, session: session, openChat: openChat,
-                             close: { profileBinding.wrappedValue = false }, jump: openChat.jump)
-                    .id(profileID)
+                Group {
+                    if let plugin = panelContent(thread) {
+                        PluginPanel(plugin: plugin, thread: thread, session: session) {
+                            pluginBinding.wrappedValue = nil
+                        }
+                    } else {
+                        ProfilePanel(agent: agent, thread: thread, session: session, openChat: openChat,
+                                     close: { profileBinding.wrappedValue = false }, jump: openChat.jump)
+                            .id(profileID)
+                    }
+                }
                     .frame(width: panelWidth)
                     .background(SideSurface().ignoresSafeArea())
                     .overlay(alignment: .leading) {
                         SideDivider(width: $profileWidth) { profileBinding.wrappedValue = false }
                     }
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .transition(EdgeSlide(width: panelWidth).combined(with: .opacity))
             }
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
@@ -428,22 +675,12 @@ struct ShellView: View {
     @ViewBuilder private var sidebarContent: some View {
         let all = conversations
         let edges = (first: all.first?.id, last: all.last?.id)
-        if let issue = deleteError ?? sectionIssue ?? session.layout.issue ?? session.sidebar.commits.notice {
-            Text(issue).font(.footnote).foregroundStyle(.muted)
-                .listRowBackground(sidebarSurface)
-                .task(id: issue) {
-                    // A failed delete, avatar save or an over-long section name needs no action, so its note fades on its own.
-                    guard deleteError != nil || sectionIssue != nil || session.sidebar.commits.notice != nil else { return }
-                    try? await Task.sleep(for: .seconds(6))
-                    deleteError = nil
-                    sectionIssue = nil
-                    session.sidebar.commits.clearNotice()
-                }
-        }
+        let selected = selectedChat?.id
         let pins = displayedPins
+        ForEach(session.plugins.views, id: \.name) { pluginRow($0) }
         if !pins.isEmpty {
             PinGrid {
-                ForEach(pins) { thread in pinnedLink(thread) }
+                ForEach(pins) { thread in pinnedLink(thread, selected: selected == thread.id) }
             }
             .padding(.vertical, 6)
             .padding(.bottom, 12)
@@ -451,19 +688,11 @@ struct ShellView: View {
             .listRowInsets(sectionInsets)
             .listRowBackground(sidebarSurface)
             .listRowSeparator(.hidden)
-        } else if case .chat = dragging {
-            Text("Pinned")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
-                .sidebarArea(.pins)
-                .listRowInsets(sectionInsets)
-                .listRowBackground(sidebarSurface)
-                .listRowSeparator(.hidden)
         }
         ForEach(dropSections, id: \.id) { section in
             let rows = chats(in: section.id, from: all)
             Section {
-                sectionHeader(section, count: rows.count)
+                sectionHeader(section, count: rows.count, selected: selected == section.id)
                 if !section.collapsed {
                     if rows.isEmpty {
                         Text("No chats yet.")
@@ -476,11 +705,68 @@ struct ShellView: View {
                             .listRowInsets(sectionInsets)
                             .listRowSeparator(.hidden)
                     } else {
-                        ForEach(rows) { thread in chatLink(thread, edges: edges) }
+                        ForEach(rows) { thread in chatLink(thread, edges: edges, selected: selected == thread.id) }
                     }
                 }
             }
             .opacity(dragging == .section(section.id) ? 0.4 : 1)
+        }
+    }
+
+    /// A both plugin's global view, above the chats and sections.
+    @ViewBuilder private func pluginRow(_ plugin: Plugin) -> some View {
+        let id = PluginStore.viewID(plugin.name)
+        let on = selection == id
+        let label = Label(plugin.title, systemImage: plugin.icon(selected: on))
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            .contentShape(Rectangle())
+        Group {
+            #if os(macOS)
+            Button { selection = id } label: { label }
+                .buttonStyle(.plain)
+                .tag(id)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            #else
+            NavigationLink(value: id) { label }
+            #endif
+        }
+        .listRowInsets(sectionInsets)
+        .listRowSeparator(.hidden)
+    }
+
+    /// The drop zone for a first pin. It floats above the list, because inserting
+    /// a row would push everything down under the pointer as the drag begins.
+    private var pinZoneShown: Bool {
+        if case .chat = dragging { pinnedChats.isEmpty } else { false }
+    }
+
+    private var pinZone: CGFloat { 32 }
+
+    private func dropFrames(origin: CGPoint, width: CGFloat) -> [SidebarArea: CGRect] {
+        var frames = dragFrames.merging(pinFrames) { _, fixed in fixed }
+        if pinZoneShown { frames[.pins] = CGRect(x: origin.x, y: origin.y, width: width, height: pinZone) }
+        return frames
+    }
+
+    private var sidebarIssue: String? {
+        #if DEBUG
+        // A real failed save needs a refusing server, and refresh clears it within seconds.
+        if CommandLine.arguments.contains("--verify-sidebar-note") { return "Couldn’t save that change." }
+        #endif
+        return deleteError ?? sectionIssue ?? session.layout.issue ?? session.sidebar.commits.notice
+    }
+
+    @ViewBuilder private var sidebarNote: some View {
+        if let sidebarIssue {
+            QuietNote(text: sidebarIssue)
+                .task(id: sidebarIssue) {
+                    // A failed delete, avatar save or an over-long section name needs no action, so its note fades on its own.
+                    guard deleteError != nil || sectionIssue != nil || session.sidebar.commits.notice != nil else { return }
+                    try? await Task.sleep(for: .seconds(6))
+                    deleteError = nil
+                    sectionIssue = nil
+                    session.sidebar.commits.clearNotice()
+                }
         }
     }
 
@@ -512,7 +798,7 @@ struct ShellView: View {
         session.layout.chats(in: sectionID, from: all ?? conversations)
     }
 
-    @ViewBuilder private func sectionHeader(_ section: PolymuxKit.Section, count: Int) -> some View {
+    @ViewBuilder private func sectionHeader(_ section: PolymuxKit.Section, count: Int, selected: Bool) -> some View {
         let unassigned = section.id == SidebarLayout.unassignedID
         let area: SidebarArea = unassigned ? .unassigned : .section(section.id)
         let visible = session.layout.visibleSections(from: conversations)
@@ -530,7 +816,7 @@ struct ShellView: View {
             .padding(.vertical, 6)
             .textCase(nil)
             .listRowInsets(sectionInsets)
-            .listRowBackground(rowBackground(section.id))
+            .listRowBackground(rowBackground(section.id, selected: selected))
             .listRowSeparator(.hidden)
             .sidebarArea(.section(section.id))
         } else {
@@ -552,15 +838,11 @@ struct ShellView: View {
             .buttonStyle(ToggleRow())
             .textCase(nil)
             .listRowInsets(sectionInsets)
-            .listRowBackground(rowBackground(section.id))
+            .listRowBackground(rowBackground(section.id, selected: selected))
             .listRowSeparator(.hidden)
             .sidebarArea(area)
             .accessibilityAddTraits(.isHeader)
-            .disabled(session.layout.isSaving)
-            .onHover { inside in
-                if inside { hovered = section.id }
-                else if hovered == section.id { hovered = nil }
-            }
+            .pointerHover { hover.update(section.id, inside: $0) }
             .accessibilityLabel("\(section.collapsed ? "Expand" : "Collapse") \(section.name)")
             .sidebarDrag(.section(section.id), active: $dragging) {
                 Text(section.name)
@@ -571,7 +853,7 @@ struct ShellView: View {
                     .overlay { RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 0.5) }
             }
             .appMenu(destructive: ["Delete section"]) {
-                Button("New Bot", systemImage: "face.smiling") { newBot(in: section.id) }
+                createRow(botAction(in: section.id))
                 Divider()
                 if !unassigned {
                     Button("Rename", systemImage: "pencil") {
@@ -600,8 +882,8 @@ struct ShellView: View {
         }
     }
 
-    private func pinnedLink(_ thread: PolymuxKit.Thread) -> some View {
-        chatControl(thread) {
+    private func pinnedLink(_ thread: PolymuxKit.Thread, selected: Bool) -> some View {
+        pinControl(thread) {
             VStack(spacing: 6) {
                 AvatarStack(members: participants(thread), isGroup: thread.isGroup, size: 76, conversationID: thread.id,
                             runs: thread.runs, activity: session.sidebar.activity, connected: session.sidebar.isConnected,
@@ -612,10 +894,11 @@ struct ShellView: View {
             .padding(.top, 6)
             .padding(.bottom, 4)
             .frame(minWidth: 0, maxWidth: .infinity)
-            .background(rowFill(thread.id), in: RoundedRectangle(cornerRadius: 10))
+            .background { RowFill(id: thread.id, selected: selected, hover: hover) }
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+        .navigationLinkIndicatorVisibility(.hidden)
         .accessibilityLabel("\(title(thread)), pinned chat")
         .accessibilityValue(session.sidebar.activity.marker(conversationID: thread.id, agentIDs: participants(thread).map(\.id),
                                                            unread: thread.unreadCount > 0)?.label ?? "")
@@ -624,11 +907,8 @@ struct ShellView: View {
         .opacity(dragging == .chat(thread.id) ? 0 : 1)
         #if os(macOS)
         .overlay { rowMenu(thread).accessibilityHidden(true) }
-        .onDrop(of: ChatDrop.types, delegate: chatDrop)
-        #else
-        .appMenu { chatMenu(thread) }
         #endif
-        .onHover { hovered = $0 ? thread.id : nil }
+        .pointerHover { hover.update(thread.id, inside: $0) }
     }
 
     private func newBot(in section: String? = nil) {
@@ -684,7 +964,7 @@ struct ShellView: View {
 
     #if os(macOS)
     private var chatDrop: ChatDrop {
-        ChatDrop(frames: chatFrames, window: dropWindow,
+        ChatDrop(geometry: geometry, window: dropWindow, dwell: dropDwell, hover: hover,
                  open: { if selection != $0 { selection = $0 } }, attach: attach)
     }
 
@@ -770,7 +1050,8 @@ struct ShellView: View {
     }
 
     private func participants(_ thread: PolymuxKit.Thread) -> [Agent] {
-        thread.participantIDs.compactMap { id in session.sidebar.agents.first { $0.id == id } }
+        _ = conversations
+        return order.members(thread)
     }
 
     private func title(_ thread: PolymuxKit.Thread) -> String {
@@ -778,6 +1059,10 @@ struct ShellView: View {
     }
 
     #if os(macOS)
+    private func toggleSidebar() {
+        if sidebar.stage == .expanded { sidebar.collapse() } else { showSidebar() }
+    }
+
     private func showSidebar() {
         guard sidebar.stage == .collapsed, !sidebarOpening else { return }
         sidebarOpening = true
@@ -786,11 +1071,11 @@ struct ShellView: View {
             visibility = .all
             return
         }
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+        withAnimation(Animation.easeInOut(duration: Motion.columnTime).unless(reduceMotion)) {
             visibility = .all
         }
         // The binding finishes before the column's slide; settle the stage once it ends.
-        let delay = reduceMotion ? 0.05 : 0.22
+        let delay = reduceMotion ? 0.05 : Motion.columnTime
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { sidebar.endReveal(token) }
     }
     #endif
@@ -799,18 +1084,10 @@ struct ShellView: View {
     /// cannot show through, and it must match the list background or the rows band visibly.
     private var sidebarSurface: Color {
         #if os(macOS)
-        Color(white: colorScheme == .dark ? 38.0 / 255 : 242.0 / 255)
+        SidebarFade.surface(colorScheme)
         #else
         AppBackground.color(colorScheme)
         #endif
-    }
-
-    /// Selection reads as a slightly stronger version of hover, not the system's
-    /// unfocused selection fill, which is far brighter than the row it marks.
-    private func rowFill(_ id: String) -> Color {
-        if selectedChat?.id == id { return Color.primary.opacity(0.11) }
-        if hovered == id { return Color.primary.opacity(0.06) }
-        return .clear
     }
 
     private func dragPreview(_ thread: PolymuxKit.Thread) -> some View {
@@ -824,13 +1101,14 @@ struct ShellView: View {
         .frame(width: 80)
         .background(sidebarSurface, in: RoundedRectangle(cornerRadius: 10))
         .environment(\.rasterAvatars, true)
+        // iOS draws the preview outside this view's hierarchy, so it inherits no environment.
+        .environment(session.avatars)
     }
 
-    private func rowBackground(_ id: String) -> some View {
+    private func rowBackground(_ id: String, selected: Bool) -> some View {
         ZStack {
             sidebarSurface
-            RoundedRectangle(cornerRadius: 10)
-                .fill(rowFill(id))
+            RowFill(id: id, selected: selected, hover: hover)
                 .padding(.horizontal, 10).padding(.vertical, 2)
         }
     }
@@ -850,37 +1128,34 @@ struct ShellView: View {
 
     /// Chats with at least one known agent: pinned first, then newest message first.
     private var conversations: [PolymuxKit.Thread] {
-        let agents = Set(session.sidebar.agents.map(\.id))
-        return session.sidebar.threads
-            .filter { !removed.contains($0.id) && $0.participantIDs.contains(where: agents.contains) }
-            .map { (thread: session.layout.applying(to: $0), date: $0.lastMessage?.date ?? .distantPast) }
-            .sorted { lhs, rhs in
-                switch (lhs.thread.pinRank, rhs.thread.pinRank) {
-                case let (left?, right?) where left != right: return left < right
-                case (.some, .none): return true
-                case (.none, .some): return false
-                default: break
-                }
-                if lhs.date == rhs.date { return lhs.thread.id < rhs.thread.id }
-                return lhs.date > rhs.date
-            }
-            .map(\.thread)
+        order.update(threads: session.sidebar.chats, agents: session.sidebar.agents,
+                     layout: session.layout, removed: removed)
+        return order.chats
     }
 
-    private func chatLink(_ thread: PolymuxKit.Thread, edges: (first: String?, last: String?)) -> some View {
+    /// The chats an arrow key reaches next, read ahead so stepping through them never waits.
+    private func warmNeighbours() {
+        let all = conversations
+        guard let index = all.firstIndex(where: { $0.id == selectedChat?.id }) else { return }
+        for neighbour in [index - 1, index + 1] where all.indices.contains(neighbour) {
+            session.warm(all[neighbour].id)
+        }
+    }
+
+    private func chatLink(_ thread: PolymuxKit.Thread, edges: (first: String?, last: String?), selected: Bool) -> some View {
         chatControl(thread) {
             if thread.isGroup {
                 GroupRow(thread: thread, members: participants(thread), activity: session.sidebar.activity,
                          connected: session.sidebar.isConnected, finished: session.sidebar.lastFinished[thread.id])
             } else if let agent = participants(thread).first {
                 AgentRow(agent: agent, thread: thread,
-                         duplicate: session.sidebar.agents.filter { $0.name == agent.name }.count > 1,
+                         duplicate: order.repeated.contains(agent.name),
                          activity: session.sidebar.activity, connected: session.sidebar.isConnected,
                          finished: session.sidebar.lastFinished[thread.id])
             }
         }
         .navigationLinkIndicatorVisibility(.hidden)
-        .listRowBackground(rowBackground(thread.id))
+        .listRowBackground(rowBackground(thread.id, selected: selected))
         .sidebarArea(thread.sectionID.flatMap { id in
             session.layout.sections.contains(where: { $0.id == id }) ? .section(id) : nil
         } ?? .unassigned)
@@ -920,21 +1195,16 @@ struct ShellView: View {
         .disabled(deleting == thread.agentID)
         .sidebarDrag(.chat(thread.id), active: $dragging) { dragPreview(thread) }
         .opacity(dragging == .chat(thread.id) ? 0.4 : 1)
-        #if os(macOS)
-        .onDrop(of: ChatDrop.types, delegate: chatDrop)
-        #endif
-        .onHover { inside in
-            if inside { if laidOut(thread) { hovered = thread.id } }
-            else if hovered == thread.id { hovered = nil }
-        }
+        .pointerHover { hover.update(thread.id, inside: $0) }
     }
 
-    /// A row inserted under a still pointer reports hover before its first layout; only trust laid-out rows.
-    private func laidOut(_ thread: PolymuxKit.Thread) -> Bool {
+    /// Pins share one list row, whose context menu and drag are always the first pin's; a Menu is each pin's own.
+    @ViewBuilder private func pinControl<Label: View>(_ thread: PolymuxKit.Thread,
+                                                     @ViewBuilder label: () -> Label) -> some View {
         #if os(macOS)
-        chatFrames[thread.id] != nil
+        chatControl(thread, label: label)
         #else
-        true
+        Menu { chatMenu(thread) } label: { label() } primaryAction: { selection = thread.id }
         #endif
     }
 
@@ -1019,37 +1289,73 @@ struct ShellView: View {
 }
 
 #if os(macOS)
-private struct ChatDrop: DropDelegate {
-    let frames: [String: CGRect]
+/// Finds the chat under a file drag and waits for it to settle before opening it.
+@MainActor
+private struct ChatDrop {
+    let geometry: SidebarGeometry
     let window: NSWindow?
+    let dwell: DropDwell
+    let hover: RowHover
     let open: (String) -> Void
     let attach: (String) -> Bool
-    static var types: [String] { DroppedFile.types }
+    private static var row: String?
 
-    func validateDrop(info: DropInfo) -> Bool {
-        !info.hasItemsConforming(to: [SidebarItem.contentType.identifier]) && info.hasItemsConforming(to: Self.types)
+    func update() -> Bool {
+        let id = DropTarget.chat(at: NSEvent.mouseLocation, frames: geometry.chats, window: window?.frame ?? .zero)
+        if let row = Self.row, row != id { hover.update(row, inside: false) }
+        if let id { hover.update(id, inside: true) }
+        Self.row = id
+        dwell.hold(id, at: NSEvent.mouseLocation, open: open)
+        return id != nil
     }
 
-    func dropEntered(info: DropInfo) {
-        if let id = target() { open(id) }
+    func exit() {
+        if let row = Self.row { hover.update(row, inside: false) }
+        Self.row = nil
+        dwell.hold(nil, at: .zero, open: open)
     }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard let id = target() else { return DropProposal(operation: .forbidden) }
-        open(id)
-        return DropProposal(operation: .copy)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let id = target() else { return false }
+    func perform() -> Bool {
+        let id = Self.row
+        exit()
+        guard let id else { return false }
         open(id)
         return attach(id)
     }
+}
 
-    private func target() -> String? {
-        guard let window else { return nil }
-        // List can retain a row's receiver after hover changes the selection.
-        return DropTarget.chat(at: NSEvent.mouseLocation, frames: frames, window: window.frame)
+/// Takes file drags for the whole list. An AppKit view, because the native list never offers them to SwiftUI drop handlers.
+private struct ChatDropZone: NSViewRepresentable {
+    let drop: ChatDrop
+
+    func makeNSView(context: Context) -> ChatDropView { ChatDropView() }
+    func updateNSView(_ view: ChatDropView, context: Context) { view.drop = drop }
+}
+
+private final class ChatDropView: NSView {
+    var drop: ChatDrop?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes(DroppedFile.types.map { NSPasteboard.PasteboardType($0) })
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    // Clicks and scrolling pass through; AppKit routes drags by registered types instead.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    private func accepts(_ info: NSDraggingInfo) -> Bool {
+        !(info.draggingPasteboard.types ?? []).contains(NSPasteboard.PasteboardType(SidebarItem.contentType.identifier))
+    }
+
+    override func draggingEntered(_ info: NSDraggingInfo) -> NSDragOperation { update(info) }
+    override func draggingUpdated(_ info: NSDraggingInfo) -> NSDragOperation { update(info) }
+    override func draggingExited(_ info: NSDraggingInfo?) { drop?.exit() }
+    override func performDragOperation(_ info: NSDraggingInfo) -> Bool { accepts(info) && drop?.perform() == true }
+
+    private func update(_ info: NSDraggingInfo) -> NSDragOperation {
+        accepts(info) && drop?.update() == true ? .copy : []
     }
 }
 
@@ -1125,6 +1431,22 @@ private struct PinGrid: Layout {
         let proposal = ProposedViewSize(width: tileWidth, height: nil)
         let height = subviews.map { $0.sizeThatFits(proposal).height }.max() ?? 0
         return (columns, CGSize(width: tileWidth, height: height))
+    }
+}
+
+/// Selection reads as a slightly stronger version of hover, not the system's unfocused selection
+/// fill, which is far brighter than the row it marks. Reads the hover here so only this row redraws.
+private struct RowFill: View {
+    let id: String
+    let selected: Bool
+    let hover: RowHover
+
+    var body: some View {
+        let hovered = hover.id == id
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color.primary.opacity(selected ? PanelStyle.selectedTint : hovered ? PanelStyle.hoverTint : 0))
+            // Answers the pointer at once and lets go softly.
+            .motion(hovered ? Motion.instant : Motion.quick, value: hovered)
     }
 }
 

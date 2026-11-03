@@ -98,16 +98,62 @@ func TestChatQuestions(t *testing.T) {
 	}
 }
 
-func TestProgressOrder(t *testing.T) {
-	f := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
-		_, err := botCall(ctx, d, "send_to_user", `{"text":"Working"}`)
-		return agentruntime.Result{Text: "Finished"}, err
-	}}
-	api, _ := startTest(t, f)
-	botSend(t, api, "assistant", "progress", "Do the work")
-	messages := botReply(t, api, "assistant", "Finished")
-	if len(messages) != 3 || store.Text(messages[1]) != "Working" || store.Text(messages[2]) != "Finished" {
-		t.Fatal("final reply appeared before progress", messages)
+func TestDirectVoice(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		worked bool
+		card   bool
+		plain  bool
+		reply  string
+		want   []string
+		parts  int
+	}{
+		{name: "text after a message stays private", want: []string{"Working"}},
+		{name: "text after more work is delivered", worked: true, want: []string{"Working", "Finished"}},
+		{name: "a card survives private text", card: true, want: []string{"Working"}, parts: 1},
+		{name: "plain paragraphs become bubbles", plain: true, reply: "One.\n\nTwo.", want: []string{"One.", "Two."}},
+		{name: "a code block stays whole", plain: true, reply: "```\na\n\nb\n```", want: []string{"```\na\n\nb\n```"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+				if test.plain {
+					return agentruntime.Result{Text: test.reply}, nil
+				}
+				if _, err := botCall(ctx, d, "send_to_user", `{"text":"Working"}`); err != nil {
+					return agentruntime.Result{}, err
+				}
+				if test.worked {
+					beforeTool(ctx, "read", "read", nil)
+				}
+				if test.card {
+					if _, err := botCall(ctx, d, "show_html", `{"html":"<h1>Result</h1>","title":"Result"}`); err != nil {
+						return agentruntime.Result{}, err
+					}
+				}
+				return agentruntime.Result{Text: "Finished"}, nil
+			}}
+			api, _ := startTest(t, f)
+			botSend(t, api, "assistant", "progress", "Do the work")
+			awaitRun(t, api.Store, store.NewRun("progress", "assistant", "assistant", "message").ID, "completed")
+			messages, err := api.Store.Messages(t.Context(), "assistant", 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var said []string
+			parts := 0
+			for _, m := range messages[1:] {
+				for _, part := range m.Parts {
+					if part.Attachment != nil {
+						parts++
+					} else if part.Text != nil {
+						said = append(said, *part.Text)
+					}
+				}
+			}
+			if !slices.Equal(said, test.want) || parts != test.parts {
+				t.Fatal("wrong messages reached the chat", said, parts)
+			}
+		})
 	}
 }
 

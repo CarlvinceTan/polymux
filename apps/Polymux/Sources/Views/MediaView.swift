@@ -2,7 +2,6 @@ import SwiftUI
 import ImageIO
 import CryptoKit
 import Combine
-import QuickLook
 import UniformTypeIdentifiers
 import PolymuxKit
 
@@ -40,9 +39,12 @@ struct MediaView: View {
                                         if downloading { MediaProgress(name: attachment.name) }
                                     }
                             } placeholder: {
-                                ProgressView().frame(width: 180, height: 140)
+                                // Holds the image's own shape, so the chat doesn't move when it loads.
+                                RoundedRectangle(cornerRadius: BubbleStyle.radius).fill(.quaternary)
+                                    .frame(width: imageSize?.width ?? 180, height: imageSize?.height ?? 140)
                                     .accessibilityLabel("Loading \(attachment.name)")
                             }
+                            .frame(width: imageSize?.width, height: imageSize?.height)
                             .frame(maxWidth: 320, maxHeight: 280, alignment: alignment == .trailing ? .trailing : .leading)
                         }.buttonStyle(.plain).accessibilityLabel("View \(attachment.name)")
                             .accessibilityValue(downloading ? "Loading" : "")
@@ -92,11 +94,31 @@ struct MediaView: View {
                 .disabled(downloading)
             if let share { share }
         }
-        .quickLookPreview($preview)
+        .mediaPreview($preview, kind: mediaKind, poster: poster)
         .fileExporter(isPresented: $exporting, document: document, contentType: UTType(mimeType: attachment.mimeType) ?? .data,
                       defaultFilename: attachment.name) { result in
             if case .failure = result { error = "Couldn’t save this file." }
         }
+    }
+
+    /// An image's drawn size within 320 by 280, when the server knows its shape.
+    private var imageSize: CGSize? {
+        guard let width = attachment.width, let height = attachment.height, width > 0, height > 0 else { return nil }
+        let scale = min(1, 320 / width, 280 / height)
+        return CGSize(width: width * scale, height: height * scale)
+    }
+
+    /// Animated images stay in QuickLook, which plays them.
+    private var mediaKind: MediaKind? {
+        switch attachment.kind {
+        case AttachmentKind.image: attachment.mimeType == "image/gif" ? nil : .image
+        case AttachmentKind.video: .video
+        default: nil
+        }
+    }
+
+    private var poster: CGImage? {
+        client.resolve(attachment.thumbnailURL ?? attachment.url).flatMap(DecodedImages.cached)
     }
 
     private var compactRow: some View {
@@ -176,18 +198,22 @@ private struct VideoPreview: View {
     var body: some View {
         Button(action: open) {
             ZStack {
-                Color.black.opacity(0.85)
+                Rectangle().fill(.quaternary)
                 if let poster {
                     CachedImage(url: poster, name: "poster-" + name, client: client) { image in
                         image.resizable().scaledToFit()
                     } placeholder: { Color.clear }
                 }
-                if loading {
-                    // Light like the play icon, since the tile is always dark.
-                    MediaProgress(name: name).environment(\.colorScheme, .dark)
-                } else {
-                    Image(systemName: "play.circle.fill").font(.system(size: 42)).foregroundStyle(.white)
+                // A dark disc reads on any poster, and on the empty tile in either appearance.
+                Group {
+                    if loading {
+                        MediaProgress(name: name).environment(\.colorScheme, .dark)
+                    } else {
+                        Image(systemName: "play.fill").font(.title2).foregroundStyle(.white)
+                    }
                 }
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.65), in: Circle())
             }
             .frame(width: 280, height: 190)
             .clipShape(.rect(cornerRadius: BubbleStyle.radius))
@@ -209,16 +235,19 @@ struct CachedImage<Content: View, Placeholder: View>: View {
     @State private var image: CGImage?
     @State private var failed = false
 
+    private var shown: CGImage? { image ?? url.flatMap(DecodedImages.cached) }
+
     var body: some View {
         Group {
-            if let shown = image ?? url.flatMap(DecodedImages.cached) {
-                content(Image(decorative: shown, scale: 1))
+            if let shown {
+                content(Image(decorative: shown, scale: 1)).transition(.opacity)
             } else if failed, let failure {
                 failure()
             } else {
-                placeholder()
+                placeholder().transition(.opacity)
             }
         }
+        .motion(Motion.fade, value: shown != nil)
         .task(id: url) {
             failed = false
             guard let url else { image = nil; failed = true; return }
@@ -233,7 +262,7 @@ struct CachedImage<Content: View, Placeholder: View>: View {
 }
 
 /// Decoded images by source URL, so a row scrolled back into view shows at once.
-private enum DecodedImages {
+enum DecodedImages {
     nonisolated(unsafe) private static let cache: NSCache<NSURL, CGImage> = {
         let cache = NSCache<NSURL, CGImage>()
         cache.totalCostLimit = 64 << 20
@@ -242,6 +271,17 @@ private enum DecodedImages {
 
     static func cached(_ url: URL) -> CGImage? { cache.object(forKey: url as NSURL) }
 
+    /// Fetches and decodes an image ahead of its bubble, so it shows in the first frame.
+    static func warm(_ attachment: Attachment, client: APIClient) async {
+        await warm(client.resolve(attachment.thumbnailURL ?? attachment.url), name: attachment.name, client: client)
+    }
+
+    static func warm(_ url: URL?, name: String, client: APIClient) async {
+        guard let url, cached(url) == nil,
+              let file = try? await MediaCache.shared.file(url: url, name: name, client: client) else { return }
+        _ = try? await load(file, for: url)
+    }
+
     /// Decodes off the main actor and keeps the result for `url`.
     static func load(_ file: URL, for url: URL) async throws -> CGImage {
         let image = try await Task.detached { try decode(file) }.value
@@ -249,10 +289,10 @@ private enum DecodedImages {
         return image
     }
 
-    /// Decodes at most 1024 px on the long side: every use draws within 320 points.
-    nonisolated private static func decode(_ file: URL) throws -> CGImage {
+    /// Decodes at most `limit` px on the long side. The default suits a bubble, which draws within 320 points.
+    nonisolated static func decode(_ file: URL, limit: Int = 1024) throws -> CGImage {
         let options = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                       kCGImageSourceShouldCacheImmediately: true, kCGImageSourceThumbnailMaxPixelSize: 1024] as CFDictionary
+                       kCGImageSourceShouldCacheImmediately: true, kCGImageSourceThumbnailMaxPixelSize: limit] as CFDictionary
         if let source = CGImageSourceCreateWithURL(file as CFURL, nil),
            let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) {
             return image

@@ -43,7 +43,7 @@ func TestPeerRemoval(t *testing.T) {
 	for _, target := range []string{"a", "b"} {
 		t.Run(target, func(t *testing.T) {
 			s, parent, child := peerFixture(t)
-			if _, _, err := s.DeleteAgent(t.Context(), target); err != nil {
+			if err := s.DeleteAgent(t.Context(), target); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.Job(t.Context(), "b"); !errors.Is(err, sql.ErrNoRows) {

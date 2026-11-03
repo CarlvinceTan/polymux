@@ -1,4 +1,5 @@
-// Use --driver control for multiline secure input; fields stay write-only across restart and edits.
+// @control
+// Needs Control for multiline secure input; fields stay write-only across restart and edits.
 let app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Vault" });

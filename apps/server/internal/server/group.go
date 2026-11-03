@@ -288,7 +288,7 @@ func (s *Server) groupTurn(ctx context.Context, g *groupActor, id string) {
 		member.mu.Unlock()
 		members = append(members, definition.Agent)
 	}
-	turn, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	turn, cancel := context.WithCancel(ctx)
 	chain := &chainState{seen: make(map[string]bool, len(members)), pending: map[string]string{}}
 	turn = context.WithValue(turn, chainKey{}, chain)
 	g.mu.Lock()
@@ -688,6 +688,9 @@ func (s *Server) groupContext(ctx context.Context, a *actor, user contract.Messa
 	if !slices.Contains(thread.AgentIDs, a.id) {
 		return user, store.ErrMembers
 	}
+	if thread.Task != nil {
+		return taskContext(thread, user)
+	}
 	agents, err := s.Store.Agents(ctx)
 	if err != nil {
 		return user, err
@@ -768,7 +771,7 @@ func (s *Server) groupContext(ctx context.Context, a *actor, user contract.Messa
 	}
 	text := "You are a member of this group chat. Respond as your own configured agent. " +
 		"Members take turns automatically unless the user addresses specific members. " +
-		"It is your turn: contribute briefly only if you have something new worth adding; otherwise return exactly NO_RESPONSE. " +
+		"It is your turn: send one short, conversational message only if you have something new worth adding; otherwise return exactly NO_RESPONSE. Don't post acknowledgements. " +
 		"The history contains only shared messages since you last spoke. Do not repeat answers, completed work or tool effects. " +
 		"Each eligible member gets one initial turn. There are no automatic repeat rounds. " +
 		"An @Name in your final reply invites that member to respond after the initial pass, within the server's delegation limits. " +

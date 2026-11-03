@@ -40,3 +40,59 @@ struct RecipientFlow: Layout {
         return rows
     }
 }
+
+/// The To: field: chosen people as removable chips, then a field to find more.
+struct RecipientBox<Item: Hashable>: View {
+    let items: [Item]
+    let title: (Item) -> String
+    let label: (Item) -> String
+    @Binding var query: String
+    @Binding var focused: Bool
+    let placeholder: String
+    let onSubmit: () -> Void
+    let onDelete: () -> Void
+    let remove: (Item) -> Void
+    @State private var height: CGFloat = 28
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("To:").foregroundStyle(.muted).frame(height: 28)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    RecipientFlow {
+                        ForEach(items, id: \.self) { item in
+                            Button { remove(item) } label: {
+                                HStack(spacing: 5) {
+                                    Text(title(item)).lineLimit(1)
+                                    Image(systemName: "xmark").font(.caption2.weight(.semibold))
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(.quaternary, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: 170)
+                            .accessibilityLabel("Remove \(label(item))")
+                        }
+                        RecipientField(text: $query, focused: $focused, placeholder: placeholder,
+                                       onSubmit: onSubmit, onDelete: onDelete)
+                            .frame(minWidth: 80, minHeight: 28)
+                            .accessibilityLabel("To")
+                            .id("recipientInput")
+                    }
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height = $0 }
+                }
+                .scrollIndicators(.hidden)
+                .frame(height: min(136, max(28, height)))
+                .onChange(of: height) { _, _ in
+                    if focused { proxy.scrollTo("recipientInput", anchor: .bottom) }
+                }
+                .onChange(of: focused) { _, value in
+                    if value { proxy.scrollTo("recipientInput", anchor: .bottom) }
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+    }
+}

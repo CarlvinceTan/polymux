@@ -12,6 +12,11 @@ await app.waitFor({ role: "button", name: "History message 150", timeout_ms: 100
 await app.waitFor({ role: "button", name: "Scroll to latest", gone: true });
 await app.scroll({ role: "button", name: "History message 150" }, "up", 12);
 await app.waitFor({ role: "button", name: "Scroll to latest" });
+const [latest] = await app.query({ role: "button", name: "Scroll to latest" });
+const [input] = await app.query({ role: "textfield", name: "Message" });
+if (!latest?.frame || !input?.frame || latest.frame.y + latest.frame.h > input.frame.y) {
+    throw new Error("Latest button overlaps the composer");
+}
 for (let i = 0; i < 5; i++) {
     if ((await app.query({ role: "button", name: "Scroll to latest" })).length !== 1) throw new Error("Latest button flickered");
     await cua.sleep(100);

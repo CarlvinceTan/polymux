@@ -103,12 +103,39 @@ func TestWorkspaceWorktreePerThread(t *testing.T) {
 	}
 }
 
+func TestReopenReplacesSavedDirectory(t *testing.T) {
+	runtime := openDurable(t, &httptest.Server{URL: "http://localhost"})
+	d := Definition{Agent: Agent{ID: "coding", Name: "Coding"}}
+	moved := d
+	moved.Worktree = t.TempDir()
+	first, err := runtime.Open(t.Context(), moved, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := first.Path()
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtime.Open(t.Context(), d, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	state, err := second.(*durableSession).conversation.Agent(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(runtime.dir, "agents", "coding"); state.Cwd == nil || *state.Cwd != want {
+		t.Fatalf("saved working directory = %v, want %q", state.Cwd, want)
+	}
+}
+
 func TestWorkspaceLiveDirectory(t *testing.T) {
 	for _, name := range []string{"workspace", "absent"} {
 		t.Run(name, func(t *testing.T) {
 			runtime := openDurable(t, &httptest.Server{URL: "http://localhost"})
 			d := Definition{Agent: Agent{ID: "coding", Name: "Coding"}}
-			want := filepath.Join(runtime.dir, "coding")
+			want := filepath.Join(runtime.dir, "agents", "coding")
 			if name == "workspace" {
 				d.Worktree = t.TempDir()
 				want = d.Worktree

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,6 +14,12 @@ import (
 type Identity struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
+}
+
+// Fingerprint names a server: the key lives in its data folder, so it survives a new address.
+func Fingerprint(key []byte) string {
+	sum := sha256.Sum256(key)
+	return base64.RawURLEncoding.EncodeToString(sum[:])[:16]
 }
 
 func LoadIdentity(dir string) (Identity, error) {

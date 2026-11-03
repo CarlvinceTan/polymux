@@ -170,26 +170,35 @@ public final class BotEngine {
     /// Nothing is still easing, so a resting avatar can stop drawing.
     public func settled(_ now: Double) -> Bool {
         moods.settled && mascot.settled(now) && pokes.allSatisfy { now - $0.at > $0.poke.duration }
+            && (shapePrev == nil || now - shapeAt >= Self.SHAPE_MORPH)
+            && (exprPrev == nil || now - exprAt >= Self.SHAPE_MORPH)
+            && thinking.settled && spawning.settled
     }
 
     private struct MeshKey: Equatable {
         var mesh: ShapeID?
+        var frosting: Bool
         var turn: [Int]
         var sx, sy, cx, cy, scale: Int
     }
     private var meshCache: (key: MeshKey, frame: (CGPath, [CharacterLayer]), eyes: [EyePose])?
 
-    /// A character's mesh is expensive to build, so a pose within a degree reuses the last one.
-    private func meshRender(_ sil: Silhouette, _ body: Rotation, _ r: Double) -> (CGPath, [CharacterLayer])? {
-        guard let character, let mesh = character.mesh else { return nil }
+    /// A costly character is expensive to build, so a pose within a degree reuses the last one.
+    private func meshRender(_ sil: Silhouette, _ body: Rotation, _ r: Double, now: Double) -> (CGPath, [CharacterLayer])? {
+        guard let character else { return nil }
+        // A morph or a flat pose draws its own body.
+        let built = character.costly && !body.isIdentity && now - shapeAt >= Self.SHAPE_MORPH
+        guard character.mesh != nil || built else { return nil }
         func quantised(_ value: Double, _ step: Double) -> Int { Int((value / step).rounded()) }
         let turn = body.turn
-        let key = MeshKey(mesh: character.meshID, turn: turn.map { quantised($0, 0.5) },
+        let key = MeshKey(mesh: character.meshID, frosting: character.frosting, turn: turn.map { quantised($0, 0.5) },
                           sx: quantised(sil.sx, 0.01), sy: quantised(sil.sy, 0.01),
                           cx: quantised(sil.cx, 0.01), cy: quantised(sil.cy, 0.01), scale: quantised(r, 0.5))
         if let meshCache, meshCache.key == key { return meshCache.frame }
         var eyes: [EyePose] = []
-        let frame = mesh.render(sil, rotation: body, scale: r, eyes: { eyes = $0 })
+        let frame = character.mesh?.render(sil, rotation: body, scale: r, eyes: { eyes = $0 })
+            ?? (closedPath(solidOutline(sil, character.solid, body, scale: r, smooth: true)),
+                character.layers(sil, rotation: body, scale: r))
         meshCache = (key, frame, eyes)
         return frame
     }
@@ -398,6 +407,8 @@ public final class BotEngine {
                         offY: -(frame.pose.anchor * (1 - squash[1]) + frame.pose.pos[1]) * zoom,
                         dots: moodMarks(frame.mood, frame.elapsed), notif: pose.notif)
         }
+        let thinkingPhase = thinking.sample(elapsed: thinkingTime, now: now, reducedMotion: reducedMotion)
+        let thinkingHidden = (thinkingPhase?.amount ?? 0) > ThinkingMorph.hidden
         let spawn = spawning.sample(elapsed: spawnTime, now: now)
         if spawn.amount >= 0.5 { pose.eyeAlpha = 0 }
         if spawnTime != nil {
@@ -455,7 +466,7 @@ public final class BotEngine {
         if let fit = character?.fit { sil.sx *= fit; sil.sy *= fit }
         sil.cx += offX; sil.cy += offY; sil.sy *= life.breath
         var bodyPath: CGPath
-        let meshFrame = meshRender(sil, body, r)
+        let meshFrame = thinkingHidden ? nil : meshRender(sil, body, r, now: now)
         // A round sphere looks the same from every side.
         let sphere = solid == .inflated(depth: 1) && sil.radii.allSatisfy { abs($0 - sil.radii[0]) < 1e-9 }
         if let meshFrame {
@@ -534,7 +545,7 @@ public final class BotEngine {
                              dotsBehind: pose.dotsBehind,
                              arcs: pose.arcs.filter { $0.opacity > 0.01 }.map { arcRender($0.seed, $0.t, r, $0.id, $0.opacity) },
                              notif: notif, notch: notch)
-        frame.parts = (meshFrame?.1 ?? character?.layers(sil, rotation: body, scale: r))?.map { part in
+        frame.parts = thinkingHidden ? [] : (meshFrame?.1 ?? character?.layers(sil, rotation: body, scale: r))?.map { part in
             var part = part
             part.alpha *= 1 - spawn.amount
             return part
@@ -555,8 +566,9 @@ public final class BotEngine {
             }
         }
         frame.bare = spawn.amount
-        frame = thinking.apply(frame, elapsed: thinkingTime, now: now, scale: r,
-                               displaySize: displaySize, reducedMotion: reducedMotion)
+        if let thinkingPhase {
+            frame = thinking.apply(frame, phase: thinkingPhase, scale: r, displaySize: displaySize)
+        }
         if interactive && !reducedMotion {
             let idle = (mood == nil || mood == .idle) && cur == .idle
             let motion = mascot.sample(now, idle: idle)

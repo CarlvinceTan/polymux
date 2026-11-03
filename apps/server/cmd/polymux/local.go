@@ -27,6 +27,10 @@ func localCredential(ctx context.Context, pairs *device.Store, dir string) (stri
 			return "", err
 		}
 		clientDir = filepath.Join(home, ".polymux", "data")
+		// A server elsewhere never replaces the token of the install living here.
+		if _, err := os.Stat(filepath.Join(clientDir, "polymux.db")); err == nil && filepath.Clean(clientDir) != filepath.Clean(dir) {
+			return token, nil
+		}
 	}
 	path := filepath.Join(clientDir, "devices", "local-token")
 	if filepath.Clean(path) == filepath.Join(filepath.Clean(dir), "devices", "local-token") {

@@ -59,7 +59,10 @@ class E2ETests(unittest.TestCase):
                 result = {"ok": not (args[1] == "start_session" and self.session_error)}
             output = json.dumps(result)
         elif tool == "control.sh":
-            output = json.dumps({"ok": True, "frontmost": int(self.front) if self.front else 0})
+            if args[1] == "windows":
+                output = json.dumps({"windows": [{"onscreen": True}]})
+            else:
+                output = json.dumps({"ok": True, "frontmost": int(self.front) if self.front else 0})
         elif tool == "node":
             self.scripts.append(json.loads(kwargs["input"]))
             self.control_env = kwargs["env"]

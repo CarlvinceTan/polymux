@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "apps/Polymux/Assets"
 CATALOG = ROOT / "apps/Polymux/Sources/Assets.xcassets"
 SITE = ROOT / "apps/site"
+# Matches the app's connecting screen background in dark mode.
+APP_BG = (30, 30, 30)
 
 
 def rounded(image):
@@ -40,10 +42,16 @@ def main():
         mark.thumbnail((704, 704), Image.Resampling.LANCZOS)
     image = Image.new("RGB", (1024, 1024), "black")
     image.paste(mark, ((1024 - mark.width) // 2, (1024 - mark.height) // 2))
-    image.save(ASSETS / "AppIcon.png")
     layer = Image.new("RGBA", image.size, "white")
     layer.putalpha(image.convert("L"))
+    app = Image.new("RGB", image.size, APP_BG)
+    app.paste(layer, (0, 0), layer)
+    app.save(ASSETS / "AppIcon.png")
     layer.save(CATALOG.parent / "AppIcon.icon/Assets/P.png")
+    # The Light app logo inverts it: this mark on AppIconLight.icon's white fill.
+    light = Image.new("RGBA", image.size, APP_BG)
+    light.putalpha(image.convert("L"))
+    light.save(CATALOG.parent / "AppIconLight.icon/Assets/P.png")
 
     logo = layer.crop(layer.getchannel("A").getbbox())
     logo.thumbnail((288, 288), Image.Resampling.LANCZOS)

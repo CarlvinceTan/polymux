@@ -6,6 +6,12 @@ const [shapes] = await app.query({ role: "button", name: "Shapes" });
 if (!shapes?.selected) throw new Error("New Bot did not start on Shapes");
 // A name enables Create, whose frame bounds the picker below.
 await app.typeText("Crash Bot", { role: "textfield", name: "Name" });
+// The name is an inline field that hugs its text, not a boxed form row, and the form shows no model.
+const form = await app.getState({ include_screenshot: false, tree_format: "elements", max_elements: 250 });
+const field = form.elements.find(item => item.label === "Name" && item.role === "AXTextField");
+if (!field?.frame || field.frame.w >= 200) throw new Error("New Bot's name is no longer an inline field: " + field?.frame?.w);
+const tree = await app.getState({ include_screenshot: false, tree_format: "markdown" });
+if (/\bModel\b/.test(tree.tree_markdown)) throw new Error("New Bot shows a model row");
 const categories = ["Shapes", "Food", "Animals", "Nature", "Objects"];
 const colors = ["Black / White", "Brown", "Red", "Orange", "Amber", "Green", "Turquoise", "Blue", "Purple", "Pink", "Grey"];
 const counts = { Shapes: 25, Food: 24, Animals: 24, Nature: 23, Objects: 25 };
@@ -20,7 +26,7 @@ for (const category of categories) {
     item.frame.x >= window.x && item.frame.x + item.frame.w <= window.x + window.w &&
     item.frame.y >= window.y && item.frame.y + item.frame.h <= window.y + window.h);
   const tabs = buttons.filter(item => categories.includes(item.label));
-  const choices = buttons.filter(item => !categories.includes(item.label) && !["Create", "Close New Bot", "Dismiss panel"].includes(item.label) && item.label);
+  const choices = buttons.filter(item => !categories.includes(item.label) && !["Create", "Close New Bot", "Dismiss panel", "Close", "Full screen", "Minimize"].includes(item.label) && item.label);
   const create = buttons.find(item => item.label === "Create");
   const name = state.elements.find(item => item.label === "Name" && item.role === "AXTextField");
   if (choices.length !== counts[category]) throw new Error(category + " has " + choices.length + " choices; expected " + counts[category]);

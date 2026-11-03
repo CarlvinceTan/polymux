@@ -15,6 +15,7 @@
 | Download requests must be bounded and use published native release tags only. | `downloads.test.js` exercises stalled headers/bodies, invalid and historical versions, direct tag lookup, response validation, and shared caching. | Enforced; verification recorded below. |
 | Generated pages must not clutter authored directories or leave removed routes behind. | `.generated/` contains page shells and release metadata; `publishing.test.js` checks isolation, stale-route cleanup, source preservation, and refusal of unowned or symlink output. `pipeline.test.js` checks privacy redirects and the sitemap in development and production. | Enforced. |
 | Preview must serve a consistent built snapshot rather than current source. | A build manifest supplies preview's release metadata and hosting rules; static machine docs are not intercepted. `pipeline.test.js` previews a build with invalid changed source and checks that no generation occurs. | Enforced; verification recorded below. |
+| Hover styles must not stick after a tap, and focusing search must not zoom the page on touch screens. | Every `:hover` rule sits in a `(hover: hover) and (pointer: fine)` query; `responsive.js` scans each page's stylesheets and checks the search input's size. | Enforced; sticky hover and input zoom still need a real phone to confirm. |
 | Parallel SSR checks must not share dependency caches or bind development WebSocket ports. | `scripts/renderer.ts` owns a throwaway cache and disables both HMR and Vite 8's separate WebSocket service. Renderer shutdown deletes its cache. | Enforced; the parallel suite exposed the shared-cache failure before isolation was added. |
 
 The previous HTML recreation was visually approximate despite passing its interaction tests. The new native-surface guard failed against that implementation before it was replaced. Captures now come from the unchanged native views through the DEBUG-only `SiteFixture`; both the fixture and the website use `src/content/demo.json`. This removes the duplicated UI rather than adding another styling reminder.
@@ -29,7 +30,7 @@ The focused capture refresh was verified in the website at native scale. All 21,
 
 ## Source ownership
 
-- `src/content/` owns authored Markdown, product data, legal HTML, and site metadata. Keep `demo.json` at its current path: the native fixture consumes the same bytes.
+- `src/content/` owns authored Markdown, legal HTML, and site metadata. Keep `demo.json` at its current path: the native fixture consumes the same bytes.
 - `src/pages/` colocates page components, browser entrypoints, and page styles. `src/components/` owns shared layouts and controls; `src/styles/` owns tokens, resets, navigation, and prose styling.
 - `lib/content/` owns pure parsing and validation; `lib/server/` owns API behavior. Both use the identity and URL helpers in `lib/site.ts`.
 - `scripts/prepare.ts` validates one manifest before generating every HTML entry under `.generated/pages/` and API release metadata at `.generated/releases.json`. `.generated/` is disposable and ignored; there are no authored HTML entry shells or root-level route directories.

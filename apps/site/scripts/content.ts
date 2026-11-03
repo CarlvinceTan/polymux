@@ -1,17 +1,19 @@
-import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {JSDOM} from 'jsdom';
-import {readFeatures, text, slug, date, updated, unique, integer} from '../lib/content/documents.ts';
+import {text, slug, date, updated, unique, integer} from '../lib/content/documents.ts';
 import {readRelease} from '../lib/content/releases.ts';
+import {loadPlugins} from '../lib/content/plugins.ts';
 import {site} from '../lib/site.ts';
 import {ALL_PLATFORMS, parseReleaseChangelog, groupReleaseChangelog, filterReleaseChangelog} from '../lib/content/changelog.ts';
 import {renderSafeMarkdown} from '../lib/content/markdown.js';
-import type {BlogPost, Guide, ProductFeature, Release, Rendered, ReleaseTab} from '../lib/content/types.ts';
+import type {BlogPost, Guide, Release, Rendered, ReleaseTab} from '../lib/content/types.ts';
 
 import {readCollection, siteRoot} from './files.ts';
 export {siteRoot} from './files.ts';
 export const docsContentRoot = resolve(siteRoot, 'src/content/docs');
 export const releasesContentRoot = resolve(siteRoot, 'src/content/releases');
+// The registry the server reads, so the site lists what Settings › Plugins lists. A build fetches it.
+export const pluginRegistry = () => process.env.POLYMUX_SITE_REGISTRY || resolve(siteRoot, '.generated/registry.json');
 
 function renderDocument(body: string, window: JSDOM['window']): Rendered {
   const element = window.document.createElement('article');
@@ -64,13 +66,11 @@ export function loadContent(root = siteRoot) {
         body, html: render(body).html, tabs,
       };
     }).sort((a, b) => b.date.localeCompare(a.date) || b.version.localeCompare(a.version, undefined, {numeric: true}));
-    const features = readFeatures(JSON.parse(readFileSync(resolve(root, 'src/content/product/features.json'), 'utf8')));
     unique(posts.map((post) => post.slug), 'blog slug');
     unique(docs.map((page) => page.slug), 'documentation slug');
     unique(releases.map((release) => release.version), 'release version');
     if (!docs.some((page) => page.slug === 'introduction')) throw new Error('Documentation requires an introduction.');
-    for (const feature of features) checkGuide(feature.docsPath, docs, feature.slug);
-    return {posts, docs, releases, features};
+    return {posts, docs, releases, plugins: loadPlugins(pluginRegistry())};
   } finally { dom.window.close(); }
 }
 
@@ -85,5 +85,4 @@ export function checkGuide(href: string, docs: Guide[], source: string) {
 export function loadPublishedPosts(root = siteRoot) { return loadContent(root).posts; }
 export function loadPublishedDocs(root = siteRoot) { return loadContent(root).docs; }
 export function loadPublishedReleases(root = siteRoot) { return loadContent(root).releases; }
-export function loadProductFeatures(root = siteRoot): ProductFeature[] { return loadContent(root).features; }
 export {validateReleaseBody} from '../lib/content/changelog.ts';

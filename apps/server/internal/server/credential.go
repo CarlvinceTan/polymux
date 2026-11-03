@@ -35,7 +35,7 @@ func outputCWD(d agentruntime.Definition, dir string) string {
 	if d.Worktree != "" {
 		return d.Worktree
 	}
-	return filepath.Join(dir, d.Agent.ID)
+	return agentruntime.AgentDir(dir, d.Agent.ID)
 }
 
 func credentialOrigin(raw string) (string, error) {
@@ -613,6 +613,9 @@ func (t *httpTool) Execute(ctx context.Context, _ string, args json.RawMessage, 
 		hidden = append(hidden, secret)
 	}
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if t.server.plugins.Gated(ctx, state.chats) {
+		client.Transport = noLoopback()
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return agent.AgentToolResult{}, errors.New("API request failed")

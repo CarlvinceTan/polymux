@@ -26,12 +26,15 @@ enum VoiceEvent: Sendable {
 @MainActor
 protocol VoiceSession: AnyObject {
     var phase: VoicePhase { get }
-    var agentID: String? { get }
     var transcript: String { get }
     var response: String { get }
     var level: Float { get }
     var issue: String? { get }
     var muted: Bool { get }
+    /// When the call connected; nil while dialing.
+    var connected: Date? { get }
+    /// Tasks the agent is still running for this call.
+    var working: Int { get }
     func start() async
     func stop() async
     func retry() async
@@ -40,39 +43,20 @@ protocol VoiceSession: AnyObject {
     func toggleSilence()
 }
 
-extension VoiceSession {
-    var agentID: String? { nil }
-}
-
 @MainActor
 protocol SpeechInput: AnyObject {
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error>
     func stop() async
     func setMuted(_ muted: Bool)
-    func finishTurn()
     func finalize() async throws
 }
 
 extension SpeechInput {
-    func finishTurn() {}
     func finalize() async throws {}
 }
 
 @MainActor
-protocol SpeechOutput: AnyObject {
-    var firstAudio: (() -> Void)? { get set }
-    func speak(_ text: String) async throws
-    func stop()
-    func setSilenced(_ silenced: Bool)
-}
-
-extension SpeechOutput {
-    func setSilenced(_ silenced: Bool) {}
-}
-
-@MainActor
 protocol VoiceReply: AnyObject {
-    func preview(_ text: String)
     func stream(_ text: String) -> AsyncThrowingStream<VoiceFragment, Error>
     func stop() async
 }

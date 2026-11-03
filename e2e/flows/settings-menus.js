@@ -7,10 +7,11 @@ async function choose(name, value) {
     const [control] = await app.query(trigger);
     await app.click(trigger);
     await app.waitFor({ role: "button", name: value, timeout_ms: 3000 });
-    const firstName = { Theme: "Light", Language: "System", "Voice mode": "Take turns" }[name];
+    const firstName = { Theme: "Light", Language: "System" }[name];
     const [first] = await app.query({ role: "button", name: firstName });
     if (!control?.frame || !first?.frame) throw new Error(name + " menu has no bounds");
-    if (first.frame.y < control.frame.y + control.frame.h) {
+    // A menu opens below its row, or above when that's where the room is; it never covers the row.
+    if (first.frame.y < control.frame.y + control.frame.h && first.frame.y + first.frame.h > control.frame.y) {
         throw new Error(name + " menu covers its setting row: " + JSON.stringify({ control: control.frame, first: first.frame }));
     }
     const offset = first.frame.x + first.frame.w - control.frame.x - control.frame.w;
@@ -23,7 +24,5 @@ for (const theme of ["Light", "Dark", "System"]) await choose("Theme", theme);
 await app.click({ role: "button", name: "Models" });
 await choose("Language", "Spanish");
 await choose("Language", "System");
-await choose("Voice mode", "Live conversation");
-await choose("Voice mode", "Take turns");
 await app.click({ role: "button", name: "Close Settings" });
 return "ok";

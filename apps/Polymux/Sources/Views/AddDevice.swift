@@ -2,11 +2,12 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 import PolymuxKit
 
-/// Pairs another device: a QR code and link for this server, or a link pasted from another one.
+/// Pairs a device: a QR code and link for this network, or joins another with a pasted link.
 struct AddDevice: View {
     let client: APIClient?
     let onBack: () -> Void
-    let join: (URL) async throws -> Void
+    /// Joins another network; nil shows this network's invite.
+    var join: ((URL) async throws -> Void)? = nil
     @Environment(\.panelClose) private var close
     @State private var invite: Invite?
     @State private var issue: String?
@@ -14,10 +15,36 @@ struct AddDevice: View {
     @State private var pasteIssue: String?
     @State private var joining = false
     @State private var joinTask: Task<Void, Never>?
+    @State private var scanning = false
 
     var body: some View {
-        PanelView("Add device", onClose: { close() }, onBack: onBack) {
+        PanelView(join == nil ? "Add device" : "Join network", onClose: { close() }, onBack: onBack) {
             Form {
+                if join == nil { inviteSection } else { joinSection }
+            }
+            .formStyle(.grouped)
+        }
+        .panelDismiss(onClose: { close() })
+        #if os(iOS)
+        .fullScreenCover(isPresented: $scanning) {
+            QRScanner { text in
+                scanning = false
+                pasted = text
+                submit()
+            }
+        }
+        #endif
+        .onDisappear { joinTask?.cancel() }
+        .task(id: client?.id) {
+            // Tries again on its own until a code is ready.
+            while join == nil, !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(invite == nil ? 5 : 120))
+            }
+        }
+    }
+
+    private var inviteSection: some View {
                 Section {
                     if let invite {
                         VStack(spacing: 16) {
@@ -43,7 +70,16 @@ struct AddDevice: View {
                     }
                 }
                 .panelRow()
+    }
+
+    private var joinSection: some View {
                 Section("Join with a link") {
+                    #if os(iOS)
+                    if QRScanner.available {
+                        Button("Scan QR code", systemImage: "qrcode.viewfinder") { scanning = true }
+                            .disabled(joining)
+                    }
+                    #endif
                     TextField("Pairing link", text: $pasted, prompt: Text("Paste a pairing link"))
                         .labelsHidden()
                         .lineLimit(1)
@@ -55,7 +91,7 @@ struct AddDevice: View {
                         #endif
                     Button("Join", action: submit)
                         .disabled(joining || pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityLabel("Join server")
+                        .accessibilityLabel("Join network")
                     if let pasteIssue {
                         Text(pasteIssue).font(.footnote).foregroundStyle(.muted)
                     } else if joining {
@@ -63,24 +99,18 @@ struct AddDevice: View {
                     }
                 }
                 .panelRow()
-            }
-            .formStyle(.grouped)
-        }
-        .panelDismiss(onClose: { close() })
-        .onDisappear { joinTask?.cancel() }
-        .task(id: client?.id) {
-            // Tries again on its own until a code is ready.
-            while !Task.isCancelled {
-                await load()
-                try? await Task.sleep(for: .seconds(invite == nil ? 5 : 120))
-            }
-        }
     }
 
     private func load() async {
         guard let client else { return }
         do { invite = try await client.invite(); issue = nil }
-        catch { issue = error.isOffline ? "Offline" : "Couldn’t create a pairing code." }
+        catch is CancellationError {}
+        catch let error as URLError where error.code == .cancelled {}
+        catch {
+            var text = error.isOffline ? "Offline" : error.reason(or: "Couldn’t create a pairing code.")
+            if case let .response(status, _)? = error as? ClientError, status >= 500 { text += " (HTTP \(status))" }
+            issue = text
+        }
     }
 
     private func submit() {
@@ -93,7 +123,7 @@ struct AddDevice: View {
         joining = true
         joinTask = Task {
             defer { joining = false }
-            do { try await join(url) }
+            do { try await join?(url) }
             catch is CancellationError {}
             catch {
                 pasteIssue = error.isOffline ? "Can’t reach this server. Check its connection and try the link again." : error.reason(or: "Couldn’t pair with this server.")
@@ -110,6 +140,60 @@ struct AddDevice: View {
         #endif
     }
 }
+
+#if os(iOS)
+import VisionKit
+
+/// Reads a pairing QR code with the camera.
+private struct QRScanner: View {
+    let found: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    static var available: Bool { DataScannerViewController.isSupported }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Scanner(found: found).ignoresSafeArea()
+            Button("Close scanner", systemImage: "xmark") { dismiss() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .padding()
+        }
+    }
+
+    private struct Scanner: UIViewControllerRepresentable {
+        let found: (String) -> Void
+
+        func makeUIViewController(context: Context) -> DataScannerViewController {
+            let scanner = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])],
+                                                    isHighlightingEnabled: true)
+            scanner.delegate = context.coordinator
+            try? scanner.startScanning()
+            return scanner
+        }
+
+        func updateUIViewController(_ controller: DataScannerViewController, context: Context) {}
+        func makeCoordinator() -> Coordinator { Coordinator(found: found) }
+
+        final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+            let found: (String) -> Void
+            private var done = false
+            init(found: @escaping (String) -> Void) { self.found = found }
+
+            func dataScanner(_ scanner: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
+                guard !done else { return }
+                for case .barcode(let code) in items {
+                    if let text = code.payloadStringValue, text.hasPrefix("polymux://") {
+                        done = true
+                        found(text)
+                        return
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
 
 /// A crisp QR code on a white quiet zone, so cameras read it in both themes.
 private struct QRCode: View {

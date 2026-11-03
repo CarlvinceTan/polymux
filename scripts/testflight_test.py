@@ -1,4 +1,4 @@
-"""Verify TestFlight signing guards and export policy without contacting Apple."""
+"""Verify TestFlight signing options and export policy without contacting Apple."""
 
 import os
 from pathlib import Path
@@ -18,45 +18,43 @@ class TestFlightTests(unittest.TestCase):
         self.home = Path(self.temp.name)
         tools = self.home / "tools"
         tools.mkdir()
-        for name, body in {
-            "security": 'cat "$PROFILE_FIXTURE"',
-            "xcodebuild": 'printf "%s\\n" "$@" > "$BUILD_ARGS"',
-        }.items():
-            path = tools / name
-            path.write_text("#!/bin/sh\nset -eu\n" + body + "\n")
-            path.chmod(0o755)
+        path = tools / "xcodebuild"
+        path.write_text('#!/bin/sh\nset -eu\nprintf "%s\\n" "$@" > "$BUILD_ARGS"\n')
+        path.chmod(0o755)
         self.out = self.home / "output"
-        self.profile = self.home / "profile.plist"
         self.args = self.home / "args"
         self.env = dict(os.environ, HOME=str(self.home), PATH=f"{tools}:/usr/bin:/bin",
-                        POLYMUX_TESTFLIGHT_DIR=str(self.out), POLYMUX_BUILD_NUMBER="1.0.1",
-                        POLYMUX_TEAM_ID="23YB4896XA", POLYMUX_IOS_PROFILE=str(self.profile),
-                        PROFILE_FIXTURE=str(self.profile), BUILD_ARGS=str(self.args),
-                        ASC_KEY_PATH=str(self.home / "fixture.p8"), ASC_KEY_ID="fixture", ASC_ISSUER_ID="fixture")
-        self.write_profile()
-
-    def write_profile(self, **changes):
-        value = {"UUID": "fixture-profile", "Entitlements": {
-            "application-identifier": "23YB4896XA.com.flarehq.polymux.app", "beta-reports-active": True}}
-        value.update(changes)
-        self.profile.write_bytes(plistlib.dumps(value))
+                        POLYMUX_TESTFLIGHT_DIR=str(self.out), POLYMUX_BUILD_NUMBER="2",
+                        POLYMUX_TEAM_ID="23YB4896XA", BUILD_ARGS=str(self.args))
+        for name in ("ASC_KEY_PATH", "ASC_KEY_ID", "ASC_ISSUER_ID"):
+            self.env.pop(name, None)
 
     def run_script(self, mode, **env):
         return subprocess.run(["/bin/sh", str(SCRIPT), mode], env=dict(self.env, **env),
                               capture_output=True, text=True)
 
-    def archive_info(self, version="1.0.1"):
+    def archive_info(self, version="2"):
         path = self.out / "Polymux.xcarchive/Info.plist"
         path.parent.mkdir(parents=True)
         path.write_bytes(plistlib.dumps({"ApplicationProperties": {"CFBundleVersion": version}}))
 
-    def test_archive_uses_requested_version_and_profile(self):
+    def test_archive_signs_automatically_with_requested_version(self):
         result = self.run_script("archive")
         self.assertEqual(result.returncode, 0, result.stderr)
         args = self.args.read_text()
-        self.assertIn("CURRENT_PROJECT_VERSION=1.0.1", args)
-        self.assertIn("PROVISIONING_PROFILE_SPECIFIER=fixture-profile", args)
+        self.assertIn("CURRENT_PROJECT_VERSION=2", args)
+        self.assertIn("-allowProvisioningUpdates", args)
         self.assertIn("generic/platform=iOS", args)
+        self.assertNotIn("-authenticationKeyPath", args)
+
+    def test_api_key_is_passed_when_configured(self):
+        result = self.run_script("archive", ASC_KEY_PATH="/key.p8", ASC_KEY_ID="K", ASC_ISSUER_ID="I")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("-authenticationKeyPath\n/key.p8", self.args.read_text())
+
+    def test_partial_api_key_never_builds(self):
+        self.assertNotEqual(self.run_script("archive", ASC_KEY_PATH="/key.p8").returncode, 0)
+        self.assertFalse(self.args.exists())
 
     def test_upload_is_internal_only_and_preserves_build_number(self):
         self.archive_info()
@@ -67,27 +65,16 @@ class TestFlightTests(unittest.TestCase):
         self.assertIs(options["manageAppVersionAndBuildNumber"], False)
         self.assertEqual(options["method"], "app-store-connect")
         self.assertEqual(options["destination"], "upload")
+        self.assertEqual(options["signingStyle"], "automatic")
         self.assertIn("-exportArchive", self.args.read_text())
 
     def test_mismatched_archive_is_not_uploaded(self):
-        self.archive_info("1.0.2")
+        self.archive_info("3")
         self.assertNotEqual(self.run_script("upload").returncode, 0)
         self.assertFalse(self.args.exists())
 
-    def test_wrong_profile_is_rejected(self):
-        profiles = [
-            {"Entitlements": {"application-identifier": "other.app", "beta-reports-active": True}},
-            {"Entitlements": {"application-identifier": "23YB4896XA.com.flarehq.polymux.app"}},
-            {"ProvisionedDevices": ["fixture-device"]},
-        ]
-        for changes in profiles:
-            with self.subTest(changes=changes):
-                self.write_profile(**changes)
-                self.assertNotEqual(self.run_script("archive").returncode, 0)
-                self.assertFalse(self.args.exists())
-
     def test_invalid_number_never_builds(self):
-        for version in ("", "1.100.1", "0.1.1", "10000.1.1", "1.2.bad"):
+        for version in ("1.0.1", "0", "-3", "bad"):
             with self.subTest(version=version):
                 self.assertNotEqual(self.run_script("archive", POLYMUX_BUILD_NUMBER=version).returncode, 0)
                 self.assertFalse(self.args.exists())

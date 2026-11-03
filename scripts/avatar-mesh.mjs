@@ -3,6 +3,7 @@
 // Pass model keys to rebake only those designs; new designs are always included.
 import vm from 'node:vm'
 import { readFile, writeFile, rename } from 'node:fs/promises'
+import { deflateRawSync } from 'node:zlib'
 import { redesign } from './avatar-designs.mjs'
 import { expand, colors as extraColors } from './avatar-extras.mjs'
 
@@ -177,14 +178,23 @@ for (const [key, id] of Object.entries(names)) {
   const buffer=Buffer.alloc(8+vertices.length*6+faces.length*8)
   buffer.writeUInt32LE(vertices.length);buffer.writeUInt32LE(faces.length,4)
   let at=8
-  for(const p of vertices) for(const v of [p[0],-p[1],p[2]]) {buffer.writeInt16LE(Math.round(v*10000),at);at+=2}
-  // Reflection into y-down coordinates reverses winding.
-  for(const f of faces) for(const v of [f[0],f[2],f[1],f[3]]) {buffer.writeUInt16LE(v,at);at+=2}
+  const columns=[
+    ...[p=>p[0],p=>-p[1],p=>p[2]].map(axis=>vertices.map(p=>Math.round(axis(p)*10000))),
+    // Reflection into y-down coordinates reverses winding.
+    ...[0,2,1,3].map(i=>faces.map(f=>f[i]))]
+  // Each column is delta-coded with its low bytes first, so it compresses well.
+  for(const column of columns) {
+    column.forEach((v,i)=>{
+      const delta=(v-(column[i-1]??0))&0xffff
+      buffer[at+i]=delta&255;buffer[at+column.length+i]=delta>>8
+    })
+    at+=column.length*2
+  }
   const paints=palette(model)
   models+=`    .${id}: CharacterModel(color: "${colors[key]}", radii: [${radii.map(number)}], solid: .inflated(depth: 0.7), parts: []${eyeColor(model)}, meshID: .${id}),\n`
   output+=`    static let ${id} = MascotMesh(color: "${colors[key]}", radii: [${radii.map(number)}],\n`
   output+=`        eyes: [${eyes.map(e=>'['+e.map(number)+']').join(', ')}], paints: [${paints}],\n`
-  output+=`        encoded: "${buffer.toString('base64')}")\n`
+  output+=`        encoded: "${deflateRawSync(buffer,{level:9}).toString('base64')}")\n`
   console.log(`${id}: ${vertices.length} vertices, ${faces.length} faces`)
 }
 output+='}\n\n'+models+']\n\nfunc mascot(_ id: ShapeID) -> MascotMesh? {\n    switch id {\n'

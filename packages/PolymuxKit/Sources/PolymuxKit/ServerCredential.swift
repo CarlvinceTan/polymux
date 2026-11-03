@@ -5,10 +5,13 @@ import Foundation
 public struct ServerCredential: Codable, Sendable, Equatable {
     public let token: String
     public let ticket: String?
+    /// Where the server said it was moving, tried once its own address stops answering.
+    public let also: String?
 
-    public init(token: String, ticket: String?) {
+    public init(token: String, ticket: String?, also: String? = nil) {
         self.token = token
         self.ticket = ticket
+        self.also = also
     }
 
     public static func load(_ address: String) throws -> Self? {

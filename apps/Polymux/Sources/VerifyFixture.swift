@@ -7,22 +7,47 @@ import PolymuxKit
 final class VerifyFixture: URLProtocol, @unchecked Sendable {
     static var enabled: Bool { CommandLine.arguments.contains("--verify-fixture") }
     static var local: Bool { enabled && UserDefaults.standard.string(forKey: "PolymuxServer") == nil }
+    /// With --verify-servers, a second saved server answered by this same fixture.
+    static var secondServer: String? {
+        enabled && CommandLine.arguments.contains("--verify-servers") ? "http://studio.fixture.invalid:7337" : nil
+    }
     // UI checks capture both themes: POLYMUX_VERIFY_THEME=light|dark forces the appearance.
     static var appearance: String {
         ProcessInfo.processInfo.environment["POLYMUX_VERIFY_APPEARANCE"]
             ?? ProcessInfo.processInfo.environment["POLYMUX_VERIFY_THEME"]
             ?? (CommandLine.arguments.contains("--verify-dark") ? "dark" : "light")
     }
+    // A long chat list with full histories, for checks of render counts and frame times.
+    static let loadNames = CommandLine.arguments.contains("--verify-load") ? (1...60).map { "Bot\($0)" } : []
     static let ids = ["t-chief", "t-aria", "t-milo", "t-nova", "t-long", "t-stream", "t-approval",
-                      "grp-trip", "t-media", "t-activity", "t-fern", "grp-empty"]
+                      "grp-trip", "t-media", "t-activity", "t-fern", "grp-empty"] + loadNames.map { "t-" + $0.lowercased() }
     // Unread state matches the server fixture: t-aria 3, t-milo 1, t-nova 12, the rest read.
     static let unread: [String: Int64] = ["t-aria": 3, "t-milo": 1, "t-nova": 12]
-    static let agents = ["Chief", "Aria", "Milo", "Nova", "Approval", "Fern"].map { name in
+    static let agents = (["Chief", "Aria", "Milo", "Nova", "Approval", "Fern"] + loadNames).map { name in
         let avatar = CommandLine.arguments.contains("--verify-blocked") && name == "Chief"
             ? AvatarDesign(shape: "hexagone", color: "orange", expression: "neutre", followCursor: false,
                            animates: !CommandLine.arguments.contains("--verify-still")) : nil
+        if CommandLine.arguments.contains("--verify-model-levels") {
+            return Agent(id: "t-" + name.lowercased(), name: name, model: "chat", active: true, avatar: avatar,
+                         provider: "levels", reasoning: "medium")
+        }
         return Agent(id: "t-" + name.lowercased(), name: name, active: true, avatar: avatar)
     }
+    /// Chief's tasks: one working, one waiting on the user, one with a new reply, one finished.
+    static let taskThreads: [PolymuxKit.Thread] = [
+        ("task-report", "Launch report", TaskInfoStatus.open, RunStatus.running, Int64(0)),
+        ("task-visa", "Visa renewal", TaskInfoStatus.open, RunStatus.waitingInput, Int64(0)),
+        ("task-venue", "Venue shortlist", TaskInfoStatus.open, RunStatus.completed, Int64(2)),
+        ("task-archive", "Archive photos", TaskInfoStatus.done, RunStatus.completed, Int64(0)),
+    ].enumerated().map { index, item in
+        let at = "2026-10-23T12:0\(index):00Z"
+        let run = Run(id: "run-" + item.0, conversationID: item.0, trigger: RunTrigger.assigned, seq: 1, createdAt: at,
+                      updatedAt: at, agentID: "t-chief", status: item.3, summary: item.1)
+        return PolymuxKit.Thread(runs: [run], id: item.0, agentID: "t-chief", unreadCount: item.4, title: item.1,
+                                 agentIDs: ["t-chief"],
+                                 task: TaskInfo(description: item.1, status: item.2, updatedAt: at))
+    }
+
     static let threads = ids.map { id in
         let direct = agents.first { $0.id == id }
         let members: [String]
@@ -36,6 +61,10 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
         }
         var thread = PolymuxKit.Thread(id: id, agentID: members[0], unreadCount: unread[id] ?? 0,
                                        title: direct == nil ? id : "", agentIDs: members)
+        if id.hasPrefix("t-bot") {
+            thread.lastSeq = 100
+            thread.lastMessage = loadEvents(id).last?.message
+        }
         if CommandLine.arguments.contains("--verify-blocked"), ["t-chief", "t-aria"].contains(id) {
             thread.pinned = id == "t-chief"
             thread.pinOrder = id == "t-chief" ? 0 : nil
@@ -88,6 +117,17 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
         return Event(seq: seq, conversationID: "t-long", type: EventType.messageDone, message: message, createdAt: date)
     }
 
+    private static func loadEvents(_ id: String) -> [Event] {
+        (Int64(1)...100).map { seq in
+            let date = WireDate.string(Date(timeIntervalSince1970: 1_790_000_000 + Double(seq) * 60))
+            let text = String(repeating: "Message \(seq) in \(id) keeps a few lines of text. ", count: Int(seq % 5) + 1)
+            let message = Message(id: "\(id)-\(seq)", threadID: id, role: seq.isMultiple(of: 2) ? MessageRole.assistant : MessageRole.user,
+                                  parts: [Part(kind: PartKind.text, text: text)], createdAt: date, status: MessageStatus.done,
+                                  seq: seq, agentID: seq.isMultiple(of: 2) ? id : nil)
+            return Event(seq: seq, conversationID: id, type: EventType.messageDone, message: message, createdAt: date)
+        }
+    }
+
     /// Three group members working at once (one fetching a page, two thinking), or Chief alone fetching.
     private static func busyEvents(_ conversation: String) -> [Event] {
         let date = WireDate.string(Date())
@@ -134,6 +174,16 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
     }
 
     private static var replyEvents: [Event] {
+        if CommandLine.arguments.contains("--verify-reply-notice") {
+            let message = Message(runID: "switched-reply", id: "switched", threadID: "t-chief", role: MessageRole.assistant,
+                                  parts: [Part(kind: PartKind.text, text: "Server-authored reply.")],
+                                  createdAt: "2026-10-27T06:00:00Z", status: MessageStatus.done, seq: 1, agentID: "t-chief")
+            let run = Run(id: "switched-reply", conversationID: "t-chief", trigger: RunTrigger.message,
+                          seq: 2, createdAt: "2026-10-27T06:00:00Z", agentID: "t-chief", status: RunStatus.completed,
+                          summary: "Ready", notice: "gpt-6.1-sol hit its usage limit, so deepseek-v4-pro replied instead.")
+            return [Event(seq: 1, conversationID: "t-chief", type: EventType.messageDone, message: message, createdAt: message.createdAt),
+                    Event(seq: 2, conversationID: "t-chief", type: EventType.runDone, run: run)]
+        }
         let messages = [
             Message(id: "partial-reply", threadID: "t-chief", role: MessageRole.assistant,
                     parts: [Part(kind: PartKind.text, text: "Server-authored reply.")],
@@ -269,12 +319,24 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                       createdAt: at, payload: row)
             }
     }()
+    private static let plugins = PluginFixture()
+    private var onSecondServer: Bool {
+        Self.secondServer.map { request.url?.absoluteString.hasPrefix($0) == true } ?? false
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let path = request.url?.path ?? ""
         let loading = CommandLine.arguments.contains("--verify-profile-loading")
         let load = loading ? Self.profileLoads.next(path) : 0
+        // Everything fails from the moment the profile opens, as if the connection just dropped.
+        if CommandLine.arguments.contains("--verify-profile-offline") {
+            if ["configuration", "mcp"].contains(request.url?.lastPathComponent ?? "") { _ = Self.profileLoads.next("offline") }
+            if Self.profileLoads.count("offline") > 0 {
+                client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+                return
+            }
+        }
         if CommandLine.arguments.contains("--verify-profile-media"), path.hasPrefix("/attachments/profile-") {
             let thumbnail = path.hasPrefix("/attachments/profile-thumbnail-")
             let image = thumbnail || path.hasPrefix("/attachments/profile-image-")
@@ -296,6 +358,26 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             return
         }
         if SiteFixture.handle(self) { return }
+        if CommandLine.arguments.contains("--verify-graph"), path == "/work", let data = try? Self.plugins.response(request) {
+            reply(data)
+            return
+        }
+        if CommandLine.arguments.contains("--verify-plugins"), path.hasPrefix("/plugins"), !onSecondServer {
+            // Hub's wait for changes holds its request, as the real server does.
+            let waits = path.hasSuffix("/chats") && request.url?.query?.contains("since") == true
+            let task = Task { @Sendable [self] in
+                if waits { try? await Task.sleep(for: .seconds(2)) }
+                if let data = try? Self.plugins.response(request) { reply(data, mime: path.hasSuffix(".html") ? "text/html" : "application/json") }
+            }
+            responseLock.withLock { responseTask = task }
+            return
+        }
+        if CommandLine.arguments.contains("--verify-model-levels"), path == "/providers" {
+            let model = ProviderModel(id: "chat", tags: ["text"], enabled: true, reasoning: ["off", "low", "high", "max"])
+            let provider = Provider(id: "levels", type: "fixture", name: "Levels", enabled: true, models: [model])
+            reply((try? JSONEncoder().encode([provider])) ?? Data())
+            return
+        }
         if CommandLine.arguments.contains("--verify-providers"), path.hasPrefix("/providers") || path == "/settings" {
             let task = Task { @Sendable [self] in
                 do {
@@ -356,7 +438,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
         }
         if request.url?.lastPathComponent == "stream",
             ["--verify-tools", "--verify-settings", "--verify-busy", "--verify-profile", "--verify-blocked",
-             "--verify-credentials"].contains(where: CommandLine.arguments.contains) {
+             "--verify-credentials", "--verify-servers"].contains(where: CommandLine.arguments.contains) {
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
                                            headerFields: ["Content-Type": "text/event-stream"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -386,10 +468,11 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                 case "configuration" where CommandLine.arguments.contains("--verify-profile"):
                     data = try JSONEncoder().encode(AgentConfiguration(
                         tools: (1...6).map { "tool_\($0)" }, skills: (1...6).map { "/skills/skill-\($0)/SKILL.md" },
-                        bundledSkills: ["polymux", "report", "html-cards"]))
+                        bundledSkills: ["polymux", "report"]))
                 case "mcp" where CommandLine.arguments.contains("--verify-profile"):
                     data = try JSONEncoder().encode((1...6).map { MCPConnection(name: "Connection \($0)", enabled: true) }
                         + [MCPConnection(name: "Disabled connection"), MCPConnection(name: "Hidden connection", enabled: true, hidden: true)])
+                case "mcp": data = try JSONEncoder().encode([MCPConnection]())
                 case "status" where CommandLine.arguments.contains("--verify-profile"):
                     data = try JSONEncoder().encode((1...4).map { index in
                         MCPStatus(name: "Connection \(index)", connected: true,
@@ -414,21 +497,24 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                 case "settings":
                     let theme = CommandLine.arguments.contains("--verify-tools")
                         ? (CommandLine.arguments.contains("--tools-dark") ? "dark" : "light") : Self.appearance
-                    data = try JSONEncoder().encode(Settings(appearance: theme, sidebarWidth: 360))
+                    data = try JSONEncoder().encode(Settings(appearance: theme))
                 case "network":
                     if CommandLine.arguments.contains("--verify-network-fail") { fail(); return }
                     if CommandLine.arguments.contains("--verify-network-slow") { return }
                     let devices: [[String: Any]] = [
                         ["id": "d-mac", "name": "Home server", "paired": true],
                         ["id": "d-ios", "name": "Carlvince’s iPhone", "paired": true],
-                        ["id": "d-old", "name": "Spare MacBook Pro used for development and device-pairing verification", "label": "Spare device", "paired": true],
+                        ["id": "d-old", "name": "Spare MacBook Pro used for development and device-pairing verification", "label": "Spare device", "paired": true, "client": "spare"],
                     ]
                     data = try JSONSerialization.data(withJSONObject: [
-                        "server": ["name": "Home server", "build": "0.4.0", "platform": "macOS", "role": "server"],
+                        "server": ["id": onSecondServer ? "fixture-studio" : "fixture-home", "name": onSecondServer ? "Studio" : "Home server",
+                                   "network": onSecondServer ? "Studio" : "Home server", "build": "0.4.0", "platform": "macOS", "role": "server"],
                         "devices": devices,
                         "current": "d-ios",
                         "host": "d-mac",
                         "online": ["d-mac"],
+                        "peers": Self.secondServer == nil ? [] : [["id": "fixture-attic", "name": "Attic"]],
+                        "restricted": Self.secondServer == nil ? [] : [["id": "d-gone", "name": "Old iPad", "client": "old-ipad"]],
                     ])
                 case "invite":
                     data = try JSONEncoder().encode(Invite(url: "http://192.168.1.20:7337", token: "fixture-token",
@@ -468,6 +554,8 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                         seeded = Self.busyEvents(busy)
                     } else if CommandLine.arguments.contains("--verify-history"), request.url?.path.contains("/t-long/") == true {
                         seeded = Self.history
+                    } else if let id = Self.ids.first(where: { $0.hasPrefix("t-bot") && request.url?.path.contains("/\($0)/") == true }) {
+                        seeded = Self.loadEvents(id)
                     } else {
                         seeded = request.url?.path.contains("/t-activity/") == true ? Self.activity : []
                     }
@@ -521,6 +609,8 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                 return counts[path, default: 0]
             }
         }
+
+        func count(_ path: String) -> Int { lock.withLock { counts[path, default: 0] } }
     }
 
     private final class Profiles: @unchecked Sendable {
@@ -566,7 +656,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                 thread.unreadCount = thread.id == "t-aria" ? 3 : 0
             }
             return thread
-        }
+        } + (CommandLine.arguments.contains("--verify-profile") ? VerifyFixture.taskThreads : [])
 
         var threads: [PolymuxKit.Thread] { lock.withLock { values } }
 
@@ -586,6 +676,16 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                     let count = stream.read(&bytes, maxLength: bytes.count)
                     guard count > 0 else { break }
                     body.append(contentsOf: bytes.prefix(count))
+                }
+            }
+            if request.url?.lastPathComponent == "task" {
+                let id = request.url?.deletingLastPathComponent().lastPathComponent
+                let edit = try JSONDecoder().decode(UpdateTaskRequest.self, from: body)
+                return try lock.withLock {
+                    guard let index = values.firstIndex(where: { $0.id == id }) else { throw URLError(.resourceUnavailable) }
+                    if let status = edit.status { values[index].task?.status = status }
+                    if let pinned = edit.pinned { values[index].task?.pinnedAt = pinned ? "2026-10-23T12:00:00Z" : nil }
+                    return try JSONEncoder().encode(values[index])
                 }
             }
             let patch = try JSONDecoder().decode(UpdateThreadRequest.self, from: body)

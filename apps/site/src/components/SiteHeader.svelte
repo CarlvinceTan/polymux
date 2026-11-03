@@ -14,7 +14,7 @@
   <div class="header-inner">
     <a class="site-brand" href="/" aria-label="Polymux home"><img src={logo} alt="" /><span>Polymux</span></a>
     <nav class="header-nav" aria-label="Main navigation">
-      {#each navigation.filter((link) => link.id !== 'home') as link (link.id)}
+      {#each navigation as link (link.id)}
         <a href={link.href} aria-current={link.id === active ? 'page' : undefined}>{link.label}</a>
       {/each}
     </nav>

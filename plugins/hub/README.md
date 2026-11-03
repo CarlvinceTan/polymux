@@ -2,7 +2,7 @@
 
 Hub lets you read and send messages and mail from Polymux. `polymux-hub` (`plugins/hub/internal/hub`) runs Tuwunel on loopback with federation off, one account, and the mautrix bridges as children. The app only talks to `polymux-hub`, never to Matrix. Mail uses IMAP and SMTP directly, always over TLS. Contact links and broadcast lists stay on the server.
 
-Routes, relative to `/plugins/hub/api`: `status`, `settings`, `chats?since=`, `chats/{id}/messages`, `chats/{id}/members`, `chats/{id}/name`, `stickers`, `media`, `platforms/{id}/logins`, `people`, `chats` (POST starts one), `links`, `broadcasts`, `mail`, `mail/oauth/{provider}`.
+Routes, relative to `/plugins/hub/api`: `status`, `settings`, `chats?since=`, `chats/{id}/messages`, `chats/{id}/members`, `chats/{id}/name`, `stickers`, `media`, `platforms/{id}/logins`, `people`, `chats` (POST starts one), `links`, `broadcasts`, `mail`, `mail/send`, `mail/uploads`, `mail/{id}`, `mail/{id}/health`, `mail/{id}/signatures`, `mail/{id}/folders`, `mail/{id}/messages?folder=&page=&query=&sort=`, `mail/{id}/messages/{uid}`, `mail/{id}/messages/{uid}/files/{part}`, `mail/oauth/{provider}`. Agents get `tools/email_*`, listed in `plugin.json`, with `skills/email.md`.
 
 ## Chats
 
@@ -16,13 +16,30 @@ Routes, relative to `/plugins/hub/api`: `status`, `settings`, `chats?since=`, `c
 - **Reactions**: each reaction lists who made it, shown on hover or long press, and a tap changes it straight away.
 - **Read marks**: the sidecar keeps each person's latest `m.read` receipt from the sync stream and puts their avatar on the newest message they've reached, not on their own. Networks whose bridges send no receipts show none.
 - **Voice notes**: recorded as AAC and sent as audio with the voice flag and duration. Bridges for networks that need another format convert it, which needs `ffmpeg` beside them; Hub's package doesn't carry it.
+- **Accounts**: a chat lists the logins it belongs to. A bridge's `whoami` names each login's filtering Space, and a chat in that Space is that login's; a split portal also names its receiver. A group two logins share lists both, and a chat with neither signal shows only under All accounts. The app narrows a platform's list with a dropdown when it has more than one account.
 - **Incognito**: the sidecar keeps this, so it covers every device. While it's on, opening a chat sends no read receipt and leaves its unread count. Mail still marks messages read.
+
+## Mail
+
+Everything about a mailbox is IMAP and SMTP, one connection per account held open for five idle minutes, because a message read shouldn't cost a login. IMAP carries one command at a time, so an account's operations queue on that connection. A lost socket gets one retry on a new one, and anything the server said stays its answer.
+
+- **Reading**: a page is a window on the end of the folder, which needs no SEARCH. Remembered part layouts make opening a message one round trip, and only its text is fetched: attachments stay on the server until something asks. Every fetch peeks, so loading ahead has no side effect, and the app marks a message read when someone opens it.
+- **Search**: `mail_query.go` reads the search box's language, such as `from alice since 1-Aug-2026`, `flag unread` or `subject (a OR b)`. Anything else searches subject, sender and body.
+- **Reader**: the sender's HTML runs with no scripts in a web view that loads only HTTPS images, so a tracking pixel learns a message was opened, as in any mail app. `HubMailPage` puts `cid:` images and files where they were authored and the rest after the message.
+- **Writing**: text and signature stay apart until sending. Drafts save to the mailbox 800 ms after typing stops, one at a time, each replacing the last; what isn't saved yet is kept on the device. Files stay in `mail-uploads` on the server, so a save doesn't carry them from the app each time, and go after a week or a send. Files are placed where the caret was, as `cid:` links in the HTML part.
+- **Sent**: nothing in IMAP says whether a provider files its own copy, so the first send looks and every later one goes by what it found. After delivery nothing reports failure, which would invite sending twice.
+- **Signatures**: each mailbox has any number, with one default. The server keeps only the small email-safe subset the editor can make (`cleanSignature`).
+- **Agents**: `email_search_all` covers every inbox at once and takes from each query in turn, so one broad query can't crowd out a precise one. On a Mac it also reads Mail's envelope index read-only, which needs Full Disk Access and covers accounts only Mail can open. Mail reaches a bot as untrusted content; `email_send` delivers at once, so the skill tells bots to confirm first.
+
+`TestLiveMailbox` (`-tags livemail`, see `mail_live_test.go`) runs all of this by hand against a real server. It sends only to the mailbox itself and erases what it made.
+
+Gmail's Important label isn't read, because `go-imap` can't fetch `X-GM-LABELS`. A sender's declared priority is. IMAP on port 143 uses STARTTLS and everything else implicit TLS; unlike the Electron app, there's no unencrypted option.
 
 ## Mail credentials
 
 Passwords, refresh tokens and OAuth clients are sealed with AES-256-GCM before they reach `mail.json`, each bound to its record. The key is in the Keychain on a Mac and in an owner-only `credentials.key` elsewhere, as the server's vault does it. A locked Keychain stops mail until it's unlocked; Hub never replaces a key it can't read.
 
-Gmail and Outlook sign in with OAuth. The sidecar makes the sign-in, keeps the PKCE verifier and redeems the code, then uses XOAUTH2 for IMAP and SMTP. The app only opens the browser and catches the redirect on `http://127.0.0.1:47666/mail/callback`, since the server may be another machine. Register that address with the provider, and enter the client in Accounts the first time.
+Each provider's servers, ports and hint are in `mailPresets`. Gmail and Outlook sign in with OAuth. The sidecar makes the sign-in, keeps the PKCE verifier and redeems the code, then uses XOAUTH2 for IMAP and SMTP. The app only opens the browser and catches the redirect on `http://127.0.0.1:47666/mail/callback`, since the server may be another machine. Register that address with the provider, and enter the client in Accounts the first time.
 
 ## iMessage and WeChat
 

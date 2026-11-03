@@ -532,7 +532,7 @@ private actor VoiceProbe {
 }
 
 private actor SettingsProbe {
-    var value = Settings(revision: 1, appearance: "system", sidebarWidth: 320, voiceMode: "pipeline",
+    var value = Settings(revision: 1, appearance: "system",
                          liveProvider: "gemini", liveModel: "server-live", liveVoice: "Kore",
                          voicePrompt: "Represent {target}.", defaultProvider: "server-provider", defaultModel: "server-text")
     var patches: [SettingsPatch] = []
@@ -694,12 +694,12 @@ struct TransportTests {
         await probe.holdNext()
         let read = Task { await store.refresh() }
         await probe.waitHeld()
-        store.edit(SettingsPatch(voiceMode: "live"))
+        store.edit(SettingsPatch(liveVoice: "Aoede"))
         for _ in 0..<300 where store.isSaving { try await Task.sleep(for: .milliseconds(5)) }
         #expect(!store.isSaving)
         await probe.resume()
         await read.value
-        #expect(store.value?.voiceMode == "live")
+        #expect(store.value?.liveVoice == "Aoede")
         #expect(store.value?.revision == 2)
     }
 
@@ -749,7 +749,7 @@ struct TransportTests {
         defer { ProbeProtocol.routes.remove(host) }
         let store = SettingsStore(client: client(host: host))
         await store.refresh()
-        store.edit(SettingsPatch(voiceMode: "live", liveModel: "updated-live", liveVoice: "Aoede"))
+        store.edit(SettingsPatch(liveModel: "updated-live", liveVoice: "Aoede"))
         #expect(await store.synchronize())
         #expect(!store.isSaving)
         #expect(store.value == (await probe.value))
@@ -854,21 +854,6 @@ struct TransportTests {
         #expect(socket.host == "speech.test")
         #expect(socket.path == "/speech/live")
         #expect(socket.query == nil)
-    }
-
-    @Test func spokenRepliesStreamFromServer() async throws {
-        let host = ProbeProtocol.routes.add { request in
-            #expect(request.url?.path == "/threads/a/voice/stream")
-            #expect(request.httpMethod == "POST")
-            let body = "data: {\"agentID\":\"a\",\"text\":\"Hello. \"}\n\ndata: {\"agentID\":\"a\",\"text\":\"Done.\"}\n\nevent: done\ndata: {}\n\n"
-            return (200, Data(body.utf8))
-        }
-        defer { ProbeProtocol.routes.remove(host) }
-        var spoken: [VoiceFragment] = []
-        for try await fragment in client(host: host).voiceStream(threadID: "a", request: VoiceRequest(id: "v1", text: "Hi")) {
-            spoken.append(fragment)
-        }
-        #expect(spoken == [VoiceFragment(text: "Hello. ", agentID: "a"), VoiceFragment(text: "Done.", agentID: "a")])
     }
 
     @Test(arguments: ["Planning assistant", ""])

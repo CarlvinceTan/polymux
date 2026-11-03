@@ -439,7 +439,7 @@ func TestOpenWorkScope(t *testing.T) {
 		t.Fatal("private scratchpad crossed group scope", items, err)
 	}
 	routineFixture(t, s, "cleanup", 86400)
-	if _, _, err := s.DeleteAgent(t.Context(), "a"); err != nil {
+	if err := s.DeleteAgent(t.Context(), "a"); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"routines", "open_work", "proactivity"} {

@@ -2,7 +2,17 @@ import CoreGraphics
 import Foundation
 
 // Grok Bot's dots morph, normalized from its 114.2705-point body radius.
+struct ThinkingPhase {
+    let amount: Double
+    let time: Double
+    let core: DotRender
+    let reducedMotion: Bool
+}
+
 struct ThinkingMorph {
+    /// Parts have faded out by this amount, so their detail need not be drawn or built.
+    static let hidden = 0.22
+
     private var amount = 0.0
     private var from = 0.0
     private var exited: Double?
@@ -11,8 +21,10 @@ struct ThinkingMorph {
     private var offset = 0.0
     private var active = false
 
-    mutating func apply(_ frame: BotFrame, elapsed: Double?, now: Double, scale: Double,
-                        displaySize: Double, reducedMotion: Bool) -> BotFrame {
+    /// Not still springing back to the body.
+    var settled: Bool { exited == nil || amount <= 0.0001 }
+
+    mutating func sample(elapsed: Double?, now: Double, reducedMotion: Bool) -> ThinkingPhase? {
         if let elapsed {
             if !active {
                 entering = amount
@@ -26,9 +38,15 @@ struct ThinkingMorph {
             amount = reducedMotion ? 0 : from * (1 - springStep(now - exited!))
         }
         active = elapsed != nil
-        guard amount > 0.0001 else { return frame }
+        guard amount > 0.0001 else { return nil }
         let time = elapsed == nil ? clock + now - (exited ?? now) : clock
-        let core = thinkingDot(1, time: time, amount: amount, reducedMotion: reducedMotion)
+        return ThinkingPhase(amount: amount, time: time,
+                             core: thinkingDot(1, time: time, amount: amount, reducedMotion: reducedMotion),
+                             reducedMotion: reducedMotion)
+    }
+
+    func apply(_ frame: BotFrame, phase: ThinkingPhase, scale: Double, displaySize: Double) -> BotFrame {
+        let amount = phase.amount, core = phase.core
         let compact = clamp((displaySize - 44) / 90)
         let zoom = 1 + 0.5 * amount * (1 - compact * compact * (3 - 2 * compact))
         let bounds = frame.bodyPath.boundingBoxOfPath
@@ -38,9 +56,12 @@ struct ThinkingMorph {
                                           tx: -center.x * amount * zoom,
                                           ty: (-center.y * amount + core.y * scale * amount) * zoom)
         var result = frame
-        result.parts = frame.parts.map { part in
+        // Fading parts read as a ghost of the avatar, so they go early.
+        let fade = max(0, 1 - amount / Self.hidden)
+        result.parts = frame.parts.compactMap { part in
             var part = part
-            part.alpha *= 1 - amount
+            part.alpha *= fade
+            guard part.alpha > 0.0001 else { return nil }
             part.path = part.path.copy(using: &transform)!
             part.outline = part.outline?.copy(using: &transform)
             return part
@@ -52,8 +73,9 @@ struct ThinkingMorph {
         result.bodyPath = body.copy(using: &transform)!
         result.bodyAlpha *= 1 - (1 - core.opacity) * amount
         result.bare = max(result.bare, amount)
-        result.eyes = amount >= 0.5 ? [] : frame.eyes.map { eye in
+        result.eyes = amount > Self.hidden ? [] : frame.eyes.map { eye in
             var eye = eye
+            eye.alpha *= fade
             let size = lerp(1, hub, amount)
             eye.matrix = eye.matrix.concatenating(CGAffineTransform(a: size, b: 0, c: 0, d: size,
                 tx: center.x * (1 - size), ty: center.y * (1 - size))).concatenating(transform)
@@ -66,7 +88,7 @@ struct ThinkingMorph {
             guard progress > 0.004 else { return nil }
             let visible = easings.easeOutCubic(progress)
             let spread = 1 + 2.70158 * pow(progress - 1, 3) + 1.70158 * pow(progress - 1, 2)
-            var dot = thinkingDot(index, time: time, amount: amount, reducedMotion: reducedMotion)
+            var dot = thinkingDot(index, time: phase.time, amount: amount, reducedMotion: phase.reducedMotion)
             dot.x = Double(index - 1) * 62 / 114.2705 * spread * scale * zoom
             dot.y *= scale * zoom
             dot.r *= visible * 1.02 * scale * zoom

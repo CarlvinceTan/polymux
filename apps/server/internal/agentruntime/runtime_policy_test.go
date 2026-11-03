@@ -110,6 +110,7 @@ func TestPromptToolAvailability(t *testing.T) {
 	}{
 		{name: "intro", definition: Definition{Intro: true}, tools: []string{"update_agent", "recall_memory"}},
 		{name: "child", tools: []string{"bash", "show_html"}},
+		{name: "profile", tools: []string{"update_agent"}, want: "save it in that turn with update_agent"},
 		{name: "voice", definition: Definition{Ephemeral: true}, tools: []string{"recall_history", "recall_memory", "save_memory", "track_work", "manage_routines"}, want: "park that task with track_work"},
 		{name: "automatic", definition: Definition{Automatic: true}, tools: []string{"read"}, want: "Advance established goals with the available tools."},
 		{name: "review", definition: Definition{Automatic: true}, tools: []string{"finish_review"}, want: "For a review, use finish_review"},

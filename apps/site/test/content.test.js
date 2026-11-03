@@ -3,36 +3,9 @@ import {readFileSync, readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 import test from 'node:test';
 import {JSDOM} from 'jsdom';
-import {parse} from 'svelte/compiler';
 import {parse as parseYaml} from 'yaml';
-import {docsContentRoot, loadPublishedDocs, loadProductFeatures, siteRoot} from '../scripts/content.ts';
+import {docsContentRoot, loadPublishedDocs, siteRoot} from '../scripts/content.ts';
 import {renderSafeMarkdown} from '../lib/content/markdown.js';
-
-function images(node) {
-  if (!node || typeof node !== 'object') return [];
-  return [
-    ...(node.type === 'RegularElement' && node.name === 'img' ? [node] : []),
-    ...Object.values(node).flatMap((value) => Array.isArray(value) ? value.flatMap(images) : images(value)),
-  ];
-}
-
-test('product templates contain branding images only, not historical app screenshots', () => {
-  for (const filename of ['pages/product/ProductPage.svelte']) {
-    const source = readFileSync(resolve(siteRoot, 'src', filename), 'utf8');
-    const ast = parse(source, {modern: true});
-    for (const image of images(ast.fragment)) {
-      const src = image.attributes.find((attribute) => attribute.name === 'src')?.value;
-      assert.equal(src?.type, 'ExpressionTag', `${filename}: unexpected image source`);
-      assert.equal(src.expression.type, 'Identifier', `${filename}: unexpected image expression`);
-      assert.ok(['logo', 'github'].includes(src.expression.name), `${filename}: non-branding image`);
-    }
-  }
-  for (const feature of loadProductFeatures()) {
-    assert.equal(feature.imageKey, undefined, `${feature.slug}: screenshot data remains`);
-    assert.equal(feature.imageAlt, undefined, `${feature.slug}: screenshot data remains`);
-    assert.ok(feature.demoItems?.length, `${feature.slug}: missing text overview`);
-  }
-});
 
 test('published guides render without screenshots and link to existing guides', () => {
   const slugs = new Set(loadPublishedDocs().map(({slug}) => slug));
@@ -55,8 +28,5 @@ test('published guides render without screenshots and link to existing guides', 
     }
   } finally {
     browserWindow.close();
-  }
-  for (const feature of loadProductFeatures()) {
-    assert.ok(slugs.has(feature.docsPath.split('/')[2]), `${feature.slug}: unknown guide`);
   }
 });

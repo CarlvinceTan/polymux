@@ -1,0 +1,100 @@
+{
+  "name": "graph-visualiser",
+  "title": "Graph Visualiser",
+  "description": "See how your bots, people, devices and repositories work together.",
+  "symbol": "point.3.connected.trianglepath.dotted",
+  "selectedSymbol": "point.3.filled.connected.trianglepath.dotted",
+  "version": "0.1.0",
+  "kind": "both",
+  "surface": "graph-visualiser",
+  "engines": { "plugins": 3 },
+  "service": "bin/polymux-graph-visualiser",
+  "skills": ["skills/report-work.md"],
+  "provides": ["tools"],
+  "settings": [
+    { "key": "repositories", "title": "Repositories", "type": "text", "default": "" },
+    { "key": "github", "title": "GitHub", "type": "bool", "default": true }
+  ],
+  "tools": [
+    {
+      "name": "report_work",
+      "description": "Add or update what the Graph Visualiser shows. Report work Polymux can't see itself, such as Claude Code or Codex you started, apps you control, or their tabs. Use the ID \"me\" for yourself. Nodes with a parent sit a level deeper, under that node.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "title"],
+              "properties": {
+                "id": { "type": "string", "maxLength": 128 },
+                "title": { "type": "string", "maxLength": 200 },
+                "parent": { "type": "string", "maxLength": 128 },
+                "kind": { "type": "string", "maxLength": 32, "description": "Such as agent, app, device, repo or task." },
+                "subtitle": { "type": "string", "maxLength": 200 },
+                "symbol": { "type": "string", "maxLength": 64, "description": "SF Symbol name." },
+                "shape": { "type": "string", "enum": ["card", "pill", "circle", "frame"] },
+                "tint": { "type": "string", "enum": ["neutral", "accent", "green", "orange", "red", "purple", "blue"] },
+                "state": { "type": "string", "enum": ["idle", "working", "waiting", "done", "failed"] },
+                "blocks": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind"],
+                    "properties": {
+                      "kind": { "type": "string", "enum": ["text", "badge", "status", "progress"] },
+                      "text": { "type": "string", "maxLength": 200 },
+                      "symbol": { "type": "string", "maxLength": 64 },
+                      "value": { "type": "number", "minimum": 0, "maximum": 1 },
+                      "tint": { "type": "string", "enum": ["neutral", "accent", "green", "orange", "red", "purple", "blue"] }
+                    }
+                  }
+                },
+                "details": {
+                  "type": "array",
+                  "maxItems": 24,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["label", "value"],
+                    "properties": { "label": { "type": "string", "maxLength": 64 }, "value": { "type": "string", "maxLength": 500 } }
+                  }
+                }
+              }
+            }
+          },
+          "wires": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["from", "to"],
+              "properties": {
+                "id": { "type": "string", "maxLength": 128 },
+                "from": { "type": "string", "maxLength": 128 },
+                "to": { "type": "string", "maxLength": 128 },
+                "direction": { "type": "string", "enum": ["forward", "back", "both", "none"] },
+                "line": { "type": "string", "enum": ["solid", "dashed", "dotted"] },
+                "state": { "type": "string", "enum": ["idle", "active", "failed"] },
+                "label": { "type": "string", "maxLength": 80 }
+              }
+            }
+          },
+          "remove": { "type": "array", "maxItems": 100, "items": { "type": "string", "maxLength": 128 }, "description": "Node and wire IDs to forget." }
+        }
+      }
+    },
+    {
+      "name": "read_work",
+      "description": "List the IDs the Graph Visualiser holds, so a report can link to them, such as a repository you're working in.",
+      "parameters": { "type": "object", "additionalProperties": false, "properties": {} }
+    }
+  ]
+}

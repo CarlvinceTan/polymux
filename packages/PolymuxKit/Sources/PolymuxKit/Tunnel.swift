@@ -78,6 +78,11 @@ public actor Tunnel {
         return URL(string: "http://\(id).tunnel.invalid")!
     }
 
+    /// The address a pairing that only reaches a server through a tunnel is kept under.
+    public static func address(ticket: String) -> URL? {
+        identity(ticket).flatMap { URL(string: "http://\($0).tunnel.invalid") }
+    }
+
     /// A stable short name for the server a ticket reaches, usable as a host name.
     static func identity(_ ticket: String) -> String? {
         guard let remote = try? EndpointTicket.fromString(str: ticket).endpointAddr() else { return nil }

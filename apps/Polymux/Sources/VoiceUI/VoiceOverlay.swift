@@ -1,5 +1,8 @@
 import SwiftUI
 import PolymuxKit
+#if os(iOS)
+import PolymuxCall
+#endif
 
 struct VoiceOverlay: View {
     @State private var store: any VoiceSession
@@ -9,11 +12,14 @@ struct VoiceOverlay: View {
     @State private var retryTask: Task<Void, Never>?
     @State private var lifetime: VoiceLifetime?
     @State private var owner = UUID()
+    @State private var activity = CallActivity()
+    private let name: String
     private let dismiss: () -> Void
 
     @MainActor
-    init(store: any VoiceSession, dismiss: @escaping () -> Void) {
+    init(store: any VoiceSession, name: String, dismiss: @escaping () -> Void) {
         _store = State(initialValue: store)
+        self.name = name
         self.dismiss = dismiss
     }
 
@@ -24,10 +30,18 @@ struct VoiceOverlay: View {
                 Text(status)
                     .font(.title2).foregroundStyle(.tint)
                     .accessibilityValue(caption ?? "")
+                if let started = store.connected, !closing, store.phase != .failed {
+                    Text(started, style: .timer)
+                        .font(.callout.monospacedDigit()).foregroundStyle(.muted)
+                }
                 if let caption {
                     Text(caption)
                         .font(.body).foregroundStyle(.muted)
                         .multilineTextAlignment(.center).lineLimit(4)
+                }
+                if store.working > 0, !closing {
+                    Text("Agent is working")
+                        .font(.caption).foregroundStyle(.muted)
                 }
                 if let issue = store.issue {
                     Text(issue)
@@ -59,7 +73,15 @@ struct VoiceOverlay: View {
         .onDisappear {
             retryTask?.cancel()
             lifetime?.stop(owner)
+            activity.end()
         }
+        .onChange(of: pulse, initial: true) { _, pulse in
+            guard pulse.started != nil, !closing else { return }
+            activity.update(name: name, status: pulse.status, muted: pulse.muted, started: pulse.started)
+        }
+        #if os(iOS)
+        .onReceive(NotificationCenter.default.publisher(for: .callEnd)) { _ in close() }
+        #endif
         .onKeyPress(.escape) { close(); return .handled }
         // A failed session retries on its own a few times, so there's no retry button.
         .onChange(of: store.phase) { _, phase in
@@ -99,6 +121,18 @@ struct VoiceOverlay: View {
         }
     }
 
+    /// What the Live Activity shows, so it updates only when one of these changes.
+    private var pulse: Pulse {
+        Pulse(status: store.working > 0 && store.phase != .speaking ? "Agent working" : status,
+              muted: store.muted, started: store.connected)
+    }
+
+    private struct Pulse: Equatable {
+        let status: String
+        let muted: Bool
+        let started: Date?
+    }
+
     private var caption: String? {
         guard !closing, !store.muted, store.phase == .listening, !store.transcript.isEmpty else {
             return nil
@@ -124,6 +158,7 @@ struct VoiceOverlay: View {
         closing = true
         retryTask?.cancel()
         lifetime?.stop(owner)
+        activity.end()
         dismiss()
     }
 }

@@ -50,6 +50,53 @@ public struct APIClient: Sendable {
         try await get("network/invite", retrying: false)
     }
 
+    /// An invitation for another server to link with this one.
+    public func peerInvite() async throws -> Invite {
+        try await get("network/invite", query: [URLQueryItem(name: "role", value: "peer")], retrying: false)
+    }
+
+    public func linkPeer(_ invite: Invite) async throws {
+        var request = try await request("network/peers")
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(invite)
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
+    public func movePreview(_ target: String, merge: Bool = false) async throws -> NetworkInfo.MovePreview {
+        try await get("network/move", query: [URLQueryItem(name: "target", value: target), URLQueryItem(name: "merge", value: merge ? "1" : "0")], retrying: false)
+    }
+
+    public func startMove(_ target: String, merge: Bool = false) async throws {
+        struct Body: Encodable { let target: String; let merge: Bool }
+        var request = try await request("network/move")
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(Body(target: target, merge: merge))
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
+    /// A credential of this device's own, for the app beside a server that's about to move away.
+    public func ownDevice() async throws -> String {
+        var request = try await request("network/move/own")
+        request.httpMethod = "POST"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        return try JSONDecoder().decode([String: String].self, from: data)["token"] ?? ""
+    }
+
+    /// The credential in use, to save for a server that's moving.
+    public func currentToken() async -> String? { await credential.value() }
+
+    public func allowDevice(_ id: String) async throws {
+        var request = try await request("network/devices/\(id)/allow")
+        request.httpMethod = "POST"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
     public func draft(_ threadID: String) async throws -> DraftState {
         try await get("threads/\(threadID)/draft")
     }
@@ -67,11 +114,22 @@ public struct APIClient: Sendable {
         return try JSONDecoder().decode(DraftState.self, from: data)
     }
 
-    public func renameDevice(_ name: String) async throws {
+    public func renameDevice(_ name: String, client: String) async throws {
         var request = try await request("network/devices/self")
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["name": name])
+        request.httpBody = try JSONEncoder().encode(["name": name, "client": client])
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
+    /// Names this server's network. With `first`, only if no device has named it yet.
+    public func nameNetwork(_ name: String, first: Bool = false) async throws {
+        struct Body: Encodable { let name: String; let first: Bool }
+        var request = try await request("network")
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(Body(name: name, first: first))
         let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
     }
@@ -268,6 +326,16 @@ public struct APIClient: Sendable {
         return try JSONDecoder().decode(Thread.self, from: data)
     }
 
+    public func updateTask(id: String, pinned: Bool? = nil, status: String? = nil) async throws -> Thread {
+        var request = try await request("threads/\(id)/task")
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(UpdateTaskRequest(pinned: pinned, status: status))
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        return try JSONDecoder().decode(Thread.self, from: data)
+    }
+
     public func updateThread(id: String, title: String? = nil, agentIDs: [String]? = nil, pinned: Bool? = nil, pinOrder: Double? = nil) async throws -> Thread {
         var request = try await request("threads/\(id)")
         request.httpMethod = "PATCH"
@@ -363,6 +431,105 @@ public struct APIClient: Sendable {
         try validate(response, data: data)
     }
 
+    public func plugins() async throws -> PluginList {
+        try await get("plugins")
+    }
+
+    public func pluginMarket() async throws -> [MarketPlugin] {
+        try await get("plugins/market")
+    }
+
+    /// Recent runs and handoffs across every chat.
+    public func work() async throws -> WorkActivity {
+        try await get("work", retrying: false)
+    }
+
+    /// What a plugin's service knows beyond Polymux's own activity.
+    public func workGraph(plugin: String) async throws -> WorkGraph {
+        try await get("plugins/\(plugin)/api/graph", retrying: false)
+    }
+
+    public func installPlugin(name: String, version: String) async throws -> Plugin {
+        try await write("plugins", method: "POST", body: InstallPlugin(name: name, version: version))
+    }
+
+    public func updatePlugin(name: String, chats: [String]) async throws -> Plugin {
+        try await write("plugins/\(name)", method: "PATCH", body: UpdatePlugin(chats: chats))
+    }
+
+    public func savePluginLayout(_ layout: PluginLayout) async throws -> PluginLayout {
+        try await write("plugins/layout", method: "PUT", body: layout)
+    }
+
+    public func pluginSettings(name: String) async throws -> [PluginSetting] {
+        try await get("plugins/\(name)/settings")
+    }
+
+    public func savePluginSettings(name: String, values: [String: PluginSettingValue]) async throws -> [PluginSetting] {
+        try await write("plugins/\(name)/settings", method: "PUT", body: values)
+    }
+
+    public func transports() async throws -> [PluginTransport] {
+        try await get("transports")
+    }
+
+    public func removePlugin(name: String) async throws {
+        var request = try await request("plugins/\(name)")
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
+    public func pluginGet<T: Decodable>(_ name: String, _ path: String, query: [URLQueryItem] = []) async throws -> T {
+        try await get("plugins/\(name)/api/\(path)", query: query, retrying: false)
+    }
+
+    public func pluginWrite<T: Decodable>(_ name: String, _ path: String, method: String = "POST",
+                                          query: [URLQueryItem] = [], body: some Encodable) async throws -> T {
+        let data = try await pluginCall(name, path, method: method, query: query, body: JSONEncoder().encode(body))
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    public func pluginPerform(_ name: String, _ path: String, method: String = "POST",
+                              query: [URLQueryItem] = [], body: some Encodable) async throws {
+        _ = try await pluginCall(name, path, method: method, query: query, body: JSONEncoder().encode(body))
+    }
+
+    public func pluginDelete(_ name: String, _ path: String) async throws {
+        _ = try await pluginCall(name, path, method: "DELETE", body: nil)
+    }
+
+    /// A plugin's API waits as long as its work does, such as a QR code being scanned.
+    public func pluginCall(_ name: String, _ path: String, method: String, query: [URLQueryItem] = [],
+                           body: Data?, contentType: String = "application/json", timeout: TimeInterval = 200) async throws -> Data {
+        var request = try await request("plugins/\(name)/api/\(path)", query: query)
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        if let body {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        return data
+    }
+
+    /// A web plugin page's own request: a file beside the page, or its service under `api/`.
+    public func pluginWeb(_ name: String, path: String, query: [URLQueryItem], method: String, body: Data?,
+                          contentType: String?) async throws -> (Data, HTTPURLResponse) {
+        var request = try await request("plugins/\(name)/" + (path.hasPrefix("api/") ? path : "ui/" + path), query: query)
+        request.httpMethod = method
+        request.timeoutInterval = 200
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        if let body {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let reply = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        return (data, reply)
+    }
+
     /// Deletes a section. Its chats return to the main list, or are deleted too when `chats` is set.
     public func deleteSection(id: String, chats: Bool) async throws {
         var request = try await request("sections/\(id)", query: chats ? [URLQueryItem(name: "chats", value: "1")] : [])
@@ -404,41 +571,6 @@ public struct APIClient: Sendable {
         let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
         return try JSONDecoder().decode(VoiceResponse.self, from: data)
-    }
-
-    /// Talks to the chat's agents by voice: their reply streams as it is written, so speech starts at the first sentence.
-    public func voiceStream(threadID: String, request task: VoiceRequest) -> AsyncThrowingStream<VoiceFragment, any Error> {
-        AsyncThrowingStream { continuation in
-            let work = Task {
-                do {
-                    var request = try await request("threads/\(threadID)/voice/stream")
-                    request.httpMethod = "POST"
-                    request.timeoutInterval = 10 * 60
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    request.httpBody = try JSONEncoder().encode(task)
-                    let (bytes, response) = try await session.bytes(for: request)
-                    try validate(response)
-                    var parser = SSEParser<SpokenEvent>()
-                    for try await byte in bytes {
-                        try Task.checkCancellation()
-                        guard let event = try parser.feed(byte) else { continue }
-                        if let message = event.message { throw ClientError.response(502, message) }
-                        guard let text = event.text else { break }
-                        continuation.yield(VoiceFragment(text: text, agentID: event.agentID))
-                    }
-                    continuation.finish()
-                } catch { continuation.finish(throwing: error) }
-            }
-            continuation.onTermination = { _ in work.cancel() }
-        }
-    }
-
-    /// One server event of a spoken reply: text as it is written, a failure, or neither when it is done.
-    private struct SpokenEvent: Decodable {
-        var agentID: String?
-        var text: String?
-        var message: String?
     }
 
     public func markRead(threadID: String, seq: Int64) async throws {

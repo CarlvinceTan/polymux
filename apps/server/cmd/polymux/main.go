@@ -14,7 +14,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Println("usage: polymux serve [server flags] | pair [--url URL] [--no-qr] | drain [--status | --id ID [--cancel]] | export FILE | import FILE [--force] | version")
+		fmt.Println("usage: polymux serve [server flags] | pair [--url URL] [--no-qr] | drain [--status | --id ID [--cancel]] | host install|remove|update|forget | move --to SERVER_ID | export FILE | import FILE [--force] | version")
 		return nil
 	}
 	if args[0] == "version" {
@@ -23,6 +23,15 @@ func run(args []string) error {
 	}
 	if args[0] == "drain" {
 		return drain(args[1:])
+	}
+	if args[0] == "host" {
+		return runHost(args[1:])
+	}
+	if args[0] == "move" {
+		return runMove(args[1:])
+	}
+	if args[0] == "move-worker" {
+		return moveWorker(args[1:])
 	}
 	if args[0] == "pair" {
 		return pair(args[1:])

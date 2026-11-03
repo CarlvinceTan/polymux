@@ -31,6 +31,39 @@ func (s *failureSession) Send(context.Context, contract.Message, func(agentrunti
 	return agentruntime.Result{}, s.err
 }
 
+type noticeFactory struct{}
+
+func (noticeFactory) Open(context.Context, agentruntime.Definition, string) (agentruntime.Session, error) {
+	return &noticeSession{}, nil
+}
+
+type noticeSession struct{ testSession }
+
+func (s *noticeSession) Send(_ context.Context, _ contract.Message, emit func(agentruntime.Delta) error) (agentruntime.Result, error) {
+	if err := emit(agentruntime.Delta{Notice: "chosen hit its usage limit, so backup replied instead."}); err != nil {
+		return agentruntime.Result{}, err
+	}
+	return agentruntime.Result{Text: "Done"}, nil
+}
+
+func TestRunKeepsNotice(t *testing.T) {
+	api, endpoint := startTest(t, noticeFactory{})
+	response, err := http.Post(endpoint.URL+"/threads/assistant/messages", "application/json", strings.NewReader(`{"id":"switched","text":"Hello","attachmentIDs":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	id := store.NewRun("switched", "assistant", "assistant", "message").ID
+	waitFor(t, "run did not finish", func() bool {
+		run, err := api.Store.Run(t.Context(), id)
+		return err == nil && store.Terminal(run.Status)
+	})
+	run, err := api.Store.Run(t.Context(), id)
+	if err != nil || run.Status != contract.RunStatusCompleted || run.Notice == nil || *run.Notice != "chosen hit its usage limit, so backup replied instead." {
+		t.Fatalf("run %+v, %v", run, err)
+	}
+}
+
 func failedReply(t *testing.T, cause error, code, message string) (string, string) {
 	t.Helper()
 	api, endpoint := startTest(t, failureFactory{cause})

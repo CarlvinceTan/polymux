@@ -111,7 +111,7 @@ func TestProfileEditAppliesAfterActiveReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	factory := &profileFactory{opened: make(chan openedAgent, 4), first: make(chan struct{})}
+	factory := &profileFactory{opened: make(chan openedAgent, 5), first: make(chan struct{})}
 	api, err := New(t.Context(), s, Config{DataDir: dir, Model: "provider/default", Factory: factory, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
@@ -125,8 +125,8 @@ func TestProfileEditAppliesAfterActiveReply(t *testing.T) {
 	}
 	path := "/agents/" + agent.ID
 	initial := profileRequest(t, api, http.MethodGet, path, "", 200)
-	if initial.Prompt != "" || initial.Agent.Role != "" {
-		t.Fatalf("creation assigned instructions %+v", initial)
+	if initial.Prompt != agentruntime.DefaultPrompt || initial.Agent.Role != "" {
+		t.Fatalf("a new bot should start with the default instructions %+v", initial)
 	}
 	send := func(id string) {
 		t.Helper()
@@ -182,11 +182,18 @@ func TestProfileEditAppliesAfterActiveReply(t *testing.T) {
 	if next.definition.Agent.Reasoning != "minimal" || next.definition.Agent.Model != "next-model" || factory.closed.Load() != 2 {
 		t.Fatalf("reasoning-only edit did not reload the runtime: %+v closed=%d", next, factory.closed.Load())
 	}
+	profileRequest(t, api, http.MethodPatch, path, `{"fallback":{"mode":"off","models":[]}}`, 200)
+	send("fallback")
+	profileReply(t, api, agent.ID, "fallback")
+	next = <-factory.opened
+	if next.definition.Agent.Fallback == nil || next.definition.Agent.Fallback.Mode != "off" || factory.closed.Load() != 3 {
+		t.Fatalf("fallback edit did not reload the runtime: %+v closed=%d", next, factory.closed.Load())
+	}
 	profileRequest(t, api, http.MethodPatch, path, `{"name":"Lola"}`, 200)
 	send("renamed")
 	profileReply(t, api, agent.ID, "renamed")
 	renamed := <-factory.opened
-	if renamed.path != next.path || renamed.definition.Agent.ID != agent.ID || renamed.definition.Agent.Name != "Lola" || renamed.definition.Agent.Role != next.definition.Agent.Role || renamed.definition.Prompt != next.definition.Prompt || factory.closed.Load() != 3 {
+	if renamed.path != next.path || renamed.definition.Agent.ID != agent.ID || renamed.definition.Agent.Name != "Lola" || renamed.definition.Agent.Role != next.definition.Agent.Role || renamed.definition.Prompt != next.definition.Prompt || factory.closed.Load() != 4 {
 		t.Fatalf("name-only edit did not refresh identity and preserve the conversation: %+v", renamed)
 	}
 	cleared := profileRequest(t, api, http.MethodPatch, path, `{"name":"Edited","role":"","prompt":""}`, 200)
@@ -197,9 +204,22 @@ func TestProfileEditAppliesAfterActiveReply(t *testing.T) {
 	if reply := profileReply(t, api, agent.ID, "cleared"); reply != (agentruntime.Definition{}).SystemPrompt() {
 		t.Fatalf("cleared profile did not use generic fallback: %q", reply)
 	}
+	if reloaded := profileRequest(t, api, http.MethodGet, path, "", 200); reloaded.Prompt != agentruntime.DefaultPrompt {
+		t.Fatalf("cleared instructions should return to the default: %q", reloaded.Prompt)
+	}
+	body, err := json.Marshal(contract.UpdateAgentRequest{Prompt: pointer(agentruntime.DefaultPrompt)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved := profileRequest(t, api, http.MethodPatch, path, string(body), 200); saved.Prompt != agentruntime.DefaultPrompt {
+		t.Fatalf("saving the default changed what the editor shows: %q", saved.Prompt)
+	}
+	if stored, err := s.Profile(t.Context(), agent.ID); err != nil || stored.Prompt != "" {
+		t.Fatalf("the unedited default was stored as custom instructions: %q %v", stored.Prompt, err)
+	}
 	threads, err := s.Threads(t.Context())
 	messages, messageErr := s.Messages(t.Context(), agent.ID, 0, 100)
-	if err != nil || messageErr != nil || len(threads) != 1 || len(messages) != 11 {
+	if err != nil || messageErr != nil || len(threads) != 1 || len(messages) != 13 {
 		t.Fatalf("profile edit changed history/conversation threads=%d messages=%d err=%v/%v", len(threads), len(messages), err, messageErr)
 	}
 }
@@ -268,5 +288,54 @@ func TestProfileReasoningChangesIndependently(t *testing.T) {
 	read := profileRequest(t, api, http.MethodGet, path, "", 200)
 	if read.Agent.Reasoning != "off" {
 		t.Fatalf("invalid edit changed reasoning: %+v", read.Agent)
+	}
+}
+
+func TestProfileFallback(t *testing.T) {
+	t.Parallel()
+	api := settingsAPI(t)
+	created := httptest.NewRecorder()
+	api.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(`{"name":"Fallback","role":"","prompt":""}`)))
+	var agent contract.Agent
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &agent) != nil {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	models := []contract.ProviderModel{{ID: "backup", Tags: []string{"text"}, Enabled: true}, {ID: "spare", Tags: []string{"text"}, Enabled: true}}
+	if err := api.settings.SetProviders([]contract.Provider{{ID: "other", Name: "Other", Type: "custom", Enabled: true, BaseURL: "http://localhost/v1", Models: models}}); err != nil {
+		t.Fatal(err)
+	}
+	path := "/agents/" + agent.ID
+	if fallback := profileRequest(t, api, http.MethodGet, path, "", 200).Agent.Fallback; fallback != nil {
+		t.Fatalf("a bot should start on auto, got %+v", fallback)
+	}
+	custom := `{"fallback":{"mode":"custom","models":[{"provider":"other","model":"backup","reasoning":"low"}]}}`
+	saved := profileRequest(t, api, http.MethodPatch, path, custom, 200).Agent.Fallback
+	if saved == nil || saved.Mode != "custom" || len(saved.Models) != 1 || saved.Models[0].Reasoning != "low" {
+		t.Fatalf("custom order was not saved: %+v", saved)
+	}
+	for name, body := range map[string]string{
+		"mode":      `{"fallback":{"mode":"sometimes","models":[]}}`,
+		"model":     `{"fallback":{"mode":"custom","models":[{"provider":"other","model":"missing","reasoning":"low"}]}}`,
+		"duplicate": `{"fallback":{"mode":"custom","models":[{"provider":"other","model":"spare","reasoning":"low"},{"provider":"other","model":"spare","reasoning":"high"}]}}`,
+		"reasoning": `{"fallback":{"mode":"custom","models":[{"provider":"other","model":"spare","reasoning":"loud"}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) { profileRequest(t, api, http.MethodPatch, path, body, 400) })
+	}
+	models[0].Enabled = false
+	if err := api.settings.SetProviders([]contract.Provider{{ID: "other", Name: "Other", Type: "custom", Enabled: true, BaseURL: "http://localhost/v1", Models: models}}); err != nil {
+		t.Fatal(err)
+	}
+	// A listed model that was later disabled doesn't block editing around it.
+	off := `{"fallback":{"mode":"off","models":[{"provider":"other","model":"backup","reasoning":"high"}]}}`
+	profile := profileRequest(t, api, http.MethodPatch, path, off, 200)
+	if profile.Agent.Fallback.Mode != "off" || len(profile.Agent.Fallback.Models) != 1 {
+		t.Fatalf("off lost the custom order: %+v", profile.Agent.Fallback)
+	}
+	if reread := profileRequest(t, api, http.MethodGet, path, "", 200).Agent.Fallback; reread == nil || reread.Mode != "off" {
+		t.Fatalf("fallback was not stored: %+v", reread)
+	}
+	emptied := profileRequest(t, api, http.MethodPatch, path, `{"fallback":{"mode":"auto"}}`, 200).Agent.Fallback
+	if emptied.Models == nil {
+		t.Fatal("models must stay an array for clients")
 	}
 }

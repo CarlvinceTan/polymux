@@ -51,7 +51,8 @@ def build(repository, tag, name, out):
         env = os.environ | ({'LIBRARY_PATH': build_libsignal(folder)} if name == 'mautrix-signal' else {})
         # mautrix-discord's main package is the repository root.
         package = '.' if name == 'mautrix-discord' else f'./cmd/{name}'
-        subprocess.check_call(['go', 'build', '-tags', 'nocrypto', '-o', str((out / name).resolve()), package], cwd=folder, env=env)
+        # mautrix-bluesky panics on the default version, so stamp the tag as upstream's build scripts do.
+        subprocess.check_call(['go', 'build', '-tags', 'nocrypto', '-ldflags', f'-X main.Tag={tag}', '-o', str((out / name).resolve()), package], cwd=folder, env=env)
 
 
 def build_imessage(out):

@@ -56,7 +56,7 @@ func sidebarSnapshot(ctx context.Context, tx *sql.Tx) (contract.SidebarSnapshot,
 	if err != nil {
 		return state, err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT id,pinned,pin_order,section_id,section_order FROM threads ORDER BY id`)
+	rows, err = tx.QueryContext(ctx, `SELECT id,pinned,pin_order,section_id,section_order FROM threads WHERE id NOT IN(SELECT thread_id FROM task_threads) ORDER BY id`)
 	if err != nil {
 		return state, err
 	}

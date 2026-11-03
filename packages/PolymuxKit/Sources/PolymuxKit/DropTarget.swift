@@ -71,3 +71,26 @@ public enum DropTarget {
         return frames.first(where: { $0.value.contains(location) })?.key
     }
 }
+
+/// Opens a chat once a drag rests on it, so crossing the list or passing slowly over it opens nothing.
+@MainActor
+public final class DropDwell {
+    private let wait: Duration
+    private var held: String?
+    private var rest = CGPoint.zero
+    private var task: Task<Void, Never>?
+
+    public init(wait: Duration = .milliseconds(350)) { self.wait = wait }
+
+    public func hold(_ id: String?, at point: CGPoint, open: @escaping (String) -> Void) {
+        guard id != held || hypot(point.x - rest.x, point.y - rest.y) > 6 else { return }
+        held = id
+        rest = point
+        task?.cancel()
+        guard let id else { return }
+        task = Task { [wait] in
+            try? await Task.sleep(for: wait)
+            if !Task.isCancelled { open(id) }
+        }
+    }
+}

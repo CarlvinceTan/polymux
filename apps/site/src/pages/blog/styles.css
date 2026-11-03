@@ -28,7 +28,7 @@
 .post-next > p { color: var(--muted); font-size: 12px; text-transform: uppercase; }
 .post-next > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space); }
 .post-next a { padding: var(--space); border: 1px solid var(--line); border-radius: var(--radius); }
-.post-next a:hover { background: var(--surface); }
+@media (hover: hover) and (pointer: fine) { .post-next a:hover { background: var(--surface); } }
 .blog-empty { padding: var(--space-16); text-align: center; color: var(--muted); }
 
 @media (max-width: 980px) {

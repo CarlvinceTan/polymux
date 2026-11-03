@@ -1,6 +1,6 @@
 ---
 name: cdesign
-description: General UI design rules for responsive interactions, balanced layouts, consistent components, readable text, accessibility, and contrast. Read before creating, changing, or reviewing components, styling, layout, colour, or motion, alongside the project's own design rules.
+description: General UI design rules for responsive interactions, balanced layouts, consistent components, native platform fit, avoiding generic AI-looking UI, readable text, accessibility, and contrast. Read before creating, changing, or reviewing components, styling, layout, colour, or motion, alongside the project's own design rules.
 ---
 
 # Cdesign
@@ -36,6 +36,28 @@ Apply these reusable UI rules alongside the project's design rules. Explicit pro
 
 - Use one solid theme and style throughout the interface: shared tokens for colour, type, spacing, and radius. No one-off values.
 - Before designing an unfamiliar interaction, inspect established software with the same task. Carry over the useful behaviour and states, then use the project's components; state any parts of the reference that could not be verified.
+
+## Native platforms
+
+- Use the platform's controls, navigation and transitions. A reinvented bar, back gesture or switch reads as a ported website.
+- Use semantic system colours and system materials; they adapt to appearance and contrast settings. No raw hex or hand-rolled blur.
+- Use SF Symbols, in one consistent weight. Don't mix icon families.
+- On iPhone: lay out inside the safe area, keep edge-swipe back working, use text styles that follow Dynamic Type, and give every tappable control at least 44×44 pt.
+- Nothing depends on hover where touch is possible.
+- Honour Reduce Motion: crossfade instead of parallax and large slides.
+
+## Generic AI patterns
+
+These are defaults to reject, unless the brief asks for one.
+
+- No gradient text, coloured glows, or glass and blur as decoration.
+- No emoji or Unicode glyphs in place of icons.
+- No small uppercase label above a heading; the heading carries itself.
+- No grid of identical icon, heading and text cards as the page structure, and no nested cards.
+- No hero-metric template: a big number, a small label and supporting stats.
+- No coloured side stripe on cards, list items or callouts.
+- Declare elevation once: a border or a shadow, not both.
+- Use the product's own words. No hype such as "seamless" or "supercharge", and no invented claims.
 
 ## Text
 

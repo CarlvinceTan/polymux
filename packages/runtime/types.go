@@ -2,11 +2,32 @@ package runtime
 
 // Agent identifies a bot and its model selection; presentation belongs to the host.
 type Agent struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Role      string   `json:"role"`
+	Model     string   `json:"model"`
+	Provider  string   `json:"provider,omitempty"`
+	Reasoning string   `json:"reasoning,omitempty"`
+	Fallback  Fallback `json:"fallback,omitzero"`
+}
+
+// How a bot moves off its model when that model can't answer.
+const (
+	FallbackAuto   = "auto"
+	FallbackCustom = "custom"
+	FallbackOff    = "off"
+)
+
+// Fallback is a bot's policy for a model that can't answer. The zero value is auto.
+type Fallback struct {
+	Mode   string          `json:"mode,omitempty"`
+	Models []FallbackModel `json:"models,omitempty"`
+}
+
+// FallbackModel is one step of a custom order.
+type FallbackModel struct {
+	Provider  string `json:"provider"`
 	Model     string `json:"model"`
-	Provider  string `json:"provider,omitempty"`
 	Reasoning string `json:"reasoning,omitempty"`
 }
 

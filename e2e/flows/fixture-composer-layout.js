@@ -46,6 +46,10 @@ await settled(false);
 await app.scroll({ role: "button", name: source }, "up", 12);
 await app.waitFor({ role: "button", name: "Scroll to latest" });
 const [input] = await app.query({ role: "textfield", name: "Message" });
+const [latest] = await app.query({ role: "button", name: "Scroll to latest" });
+if (!latest?.frame || latest.frame.y + latest.frame.h >= input.frame.y) {
+    throw new Error("Latest button overlaps the message input");
+}
 const messages = await app.query({ role: "button", name: "History message" });
 const anchor = messages.find(item => item.frame && item.frame.y > initial.frame.y - 350 && item.frame.y + item.frame.h < input.frame.y - 150);
 if (!anchor) throw new Error("No visible history message to check");

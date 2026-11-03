@@ -7,6 +7,25 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct DropTests {
+    @Test func dwellOpensOnlyWhereADragRests() async {
+        let dwell = DropDwell(wait: .milliseconds(40))
+        var opened: [String] = []
+        // Moving within one row keeps restarting the wait, so a slow pass opens nothing.
+        for step in 0..<6 {
+            dwell.hold("passing", at: CGPoint(x: 10, y: CGFloat(step) * 10), open: { opened.append($0) })
+            try? await Task.sleep(for: .milliseconds(15))
+        }
+        #expect(opened.isEmpty)
+        dwell.hold("resting", at: CGPoint(x: 10, y: 200), open: { opened.append($0) })
+        dwell.hold("resting", at: CGPoint(x: 11, y: 201), open: { opened.append($0) })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(opened == ["resting"])
+        dwell.hold("left", at: CGPoint(x: 10, y: 300), open: { opened.append($0) })
+        dwell.hold(nil, at: .zero, open: { opened.append($0) })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(opened == ["resting"])
+    }
+
     @Test func chatsTargetWholeSectionsButNotBlankSpace() {
         let frames: [SidebarArea: CGRect] = [
             .pins: CGRect(x: 0, y: 0, width: 300, height: 120),

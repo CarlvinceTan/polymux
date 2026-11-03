@@ -35,7 +35,7 @@ struct MascotTests {
         }
         var edges: [Int: Int] = [:]
         for face in mesh.faces {
-            let v = face.prefix(3).map { ids[$0] }
+            let v = face.corners.map { ids[$0] }
             if Set(v).count < 3 { continue }
             for i in 0..<3 { edges[v[i] << 32 | v[(i + 1) % 3], default: 0] += 1 }
         }

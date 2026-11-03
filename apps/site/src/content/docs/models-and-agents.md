@@ -28,6 +28,14 @@ Select a **Default model** under **Models**. Set a reasoning level if your model
 
 Provider settings belong to the server, so your other clients use the same setup. A local model endpoint must be reachable from the **server Mac**, not only the client Mac.
 
+## Fallbacks
+
+Each bot decides what happens when its model can't answer. Open the bot's profile, choose **Capabilities**, and press the gear beside **Model**.
+
+- **Auto** moves to the same model on another provider, then to each remaining provider's preferred model, following your provider order. New bots start here.
+- **Custom** tries the models you list, in order, each with its own reasoning level.
+- **Off** stays on the bot's model. If it can't answer after a few retries, the reply stops with an error.
+
 ## Voice
 
-**Settings → Voice** chooses how voice works. **Cascaded** speaks with your agent directly, using the device's speech recognition and voice. **Full Duplex** uses Gemini Live or OpenAI Realtime, with the API key of your connected Gemini or OpenAI provider. Voice settings don't change the default text model.
+**Settings → Voice** uses Gemini Live or OpenAI Realtime with the API key of your connected Gemini or OpenAI provider. Talk naturally and interrupt replies; the live spokesperson consults your agents for tasks and context. Voice settings don't change the default text model.

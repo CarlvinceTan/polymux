@@ -7,7 +7,8 @@
   "cleanUrls": true,
   "rewrites": [
     {"source": "/appcast.xml", "destination": "/api/appcast"},
-    {"source": "/install.sh", "destination": "/api/install"}
+    {"source": "/install.sh", "destination": "/api/install"},
+    {"source": "/plugins/index.json", "destination": "https://raw.githubusercontent.com/CarlvinceTan/polymux/dev/plugins/index.json"}
   ],
   "redirects": [
     {"source": "/privacy", "destination": "/privacy-policy/", "permanent": true},
@@ -22,6 +23,19 @@
     {"source": "/docs/introduction", "destination": "/docs/", "permanent": true}
   ],
   "headers": [
+    {
+      "source": "/plugins/index.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, s-maxage=300, stale-while-revalidate=3600"
+        }
+      ]
+    },
     {
       "source": "/(.*)",
       "headers": [

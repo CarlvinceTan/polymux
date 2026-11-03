@@ -67,7 +67,7 @@ func TestSharedSettingsAndKeyAPI(t *testing.T) {
 		t.Fatal("speechKeys must be a list, which clients require")
 	}
 	initial := settingsRequest(t, s, "GET", "/settings", "", 200)
-	if initial.Appearance != "system" || initial.VoiceMode != "pipeline" || len(initial.SpeechKeys) != 0 {
+	if initial.Appearance != "system" || initial.LiveProvider != "gemini" || len(initial.SpeechKeys) != 0 {
 		t.Fatal("invalid server defaults")
 	}
 	settingsRequest(t, s, "PATCH", "/settings", `{"appearance":"dark","liveModel":"server-live"}`, 200)

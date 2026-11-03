@@ -21,8 +21,6 @@ struct AvatarView: View {
     var mood: MoodID? = nil
     var interactive = false
     var personality = ""
-    var showsProps = false
-    var prop: WorkProp? = nil
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scene
@@ -34,10 +32,11 @@ struct AvatarView: View {
     @Environment(\.avatarPlane) private var batched
     @Environment(\.avatarGroup) private var group
 
-    // Avatars rest while their window is inactive; each animating one updates its layers every frame.
+    // Idle avatars rest while their window is inactive; each animating one updates its layers every frame.
+    // A working bot keeps moving, so its progress doesn't look hung beside another app.
     private var awake: Bool {
         visible && appeared && options.animates && !reduceMotion && scene == .active
-            && (active || Self.alwaysMoving) && frozenAt == nil && time == nil
+            && (active || playing || Self.alwaysMoving) && frozenAt == nil && time == nil
     }
 
     private var running: Bool { awake && (playing || hovering) }
@@ -112,7 +111,6 @@ struct AvatarView: View {
         .onAppear { appeared = true; canvas.motion.suspend() }
         .onDisappear { appeared = false; canvas.stop() }
         .onChange(of: running) { _, _ in canvas.motion.suspend() }
-        .onChange(of: prop) { _, _ in canvas.motion.resetProp() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(options.shape.label) avatar, \(state.label)")
     }
@@ -121,7 +119,7 @@ struct AvatarView: View {
     private var input: AvatarInput {
         AvatarInput(options: options, state: state, expression: expression, playing: playing, frozenAt: frozenAt,
                     timeline: timeline, time: time, repeating: repeating, cueID: cueID, mood: mood,
-                    interactive: interactive, personality: personality, showsProps: showsProps, prop: prop,
+                    interactive: interactive, personality: personality,
                     reduceMotion: reduceMotion, running: running, settles: awake, gazing: hovering,
                     ink: AvatarCanvasState.resolve(ink, dark: scheme == .dark),
                     markInk: AvatarCanvasState.resolve(markInk, dark: scheme == .dark),
@@ -154,21 +152,14 @@ struct AvatarView: View {
     private var lastMood: MoodID?
     /// Still easing after playing stopped: into its rest, out of a gaze, or through a poke.
     private(set) var settling = false
+    /// Stopped short of its rest, say by its window going inactive, and owed the rest of the move.
+    private var unsettled = false
     var hover: CGPoint?
     var size = CGSize.zero
     var interactive = false
     var personality = ""
     var petted = false
     var twirling = false
-    private var currentProp: WorkProp?
-    private var propAt = 0.0
-
-    func workTime(_ prop: WorkProp) -> Double {
-        if currentProp != prop { currentProp = prop; propAt = clock }
-        return clock - propAt
-    }
-
-    func resetProp() { currentProp = nil }
 
     private var queued: [Poke] = []
 
@@ -181,7 +172,8 @@ struct AvatarView: View {
                timeline: [AvatarBlock]?, reduceMotion: Bool, repeating: Bool, cueID: String?,
                mood: MoodID?) -> BotFrame {
         // A resting avatar keeps drawing until whatever was moving settles.
-        let live = running || (settles && (settling || wasRunning))
+        let live = running || (settles && (unsettled || wasRunning))
+        let stopped = wasRunning
         wasRunning = running
         if live, let lastDate { clock += min(0.064, max(0, date.timeIntervalSince(lastDate))) }
         lastDate = live ? date : nil
@@ -200,7 +192,6 @@ struct AvatarView: View {
             lastTime = -1
         }
         wasStatic = staticPose
-        if lastMood != mood { currentProp = nil }
         lastMood = mood
         let engine = engine!
         engine.interactive = interactive && live && !controlled && state == .idle && (mood == nil || mood == .idle)
@@ -223,11 +214,14 @@ struct AvatarView: View {
         engine.setMood(timeline == nil ? activeMood ?? MoodID(expression: effective) : nil, interaction: interaction)
         if controlled, lastTime < 0 { _ = engine.sample(0) }
         if changed, !controlled {
-            engine.setShape(next.shape.radii, clock)
+            // An avatar that can't draw again can't carry a morph, so it takes the new look at once.
+            let start = settles ? clock : clock - BotEngine.SHAPE_MORPH
+            engine.setShape(next.shape.radii, start)
             engine.solid = next.shape.solid
             engine.character = next.shape.character
-            engine.setExpression(effective.expression, clock)
+            engine.setExpression(effective.expression, start)
             appliedExpression = effective
+            if options != nil { unsettled = true }
         }
         if let blocks = timeline, !blocks.isEmpty {
             let total = blocks.reduce(0) { $0 + $1.duration }
@@ -272,7 +266,8 @@ struct AvatarView: View {
         lastTime = now
         lastBlocks = timeline
         let frame = engine.sample(now)
-        settling = settles && live && !controlled && !engine.settled(now)
+        unsettled = (live || stopped || unsettled) && !controlled && !engine.settled(now)
+        settling = settles && unsettled
         return frame
     }
 

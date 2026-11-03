@@ -168,6 +168,34 @@ private func coordinates(_ path: CGPath) -> [Double] {
         for sample in reference.look { frame(look.sample(sample.at), sample.frame, "look \(sample.at)") }
     }
 
+    @Test func morphsKeepAnAvatarDrawing() {
+        let engine = BotEngine(shape: ShapeID.circle.radii, expression: EXPRESSION_BY_ID["neutre"]!)
+        #expect(engine.settled(1))
+        engine.setShape(ShapeID.cupcake.radii, 1)
+        #expect(!engine.settled(1.2))
+        #expect(engine.settled(1.5))
+        engine.setExpression(EXPRESSION_BY_ID["colere"]!, 2)
+        #expect(!engine.settled(2.2))
+        #expect(engine.settled(2.5))
+    }
+
+    @Test func costlyCharactersDoNotShareACachedPose() {
+        func dress(_ engine: BotEngine, _ shape: ShapeID, at now: Double) {
+            engine.setShape(shape.radii, now)
+            engine.solid = shape.solid
+            engine.character = shape.character
+        }
+        let engine = BotEngine(shape: ShapeID.cupcake.radii)
+        dress(engine, .cupcake, at: 0)
+        engine.resting = true
+        engine.setMood(.idle)
+        let cupcake = engine.sample(1).parts
+        dress(engine, .pumpkin, at: 1)
+        let pumpkin = engine.sample(2).parts
+        #expect(cupcake.contains { $0.color == "#FFF0CC" })
+        #expect(!pumpkin.isEmpty && !pumpkin.contains { $0.color == "#FFF0CC" })
+    }
+
     @Test func seededDecorAndDurationsMatchUpstream() throws {
         let reference = try engineReference()
         for (actual, expected) in [(RINGS, reference.rings), (COMET_RIBBONS, reference.comet)] {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createDownloads} from '../lib/server/downloads.ts';
+import {createNightly} from '../lib/server/nightly.ts';
 import {loadContent} from '../scripts/content.ts';
 import {visiblePlatforms} from '../src/lib/platform.ts';
 import {response} from './helpers.js';
@@ -119,4 +120,24 @@ test('download cards only show platforms the release actually ships', () => {
     version: '1.0.0', releaseUrl: 'https://github.com/CarlvinceTan/polymux/releases/tag/app-v1.0.0',
     platforms: {macos: asset, windows: asset, linux: asset},
   }), ['macos', 'windows', 'linux']);
+});
+
+test('nightly serves the newest dev-updates payload by build number', async () => {
+  const assets = ['Polymux-dev-4000001.9.1.zip', 'Polymux-dev-4000001.12.1.zip', 'Polymux-dev-4000001.12.2.zip', 'Polymux-dev-3999999.99.9.zip', 'appcast.xml', 'Polymux-1.dSYM.zip']
+    .map((name) => ({name, browser_download_url: `https://files.example/${name}`, size: 5}));
+  const release = {tag_name: 'dev-updates', html_url: 'https://github.com/CarlvinceTan/polymux/releases/tag/dev-updates', assets};
+  const result = response();
+  await createNightly({request: async () => json(release)})({}, result);
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.json().version, '4000001.12.2');
+  assert.equal(result.json().macos.url, 'https://files.example/Polymux-dev-4000001.12.2.zip');
+});
+
+test('nightly is unavailable without a payload, a matching tag, or upstream', async () => {
+  const release = (overrides) => ({tag_name: 'dev-updates', html_url: 'https://github.com/x/y', assets: [], ...overrides});
+  for (const request of [async () => json(release({})), async () => json(release({tag_name: 'other'})), async () => json(release({draft: true})), async () => {throw new Error('offline');}]) {
+    const result = response();
+    await createNightly({request})({}, result);
+    assert.equal(result.statusCode, 503);
+  }
 });

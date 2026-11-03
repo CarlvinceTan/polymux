@@ -14,4 +14,4 @@ Spacing refinement requested on 2026-10-29:
 
 Equalize the three narrow black clearances: above the inner chevron, between the two facing left tips, and below the inner chevron. Keep the existing bold white outline, softened corners and outer P/ribbon silhouette. Open the lower clearance so none of the three almost touch.
 
-Run uv run --no-project scripts/icon.py to export the transparent native icon layer, connecting logo, website logo and favicon from Logo.png. AppIcon.icon supplies the solid black background; Xcode generates platform sizes.
+Run uv run --no-project scripts/icon.py to export the transparent native icon layer, connecting logo, website logo and favicon from Logo.png. AppIcon.icon supplies the solid dark background, and AppIconLight.icon the white one for the Light app logo; Xcode generates platform sizes.

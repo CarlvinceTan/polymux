@@ -18,6 +18,7 @@ Apply these unless instructed otherwise.
 - Don't retain legacy code (old paths, compatibility shims, deprecated fallbacks) unless instructed; suggest keeping it if removal might be a concern.
 - Define what success looks like up front, and don't stop until it is achieved.
 - Other agents may edit this tree at the same time. Before editing an area, list recent changes (`find . -mmin -30 -type f -not -path './.build/*' -not -path '*/node_modules/*'`) and re-read changed files. Report another agent's in-progress breakage rather than reworking it.
+- At the end of a task, check whether `AGENTS.md` or `AGENTS.local.md` went stale because of new changes, workflows or setup. If so, propose the exact edit in your report, and make it only once it is explicitly accepted.
 
 ## Reference Matching
 
@@ -42,6 +43,7 @@ When asked to make something like another app or implementation, follow this ord
   - Most flows cover behaviour against a real server (create a chat and send, search, relaunch persistence).
   - Flows whose first line is `// @fixture <flags>` cover states a real server can't produce on demand (failed, slow, approvals). They run against a copy of the instance's app on the DEBUG fixture server, started with those flags. `--verify-fixture` alone shows no window; add a view flag such as `--verify-tools`.
   - A `// @relaunch` line quits and reopens the app midway, and `// @crash` kills it; the next part gets the previous result as `PREVIOUS`.
+  - A `// @fresh` line runs the flow on `run.sh --fresh`, where the app runs its own server. A `// @second-server` line starts another live server and gives the flow its pairing link as `SECOND_LINK`; `// @linked-job` links that server with the first and runs it under launchd.
 - Follow the user's GUI control preference in `AGENTS.local.md`, which may allow background control, foreground control, or both. If no preference is saved, use background control. For manual checks, use the `cua-driver` skill.
 - Clean up after manual testing: close every browser window, tab, app, and server you opened, including Chrome windows used to check a site or docs. Verify they are closed; nothing should still be running or cluttering the dock when the task is done.
 - Add or change an E2E test without asking when it is genuinely useful: it covers behaviour that is easy to break, or keeps a flow true to an intended change. Mention it in the report.
@@ -52,13 +54,47 @@ When asked to make something like another app or implementation, follow this ord
 
 Keep toolchains and dependencies on the latest stable release unless that breaks something; prefer upgrading in one scoped change over mixing it with feature work.
 
-- Keep one Go version. `go.work` and `apps/server/go.mod` carry the same `go` directive, and CI reads `apps/server/go.mod`; don't leave a lagging `toolchain` line. Update any doc that states the Go version (`apps/site/src/content/docs/`).
+- Keep one Go version. `go.work`, `apps/server/go.mod` and `plugins/go.mod` carry the same `go` directive, and CI reads `apps/server/go.mod`; don't leave a lagging `toolchain` line. Update any doc that states the Go version (`apps/site/src/content/docs/`).
 - Swift packages are locked by `Package.resolved` (`Package.swift` at the root and under `apps/Polymux`); the site uses `apps/site/package-lock.json`. Refresh the lock file with the upgrade, not separately.
 - Read the release notes for each major or minor bump, then apply only the migration it requires. Drop deprecated APIs the upgrade obsoletes instead of leaving compatibility shims.
 - Preserve behaviour. An upgrade should not change what the app does; a visible or behavioural difference is a bug to fix, or an intentional change to state explicitly and verify against the reference.
 - Verify with the build plus existing tests and the E2E flows that cover the upgraded area (`scripts/check.sh`, `scripts/run-e2e.sh`). Say which checks you ran and which you could not.
 - If latest can't be adopted, keep the reason next to the pin and report it rather than silently staying behind.
 - In the report: versions before and after, breaking changes handled, and any behaviour left unverified.
+
+## Plugins
+
+[`docs/plugins.md`](docs/plugins.md) is how plugins work. Read it before changing them, and update it when the manifest, index, routes or capabilities change.
+
+How it fits together:
+
+- Polymux ships no plugin code. A plugin is a versioned package listed in a JSON registry, installed at a pinned version only when someone confirms it. The package's `plugin.json` decides what it is, not its registry row.
+- Global plugins replace the sidebar and content through the switcher. Scoped plugins attach to chats, direct or group, and may have no UI. Chats always stays in the switcher.
+- The server owns install state, chat activation and the shared layout (`apps/server/internal/plugins`). It runs at most one service per plugin and forwards `/plugins/{name}/api/*` to it behind normal device authentication.
+- Plugin screens are native and ship in the app, because iOS can't load native code. A package only names a `surface`, which `apps/Polymux/Sources/Plugins/PluginSurface.swift` maps to views. An app without that surface shows Needs update. The exception is `web`: a Scoped package ships its own page, which fills the side panel.
+- `plugins/index.json` on `dev` is the one registry, served at `https://polymux.com/plugins/index.json` (`apps/site/vercel.json`). The server's Marketplace and the site's `/plugins/` page both read it, so never give either its own list. The official plugins' code and packaging live in `plugins/`.
+
+Developing a plugin:
+
+- Everything beyond `kind` is opt-in: `surface`, `service`, `skills`, `settings`, `provides`. Add only what the plugin needs.
+- A plugin with a `surface` must set `symbol` (unfilled, for unselected) and `selectedSymbol` (filled, for selected). Installs without both are refused.
+- A plugin sets its icons and nothing else about its chrome, except that a web plugin can hide the side panel's close button. Buttons, the close button, panels and layout belong to the app. Reuse the app's components, so a plugin reads like the rest of Polymux; Hub reuses the bot chat's bubbles, replies and composer parts.
+- Add new `Plugin*` or plugin-specific types to `contracts/polymux.schema.json` and run `python3 contracts/generate.py`. Don't hand-edit the generated files.
+- A service gets `POLYMUX_PLUGIN_PORT`, `POLYMUX_PLUGIN_TOKEN`, `POLYMUX_PLUGIN_DATA`, `POLYMUX_PLUGIN_ROOT` and, with settings, `POLYMUX_PLUGIN_SETTINGS`. Keep its state in the data folder, which uninstalling removes. It's built with `CGO_ENABLED=0`, so its dependencies must be pure Go.
+- Client stores follow the Data rules in `DESIGN.md`: restore what's saved first, then refresh, and only load ahead in ways with no side effect. Hub's preloading must never mark a chat read.
+
+Testing a plugin:
+
+- Server: `go test -tags sqlite_fts5 ./internal/plugins` from `apps/server`. A plugin's own tests run with `scripts/test.sh plugins`.
+- UI: add routes to `apps/Polymux/Sources/PluginFixture.swift` and flows in `e2e/flows/fixture-plugin*.js` or `fixture-hub*.js`, started with `// @fixture --verify-fixture --verify-plugins`. Running by hand with `scripts/run.sh --fixture` also needs a view flag, such as `--verify-settings`.
+- Never test against a real account, bridge or mailbox. Reading can have side effects, and sending reaches real people. Say what stayed unverified against the real service.
+
+Maintaining plugins:
+
+- Saved installs keep the manifest they were installed with, so a manifest or service change reaches an install only when it's reinstalled. Bump `version` for every release.
+- A bridge's seed config only applies when its config is first written, so a change to `seedConfig` doesn't reach existing installs.
+- Raise `plugins.APIVersion` and the package's `engines.plugins` for an incompatible plugin API change. Ship a new `surface` in the app before listing the package that needs it.
+- Release a plugin from `dev`: bump `version` in its `plugin.json`, then run the Release plugin workflow with the plugin's name. It tests, builds every target, publishes the release and merges the entry into `plugins/index.json` on `dev`, which polymux.com serves.
 
 ## Documentation
 

@@ -8,9 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
 )
+
+// sealLimit is how long a restarted server waits for its installer to confirm it.
+const sealLimit = 10 * time.Minute
 
 // admission covers whole jobs, including finalization and their asynchronous descendants.
 type admission struct {
@@ -40,7 +44,38 @@ func (s *Server) loadDrain() error {
 	if len(data) < 16 || len(data) > 128 {
 		return errors.New("invalid maintenance identity")
 	}
-	s.admission.id, s.admission.state = string(data), "ready"
+	id := string(data)
+	s.admission.id, s.admission.state = id, "ready"
+	time.AfterFunc(sealLimit, func() { s.releaseSeal(id) })
+	return nil
+}
+
+// releaseSeal reopens a server whose update never confirmed it, so a failed installer can't stop chats for good.
+func (s *Server) releaseSeal(id string) {
+	a := &s.admission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.id != id {
+		return
+	}
+	if err := s.endDrain(); err != nil {
+		s.config.Log.Error("resume after a stalled update", "error", err)
+		return
+	}
+	s.config.Log.Warn("resumed after a stalled update", "update", id)
+}
+
+// endDrain reopens admission; the caller holds the admission lock.
+func (s *Server) endDrain() error {
+	a := &s.admission
+	if err := os.Remove(filepath.Join(s.config.DataDir, "maintenance")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	a.id, a.state = "", ""
+	if a.changed != nil {
+		close(a.changed)
+		a.changed = nil
+	}
 	return nil
 }
 
@@ -167,14 +202,9 @@ func (s *Server) drain(w http.ResponseWriter, r *http.Request) {
 		if a.state == "" {
 			break
 		}
-		if err := os.Remove(filepath.Join(s.config.DataDir, "maintenance")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := s.endDrain(); err != nil {
 			s.respond(w, nil, err)
 			return
-		}
-		a.id, a.state = "", ""
-		if a.changed != nil {
-			close(a.changed)
-			a.changed = nil
 		}
 		status = a.status()
 	default:
@@ -227,6 +257,5 @@ func executionRequest(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false
 	}
-	return r.URL.Path == "/providers/logins" || strings.HasSuffix(r.URL.Path, "/voice") ||
-		strings.HasSuffix(r.URL.Path, "/voice/stream")
+	return r.URL.Path == "/providers/logins" || strings.HasSuffix(r.URL.Path, "/voice")
 }

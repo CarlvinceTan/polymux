@@ -81,7 +81,7 @@ func TestAgentConfiguration(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil || !slices.Equal(config.Tools, []string{"read", "ls"}) || !slices.Equal(config.Skills, []string{path}) {
 		t.Fatal(config, err)
 	}
-	if !slices.Equal(config.BundledSkills, []string{"polymux", "report", "html-cards", "skill-creator"}) {
+	if !slices.Equal(config.BundledSkills, []string{"polymux", "report", "skill-creator", "plugin-creator"}) {
 		t.Fatal("configuration omitted bundled skills", config.BundledSkills)
 	}
 	var fields map[string]json.RawMessage
@@ -119,7 +119,7 @@ func TestAgentConfiguration(t *testing.T) {
 	if err := json.Unmarshal(call("GET", "", 200), &config); err != nil || len(config.Tools) != 0 || len(config.Skills) != 0 || config.Workspace != "" {
 		t.Fatal(config, err)
 	}
-	if !slices.Equal(config.BundledSkills, []string{"polymux", "report", "html-cards", "skill-creator"}) {
+	if !slices.Equal(config.BundledSkills, []string{"polymux", "report", "skill-creator", "plugin-creator"}) {
 		t.Fatal("clearing configured skills removed bundled skills", config.BundledSkills)
 	}
 	response := httptest.NewRecorder()

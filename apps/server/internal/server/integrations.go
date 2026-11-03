@@ -116,7 +116,7 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 				available = append(available, item.Name)
 			}
 		}
-		folder := filepath.Join(s.config.DataDir, a.id, "skills")
+		folder := filepath.Join(agentruntime.AgentDir(s.config.DataDir, a.id), "skills")
 		return toolResult(map[string]any{"mcp": names, "availableMCP": available, "skills": d.Skills, "skillFolder": folder, "tools": d.Tools, "devices": d.Devices})
 	case "attach", "detach":
 		legacy := slices.ContainsFunc(d.MCP, func(config agentruntime.MCPServer) bool { return config.Name == input.Name })
@@ -293,7 +293,7 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 // loaded arranges for a changed bot to pick up its setup without waiting for another message.
 func (t *integrationTool) loaded(ctx context.Context, state *turnState, target string) (agent.AgentToolResult, error) {
 	if target == state.run.AgentID {
-		if automatic(state.work.Trigger) && state.work.Trigger != contract.RunTriggerFollowUp {
+		if isolatedTurn(state.work.Trigger) {
 			return toolResult(map[string]any{"configured": true, "available": "next turn"})
 		}
 		state.mu.Lock()

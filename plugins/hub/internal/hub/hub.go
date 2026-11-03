@@ -90,6 +90,7 @@ func Run(ctx context.Context, config Config) error {
 		defer close(running)
 		s.start(ctx)
 	}()
+	defer s.mail.close()
 	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 		cancel()
 		<-running
@@ -261,7 +262,7 @@ func (s *service) status(ctx context.Context) contract.HubStatus {
 	state, issue, client, fleet := s.state, s.issue, s.matrix, s.bridges
 	s.mu.Unlock()
 	status := contract.HubStatus{State: state, Platforms: []contract.HubPlatform{}, Mail: s.mail.accounts(),
-		MailProviders: s.mail.providers(), Incognito: s.prefs.get().Incognito, Selector: s.prefs.get().Selector}
+		MailProviders: s.mail.providers(), MailPresets: presets(), Incognito: s.prefs.get().Incognito, Selector: s.prefs.get().Selector}
 	if issue != "" {
 		status.Issue = &issue
 	}
@@ -273,6 +274,7 @@ func (s *service) status(ctx context.Context) contract.HubStatus {
 	}
 	if client != nil && len(status.Platforms) > 0 {
 		client.setSelves(append(accountIDs(status.Platforms), fleet.hiddenIDs(ctx)...))
+		client.setSpaces(fleet.loginSpaces())
 	}
 	status.WechatRename = fleet != nil && (fleet.wechat != nil || fleet.adopted) && s.renamer != nil && s.renamer.available()
 	status.TextOnly = []string{}
@@ -341,6 +343,7 @@ func (s *service) routes() http.Handler {
 	s.loginRoutes(mux)
 	s.peopleRoutes(mux)
 	s.mailRoutes(mux)
+	s.toolRoutes(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+s.config.Token {
 			w.WriteHeader(http.StatusUnauthorized)

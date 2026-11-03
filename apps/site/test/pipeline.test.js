@@ -148,7 +148,8 @@ test('development watches content creation, edits, and removal without restartin
     const prepared = prepare({root: fixture.root});
     dev = await createServer({root: fixture.root, cacheDir: resolve(fixture.root, '.vite'), configFile: false, logLevel: 'silent', appType: 'mpa',
       plugins: [sitePlugin(prepared, fixture.root), svelte()],
-      server: {host: '127.0.0.1', port: 0, hmr: false, ws: false, fs: {allow: [fixture.root, siteRoot]}},
+      // Polls, as the site's config does: macOS file events can arrive after this test's wait.
+      server: {host: '127.0.0.1', port: 0, hmr: false, ws: false, watch: {usePolling: true, interval: 25}, fs: {allow: [fixture.root, siteRoot]}},
     });
     await dev.listen();
     const devOrigin = `http://127.0.0.1:${dev.httpServer.address().port}`;
@@ -198,7 +199,7 @@ test('preview serves the built snapshot even when source content has changed or 
     fixture.write('dist/index.html', '<!doctype html><h1>Built snapshot</h1>');
     fixture.write('dist/llms-full.txt', 'Published documentation snapshot');
     fixture.write('dist/_site/manifest.json', JSON.stringify({hosting: {}, releases: []}));
-    fixture.write('src/content/product/features.json', 'Invalid work in progress');
+    fixture.write('src/content/site.json', 'Invalid work in progress');
     previewServer = await preview({root: fixture.root, configFile: false, plugins: [previewPlugin()], logLevel: 'silent', build: {outDir: 'dist'}, preview: {host: '127.0.0.1', port: 0}});
     const url = `http://127.0.0.1:${previewServer.httpServer.address().port}`;
     assert.equal(await (await fetch(`${url}/llms-full.txt`)).text(), 'Published documentation snapshot');

@@ -11,6 +11,8 @@ export default defineConfig(({isPreview}) => {
   return {
     appType: 'mpa',
     plugins: [sitePlugin(prepared), svelte(), assetLinks()],
+    // Polls, because macOS file events can arrive many seconds late on a busy machine.
+    server: {watch: {usePolling: true}},
     build: {
       outDir: resolve(siteRoot, 'dist'),
       emptyOutDir: true,

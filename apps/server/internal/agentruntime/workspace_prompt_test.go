@@ -9,7 +9,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
-func TestWorkspaceFirstReply(t *testing.T) {
+func TestWorkspacePrompt(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -19,7 +19,10 @@ func TestWorkspaceFirstReply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, "Working in ~/code/Polymux in a detached conversation checkout") || !strings.Contains(prompt, "Do not create or push another branch") {
-		t.Fatal("first reply does not identify the repository and detached workflow")
+	if strings.Contains(prompt, "Start your first reply") {
+		t.Fatal("prompt scripts the first reply")
+	}
+	if !strings.Contains(prompt, "working in ~/code/Polymux in a detached conversation checkout") || !strings.Contains(prompt, "Do not create or push another branch") {
+		t.Fatal("prompt does not identify the repository and detached workflow")
 	}
 }
