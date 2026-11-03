@@ -3,7 +3,7 @@
 let app = await cua.getApp(APP);
 const host = await app.getState({ query: "Settings", include_screenshot: false });
 async function capabilities() {
-    const state = await app.getState({ query: "Capabilities", tree_format: "elements", include_screenshot: false, max_elements: 120 });
+    const state = await app.getState({ query: "Capabilities", tree_format: "elements", include_screenshot: false, max_elements: 120, timeout_ms: 5000 });
     const tabs = state.elements.filter(row => row.role === "AXButton" && row.label === "Capabilities");
     if (state.truncated || tabs.length !== 1) throw new Error("Capabilities tab lookup is incomplete or ambiguous");
     await app.click(tabs[0].element_token);

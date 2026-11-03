@@ -3,7 +3,7 @@
 const app = await cua.getApp(APP);
 let chief;
 for (let i = 0; i < 30 && !chief; i++) {
-    const state = await app.getState({ query: "Chief", tree_format: "elements", include_screenshot: false, max_elements: 300 });
+    const state = await app.getState({ query: "Chief", tree_format: "elements", include_screenshot: false, max_elements: 300, timeout_ms: 5000 });
     if (state.truncated) throw new Error("Chief lookup is incomplete");
     chief = state.elements.find(item => item.role === "AXButton" && item.label?.startsWith("Chief, "));
     if (!chief) await cua.sleep(100);
