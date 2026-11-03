@@ -15,7 +15,7 @@ Paths below are relative to the repository root.
 | Directory | What lives here |
 | --- | --- |
 | [`apps/Polymux/`](../apps/Polymux/) | SwiftUI app, platform integrations, and app-specific tests. Start with `Sources/Views/` for screens. |
-| [`apps/server/`](../apps/server/) | Go server and CLI. `cmd/polymux/` is the entry point; `internal/` contains the implementation; `evals/` checks agent behaviour. |
+| [`apps/server/`](../apps/server/) | Go server and CLI. `cmd/polymux/` is the entry point; `internal/` contains the implementation; `evals/` checks agent behaviour; `bench/` scores quality, speed and cost against a real model. |
 | [`apps/site/`](../apps/site/) | Public website and user-facing documentation. |
 | [`packages/`](../packages/) | Reusable Go backend modules (`runtime`, `memory`, `vault`, `search`) and shared Swift app code. See [Backend packages](packages.md) for backend usage and boundaries. |
 | [`contracts/`](../contracts/) | Shared API schema and code generation for the server and clients. |
@@ -41,6 +41,7 @@ Generated output is separate from source: `.build/` holds caches and local build
 | [Plugins](plugins.md) | Global and Scoped plugins, packages, the index, and Hub. |
 | [Control candidate](control.md) | The observation-only UI tooling experiment and its current limits. E2E input still uses Cua. |
 | [References](references.md) | Other products that inform Polymux's behaviour. |
+| [Benchmarks](benchmarks.md) | The planned benchmark index: quality, speed and cost across harnesses, and how it stays honest. |
 
 ## Working on a change
 
