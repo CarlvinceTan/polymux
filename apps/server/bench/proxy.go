@@ -50,11 +50,12 @@ type Proxy struct {
 	server   *http.Server
 	client   *http.Client
 
-	mu       sync.Mutex
-	calls    map[string][]Call
-	inflight map[string]int
-	recorded map[string]bool
-	spent    float64
+	mu        sync.Mutex
+	calls     map[string][]Call
+	inflight  map[string]int
+	recorded  map[string]bool
+	exhausted bool // the provider reported its usage limit
+	spent     float64
 }
 
 // Start listens on a loopback port.
@@ -92,6 +93,26 @@ func (p *Proxy) Busy(run string) bool {
 }
 
 // Spent is the suite's cost so far.
+// Exhausted reports that the provider has refused calls for its usage limit.
+func (p *Proxy) Exhausted() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.exhausted
+}
+
+// Failed counts a run's calls the provider refused or broke, which make its score meaningless.
+func (p *Proxy) Failed(run string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, c := range p.calls[run] {
+		if c.Status == http.StatusTooManyRequests || c.Status >= 500 {
+			n++
+		}
+	}
+	return n
+}
+
 func (p *Proxy) Spent() float64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -196,6 +217,12 @@ func (p *Proxy) complete(w http.ResponseWriter, r *http.Request, run string) {
 		data, _ := io.ReadAll(response.Body)
 		_, _ = w.Write(data)
 		call.meter(data)
+		// A spent allowance fails every later call, so the suite stops rather than score the provider's outage.
+		if response.StatusCode == http.StatusTooManyRequests && bytes.Contains(data, []byte("UsageLimit")) {
+			p.mu.Lock()
+			p.exhausted = true
+			p.mu.Unlock()
+		}
 		return
 	}
 	flusher, _ := w.(http.Flusher)

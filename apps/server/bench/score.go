@@ -131,7 +131,17 @@ func percentile(values []float64, q float64) float64 {
 }
 
 // Summarize renders the suite's results as Markdown.
-func Summarize(rows []Row) string {
+func Summarize(all []Row) string {
+	// Runs the provider broke say nothing about a harness, so they're counted, not scored.
+	var rows []Row
+	invalid := 0
+	for _, r := range all {
+		if r.Invalid {
+			invalid++
+			continue
+		}
+		rows = append(rows, r)
+	}
 	bySystem := map[string][]Row{}
 	var systems []string
 	for _, r := range rows {
@@ -142,6 +152,9 @@ func Summarize(rows []Row) string {
 	}
 	sort.Strings(systems)
 	var b strings.Builder
+	if invalid > 0 {
+		fmt.Fprintf(&b, "**%d of %d runs left out: the provider refused or failed model calls during them.**\n\n", invalid, len(all))
+	}
 	// Each suite is its own index: the group suite judges teams, the solo suite single assistants.
 	for _, suite := range []string{"solo", "group"} {
 		var header bool

@@ -118,6 +118,10 @@ func main() {
 						fmt.Printf("skip %s %s #%d: spend cap reached\n", system, sc.Name, rep)
 						return
 					}
+					if proxy.Exhausted() {
+						fmt.Printf("skip %s %s #%d: the provider's usage limit is spent\n", system, sc.Name, rep)
+						return
+					}
 					row := suite.Run(ctx, system, sc, rep)
 					ok := 0
 					for _, t := range row.Tasks {

@@ -42,6 +42,7 @@ type Row struct {
 	Messages   int       `json:"messages"`
 	Duration   float64   `json:"duration"`
 	TimedOut   bool      `json:"timedOut,omitempty"`
+	Invalid    bool      `json:"invalid,omitempty"` // the provider failed calls, so the run isn't scored
 	Error      string    `json:"error,omitempty"`
 }
 
@@ -192,6 +193,10 @@ func (s *Suite) Run(ctx context.Context, system string, sc *Scenario, rep int) R
 		row.Cached += c.Cached
 		row.Completion += c.Completion
 		row.Cost += c.Cost
+	}
+	if failed := s.Proxy.Failed(id); failed > 0 {
+		problems = append(problems, fmt.Sprintf("provider refused or failed %d model calls", failed))
+		row.Invalid = true
 	}
 	if len(problems) > 0 {
 		row.Error = strings.Join(problems[:min(3, len(problems))], "; ")
