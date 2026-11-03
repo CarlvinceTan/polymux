@@ -7,6 +7,7 @@ type execution struct {
 	done   chan struct{}
 }
 
+// acquire takes the turn of one session, keyed by id, and one of the server's turn slots.
 func (s *Server) acquire(ctx context.Context, id string) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

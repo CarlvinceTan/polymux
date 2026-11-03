@@ -1,8 +1,6 @@
 package agentruntime
 
 import (
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -93,10 +91,10 @@ func buildPrompt(d Definition, tools []string, mcpDown bool, installed []skills.
 	prompt += "\nDistinguish tentative inferences from stated preferences. Keep credentials in their existing secure stores."
 	prompt += "\nBackground reviews are enabled after the first direct-chat task, normally every four hours; pause proactivity and resume proactivity are user chat commands."
 	prompt += "\nFor integrations prefer a CLI plus a small reusable skill for occasional/simple work; use MCP for frequent structured interaction when its maintenance cost is worthwhile. Inspect existing setup first, avoid duplicate installations, and keep credentials in their existing secure store."
-	prompt += "\nVerify ambiguous effects before retrying them."
+	prompt += "\nVerify ambiguous effects before retrying them. When the user changes or cancels something you already did, such as a booking, an order or a scheduled message, change or undo it rather than adding a second one. Hold to the user's constraints: when fewer results meet them than they asked for, say so rather than filling the gap with ones that don't. Send emails or messages in the user's name only when they asked for that message; otherwise show the draft and ask first. Before giving a total, a list or a “there's nothing”, check every source the user has that could hold part of it, such as their bank, inbox, calendar and the site or account it belongs to. Before proposing or accepting a time for the user, check their calendar on that exact date."
 	guide("tool_search", "More tools load with tool_search when needed: managing bots and group chats, organizing the chat list, integrations, saved secrets, projects, triggers, and image or video generation.")
 	guide("tool_search", "For the user's vault, find vault_list, vault_manage, vault_import, vault_fill, vault_request, vault_write, and vault_passkey with tool_search. Manage entries by reference; use Settings → Vault or private cards for manual entry and replacement. Saved values cannot be viewed or revealed. Import CSV, JSON, or encrypted KDBX directly by path or private upload, never by reading the file into context or asking for an ordinary chat attachment. For KDBX, let the user enter the master password and optional key file only in the private card; never ask for them in chat. Unencrypted Bitwarden JSON is supported; encrypted vendor exports must be exported unencrypted or as CSV. Never extract vault values with shell, file, browser, accessibility, screenshot, or MCP tools; never inspect filled secret fields or private cards or put secrets in chat, memory, logs, or tool arguments. These tools return references and receipts, not secret values. When a tool needs a vault field's value itself, vault_write hands it to an owner-only file instead.")
-	guide("request_secret", "Use request_secret for secrets the user needs to provide, such as API keys and tokens. They enter the value in a masked card. Saved secrets and vault fields are black boxes you can use anywhere they are needed without seeing them: write {{secret:name}} or {{vault:id:field}} in http_request URLs, headers, bodies or basic auth, or in MCP connection headers, and the value is filled in for its bound origin. Commands, scripts and local MCP servers can use the same references literally, for example curl -H 'X-Api-Key: {{secret:name}}' or KEY='{{secret:name}}' some-cli: Polymux's proxy fills them in on the way to the bound origin and redacts them from replies. This covers tools that honour HTTPS_PROXY, including gh and git over HTTPS; for a tool that spans hosts, save the secret with every origin it needs (gh needs https://api.github.com and https://github.com). That does not cover tools that sign requests with the key, or that need the value itself; write_secret handles those. When requesting a secret, set origins for a multi-host tool, and ttlMinutes or ephemeral for anything short-lived or needed for one task only. For a private key, request kind=ssh with the host as origin: it is already loaded in SSH_AUTH_SOCK, so ssh, git over SSH, scp, rsync and gh over SSH work without the key being readable anywhere. Secrets and vault entries are long-term: replace a secret with replace=true, remove it with forget_secret, and edit or delete vault entries with vault_manage. Never ask for secret values in chat, memory, tool arguments or files.")
+	guide("request_secret", "Use request_secret for secrets the user needs to provide, such as API keys and tokens. They enter the value in a masked card. Saved secrets and vault fields are black boxes you can use anywhere they are needed without seeing them: write {{secret:name}} or {{vault:id:field}} in http_request URLs, headers, bodies or basic auth, in MCP connection headers, or in a remote MCP tool's arguments, and the value is filled in for its bound origin. Commands, scripts and local MCP servers can use the same references literally, for example curl -H 'X-Api-Key: {{secret:name}}' or KEY='{{secret:name}}' some-cli: Polymux's proxy fills them in on the way to the bound origin and redacts them from replies. This covers tools that honour HTTPS_PROXY, including gh and git over HTTPS; for a tool that spans hosts, save the secret with every origin it needs (gh needs https://api.github.com and https://github.com). That does not cover tools that sign requests with the key, or that need the value itself; write_secret handles those. When requesting a secret, set origins for a multi-host tool, and ttlMinutes or ephemeral for anything short-lived or needed for one task only. For a private key, request kind=ssh with the host as origin: it is already loaded in SSH_AUTH_SOCK, so ssh, git over SSH, scp, rsync and gh over SSH work without the key being readable anywhere. Secrets and vault entries are long-term: replace a secret with replace=true, remove it with forget_secret, and edit or delete vault entries with vault_manage. Never ask for secret values in chat, memory, tool arguments or files.")
 	guide("write_secret", "When a tool needs a saved secret's value itself, such as ssh -i, a key file, .netrc, PGPASSFILE or a signer that loads a key, use write_secret with that secret's name and an absolute path. It writes an owner-only file without putting the value in the tool result; hand the path to the tool and delete the file when the task is done. Prefer {{secret:name}} references whenever they work. A key saved with a passphrase is usable only this way. This applies to saved secrets, not vault entries.")
 	if mcpDown {
 		guide("manage_integrations", "Use available CLI tools or manage_integrations to repair the configuration.")
@@ -135,8 +133,8 @@ func splitCards(installed []skills.Skill) (skills.Skill, []skills.Skill) {
 	return cards, listed
 }
 
-// cardPrompt comes with show_html rather than the skill list, and loads like a skill does:
-// by path when the agent can read files, inline when it can't.
+// cardPrompt comes with show_html rather than the skill list: by path when the agent can read files, and inline when
+// it can't. Cards are frequent, so inline beats a load per card: the cached prompt costs little, a round trip doesn't.
 func cardPrompt(prompt string, cards skills.Skill, canRead bool) (string, error) {
 	if canRead && cards.Path != "" {
 		return prompt + "\nThe card reference is at " + cards.Path + ": read it before building anything beyond plain text.", nil
@@ -145,53 +143,41 @@ func cardPrompt(prompt string, cards skills.Skill, canRead bool) (string, error)
 	return prompt + "\n" + text, err
 }
 
-// skillPrompt lists skills by name, description and file, as pi does, when the agent can read
-// files: it loads a skill's text only when one applies. Without read, their text is inlined.
+// skillPrompt lists skills by name and description, as pi does, so a skill's text loads only when one applies: from
+// its file when the agent can read files, or with read_skill, which serves the bundled skills, when it can't.
 func skillPrompt(prompt string, d Definition, canRead bool, installed []skills.Skill) (string, error) {
-	if canRead && len(installed) > 0 {
-		listed := slices.Clone(installed)
-		for _, path := range d.Skills {
-			data, err := os.ReadFile(path)
+	listed := slices.Clone(installed)
+	how := "read its file"
+	if !canRead {
+		listed, how = nil, "load it with read_skill"
+		for _, bundled := range []func() (string, error){skills.Polymux, skills.Report} {
+			text, err := bundled()
 			if err != nil {
-				prompt += "\nConfigured integration skill unavailable: " + path
-				continue
+				return "", err
 			}
-			skill := skills.Describe(string(data))
-			if skill.Name == "" {
-				skill.Name = filepath.Base(filepath.Dir(path))
-			}
-			skill.Path = path
-			listed = append(listed, skill)
+			listed = append(listed, skills.Describe(text))
 		}
-		prompt += "\nSkills: when a task matches one's description, read its file before acting."
-		for _, skill := range listed {
-			prompt += "\n<skill name=\"" + skill.Name + "\" location=\"" + skill.Path + "\">" + skill.Description + "</skill>"
-		}
-		return prompt, nil
 	}
-	bundled, err := skills.Bundled()
-	if err != nil {
-		return "", err
-	}
-	prompt += "\n" + bundled
-	budget := 32768
 	for _, path := range d.Skills {
-		if budget <= 0 {
-			break
-		}
-		file, err := os.Open(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			prompt += "\nConfigured integration skill unavailable: " + path
 			continue
 		}
-		data, err := io.ReadAll(io.LimitReader(file, int64(min(8192, budget))))
-		err = errors.Join(err, file.Close())
-		if err != nil {
-			prompt += "\nConfigured integration skill unreadable: " + path
-			continue
+		skill := skills.Describe(string(data))
+		skill.Name = configuredName(path, string(data))
+		if canRead {
+			skill.Path = path
 		}
-		budget -= len(data)
-		prompt += "\nConfigured integration skill " + path + ":\n" + strings.ToValidUTF8(string(data), "")
+		listed = append(listed, skill)
+	}
+	prompt += "\nSkills: when a task matches one's description, " + how + " before acting."
+	for _, skill := range listed {
+		location := ""
+		if skill.Path != "" {
+			location = " location=\"" + skill.Path + "\""
+		}
+		prompt += "\n<skill name=\"" + skill.Name + "\"" + location + ">" + skill.Description + "</skill>"
 	}
 	return prompt, nil
 }

@@ -572,6 +572,10 @@ type groupFactory struct {
 }
 
 func (f *groupFactory) Open(_ context.Context, d agentruntime.Definition, path string) (agentruntime.Session, error) {
+	// A group router's call leaves the choice to the members and isn't one of the turns under test.
+	if strings.HasPrefix(d.Scope, "route-") {
+		return &voiceSession{factory: &voiceFactory{}, definition: d}, nil
+	}
 	f.mu.Lock()
 	f.opened = append(f.opened, openedAgent{definition: d, path: path})
 	f.mu.Unlock()
@@ -1115,4 +1119,34 @@ func TestGroupMembersTakeTurns(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("both members did not reply")
+}
+
+// A message addressed to nobody goes only to the member the router picks, who is told it was picked.
+func TestGroupRouterPicksOneMember(t *testing.T) {
+	var mu sync.Mutex
+	var speakers []string
+	picked := false
+	f := &voiceFactory{route: "c", script: func(ctx context.Context, d agentruntime.Definition, m contract.Message) (agentruntime.Result, error) {
+		mu.Lock()
+		speakers = append(speakers, d.Agent.ID)
+		for _, part := range m.Parts {
+			picked = picked || part.Text != nil && strings.Contains(*part.Text, "your role fits this message best")
+		}
+		mu.Unlock()
+		return agentruntime.Result{Text: "Answer from " + d.Agent.ID}, nil
+	}}
+	api, _ := voiceTest(t, f, func(c *Config) {
+		c.Definitions = append(c.Definitions, agentruntime.Definition{Agent: contract.Agent{ID: "c", Name: "C", Role: "Finance"}})
+	})
+	group, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b", "c"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	botSend(t, api, group.ID, "routed", "How much did I spend last month?")
+	botReply(t, api, group.ID, "Answer from c")
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(speakers, []string{"c"}) || !picked {
+		t.Fatal("router choice not followed", speakers, picked)
+	}
 }

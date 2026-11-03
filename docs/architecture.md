@@ -35,9 +35,27 @@ A bot's prompt is built in layers, in this order. A layer only adds to the ones 
 | Instructions | How the bot talks and any custom behaviour | The Instructions field, or `DefaultPrompt` when blank | Yes, by the user or a bot |
 
 - Instructions go last so they have the final say.
-- In a direct chat `send_to_user` is the bot's voice, and each message is one bubble. A reminder goes with every model request. Text written after the last message stays private, so a bot ends with `NO_RESPONSE`. A bot that skips the tool, or does more work and ends in plain text, still reaches the user: its text is delivered with one bubble per paragraph.
+- Skills load on demand: the prompt lists each by name and description, and a bot reads one from its file, or with `read_skill` when it has no file access, only when a task needs it. The card reference is the exception for bots without file access: cards are frequent, and a cached prompt costs less than a load per card.
+- In a direct chat `send_to_user` is the bot's voice, and each message is one bubble. A reminder goes with every model request. Text written after the last message stays private, so a bot ends with `NO_RESPONSE`. A bot that skips the tool, or does more work and ends in plain text, still reaches the user: its text is delivered with one bubble per paragraph, including what it wrote beside its tool calls, such as a quick answer given mid-run.
 - A message sent while a bot is working steers its run: it joins the bot's next model request with a note to answer and carry on, and the run keeps its place. A message from another bot stays its own queued turn, because its answer returns as a receipt.
+- In a group chat, a message addressed to nobody first goes to a router: one short model call that picks the member whose role fits it, so the others skip a turn. When the router can't tell, every member takes a turn and speaks only if its role fits best. Either way one bot answers each request, not every bot that could.
+- A bot takes one turn at a time in each conversation. Its task threads, delegated tasks and voice consultations have sessions of their own, so they run alongside its main chat, within the server's limit on turns at once.
+- A long command or codemode script steps aside when a message is waiting: it keeps running in the background and its result arrives as a new message. A script that has run a few seconds also stops at its next tool call, handing back what finished, so a change of mind lands before more tools run.
 - A blank field follows `DefaultPrompt`, and clients are shown that text. Saving it unchanged keeps the field blank, so a bot only stops following the default once its instructions are edited.
+
+## Bot quality
+
+How a bot's handling of work is judged. A change to how bots run, delegate or schedule work must hold or improve each of these.
+
+- Time to completion: the time from when a task is given to when its result reaches the user, averaged over tasks. It matters more than overall throughput, but never at the expense of the quality of the reply or the work.
+- Responsiveness: the user never waits long for a first reply, even while the bot is busy; a quick "ok, on it" beats silence.
+- Conversational quality: the bot talks like a person, including when it reports results: as long as the content needs, without filler.
+- Throughput: when requests keep arriving before earlier ones finish, every one still gets done, none dropped or duplicated.
+- Accuracy and recall over long contexts: facts and preferences given earlier still shape later work, however much has happened since.
+- Long horizons: long, many-step work stays on track and finishes.
+- Changing minds: a changed or cancelled request is followed promptly, and effects already made are undone or adjusted.
+- Active guidance: constraints the user adds while work runs are applied to the result.
+- Proactivity: a bot raises what the user would want to know, such as a conflict or a due reminder, and stays quiet about what they wouldn't.
 
 ## Clients
 

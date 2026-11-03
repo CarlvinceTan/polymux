@@ -1295,7 +1295,11 @@ func (s *durableSession) answer(ctx context.Context, id durable.EntryId) (string
 			continue
 		}
 		for _, block := range assistant.Content {
-			if content, ok := block.(ai.TextContent); ok {
+			if content, ok := block.(ai.TextContent); ok && content.Text != "" {
+				// Separate blocks are separate steps, so each starts its own paragraph.
+				if text != "" && !strings.HasSuffix(text, "\n") {
+					text += "\n\n"
+				}
 				text += content.Text
 			}
 		}
@@ -1387,7 +1391,9 @@ func lastAnswer(view harness.ConversationView) string {
 // content builds the user content for one turn, matching the coding-agent session's shape.
 func (s *durableSession) content(m Message) (ai.UserContent, error) {
 	blocks := ai.UserContentBlocks{}
-	blocks = append(blocks, ai.TextContent{Text: "Current UTC time: " + time.Now().UTC().Format(time.RFC3339)})
+	// The weekday saves the model working it out, which it often gets wrong.
+	now := time.Now().UTC()
+	blocks = append(blocks, ai.TextContent{Text: "Current UTC time: " + now.Format(time.RFC3339) + " (" + now.Weekday().String() + ")"})
 	if m.Reply != nil {
 		text, err := quoteText(m.Reply)
 		if err != nil {

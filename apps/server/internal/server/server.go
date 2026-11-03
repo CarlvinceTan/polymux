@@ -1420,7 +1420,12 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	active := &execution{cancel: cancel, done: make(chan struct{})}
 	s.turns.Store(run.ID, active)
 	defer func() { s.turns.Delete(run.ID); close(active.done) }()
-	release, resourceErr := s.acquire(runCtx, a.id)
+	// A turn holds only its own session, so the bot's other threads and fresh-session turns run alongside it.
+	session := a.threadID + "/" + a.id
+	if isolatedTurn(work.Trigger) {
+		session = run.ID
+	}
+	release, resourceErr := s.acquire(runCtx, session)
 	if release != nil {
 		defer release()
 	}
@@ -1631,6 +1636,13 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	if spoke && voiced {
 		result.Text = ""
 		st.content.Reset()
+	}
+	// What the bot wrote beside its work streamed to the user, so the reply keeps it ahead of its final words.
+	if kept := strings.TrimSpace(st.kept.String()); voiced && !st.voiced && kept != "" && !strings.Contains(result.Text, kept) {
+		if final := strings.TrimSpace(result.Text); final != "" && final != "NO_RESPONSE" {
+			kept += "\n\n" + final
+		}
+		result.Text = kept
 	}
 	silent := !handed && (strings.TrimSpace(result.Text) == "NO_RESPONSE" || result.Text == "" && strings.TrimSpace(st.content.String()) == "NO_RESPONSE" || result.Text == "" && st.content.Len() == 0 && posted)
 	if silent {

@@ -23,7 +23,7 @@ func (s *Store) QueueShell(ctx context.Context, parent contract.Run, call, comma
 	if failed {
 		outcome = "failed or was stopped"
 	}
-	text := "A command you left running in the background " + outcome + ".\nCommand: " + boundedText(command, 2048) +
+	text := "A command or tool call you left running in the background " + outcome + ".\nRan: " + boundedText(command, 2048) +
 		"\nOutput:\n" + untrusted.Wrap("command output", output) + "\nUse this to move the task forward."
 	return s.queueNote(ctx, parent, "shell:"+parent.ID+":"+call, text)
 }

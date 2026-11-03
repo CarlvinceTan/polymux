@@ -105,9 +105,22 @@ func (s *Server) effectiveMCP(ctx context.Context, id string, local []agentrunti
 				config.Auth[header] = filled
 			}
 		}
+		// Secret references in a remote server's tool arguments reach it as values bound to its origin.
+		if config.URL != "" {
+			target := config.URL
+			config.Fill = func(ctx context.Context, args string) (string, []string) {
+				return s.fillSecrets(ctx, id, target, args, jsonString)
+			}
+		}
 		result = append(result, config)
 	}
 	return result, nil
+}
+
+// jsonString escapes a value for the inside of a JSON string.
+func jsonString(value string) string {
+	data, _ := json.Marshal(value)
+	return string(data[1 : len(data)-1])
 }
 
 func (s *Server) mcpInventory(ctx context.Context, id string, local []agentruntime.MCPServer, includeHidden bool) ([]contract.MCPConnection, error) {

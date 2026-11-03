@@ -73,6 +73,7 @@ func TestCardsComeWithTheTool(t *testing.T) {
 			if strings.Contains(prompt, `<skill name="html-cards"`) {
 				t.Fatal("the card reference was listed as a skill")
 			}
+			// With read the reference loads by path; without it, it's inline, since cards are too frequent for a load each.
 			if strings.Contains(prompt, "/s/html-cards/REFERENCE.md") != test.path || strings.Contains(prompt, "polymuxSend") != test.inlined {
 				t.Fatalf("card reference delivered wrongly: %q", prompt[:200])
 			}

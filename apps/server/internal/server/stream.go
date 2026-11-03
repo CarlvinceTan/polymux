@@ -31,6 +31,9 @@ type stream struct {
 	submission int64
 	content    strings.Builder
 	pending    strings.Builder
+	step       strings.Builder // text since the last tool call
+	kept       strings.Builder // text the bot wrote beside its work, which the user saw stream
+	voiced     bool            // the bot spoke through send_to_user, so its other text stays private
 	shown      bool
 	lastFlush  time.Time
 	tools      map[string]contract.ToolActivity
@@ -180,6 +183,7 @@ func (st *stream) handle(ctx context.Context, delta agentruntime.Delta) error {
 		}
 		return st.toolDone(delta)
 	case delta.Tool != "":
+		st.endStep(delta.Tool)
 		if delta.Tool == "set_status" {
 			// End the previous step's typing state without replacing its line with a tool label.
 			tool := contract.ToolActivity{ID: delta.ToolID, RunID: st.run.ID, Name: delta.Tool, Status: contract.ToolActivityStatusRunning}
@@ -275,6 +279,19 @@ func (st *stream) toolStart(delta agentruntime.Delta) error {
 	return st.event(contract.EventTypeMessageToolCall, nil, nil, nil)
 }
 
+// endStep keeps what the bot wrote before a work tool, such as an answer given mid-run, so it stays in the chat. Text
+// before send_to_user or ask_user drafts that message, and set_status doesn't end a step.
+func (st *stream) endStep(tool string) {
+	if tool == "set_status" {
+		return
+	}
+	st.voiced = st.voiced || tool == "send_to_user"
+	if text := strings.TrimSpace(st.step.String()); text != "" && text != "NO_RESPONSE" && tool != "send_to_user" && tool != "ask_user" {
+		st.kept.WriteString(text + "\n\n")
+	}
+	st.step.Reset()
+}
+
 func (st *stream) text(ctx context.Context, delta string) error {
 	var over error
 	if st.content.Len()+len(delta) > 64<<10 {
@@ -298,6 +315,11 @@ func (st *stream) text(ctx context.Context, delta string) error {
 			return err
 		}
 	}
+	if st.step.Len() == 0 && st.content.Len() > 0 && !strings.HasSuffix(st.content.String(), "\n") {
+		// A new step's text starts its own paragraph.
+		st.content.WriteString("\n\n")
+	}
+	st.step.WriteString(delta)
 	st.content.WriteString(delta)
 	text := st.content.String()
 	if !st.shown {

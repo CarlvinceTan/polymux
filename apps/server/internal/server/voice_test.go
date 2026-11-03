@@ -30,6 +30,8 @@ type voiceFactory struct {
 	script func(context.Context, agentruntime.Definition, contract.Message) (agentruntime.Result, error)
 	// deltas stream before the script's result.
 	deltas []string
+	// route is what a group router answers; empty answers ALL.
+	route string
 }
 
 func (f *voiceFactory) Open(_ context.Context, d agentruntime.Definition, path string) (agentruntime.Session, error) {
@@ -46,6 +48,12 @@ type voiceSession struct {
 }
 
 func (s *voiceSession) Send(ctx context.Context, m contract.Message, emit func(agentruntime.Delta) error) (agentruntime.Result, error) {
+	// A group router's call leaves the choice to the members unless a test routes on purpose.
+	if strings.HasPrefix(s.definition.Scope, "route-") && s.factory.route == "" {
+		return agentruntime.Result{Text: "ALL"}, nil
+	} else if strings.HasPrefix(s.definition.Scope, "route-") {
+		return agentruntime.Result{Text: s.factory.route}, nil
+	}
 	for _, text := range s.factory.deltas {
 		if err := emit(agentruntime.Delta{Text: text}); err != nil {
 			return agentruntime.Result{}, err

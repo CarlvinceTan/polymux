@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,7 +28,15 @@ type MCPServer struct {
 	NativeOnly bool              `json:"nativeOnly,omitempty"`
 	// ReadOnly is an operator-reviewed guarantee for every tool on this connection.
 	ReadOnly bool `json:"readOnly,omitempty"`
+	// Fill swaps saved-secret references in a tool call's arguments for the values bound to this server's origin, and
+	// returns those values so the result can be redacted. The host sets it for one session; nil leaves arguments as
+	// the agent wrote them.
+	Fill func(ctx context.Context, args string) (string, []string) `json:"-"`
 }
+
+// mcpCallTimeout bounds one MCP request. Connecting and listing tools have their own 30-second limit; a tool call
+// can be long work, such as an export, which steps aside for the user rather than holding the turn.
+const mcpCallTimeout = int(10 * time.Minute / time.Millisecond)
 
 // mcpTransport builds the transport one config describes, with the shell environment layered
 // under a local server's own Env.
@@ -65,7 +74,7 @@ func connectMCP(ctx context.Context, servers []MCPServer, cwd string, shell map[
 			cleanup()
 			return nil, nil, err
 		}
-		client := mcp.NewClient(mcp.ClientOptions{Implementation: mcp.Implementation{Name: "Polymux", Version: "0.1"}, RequestTimeoutMs: 30000})
+		client := mcp.NewClient(mcp.ClientOptions{Implementation: mcp.Implementation{Name: "Polymux", Version: "0.1"}, RequestTimeoutMs: mcpCallTimeout})
 		clients = append(clients, client)
 		connectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		_, err = client.Connect(connectCtx, transport)
@@ -89,7 +98,7 @@ func connectMCP(ctx context.Context, servers []MCPServer, cwd string, shell map[
 				cleanup()
 				return nil, nil, err
 			}
-			tools = append(tools, &mcpTool{client: client, tool: tool, readOnly: config.ReadOnly, schema: ai.ToolSchema{Name: config.Name + "__" + tool.Name, Description: tool.Description, Parameters: params}})
+			tools = append(tools, &mcpTool{client: client, tool: tool, readOnly: config.ReadOnly, fill: config.Fill, schema: ai.ToolSchema{Name: config.Name + "__" + tool.Name, Description: tool.Description, Parameters: params}})
 		}
 	}
 	return tools, clients, nil
@@ -111,7 +120,7 @@ func ProbeMCP(
 	if err != nil {
 		return nil, err
 	}
-	client := mcp.NewClient(mcp.ClientOptions{Implementation: mcp.Implementation{Name: "Polymux", Version: "0.1"}, RequestTimeoutMs: 30000})
+	client := mcp.NewClient(mcp.ClientOptions{Implementation: mcp.Implementation{Name: "Polymux", Version: "0.1"}, RequestTimeoutMs: mcpCallTimeout})
 	defer client.Close()
 	connectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -136,6 +145,7 @@ type mcpTool struct {
 	tool     mcp.Tool
 	schema   ai.ToolSchema
 	readOnly bool
+	fill     func(ctx context.Context, args string) (string, []string)
 }
 
 func (t *mcpTool) ToolClass() string {
@@ -150,6 +160,12 @@ func (t *mcpTool) Label() string                          { return t.tool.Title 
 func (t *mcpTool) Schema() ai.ToolSchema                  { return t.schema }
 func (t *mcpTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (t *mcpTool) Execute(ctx context.Context, _ string, params json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+	// Secret references reach the server as values; the result never shows them.
+	var secrets []string
+	if t.fill != nil && bytes.Contains(params, []byte("{{")) {
+		filled, values := t.fill(ctx, string(params))
+		params, secrets = json.RawMessage(filled), values
+	}
 	var args any
 	if err := json.Unmarshal(params, &args); err != nil {
 		return agent.AgentToolResult{}, err
@@ -158,15 +174,29 @@ func (t *mcpTool) Execute(ctx context.Context, _ string, params json.RawMessage,
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
-	out := agent.AgentToolResult{Content: []ai.ToolResultMessageContent{}, StructuredContent: result.StructuredContent, IsError: result.IsError != nil && *result.IsError}
+	structured := result.StructuredContent
+	if len(secrets) > 0 && structured != nil {
+		structured = json.RawMessage(hide(string(structured), secrets))
+	}
+	out := agent.AgentToolResult{Content: []ai.ToolResultMessageContent{}, StructuredContent: structured, IsError: result.IsError != nil && *result.IsError}
 	for _, block := range mcp.ToLLMContent(*result) {
 		if block.Type == "image" {
 			out.Content = append(out.Content, ai.ImageContent{MimeType: block.MimeType, Data: block.Data})
 		} else {
-			out.Content = append(out.Content, ai.TextContent{Text: untrusted.Wrap(t.schema.Name, block.Text)})
+			out.Content = append(out.Content, ai.TextContent{Text: untrusted.Wrap(t.schema.Name, hide(block.Text, secrets))})
 		}
 	}
 	return out, nil
+}
+
+// hide replaces each filled secret value in text.
+func hide(text string, secrets []string) string {
+	for _, secret := range secrets {
+		if len(secret) >= 4 {
+			text = strings.ReplaceAll(text, secret, "[REDACTED]")
+		}
+	}
+	return text
 }
 
 func closeMCP(clients []*mcp.Client) error {

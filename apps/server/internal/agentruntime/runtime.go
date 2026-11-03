@@ -3,6 +3,9 @@ package agentruntime
 
 import (
 	"context"
+	"os"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
@@ -87,7 +90,14 @@ type Session interface {
 }
 type DurableRuntime struct{ *core.DurableRuntime }
 
+// CodemodeWorkers is how many codemode scripts may run at once on this server. PiG's default of two is shared by
+// every bot and thread in the process, so one long script held up the rest.
+const CodemodeWorkers = 8
+
 func NewDurable(ctx context.Context, dir, baseURL, model, key string, client Client, storage durable.Storage, extra ...string) (*DurableRuntime, error) {
+	if os.Getenv("PI_CODEMODE_MAX_WORKERS") == "" {
+		_ = os.Setenv("PI_CODEMODE_MAX_WORKERS", strconv.Itoa(CodemodeWorkers))
+	}
 	client.InstallSkills = func(dir string) ([]core.Skill, error) {
 		installed, err := skills.Install(dir)
 		out := make([]core.Skill, len(installed))
@@ -117,6 +127,11 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (S
 	return &session{opened}, nil
 }
 func runtimeDefinition(d Definition) core.Definition {
+	extra := d.ExtraTools
+	// Without file access, skills load through read_skill instead of riding along in every request.
+	if !d.Intro && !slices.Contains(d.Tools, "read") {
+		extra = append(slices.Clone(extra), &skillTool{configured: d.Skills})
+	}
 	return core.Definition{
 		DelegationDisabled: d.DelegationDisabled,
 		Devices:            d.Devices,
@@ -127,7 +142,7 @@ func runtimeDefinition(d Definition) core.Definition {
 		Workspace:          d.Workspace,
 		WorkspaceSet:       d.WorkspaceSet,
 		Worktree:           d.Worktree,
-		ExtraTools:         d.ExtraTools,
+		ExtraTools:         extra,
 		Scope:              d.Scope,
 		Intro:              d.Intro,
 		Ephemeral:          d.Ephemeral,

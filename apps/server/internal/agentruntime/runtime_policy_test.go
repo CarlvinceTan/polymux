@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/skills"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/testenv"
 )
 
@@ -63,7 +62,12 @@ func TestRestrictedPolicy(t *testing.T) {
 			if err := json.Unmarshal(body["tools"], &tools); err != nil && len(body["tools"]) > 0 {
 				t.Fatal(err)
 			}
+			// A turn without file access also gets read_skill, to load skills on demand.
+			loads := !test.intro && !slices.Contains(test.tools, "read")
 			want := len(test.tools)
+			if loads {
+				want++
+			}
 			if test.intro {
 				want = 0
 			}
@@ -72,22 +76,17 @@ func TestRestrictedPolicy(t *testing.T) {
 			}
 			message := string(body["messages"])
 			wantHelp := !test.intro
-			// With read, skills are listed for loading on demand; without it, their text is inline.
-			inline := wantHelp && !slices.Contains(test.tools, "read")
+			// Skills are listed for loading on demand, never inlined: by file with read, by read_skill without.
 			for _, name := range []string{"polymux", "report"} {
-				if strings.Contains(message, "name: "+name) != inline {
-					t.Fatalf("prompt inlines %s = %v, want %v", name, !inline, inline)
+				if strings.Contains(message, "name: "+name) {
+					t.Fatalf("prompt inlines %s", name)
 				}
-				if strings.Contains(message, `<skill name=\"`+name+`\"`) != (wantHelp && !inline) {
+				if strings.Contains(message, `<skill name=\"`+name+`\"`) != wantHelp {
 					t.Fatalf("prompt lists %s wrongly", name)
 				}
 			}
-			if inline {
-				for _, marker := range []string{skills.IssueRepo, "explicit confirmation in chat", "[REDACTED]"} {
-					if !strings.Contains(message, marker) {
-						t.Fatalf("bundled report skill omitted %q", marker)
-					}
-				}
+			if strings.Contains(message, "load it with read_skill") != loads {
+				t.Fatalf("prompt offers read_skill = %v, want %v", !loads, loads)
 			}
 			for _, part := range []string{"Coach", "Guide", "Configured policy", "Polymux policy", "Current UTC time", "Conversation"} {
 				if !strings.Contains(message, part) {
@@ -121,11 +120,7 @@ func TestPromptToolAvailability(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bundled, err := skills.Bundled()
-			if err != nil {
-				t.Fatal(err)
-			}
-			policy := strings.ReplaceAll(prompt, bundled, "")
+			policy := prompt
 			for _, name := range []string{"update_agent", "create_agent", "create_group_chat", "update_group_chat", "track_work", "send_to_user", "ask_user", "save_memory", "recall_memory", "forget_memory", "recall_history", "manage_routines", "manage_integrations", "manage_tasks", "manage_triggers", "run_device", "finish_review"} {
 				// Guidance may only name a tool the turn offers; most tools describe themselves.
 				available := !test.definition.Intro && slices.Contains(test.tools, name)

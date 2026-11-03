@@ -566,3 +566,27 @@ func TestVaultWriteHandsAValueToATool(t *testing.T) {
 		t.Fatal("the same recovery code was handed out twice")
 	}
 }
+
+// A remote MCP server's tool arguments get only the secrets bound to that server's origin.
+func TestMCPArgumentsFillBoundSecrets(t *testing.T) {
+	api, _ := startTest(t, &voiceFactory{})
+	if err := api.secrets.Save("assistant", secrets.Credential{Name: "site", Origin: "https://mcp.example.com", Value: "mcp-bound-value"}); err != nil {
+		t.Fatal(err)
+	}
+	servers, err := api.effectiveMCP(t.Context(), "assistant", []agentruntime.MCPServer{
+		{Name: "site", URL: "https://mcp.example.com/mcp"}, {Name: "other", URL: "https://other.example.com/mcp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := `{"token":"{{secret:site}}"}`
+	for _, server := range servers {
+		if server.Fill == nil {
+			t.Fatalf("%s has no filler", server.Name)
+		}
+		filled, values := server.Fill(t.Context(), args)
+		bound := server.Name == "site"
+		if strings.Contains(filled, "mcp-bound-value") != bound || (len(values) == 1) != bound {
+			t.Fatalf("%s filled %q with %d values", server.Name, filled, len(values))
+		}
+	}
+}

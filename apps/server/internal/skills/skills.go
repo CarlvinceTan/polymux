@@ -29,19 +29,6 @@ func Report() (string, error) {
 	return text("report/SKILL.md")
 }
 
-// Bundled returns the Polymux guide and the report skill, in that order.
-func Bundled() (string, error) {
-	guide, err := Polymux()
-	if err != nil {
-		return "", err
-	}
-	report, err := Report()
-	if err != nil {
-		return "", err
-	}
-	return guide + "\n" + report, nil
-}
-
 // Cards returns the reference for building show_html cards.
 func Cards() (string, error) {
 	return text(cardsFile)
