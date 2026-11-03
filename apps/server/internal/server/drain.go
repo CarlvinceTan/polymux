@@ -45,7 +45,9 @@ func (s *Server) loadDrain() error {
 		return errors.New("invalid maintenance identity")
 	}
 	id := string(data)
+	s.admission.mu.Lock()
 	s.admission.id, s.admission.state = id, "ready"
+	s.admission.mu.Unlock()
 	time.AfterFunc(sealLimit, func() { s.releaseSeal(id) })
 	return nil
 }

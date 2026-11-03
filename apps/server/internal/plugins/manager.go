@@ -365,7 +365,8 @@ func (m *Manager) Install(ctx context.Context, name, version string) (contract.P
 		m.work.Done()
 		return contract.Plugin{}, err
 	}
-	go func() {
+	// The goroutine finishes its own copy, since the reply below reads value as it was.
+	go func(value record) {
 		defer m.work.Done()
 		manifest, err := m.place(entry, release)
 		if err != nil {
@@ -387,7 +388,7 @@ func (m *Manager) Install(ctx context.Context, name, version string) (contract.P
 		if value.State == contract.PluginStateReady {
 			m.launch(manifest)
 		}
-	}()
+	}(value)
 	return contract.Plugin{Name: name, Title: value.Title, Description: entry.Description, Symbol: value.Symbol,
 		Version: release.Version, Kind: value.Kind, Surface: entry.Surface, State: value.State, Source: value.Source, Chats: []string{}}, nil
 }
