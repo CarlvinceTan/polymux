@@ -188,6 +188,15 @@ var perfects = map[string]perfect{
 		use(t, w, "calendar_create", map[string]any{"title": "Yoga with Priya", "start": thu + "T13:30", "end": thu + "T14:30"})
 	}, seen: []Message{msg(40, "", "Booked. Pulse moved it to 1:30–2:30pm next Thursday, so that's what's in your calendar.")}},
 
+	"payment-declined": {act: func(t *testing.T, w *World, d dates) {
+		submit(t, w, "https://fernway.shop/cart/add", map[string]any{"product_id": "FW-3102", "quantity": "1"})
+		if !strings.Contains(submit(t, w, "https://fernway.shop/checkout", map[string]any{"address": "home", "payment": "visa-4242"}), "declined") {
+			t.Fatal("the card should be declined")
+		}
+	}, seen: []Message{msg(40, "", "Fernway declined your Visa ending 4242, so nothing's ordered. Want to try another card?")}},
+
+	"bill-mismatch": {seen: []Message{msg(30, "", "Mostly. One thing: ConEd billed $84.20, but $91.30 is scheduled to come out of checking on Friday. Worth checking with them.")}},
+
 	"weekday-briefing": {routines: []contract.Routine{{Status: "active", Crons: []string{"30 7 * * 1-5"}, Timezone: ptr("America/New_York"), Prompt: "Send Ana today's agenda from her calendar and anything urgent in her inbox."}},
 		seen: []Message{msg(10, "", "Done: every weekday at 7:30am.")}},
 

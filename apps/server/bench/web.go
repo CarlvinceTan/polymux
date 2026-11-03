@@ -365,6 +365,9 @@ func fernwaySite(w *World, r request) webPage {
 			where, ok := address[strings.ToLower(r.field("address"))]
 			if !ok || !strings.EqualFold(r.field("payment"), "visa-4242") {
 				p.body = []string{"Choose a saved address (home or work) and the saved card (visa-4242)."}
+			} else if l.declined {
+				p.title, p.body = "Payment declined", []string{"Your card ending 4242 was declined by your bank. Try another payment method, or contact your bank."}
+				return p
 			} else {
 				_, _, _, total := totals()
 				order := Order{ID: fmt.Sprintf("FW%05d", 40211+len(l.orders)), Items: l.cart, Promo: l.promo, Total: total, Address: where}

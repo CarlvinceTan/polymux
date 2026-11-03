@@ -28,6 +28,8 @@ type life struct {
 	flaky    bool            // the next checkout places the order but shows an error
 	selling  bool            // the Nimbus sells out the moment it's added to a cart
 	gone     map[string]bool // products that have sold out during the run
+	declined bool            // Fernway's checkout declines the saved card
+	coned    float64         // the ConEd payment scheduled at the bank, when it differs from the bill
 	throttle bool            // Wayfarer turns requests away for a while, starting with the first
 	until    float64         // when it lets requests through again
 
@@ -150,7 +152,11 @@ func officeTools() map[string]tool {
 			}},
 		"bank_upcoming": {"Payments scheduled from checking before the month ends.", map[string]any{}, nil, 700 * time.Millisecond,
 			func(w *World, a map[string]any) (any, error) {
-				return map[string]any{"scheduled": w.life.d.upcoming()}, nil
+				scheduled := w.life.d.upcoming()
+				if w.life.coned != 0 {
+					scheduled[0].Amount = -w.life.coned
+				}
+				return map[string]any{"scheduled": scheduled}, nil
 			}},
 	}
 }

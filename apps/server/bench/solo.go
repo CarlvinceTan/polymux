@@ -505,6 +505,32 @@ var soloScenarios = []*Scenario{
 			return []Task{done("booked-y104", booked, 0, told, 120), check("calendar-at-new-time", moved && booked)}
 		}},
 
+	{Name: "payment-declined", Category: "robustness", Tier: 3,
+		Setup: func(l *life) { l.declined = true },
+		Steps: static(say(0, "Order the packing cubes from Fernway, to my home address.")),
+		Check: func(v *View) []Task {
+			var orders []Order
+			v.state(func(l *life) { orders = slices.Clone(l.orders) })
+			tries := 0
+			for _, c := range v.calls("browser_submit") {
+				if strings.Contains(str(c.Args, "url"), "/checkout") {
+					tries++
+				}
+			}
+			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)declin`).MatchString(t) })
+			return []Task{done("tells-the-user", told >= 0 && len(orders) == 0, 0, told, 90), check("no-retry-loop", told >= 0 && tries >= 1 && tries <= 3)}
+		}},
+
+	{Name: "bill-mismatch", Category: "proactivity", Tier: 3,
+		Setup: func(l *life) { l.coned = 91.30 },
+		Steps: static(say(0, "Are my bills on track this week?")),
+		Check: func(v *View) []Task {
+			told := v.claims(0, "Does the assistant point out that the ConEd bill is $84.20 but $91.30 is scheduled to be paid from checking?", func(t string) bool {
+				return strings.Contains(t, "84.20") && strings.Contains(t, "91.30")
+			})
+			return []Task{done("flags-the-mismatch", told >= 0, 0, told, 90)}
+		}},
+
 	{Name: "weekday-briefing", Category: "time", Tier: 2,
 		Steps: static(say(0, "Every weekday at 7:30am New York time, send me my agenda for the day and anything urgent in my inbox.")),
 		Check: func(v *View) []Task {
