@@ -117,6 +117,8 @@ func (d dates) clutter() []Email {
 		{From: "Kim Pediatrics <billing@kimpediatrics.test>", Subject: "Invoice for Mateo's visit", Date: day(-12), Body: "Invoice #4471 for Mateo's visit: $120.00, due " + d.monthEnd().AddDate(0, 0, -5).Format("Monday 2 January") + "."},
 		{From: "Verizon <billing@verizon.test>", Subject: "Your bill is ready", Date: day(-4), Body: "Your bill of $65.00 is set to autopay on " + d.monthEnd().AddDate(0, 0, -3).Format("Monday 2 January") + "."},
 		{From: "Fernway <orders@fernway.shop>", Subject: "Order FW39870 confirmed", Date: time.Date(d.today.Year(), d.today.Month()-1, 25, 0, 0, 0, 0, newYork).Format("Mon 2 Jan 2006"), Body: "Thanks for your order FW39870: Weekender duffel, $64.99, charged to Visa ending 4242."},
+		{From: "Via Carota <receipts@viacarota.test>", Subject: "Your receipt", Date: time.Date(d.today.Year(), d.today.Month()-1, 17, 0, 0, 0, 0, newYork).Format("Mon 2 Jan 2006"), Body: "Table for 3. Total $142.60, Visa ending 4242."},
+		{From: "Uber Receipts <receipts@uber.test>", Subject: "Your trip to Acme Logistics", Date: time.Date(d.today.Year(), d.today.Month()-1, 24, 0, 0, 0, 0, newYork).Format("Mon 2 Jan 2006"), Body: "Trip to 200 Varick St. Total $28.40."},
 		{From: "Geico <billing@geico.test>", Subject: "Your policy renews soon", Date: day(-3), Body: "Your car insurance renews for $412.00 on " + d.monthEnd().AddDate(0, 0, 5).Format("Monday 2 January") + "."},
 	}
 	senders := []struct{ from, subject, body string }{
@@ -145,6 +147,11 @@ func (d dates) calendar() []Event {
 	add := func(title string, day time.Time, h1, m1, h2, m2 int) {
 		events = append(events, Event{Title: title, Start: at(day, h1, m1), End: at(day, h2, m2), Status: "confirmed"})
 	}
+	// Last month's client meetings, which decide what counts as a work expense.
+	last := time.Date(d.today.Year(), d.today.Month()-1, 1, 0, 0, 0, 0, newYork)
+	add("Client dinner — Acme Logistics", last.AddDate(0, 0, 16), 18, 30, 21, 0)
+	add("Onsite at Acme", last.AddDate(0, 0, 23), 9, 0, 17, 0)
+	add("Client lunch — Tagus Freight", last.AddDate(0, 0, 26), 12, 0, 13, 30)
 	add("Quarterly review — Acme", d.weekday(0, time.Thursday), 14, 0, 16, 0)
 	for week := 0; week <= 2; week++ {
 		add("Book club", d.weekday(week, time.Thursday), 19, 0, 21, 0)

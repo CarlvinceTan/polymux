@@ -22,12 +22,14 @@ type life struct {
 	gymWaits  []string
 	classes   []Class
 
-	cart    map[string]int
-	promo   string
-	orders  []Order
-	flaky   bool            // the next checkout places the order but shows an error
-	selling bool            // the Nimbus sells out the moment it's added to a cart
-	gone    map[string]bool // products that have sold out during the run
+	cart     map[string]int
+	promo    string
+	orders   []Order
+	flaky    bool            // the next checkout places the order but shows an error
+	selling  bool            // the Nimbus sells out the moment it's added to a cart
+	gone     map[string]bool // products that have sold out during the run
+	throttle bool            // Wayfarer turns requests away for a while, starting with the first
+	until    float64         // when it lets requests through again
 
 	streamly string // active, discounted, paused or cancelled
 

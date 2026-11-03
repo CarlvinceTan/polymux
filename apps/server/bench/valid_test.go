@@ -165,6 +165,29 @@ var perfects = map[string]perfect{
 		submit(t, w, "https://fernway.shop/checkout", map[string]any{"address": "home", "payment": "visa-4242"})
 	}, seen: []Message{msg(150, "", "The Nimbus Lite sold out as I added it, so I ordered the Atlas Carry-On instead: $174.91 with SAVE15, to home.")}},
 
+	"expense-report": {act: func(t *testing.T, w *World, d dates) {
+		last := time.Date(d.today.Year(), d.today.Month()-1, 1, 0, 0, 0, 0, newYork)
+		csv := fmt.Sprintf("date,merchant,amount,receipt\n%s,Via Carota,142.60,yes\n%s,Uber,28.40,yes\n%s,Katz's Deli,44.30,no\n",
+			ymd(last.AddDate(0, 0, 16)), ymd(last.AddDate(0, 0, 23)), ymd(last.AddDate(0, 0, 26)))
+		use(t, w, "write_file", map[string]any{"path": "expenses.csv", "content": csv})
+		use(t, w, "email_send", map[string]any{"to": "priya.nair@acme-logistics.test", "subject": "October expenses", "body": "Total $215.30; the Katz's receipt is missing."})
+	}, seen: []Message{msg(200, "", "Three work costs, $215.30 in all; Katz's has no receipt. expenses.csv is saved and Priya has the total.")}},
+
+	"lisbon-throttled": {act: func(t *testing.T, w *World, d dates) {
+		if !strings.Contains(use(t, w, "browser_open", map[string]any{"url": "https://wayfarer.travel/activities?city=lisbon"}), "Too many requests") {
+			t.Fatal("the first request should be turned away")
+		}
+		w.Life(func(l *life) { l.until = 0 })
+		submit(t, w, "https://wayfarer.travel/book", map[string]any{"activity_id": "WF-20", "date": ymd(d.weekday(3, time.Thursday)), "time": "12:00", "people": "1"})
+		submit(t, w, "https://wayfarer.travel/book", map[string]any{"activity_id": "WF-16", "date": ymd(d.weekday(3, time.Tuesday)), "time": "18:30", "people": "1"})
+	}, seen: []Message{msg(200, "", "Wayfarer made me wait a bit, but both are booked: Tagus sunset sailing Tuesday 18:30 and the Mouraria food tour Thursday noon.")}},
+
+	"class-moved": {act: func(t *testing.T, w *World, d dates) {
+		submit(t, w, "https://pulse.fit/book", map[string]any{"class_id": "Y104"})
+		thu := ymd(d.weekday(1, time.Thursday))
+		use(t, w, "calendar_create", map[string]any{"title": "Yoga with Priya", "start": thu + "T13:30", "end": thu + "T14:30"})
+	}, seen: []Message{msg(40, "", "Booked. Pulse moved it to 1:30–2:30pm next Thursday, so that's what's in your calendar.")}},
+
 	"weekday-briefing": {routines: []contract.Routine{{Status: "active", Crons: []string{"30 7 * * 1-5"}, Timezone: ptr("America/New_York"), Prompt: "Send Ana today's agenda from her calendar and anything urgent in her inbox."}},
 		seen: []Message{msg(10, "", "Done: every weekday at 7:30am.")}},
 

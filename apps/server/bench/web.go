@@ -522,6 +522,12 @@ func cobaltSite(w *World, r request) webPage {
 func wayfarerSite(w *World, r request) webPage {
 	const base = "https://wayfarer.travel"
 	l := w.life
+	if l.throttle {
+		l.throttle, l.until = false, w.now()+20
+	}
+	if w.now() < l.until {
+		return webPage{title: "Too many requests", url: base + r.path, body: []string{fmt.Sprintf("You've made too many requests. Try again in %.0f seconds.", l.until-w.now())}}
+	}
 	p := webPage{url: base + r.path, links: [][2]string{{"Lisbon activities", base + "/activities?city=lisbon"}, {"My trips", base + "/trips"}}}
 	trip := map[time.Weekday]time.Time{}
 	for _, wd := range []time.Weekday{time.Tuesday, time.Wednesday, time.Thursday} {

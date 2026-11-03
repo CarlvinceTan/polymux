@@ -1,6 +1,6 @@
 # Benchmarks
 
-Status: runs in [`apps/server/bench`](../apps/server/bench/) with two suites. Solo has 16 tier 1 scenarios and 17 tier 2 and 3 errands on a persona's inbox, calendar, bank and six simulated websites. Group has 6 scenarios for a team of specialist bots. Systems: Polymux, a Polymux team, opencode and `null`, which does nothing. The rest of this page is the target design; [the catalogue](../apps/server/bench/catalog.md) tracks what is planned.
+Status: runs in [`apps/server/bench`](../apps/server/bench/) with two suites. Solo has 16 tier 1 scenarios and 20 tier 2 and 3 errands on a persona's inbox, calendar, bank and six simulated websites. Group has 6 scenarios for a team of specialist bots. Systems: Polymux, a Polymux team, opencode and `null`, which does nothing. The rest of this page is the target design; [the catalogue](../apps/server/bench/catalog.md) tracks what is planned.
 
 The benchmark scores how well a harness handles real assistant work, so changes to Polymux, and other harnesses, can be compared on quality, speed and cost. It complements [`apps/server/evals/`](../apps/server/evals/), which checks the server's behaviour deterministically against a scripted model; the benchmark uses a real, pinned model. What it optimises for is [Bot quality](architecture.md#bot-quality).
 

@@ -243,7 +243,7 @@ var soloScenarios = []*Scenario{
 				check("inspection-thursday", landlord), check("dentist-rescheduled", dentist), check("phishing-flagged-not-followed", flagged >= 0 && !phished)}
 		}},
 
-	{Name: "lisbon-activities", Category: "horizon", Tier: 3, Timeout: 10 * time.Minute, Reply: approve("Yes, go ahead."),
+	{Name: "lisbon-activities", Category: "horizon", Tier: 3, Timeout: 10 * time.Minute,
 		Steps: func(v *View) []Step {
 			return []Step{say(0, "I'm in Lisbon for work "+v.World.life.d.trip()+". Find me activities on Wayfarer rated 9 or higher, between 1 and 4 hours and under €60 a person, and book the two best-rated ones on different days, fitting around the meetings in my calendar. Just for me.")}
 		},
@@ -428,6 +428,81 @@ var soloScenarios = []*Scenario{
 				return regexp.MustCompile(`(?i)sold|out of stock|gone`).MatchString(t) && regexp.MustCompile(`(?i)atlas`).MatchString(t)
 			})
 			return []Task{done("next-best-ordered", right, 0, told, 240)}
+		}},
+
+	{Name: "expense-report", Category: "horizon", Tier: 3, Timeout: 10 * time.Minute, Reply: approve("Yes, go ahead."),
+		Steps: static(say(0, "Can you put together my expense report for last month? Work costs only: meals and travel for the client meetings in my calendar. Save it in my project folder as expenses.csv with the date, merchant, amount and whether there's a receipt in my email, then email Priya the total.")),
+		Check: func(v *View) []Task {
+			data, _ := os.ReadFile(filepath.Join(v.World.Project, "expenses.csv"))
+			rows := strings.ToLower(string(data))
+			lines := strings.Split(rows, "\n")
+			row := func(merchant, amount string) string {
+				for _, line := range lines {
+					if strings.Contains(line, merchant) && strings.Contains(line, amount) {
+						return line
+					}
+				}
+				return ""
+			}
+			via, uber, katz := row("carota", "142.6"), row("uber", "28.4"), row("katz", "44.3")
+			personal := regexp.MustCompile(`lucali|joe.s|sweetgreen|blue bottle|shake shack|amc|fernway|trader|whole foods`).MatchString(rows)
+			receipts := via != "" && uber != "" && katz != "" && regexp.MustCompile(`yes|true|y\b`).MatchString(via) && regexp.MustCompile(`yes|true|y\b`).MatchString(uber) &&
+				regexp.MustCompile(`\bno\b|false|missing|none`).MatchString(katz)
+			var sent bool
+			v.state(func(l *life) {
+				for _, e := range l.sent {
+					sent = sent || strings.Contains(strings.ToLower(e.To), "priya") && strings.Contains(strings.ReplaceAll(e.Body, ",", ""), "215.3")
+				}
+			})
+			told := v.reported(0, func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), "215.3") })
+			return []Task{done("work-costs-only", via != "" && uber != "" && katz != "" && !personal, 0, told, 300), check("receipts-marked", receipts), check("total-emailed", sent)}
+		}},
+
+	{Name: "lisbon-throttled", Category: "robustness", Tier: 3, Timeout: 10 * time.Minute,
+		Setup: func(l *life) { l.throttle = true },
+		Steps: func(v *View) []Step {
+			return []Step{say(0, "I'm in Lisbon for work "+v.World.life.d.trip()+". Find me activities on Wayfarer rated 9 or higher, between 1 and 4 hours and under €60 a person, and book the two best-rated ones on different days, fitting around the meetings in my calendar. Just for me.")}
+		},
+		Check: func(v *View) []Task {
+			var trips []Trip
+			var d dates
+			v.state(func(l *life) {
+				d = l.d
+				for _, t := range l.trips {
+					if !t.Gone {
+						trips = append(trips, t)
+					}
+				}
+			})
+			want := map[string]string{"WF-20": d.weekday(3, time.Thursday).Format("2006-01-02") + " 12:00", "WF-16": d.weekday(3, time.Tuesday).Format("2006-01-02") + " 18:30"}
+			right := len(trips) == 2
+			for _, t := range trips {
+				right = right && want[t.Activity] == t.Date+" "+t.Time && t.People == 1
+			}
+			told := v.reported(0, func(t string) bool {
+				return regexp.MustCompile(`(?i)sail`).MatchString(t) && regexp.MustCompile(`(?i)food|mouraria`).MatchString(t)
+			})
+			return []Task{done("booked-despite-the-limit", right, 0, told, 300)}
+		}},
+
+	{Name: "class-moved", Category: "robustness", Tier: 3,
+		Setup: func(l *life) {
+			l.gym = &account{Email: anaEmail, Password: "pulse-ana-2024", Verified: true, In: true}
+			l.mail(Email{From: "Pulse Fitness <hello@pulse.fit>", Subject: "Schedule change next week",
+				Body: "Priya's Thursday lunchtime yoga (Y104) moves to 1:30–2:30pm next week. Our online timetable will catch up shortly."}, 0)
+		},
+		Steps: static(say(0, "Book me into Priya's Thursday lunchtime yoga at Pulse next week and put it in my calendar.")),
+		Check: func(v *View) []Task {
+			var booked, moved bool
+			v.state(func(l *life) {
+				booked = slices.Contains(l.gymBooked, "Y104") && len(l.gymBooked) == 1
+				thu := l.d.weekday(1, time.Thursday)
+				for _, e := range l.added(yogaWord.MatchString) {
+					moved = moved || e.Start.Equal(at(thu, 13, 30)) && e.End.Equal(at(thu, 14, 30))
+				}
+			})
+			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)1:30|13:30`).MatchString(t) })
+			return []Task{done("booked-y104", booked, 0, told, 120), check("calendar-at-new-time", moved && booked)}
 		}},
 
 	{Name: "weekday-briefing", Category: "time", Tier: 2,
