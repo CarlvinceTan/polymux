@@ -17,8 +17,6 @@ struct GraphCanvas: View {
     @State private var pinch = 1.0
     /// The card picked up by a long press, which a touch drag then moves.
     @State private var lifted: String?
-    /// Below this zoom, wire labels would cover the cards, so only a selected one shows.
-    static let labelScale = 0.5
     #if os(macOS)
     @State private var events = GraphEvents()
     #endif
@@ -44,7 +42,7 @@ struct GraphCanvas: View {
                 let anchor = model.point(GraphKit.Point(x: wire.route.anchor.x, y: wire.route.anchor.y))
                 if onScreen.contains(anchor) {
                     GraphWireLabel(wire: wire, from: model.title(wire.from), to: model.title(wire.to),
-                                   showsTitle: model.scale >= Self.labelScale || model.selectedWire == wire.id,
+                                   showsTitle: model.scale >= GraphModel.readableScale || model.selectedWire == wire.id,
                                    selected: model.selectedWire == wire.id) {
                         model.selectWire(wire.id)
                     }
@@ -108,24 +106,23 @@ struct GraphCanvas: View {
                     model.clearSelection()
                 }
             })
-            .gesture(backgroundDrag)
+            #if os(macOS)
+            .gesture(marquee)
+            #endif
             .accessibilityHidden(true)
     }
 
-    private var backgroundDrag: some Gesture {
+    #if os(macOS)
+    private var marquee: some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .named("graph"))
             .onChanged { value in
-                #if os(macOS)
                 if band == nil { bandBase = adding ? model.selected : [] }
                 band = (value.startLocation, value.location)
                 model.marquee(from: value.startLocation, to: value.location, adding: bandBase)
-                #endif
             }
-            .onEnded { _ in
-                band = nil
-                dragStart = nil
-            }
+            .onEnded { _ in band = nil }
     }
+    #endif
 
     private var adding: Bool {
         #if os(macOS)

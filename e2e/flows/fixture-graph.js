@@ -61,6 +61,8 @@ await app.waitFor({ role: "button", name: "Close details", gone: true });
 await app.click({ role: "button", name: "Task from Chief to Aria" });
 await app.waitFor({ text: "Sent" });
 await app.click({ role: "button", name: "Close details" });
+// A reply keeps its own line, as on the old canvas, rather than merging with the task.
+await app.waitFor({ role: "button", name: "Result from Aria to Chief" });
 
 // The camera moves without changing anything.
 const zoom = async () => (await app.query({ name: "Zoom" })).find((item) => item.label === "Zoom")?.value;

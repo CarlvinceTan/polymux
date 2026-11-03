@@ -28,6 +28,8 @@ extension CGSize {
 final class GraphModel {
     static let minimumScale = 0.25
     static let maximumScale = 2.0
+    /// Below this, card titles and wire labels are too small to read.
+    static let readableScale = 0.5
     private static let historyLimit = 100
     private static let snapGrid = 24.0
     private static let magnetReach = 12.0
@@ -265,17 +267,26 @@ final class GraphModel {
         let narrow = viewport.width < 640
         let leading = narrow ? 48.0 : 64.0
         let margin = narrow ? 10.0 : 32.0
-        let bounds = scene.bounds
+        var bounds = scene.bounds
+        // A label centres on its wire, so one on the outermost wire hangs past the graph's edge.
+        let anchors = scene.wires.filter { $0.wires.count > 1 || $0.label?.isEmpty == false }.map(\.route.anchor.x)
+        if let low = anchors.min(), let high = anchors.max() {
+            let reach = 56.0
+            let left = min(bounds.x, low - reach)
+            bounds.w = max(bounds.x + bounds.w, high + reach) - left
+            bounds.x = left
+        }
         let roomX = max(1, Double(viewport.width) - leading - margin * 2)
         let roomY = max(1, Double(viewport.height) - margin * 2)
         var scale = 1.0
         if bounds.w > 0, bounds.h > 0 {
-            // A phone or side panel fits the width and scrolls down, so cards stay readable.
-            scale = tall ? min(roomX / bounds.w, 1) : min(roomX / bounds.w, roomY / bounds.h, 1)
+            // A phone or side panel fits the width and scrolls down, and never opens too small to read.
+            scale = tall ? max(Self.readableScale, min(roomX / bounds.w, 1)) : min(roomX / bounds.w, roomY / bounds.h, 1)
         }
         scale = min(Self.maximumScale, max(Self.minimumScale, scale))
         place.scale = scale
-        place.x = leading + margin + (roomX - bounds.w * scale) / 2 - bounds.x * scale
+        // Wider than the room, the graph keeps its start in view rather than its middle.
+        place.x = leading + margin + max(0, roomX - bounds.w * scale) / 2 - bounds.x * scale
         place.y = margin + max(0, roomY - bounds.h * scale) / 2 - bounds.y * scale
         place.framed = false
         save()

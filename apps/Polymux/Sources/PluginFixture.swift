@@ -153,6 +153,8 @@ final class PluginFixture: @unchecked Sendable {
         ], deliveries: [
             PeerDelivery(id: "task", sourceAgentID: "t-chief", targetAgentID: "t-aria", conversationID: "t-chief", parentRunID: "run-chief",
                          intent: PeerDeliveryIntent.request, status: PeerDeliveryStatus.delivered, createdAt: stamp),
+            PeerDelivery(id: "result", sourceAgentID: "t-aria", targetAgentID: "t-chief", conversationID: "t-aria", parentRunID: "run-aria",
+                         intent: PeerDeliveryIntent.result, status: PeerDeliveryStatus.completed, createdAt: stamp),
         ])
     }
 
