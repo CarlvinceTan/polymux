@@ -49,6 +49,7 @@ When asked to make something like another app or implementation, follow this ord
 - Add or change an E2E test without asking when it is genuinely useful: it covers behaviour that is easy to break, or keeps a flow true to an intended change. Mention it in the report.
 - Tests cover non-trivial behaviour that other changes could easily break. Don't test trivial things, such as a single value like a width.
 - After a change, check whether existing tests need updating or new coverage is warranted, scoped to that change.
+- For changes to how bots run, also pass `go test -tags sqlite_fts5 ./bench` and compare a bench run against a baseline (see `docs/benchmarks.md`).
 
 ## Versions and Upgrades
 
