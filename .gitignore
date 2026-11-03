@@ -22,6 +22,7 @@ __pycache__/
 # Go build output
 /server
 /apps/*/server
+/apps/server/cmd/polymux/polymux
 __debug_bin*
 *.test
 *.out
