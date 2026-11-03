@@ -34,7 +34,9 @@ Each bot decides what happens when its model can't answer. Open the bot's profil
 
 - **Auto** moves to the same model on another provider, then to each remaining provider's preferred model, following your provider order. New bots start here.
 - **Custom** tries the models you list, in order, each with its own reasoning level.
-- **Off** stays on the bot's model. If it can't answer after a few retries, the reply stops with an error.
+- **Off** stays on the bot's model.
+
+When every model a bot can use is out of allowance, rate-limited or down, the bot waits rather than failing, and carries on as soon as one is back. That's at the reset time the provider gave, or within two minutes when it gave none, such as after a top-up. Sending a message makes it check straight away. A bad API key still stops the reply with an error.
 
 ## Voice
 

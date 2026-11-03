@@ -133,6 +133,10 @@ func NewDurable(ctx context.Context, dir, baseURL, model, key string, client Cli
 // Fallback reports whether the configured endpoint can answer: without a URL or key it can't.
 func (r *DurableRuntime) Fallback() bool { return r.models.baseURL != "" || r.models.key != "" }
 
+// Recheck tries providers that are down for a reason that clears by itself, such as a spent allowance, straight away,
+// and wakes turns waiting for one. Call it when the user sends something, since they may have just topped up.
+func (r *DurableRuntime) Recheck() { r.fallback.recheck() }
+
 // SetProviders replaces the Settings providers chats can use; the fallback endpoint stays.
 func (r *DurableRuntime) SetProviders(specs []ProviderSpec) {
 	r.specsMu.Lock()

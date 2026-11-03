@@ -1234,6 +1234,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		if err := s.Store.ReopenTask(r.Context(), t.ID); err != nil {
 			s.config.Log.Error("reopen task", "error", err)
 		}
+		// The user may have just topped up a spent provider, so waiting turns check now.
+		if runtime, ok := s.config.Factory.(interface{ Recheck() }); ok {
+			runtime.Recheck()
+		}
 		// The store already applied the command, so cancel any review it left running.
 		if strings.ToLower(strings.TrimSpace(request.Text)) == store.PauseCommand {
 			s.stopReviews(r.Context(), t.AgentID)

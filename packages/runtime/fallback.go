@@ -17,14 +17,17 @@ import (
 const (
 	unavailableMessage = "no providers are available right now"
 	modelUnavailable   = "this bot's model is unavailable right now"
-	usageLimit         = "this bot's model reached its usage limit"
+	// recheckCap is the longest a provider that gave no reset time is left before it's tried again, so a top-up is
+	// noticed within it.
+	recheckCap = 2 * time.Minute
 )
 
 type providerHealth struct {
-	until    time.Time
-	failures int
-	probing  bool
-	limited  bool
+	until     time.Time
+	failures  int
+	probing   bool
+	limited   bool
+	transient bool // the failure clears by itself, such as a usage limit, a rate limit or an outage
 }
 
 // fallbackModels routes before auth, so each connection resolves only its own credentials.
@@ -36,6 +39,7 @@ type fallbackModels struct {
 	preferred map[string]string
 	blocked   map[string]providerHealth
 	routes    map[string]*fallbackRoute
+	recovered chan struct{} // closed when a provider comes back, waking turns that wait for one
 	epoch     uint64
 	now       func() time.Time
 	timeout   time.Duration
@@ -70,6 +74,15 @@ func (f *fallbackModels) replace(order []string, preferred map[string]string) {
 	f.preferred = preferred
 	f.blocked = map[string]providerHealth{}
 	f.epoch++
+	f.wakeLocked()
+}
+
+// wakeLocked tells waiting turns that a provider may be available again.
+func (f *fallbackModels) wakeLocked() {
+	if f.recovered != nil {
+		close(f.recovered)
+	}
+	f.recovered = make(chan struct{})
 }
 
 func (f *fallbackModels) bind(conversation string, policy Fallback) *fallbackRoute {
@@ -135,19 +148,88 @@ func (f *fallbackModels) settle(id string, epoch uint64, failed bool, failure *p
 	if epoch != f.epoch {
 		return
 	}
+	health, known := f.blocked[id]
+	if known {
+		// Turns waiting on this model's probe look again, either to carry on or to wait for its next try.
+		f.wakeLocked()
+	}
 	if !failed {
 		delete(f.blocked, id)
 		return
 	}
-	health := f.blocked[id]
 	health.failures++
 	health.limited = failure.quota
+	health.transient = failure.transient()
 	delay := failure.delay
 	if delay <= 0 {
-		delay = min(30*time.Second*time.Duration(1<<min(health.failures-1, 4)), 5*time.Minute)
+		delay = min(30*time.Second*time.Duration(1<<min(health.failures-1, 4)), recheckCap)
 	}
 	health.until, health.probing = f.now().Add(delay), false
 	f.blocked[id] = health
+}
+
+// resumeAt is when a model in the chain may be back, for a chain that's down only for reasons that clear by themselves.
+// A model another turn is probing counts as later, since that probe settling wakes the wait.
+func (f *fallbackModels) resumeAt(chain []attempt, epoch uint64) (time.Time, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if epoch != f.epoch {
+		return f.now(), true
+	}
+	var soonest time.Time
+	found := false
+	for _, next := range chain {
+		health, ok := f.blocked[next.model.ProviderID()+"/"+next.model.ID]
+		if !ok || !health.transient {
+			continue
+		}
+		until := health.until
+		if health.probing {
+			until = f.now().Add(recheckCap)
+		}
+		if !found || until.Before(soonest) {
+			soonest, found = until, true
+		}
+	}
+	return soonest, found
+}
+
+// recheck makes every model that's down for a reason that clears by itself due now, and wakes waiting turns, so a
+// top-up is noticed as soon as the user sends something.
+func (f *fallbackModels) recheck() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := f.now()
+	for id, health := range f.blocked {
+		if health.transient && now.Before(health.until) {
+			health.until = now
+			f.blocked[id] = health
+		}
+	}
+	f.wakeLocked()
+}
+
+// hold waits until a model in the chain may be back or one recovers, showing the turn as waiting meanwhile.
+func (f *fallbackModels) hold(ctx context.Context, marker string, until time.Time) error {
+	if err := notifyWaiting(marker); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	if f.recovered == nil {
+		f.recovered = make(chan struct{})
+	}
+	recovered := f.recovered
+	delay := min(max(until.Sub(f.now()), time.Second), recheckCap)
+	f.mu.Unlock()
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-recovered:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
 }
 
 // limited reports whether a model's last failure was its usage limit.
@@ -163,6 +245,7 @@ func (f *fallbackModels) release(id string, epoch uint64) {
 	if health, ok := f.blocked[id]; ok && epoch == f.epoch {
 		health.probing = false
 		f.blocked[id] = health
+		f.wakeLocked()
 	}
 }
 
@@ -254,120 +337,136 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 	tokens := ai.EstimateContextTokens(transcript).Tokens
 	policy := f.policy(markerID(transcript), opts.SessionID)
 	chain, epoch := f.chain(original, opts.Thinking, policy)
-	attempts := 0
 	own := original.ProviderID() + "/" + original.ID
 	var rejected *ai.AssistantMessage
-	for _, next := range chain {
-		if ctx.Err() != nil {
-			break
-		}
-		model := next.model
-		// Health is per model, so a custom order can step to another model on one provider.
-		id := model.ProviderID() + "/" + model.ID
-		params := opts
-		params.Thinking = next.level
-		if window := model.Capabilities.ContextWindow; window > 0 {
-			remaining := window - tokens - 1024
-			if remaining <= 0 {
-				continue
+	for waits := 0; ; waits++ {
+		attempts := 0
+		for _, next := range chain {
+			if ctx.Err() != nil {
+				break
 			}
-			if params.MaxTokens <= 0 {
-				params.MaxTokens = model.Capabilities.MaxOutputTokens
+			model := next.model
+			// Health is per model, so a custom order can step to another model on one provider.
+			id := model.ProviderID() + "/" + model.ID
+			params := opts
+			params.Thinking = next.level
+			if window := model.Capabilities.ContextWindow; window > 0 {
+				remaining := window - tokens - 1024
+				if remaining <= 0 {
+					continue
+				}
 				if params.MaxTokens <= 0 {
-					params.MaxTokens = 4096
+					params.MaxTokens = model.Capabilities.MaxOutputTokens
+					if params.MaxTokens <= 0 {
+						params.MaxTokens = 4096
+					}
+				}
+				if params.MaxTokens <= 0 || params.MaxTokens > remaining {
+					params.MaxTokens = remaining
 				}
 			}
-			if params.MaxTokens <= 0 || params.MaxTokens > remaining {
-				params.MaxTokens = remaining
-			}
-		}
-		if !f.claim(id, epoch, len(chain) == 1) {
-			continue
-		}
-		if attempts > 0 {
-			if err := notifyRetry(markerID(transcript), attempts); err != nil {
-				f.release(id, epoch)
-				endFallback(target, model, err.Error(), ai.StopReasonAborted)
-				return
-			}
-		}
-		attempts++
-		if model.ID != original.ID {
-			if err := notifySwitch(markerID(transcript), switchNotice(original.ID, model.ID, f.limited(own))); err != nil {
-				f.release(id, epoch)
-				endFallback(target, model, err.Error(), ai.StopReasonAborted)
-				return
-			}
-		}
-		failure := &providerFailure{now: f.now()}
-		client := http.Client{}
-		if params.Fetch != nil {
-			client = *params.Fetch
-		}
-		client.Transport = statusRetry{base: client.Transport, failure: failure, fallback: len(chain) > 1}
-		params.Fetch = &client
-		attemptCtx, cancel := context.WithCancel(ctx)
-		timeout := f.timeout
-		if timeout <= 0 {
-			timeout = 30 * time.Second
-		}
-		timer := time.AfterFunc(timeout, cancel)
-		source := f.Models.StreamSimple(attemptCtx, model, request, params)
-		started := false
-		for event := range source.Events(attemptCtx) {
-			switch event.(type) {
-			case ai.StartEvent, ai.DoneEvent, ai.ErrorEvent:
+			// A waiting turn takes its turn at probing, so many waiting on one model send one probe.
+			if !f.claim(id, epoch, len(chain) == 1 && waits == 0) {
 				continue
 			}
-			started = true
-			timer.Stop()
-			if err := target.Push(event); err != nil {
+			if attempts > 0 {
+				if err := notifyRetry(markerID(transcript), attempts); err != nil {
+					f.release(id, epoch)
+					endFallback(target, model, err.Error(), ai.StopReasonAborted)
+					return
+				}
+			}
+			attempts++
+			if model.ID != original.ID {
+				if err := notifySwitch(markerID(transcript), switchNotice(original.ID, model.ID, f.limited(own))); err != nil {
+					f.release(id, epoch)
+					endFallback(target, model, err.Error(), ai.StopReasonAborted)
+					return
+				}
+			}
+			failure := &providerFailure{now: f.now()}
+			client := http.Client{}
+			if params.Fetch != nil {
+				client = *params.Fetch
+			}
+			client.Transport = statusRetry{base: client.Transport, failure: failure, fallback: len(chain) > 1}
+			params.Fetch = &client
+			attemptCtx, cancel := context.WithCancel(ctx)
+			timeout := f.timeout
+			if timeout <= 0 {
+				timeout = 30 * time.Second
+			}
+			timer := time.AfterFunc(timeout, cancel)
+			source := f.Models.StreamSimple(attemptCtx, model, request, params)
+			started := false
+			for event := range source.Events(attemptCtx) {
+				switch event.(type) {
+				case ai.StartEvent, ai.DoneEvent, ai.ErrorEvent:
+					continue
+				}
+				started = true
 				timer.Stop()
-				cancel()
+				if err := target.Push(event); err != nil {
+					timer.Stop()
+					cancel()
+					f.release(id, epoch)
+					endFallback(target, model, err.Error(), ai.StopReasonError)
+					return
+				}
+			}
+			result, err := source.ResultContext(attemptCtx)
+			timedOut := attemptCtx.Err() != nil
+			timer.Stop()
+			cancel()
+			if ctx.Err() != nil {
 				f.release(id, epoch)
-				endFallback(target, model, err.Error(), ai.StopReasonError)
+				endFallback(target, model, "request cancelled", ai.StopReasonAborted)
 				return
 			}
-		}
-		result, err := source.ResultContext(attemptCtx)
-		timedOut := attemptCtx.Err() != nil
-		timer.Stop()
-		cancel()
-		if ctx.Err() != nil {
-			f.release(id, epoch)
-			endFallback(target, model, "request cancelled", ai.StopReasonAborted)
-			return
-		}
-		failed := err != nil || timedOut || result == nil || result.StopReason == ai.StopReasonError
-		unused := failed && !started && (result == nil || len(result.Content) == 0)
-		if failed {
-			reason := failureReason(result, err)
-			failure.note(reason)
-			slog.Warn("model attempt failed", "model", id, "status", failure.status, "error", reason)
-		}
-		// A rejected request says nothing about the provider's health, so it stays available.
-		if unused && failure.rejected() {
-			f.release(id, epoch)
-			if result != nil {
-				rejected = result
+			failed := err != nil || timedOut || result == nil || result.StopReason == ai.StopReasonError
+			unused := failed && !started && (result == nil || len(result.Content) == 0)
+			if failed {
+				reason := failureReason(result, err)
+				failure.note(reason)
+				slog.Warn("model attempt failed", "model", id, "status", failure.status, "error", reason)
 			}
-			continue
-		}
-		f.settle(id, epoch, failed, failure)
-		if unused {
-			continue
-		}
-		if result == nil {
-			endFallback(target, model, "provider returned no result", ai.StopReasonError)
+			// A rejected request says nothing about the provider's health, so it stays available.
+			if unused && failure.rejected() {
+				f.release(id, epoch)
+				if result != nil {
+					rejected = result
+				}
+				continue
+			}
+			f.settle(id, epoch, failed, failure)
+			if unused {
+				continue
+			}
+			if result == nil {
+				endFallback(target, model, "provider returned no result", ai.StopReasonError)
+				return
+			}
+			if result.StopReason == ai.StopReasonError || result.StopReason == ai.StopReasonAborted {
+				_ = target.Push(ai.ErrorEvent{Reason: result.StopReason, Error: result})
+			} else {
+				_ = target.Push(ai.DoneEvent{Reason: result.StopReason, Message: result})
+			}
+			target.End(result)
 			return
 		}
-		if result.StopReason == ai.StopReasonError || result.StopReason == ai.StopReasonAborted {
-			_ = target.Push(ai.ErrorEvent{Reason: result.StopReason, Error: result})
-		} else {
-			_ = target.Push(ai.DoneEvent{Reason: result.StopReason, Message: result})
+		// Every provider is down for now. Wait for one to come back rather than fail, unless nothing will clear by itself.
+		if ctx.Err() != nil || rejected != nil {
+			break
 		}
-		target.End(result)
-		return
+		until, ok := f.resumeAt(chain, epoch)
+		if !ok {
+			break
+		}
+		if err := f.hold(ctx, markerID(transcript), until); err != nil {
+			endFallback(target, original, "request cancelled", ai.StopReasonAborted)
+			return
+		}
+		chain, epoch = f.chain(original, opts.Thinking, policy)
 	}
 	if ctx.Err() != nil {
 		endFallback(target, original, "request cancelled", ai.StopReasonAborted)
@@ -377,10 +476,6 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 	if rejected != nil {
 		_ = target.Push(ai.ErrorEvent{Reason: ai.StopReasonError, Error: rejected})
 		target.End(rejected)
-		return
-	}
-	if f.limited(own) {
-		endFallback(target, original, usageLimit, ai.StopReasonError)
 		return
 	}
 	if policy.Mode == FallbackOff {
@@ -419,6 +514,12 @@ type providerFailure struct {
 	delay  time.Duration
 	quota  bool
 	status int
+}
+
+// transient reports a failure that clears by itself: a usage limit, a rate limit, an outage, or no response at all,
+// but not a bad key, a refused request or a stream that broke after the provider accepted it.
+func (f *providerFailure) transient() bool {
+	return f.quota || f.status == 0 || f.status == http.StatusRequestTimeout || f.status == http.StatusTooManyRequests || f.status >= 500
 }
 
 // rejected reports a provider refusing this request's content rather than being unavailable.

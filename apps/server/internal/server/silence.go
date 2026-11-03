@@ -7,13 +7,14 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 )
 
-// silence stops a turn the model has gone quiet on. Progress restarts the clock
-// and a running tool pauses it, because tools may take as long as they need.
+// silence stops a turn the model has gone quiet on. Progress restarts the clock, and a running tool or a wait for a
+// provider to come back pauses it, because those take as long as they need.
 type silence struct {
-	mu    sync.Mutex
-	timer *time.Timer
-	limit time.Duration
-	tools int
+	mu      sync.Mutex
+	timer   *time.Timer
+	limit   time.Duration
+	tools   int
+	waiting bool
 }
 
 func newSilence(limit time.Duration, stop func()) *silence {
@@ -29,7 +30,8 @@ func (q *silence) saw(delta agentruntime.Delta) {
 	case "tool.done":
 		q.tools = max(q.tools-1, 0)
 	}
-	if q.tools > 0 {
+	q.waiting = delta.Kind == "waiting"
+	if q.tools > 0 || q.waiting {
 		q.timer.Stop()
 	} else {
 		q.timer.Reset(q.limit)

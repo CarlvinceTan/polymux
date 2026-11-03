@@ -419,14 +419,16 @@ func TestFallbackPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = session.Close() })
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			// With every model spent, the turn waits for one to come back, so a short deadline ends it.
+			limit := 10 * time.Second
+			if test.reply == "" {
+				limit = time.Second
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), limit)
 			defer cancel()
 			result, err := session.Send(ctx, turn("hello"), nil)
 			if test.reply == "" && err == nil || test.reply != "" && (err != nil || result.Text != test.reply) {
 				t.Fatalf("result=%+v err=%v, want %q", result, err, test.reply)
-			}
-			if test.fallback.Mode == FallbackOff && !strings.Contains(err.Error(), usageLimit) {
-				t.Fatalf("off error %v", err)
 			}
 			mu.Lock()
 			defer mu.Unlock()

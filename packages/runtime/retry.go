@@ -156,6 +156,19 @@ func notifyRetry(id string, attempt int) error {
 	return sink.send(Delta{Kind: "run.retrying", Attempt: attempt})
 }
 
+// notifyWaiting shows a turn as waiting for a provider to come back.
+func notifyWaiting(id string) error {
+	value, ok := retryNotices.Load(id)
+	if !ok {
+		return nil
+	}
+	sink, _ := value.(*retrySink)
+	if sink == nil {
+		return nil
+	}
+	return sink.send(Delta{Kind: "waiting"})
+}
+
 func notifySwitch(id, text string) error {
 	value, ok := retryNotices.Load(id)
 	if !ok {
@@ -306,6 +319,9 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 			continue
 		}
+		if t.failure != nil {
+			t.failure.status = resp.StatusCode
+		}
 		// A response body is stream output. Returning it means a later disconnect is not retried.
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			resp.Body = &loadedBody{ReadCloser: resp.Body, load: load}
@@ -316,9 +332,6 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 			load.leave(-1)
 		} else {
 			load.leave(0)
-		}
-		if t.failure != nil {
-			t.failure.status = resp.StatusCode
 		}
 		if t.failure != nil && resp.Body != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))

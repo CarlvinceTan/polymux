@@ -53,6 +53,16 @@ func TestSilence(t *testing.T) {
 		q.saw(done)
 		time.Sleep(limit + time.Second)
 	})
+	check("waiting for a provider is not silence", false, func(q *silence) {
+		q.saw(agentruntime.Delta{Kind: "waiting"})
+		time.Sleep(48 * time.Hour)
+	})
+	check("silence after the wait stops", true, func(q *silence) {
+		q.saw(agentruntime.Delta{Kind: "waiting"})
+		time.Sleep(time.Hour)
+		q.saw(text)
+		time.Sleep(limit + time.Second)
+	})
 	check("a finished turn never stops", false, func(q *silence) {
 		q.end()
 		time.Sleep(limit + time.Second)

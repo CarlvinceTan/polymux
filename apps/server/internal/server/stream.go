@@ -168,6 +168,8 @@ func (st *stream) handle(ctx context.Context, delta agentruntime.Delta) error {
 			return err
 		}
 		return st.setActivity(contract.RunActivityGenerating, text)
+	case delta.Kind == "waiting":
+		return st.setActivity(contract.RunActivityGenerating, "Waiting for a model provider to be available")
 	case delta.Notice != "":
 		st.s.config.Log.Warn("model switched", "run", st.run.ID, "notice", delta.Notice)
 		st.run.Notice = &delta.Notice

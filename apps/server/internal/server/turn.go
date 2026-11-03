@@ -221,9 +221,6 @@ func failure(err error, interrupted bool, attempt int64, background bool) (code,
 	if strings.Contains(err.Error(), "this bot's model is unavailable right now") {
 		code, message, summary = "model_unavailable", "This bot’s model is unavailable right now.", "Model unavailable"
 	}
-	if strings.Contains(err.Error(), "this bot's model reached its usage limit") {
-		code, message, summary = "usage_limit", "This bot’s model reached its usage limit.", "Usage limit reached"
-	}
 	if errors.Is(err, agentruntime.ErrProviderMissing) {
 		code, message, summary = "provider_missing", "This bot’s provider is no longer configured. Choose a model in its profile.", "Provider unavailable"
 	}
