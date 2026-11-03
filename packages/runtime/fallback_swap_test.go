@@ -23,7 +23,8 @@ func TestFallbackHiccup(t *testing.T) {
 		own, spare int32
 	}{
 		{name: "short wait stays", retryAfter: "2", reply: "own", own: 2},
-		{name: "long wait switches", retryAfter: "120", reply: "spare", own: 1, spare: 1},
+		{name: "longer wait switches", retryAfter: "8", reply: "spare", own: 1, spare: 1},
+		{name: "long limit switches", retryAfter: "120", reply: "spare", own: 1, spare: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			useClock(t, &recordClock{})

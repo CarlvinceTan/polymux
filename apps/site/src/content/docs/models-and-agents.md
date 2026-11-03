@@ -36,7 +36,7 @@ Each bot decides what happens when its model can't answer. Open the bot's profil
 - **Custom** tries the models you list, in order, each with its own reasoning level.
 - **Off** stays on the bot's model.
 
-A bot switches only when it has to. It waits out a brief limit of up to 20 seconds on its own model, and once it has switched, it finishes that reply on the new model and goes back to its own model on the next one.
+A bot switches only when it has to. It waits out a blip of up to 5 seconds on its own model, and once it has switched, it finishes that reply on the new model and goes back to its own model on the next one.
 
 When every model a bot can use is out of allowance, rate-limited or down, the bot waits rather than failing, and carries on as soon as one is back. That's at the reset time the provider gave, or within two minutes when it gave none, such as after a top-up. Sending a message makes it check straight away. A bad API key still stops the reply with an error.
 

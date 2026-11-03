@@ -21,9 +21,9 @@ const (
 	retryCapMs = 30_000
 	// busyBudget is how long a call keeps waiting out a provider that says it's busy before giving up.
 	busyBudget = 10 * time.Minute
-	// swapPatience is how long a bot with fallbacks waits on its model through a brief hiccup before switching, since
-	// a switch costs the new model an uncached request.
-	swapPatience = 20 * time.Second
+	// swapPatience is how long a bot with fallbacks waits on its model through a blip before switching, since a switch
+	// costs the new model an uncached request. It's short so a reply isn't held up; a turn switches only once anyway.
+	swapPatience = 5 * time.Second
 )
 
 // configureRetry is the PiG settings call. Tests replace it to simulate a failure.
