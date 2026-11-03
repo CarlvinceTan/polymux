@@ -33,7 +33,7 @@ type stream struct {
 	pending    strings.Builder
 	step       strings.Builder // text since the last tool call
 	kept       strings.Builder // text the bot wrote beside its work, which the user saw stream
-	voiced     bool            // the bot spoke through send_to_user, so its other text stays private
+	messaged   bool            // the bot spoke through send_to_user, so its other text stays private
 	shown      bool
 	lastFlush  time.Time
 	tools      map[string]contract.ToolActivity
@@ -285,7 +285,7 @@ func (st *stream) endStep(tool string) {
 	if tool == "set_status" {
 		return
 	}
-	st.voiced = st.voiced || tool == "send_to_user"
+	st.messaged = st.messaged || tool == "send_to_user"
 	if text := strings.TrimSpace(st.step.String()); text != "" && text != "NO_RESPONSE" && tool != "send_to_user" && tool != "ask_user" {
 		st.kept.WriteString(text + "\n\n")
 	}

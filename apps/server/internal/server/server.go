@@ -1638,7 +1638,7 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 		st.content.Reset()
 	}
 	// What the bot wrote beside its work streamed to the user, so the reply keeps it ahead of its final words.
-	if kept := strings.TrimSpace(st.kept.String()); voiced && !st.voiced && kept != "" && !strings.Contains(result.Text, kept) {
+	if kept := strings.TrimSpace(st.kept.String()); voiced && !st.messaged && kept != "" && !strings.Contains(result.Text, kept) {
 		if final := strings.TrimSpace(result.Text); final != "" && final != "NO_RESPONSE" {
 			kept += "\n\n" + final
 		}
