@@ -1,0 +1,37 @@
+{
+  "start": "c966dc513b75ba5c",
+  "scene": "Chief, pinned chat",
+  "state": {
+    "w": 1920,
+    "h": 960,
+    "rows": [
+      "AXOutline|Sidebar|0,52,320,908|scrolled",
+      "AXButton|Chief, pinned chat|20,58,91,107|scrolled",
+      "AXButton|Milo, pinned chat|115,58,90,107|scrolled",
+      "AXButton|Group, pinned chat|209,58,91,107|scrolled",
+      "AXButton|Collapse Unassigned|20,198,280,28|scrolled",
+      "AXButton|grp-trip, Chief, Aria, Milo|18,228,284,60|scrolled",
+      "AXButton|t-activity, Chief, Milo|18,288,284,60|scrolled",
+      "AXButton|Approval, ,|18,348,284,60|scrolled",
+      "AXButton|Aria, ,|18,408,284,60|scrolled",
+      "AXButton|Fern, ,|18,468,284,60|scrolled",
+      "AXButton|t-long, Chief, Aria|18,528,284,60|scrolled",
+      "AXButton|t-media, Aria, Milo|18,588,284,60|scrolled",
+      "AXButton|Nova, ,|18,648,284,60|scrolled",
+      "AXButton|t-stream, Nova, Fern|18,708,284,60|scrolled",
+      "AXButton|Edit Chief’s profile|990,8,260,70",
+      "AXStaticText|No messages yet.|1066,487,108,16",
+      "AXButton|Add attachment|334,914,32,32",
+      "AXTextField|Message|378,914,1484,32",
+      "AXButton|Start dictation|1874,914,32,32",
+      "AXButton|Search|191,11,38,31",
+      "AXButton|New chat|227,9,38,34",
+      "AXButton|Settings|271,7,38,38",
+      "AXButton||1080,8,80,36",
+      "AXButton|Speech conversation|1876,8,36,36"
+    ]
+  },
+  "steps": null,
+  "approved": "2026-11-01",
+  "reason": "First baseline of the Polymux UI, reproduced in two runs"
+}

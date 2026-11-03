@@ -1,0 +1,16 @@
+name: Request a feature
+description: Suggest a change or addition.
+labels: enhancement
+body:
+  - type: textarea
+    attributes:
+      label: Problem
+      description: What can't you do today, or what is painful?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposal
+      description: What should change? Add a mockup or screenshot for UI changes.
+    validations:
+      required: true

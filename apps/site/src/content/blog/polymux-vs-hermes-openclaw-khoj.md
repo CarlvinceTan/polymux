@@ -8,7 +8,10 @@ tags:
   - Comparisons
   - Personal AI
 published: true
+updated: 2026-10-24
 ---
+
+> **Version note, October 2026:** This August comparison describes the earlier Electron app. Polymux's current source is a native SwiftUI app backed by a Go agent server, without the tabbed Hub, Drive, and Browser workspace described below. See the [current introduction](/docs/) and [installation guide](/docs/installation/). The comparison is retained as a dated article, not current setup guidance.
 
 “Personal AI assistant” now describes several very different products. Some begin with a terminal, some with a messaging gateway, and others with a library of your notes. Polymux begins with the desktop workspace itself.
 
@@ -90,13 +93,13 @@ Hermes, OpenClaw, and Khoj each make a strong case for their centre of gravity. 
 
 We are building Polymux because we think a personal assistant needs a home: a calm, understandable place where communication, files, browsing, models, and ongoing work meet. The agent matters, but so does the environment around it.
 
-If that workspace-first approach sounds like the way you want to work, [explore Polymux](/) or [follow the project on GitHub](https://github.com/CarlvinceTan/Polymux).
+If that workspace-first approach sounds like the way you want to work, [explore Polymux](/) or [follow the project on GitHub](https://github.com/CarlvinceTan/polymux).
 
 ---
 
 ## Sources
 
-- [Polymux source and product overview](https://github.com/CarlvinceTan/Polymux)
+- [Polymux source and product overview](https://github.com/CarlvinceTan/polymux)
 - [Hermes Agent feature overview](https://hermes-agent.nousresearch.com/docs/user-guide/features/overview/)
 - [OpenClaw documentation](https://docs.openclaw.ai/)
 - [Khoj documentation](https://docs.khoj.dev/)

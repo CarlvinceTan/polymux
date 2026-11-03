@@ -1,0 +1,27 @@
+.prose { color: var(--text); font-size: 15px; line-height: 1.72; overflow-wrap: anywhere; }
+.prose > :first-child { margin-top: 0; }
+.prose h1 { margin-bottom: var(--space-5); color: var(--ink); font-family: var(--font-serif); font-size: clamp(36px, 4vw, 44px); font-weight: 500; letter-spacing: -.025em; }
+.prose h2 { margin: var(--space-12) 0 var(--space-3); color: var(--ink); font-size: 22px; line-height: 1.3; font-weight: 650; letter-spacing: -.025em; }
+.prose h3 { margin: var(--space-8) 0 var(--space-3); color: var(--ink); font-size: 17px; line-height: 1.4; }
+.prose h2, .prose h3 { scroll-margin-top: calc(var(--header-size) + var(--space)); }
+.prose p { margin: 0 0 var(--space-4); }
+.prose ul, .prose ol { margin: 0 0 var(--space-5); padding-left: var(--space); }
+.prose li { margin-bottom: var(--space-2); }
+.prose li > p:last-child { margin-bottom: 0; }
+.prose strong { color: var(--ink); }
+.prose a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--focus); text-underline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) { .prose a:hover { text-decoration-color: var(--ink); } }
+.prose blockquote { margin: var(--space) 0; padding-left: var(--space-4); border-left: 2px solid var(--focus); color: var(--muted); }
+.prose code { padding: 2px var(--space-1); border-radius: var(--space-1); background: var(--soft); color: var(--ink); font-family: var(--font-mono); font-size: .86em; }
+.prose pre { margin: var(--space) 0; padding: var(--space-4); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-small); background: var(--surface); }
+.prose pre code { padding: 0; background: transparent; }
+.prose hr { margin: var(--space-8) 0; border: 0; border-top: 1px solid var(--line); }
+.prose table { display: block; width: 100%; margin: var(--space) 0; overflow-x: auto; border-collapse: collapse; }
+.prose th, .prose td { min-width: 130px; padding: var(--space-3); border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.prose th { color: var(--ink); background: var(--soft); }
+.prose img { height: auto; border-radius: var(--radius-small); }
+
+@media (max-width: 620px) {
+  .prose table { display: table; table-layout: fixed; }
+  .prose th, .prose td { min-width: 0; padding: var(--space-2); font-size: 11px; }
+}

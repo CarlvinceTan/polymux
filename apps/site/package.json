@@ -3,31 +3,36 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node scripts/generate-blog-pages.mjs && node scripts/generate-doc-pages.mjs && node scripts/generate-release-pages.mjs && node scripts/generate-product-pages.mjs && node scripts/generate-sitemap.mjs",
     "dev": "vite",
-    "build": "node scripts/build-site.mjs",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "node --test test/*.test.js",
+    "prebuild": "node scripts/registry.ts",
+    "build": "vite build",
+    "vercel-build": "node scripts/api.ts",
+    "check": "node scripts/prepare.ts && svelte-check --tsconfig ./tsconfig.json",
+    "test": "node scripts/prepare.ts && node --test test/*.test.js",
+    "test:responsive": "node --test test/responsive.js",
+    "verify": "npm test && npm run check && npm run build",
     "preview": "vite preview"
   },
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "devDependencies": {
-    "@lobehub/icons-static-svg": "^1.94.0",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/jsdom": "^21.1.7",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.2.0",
-    "jsdom": "^26.1.0",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.64.1",
     "svelte": "^5.46.4",
     "svelte-check": "^4.4.8",
     "tslib": "^2.6.2",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "vite": "^8.0.5"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "dompurify": "^3.4.14",
-    "highlight.js": "^11.12.0",
     "marked": "^18.0.11",
     "simple-icons": "^16.28.0",
     "yaml": "^2.9.0"

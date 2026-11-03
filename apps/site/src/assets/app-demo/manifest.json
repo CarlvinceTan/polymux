@@ -1,0 +1,61 @@
+{
+  "width": 2160,
+  "height": 1600,
+  "scale": 2,
+  "appearance": "dark",
+  "windowState": "focused",
+  "focusSource": "cua-driver.bring_to_front exact-window verification and list_apps before each capture",
+  "focusProbeSource": "native accessibility close-control screenshot_frame",
+  "focusProbe": {
+    "x": 36,
+    "y": 36,
+    "width": 32,
+    "height": 32
+  },
+  "fixture": "apps/Polymux/Sources/SiteFixture.swift",
+  "hotspotSource": "native accessibility screenshot_frame",
+  "hotspots": {
+    "atlas": {
+      "x": 36,
+      "y": 104,
+      "width": 568,
+      "height": 120
+    },
+    "nova": {
+      "x": 36,
+      "y": 224,
+      "width": 568,
+      "height": 120
+    },
+    "fern": {
+      "x": 36,
+      "y": 344,
+      "width": 568,
+      "height": 120
+    }
+  },
+  "source": "cua-driver.get_window_state",
+  "encoding": "lossless-webp",
+  "fixtureSha256": "252cb20328a787d8daa317e0966e55ce8a6146fe1436418cef2af854514b57a7",
+  "capturedAt": "2026-10-23T14:50:52.594600+00:00",
+  "captures": {
+    "atlas": {
+      "file": "atlas.webp",
+      "sha256": "30522cc70658936c1fe1b34685dfbc7e8ed6b729d34cff66b868eaf1df887fb4",
+      "nativeSha256": "be47c59e8962ed014e7ae10a81873752796fe34317b28596cecfd10cc4e91f63",
+      "pixelsSha256": "01132124d26d89e16e37c1ba8c95e4db59c72950b902e915fc8607ecf90e7fdb"
+    },
+    "nova": {
+      "file": "nova.webp",
+      "sha256": "a83abb5a6c450ffc24f64f48a1d3511ed21a17802c7f2a05019dbec0b7a8d3a7",
+      "nativeSha256": "161aecf14b8932e1141f0d6ac36b377ae21c4281bce43eb0b784102233e8f77e",
+      "pixelsSha256": "87c2271e1ab0309f2cee420f64e82378d7c1a221b210d5d1bba0d93ff3eaf0e6"
+    },
+    "fern": {
+      "file": "fern.webp",
+      "sha256": "dd0fa3466a3b1c10016b602054811083dbcfd1c62a320eedd35e09d4ad198f80",
+      "nativeSha256": "0c8c7b33031580084a6808c13be13205a5ac988457c6697ddb9bf6052177326b",
+      "pixelsSha256": "2eefdf2afcde81d6f92a46e60b0bda9cfdc4353ef216ed16a06f9127c8830d32"
+    }
+  }
+}

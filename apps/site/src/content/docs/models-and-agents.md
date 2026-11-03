@@ -1,37 +1,45 @@
 ---
-title: Models and agents
+title: Models
 slug: models-and-agents
-description: Choose hosted or local models and switch between Polymux Agent and compatible ACP runtimes.
-section: Customising Polymux
-sectionOrder: 3
-order: 1
+description: Connect a model provider and choose the model your agents use.
+section: Guides
+sectionOrder: 1
+order: 4
 published: true
 ---
 
-# Models and agents
+# Models
 
-Polymux separates the desktop workspace from the intelligence running behind it. You can change a model, provider, or compatible agent runtime without replacing the surrounding chats, files, views, and permission controls.
+Choose your own provider, such as OpenAI, Anthropic, Google Gemini, xAI, or OpenRouter. You can also connect local models.
 
-## Connect a provider
+## Add a provider
 
-Open **Settings → Providers** to add a hosted model provider, sign in where supported, or save an API key. Credentials are stored locally using protected operating-system storage.
+Open **Settings → Models**, find **Providers**, and press **Add provider**.
 
-Local runtimes appear as providers when Polymux can reach them. They do not require a hosted API key, but the runtime and selected model must be running on this computer.
+- **Sign in** where the provider supports it.
+- **API key** to use your own provider key.
+- **Manual** for Ollama, LM Studio, or a compatible custom endpoint.
 
-## Choose models
+Enter keys in provider settings, not chat messages. Provider access and usage charges depend on the service you choose.
 
-Open **Settings → Models** to select the models assigned to available roles. The full picker and role configuration are always available.
+## Choose a model
 
-Changing the model affects future agent work. It does not remove existing chats or workspace content.
+Select a **Default model** under **Models**. Set a reasoning level if your model supports it.
 
-## Choose an agent runtime
+Provider settings belong to the server, so your other clients use the same setup. A local model endpoint must be reachable from the **server Mac**, not only the client Mac.
 
-Polymux Agent is included by default. It supports skills, MCP tools, local memory, goals, compaction, and subagent delegation.
+## Fallbacks
 
-Profiles can instead launch or connect to an external agent over ACP. Configure this under the profile’s Agent settings. Polymux continues to own the conversation UI, local history, rendering, and permission decisions; the selected runtime owns its agent session.
+Each bot decides what happens when its model can't answer. Open the bot's profile, choose **Capabilities**, and press the gear beside **Model**.
 
-## Profiles
+- **Auto** moves to the same model on another provider, then to each remaining provider's preferred model, following your provider order. New bots start here.
+- **Custom** tries the models you list, in order, each with its own reasoning level.
+- **Off** stays on the bot's model.
 
-A profile groups agent, model, provider, MCP, plugin, skill, and credential configuration. Use profiles when different kinds of work need different tools or model access.
+A bot switches only when it has to. It waits out a blip of up to 5 seconds on its own model, and once it has switched, it finishes that reply on the new model and goes back to its own model on the next one.
 
-Profiles do not create a separate copy of the desktop process or every local data store. They are configuration boundaries, not separate operating-system users.
+When every model a bot can use is out of allowance, rate-limited or down, the bot waits rather than failing, and carries on as soon as one is back. That's at the reset time the provider gave, or within two minutes when it gave none, such as after a top-up. Sending a message makes it check straight away. A bad API key still stops the reply with an error.
+
+## Voice
+
+**Settings → Voice** uses Gemini Live or OpenAI Realtime with the API key of your connected Gemini or OpenAI provider. Talk naturally and interrupt replies; the live spokesperson consults your agents for tasks and context. Voice settings don't change the default text model.

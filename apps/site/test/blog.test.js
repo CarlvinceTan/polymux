@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadPublishedPosts} from '../scripts/blog-content.mjs';
+import {loadPublishedPosts} from '../scripts/content.ts';
 
 test('loads published Markdown posts with stable blog metadata', () => {
   const posts = loadPublishedPosts();

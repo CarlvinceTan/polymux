@@ -1,0 +1,5216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polymux.local/contracts/v1",
+  "title": "Polymux wire contract",
+  "$defs": {
+    "PushStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registered": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "registered",
+        "available"
+      ]
+    },
+    "Notice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string",
+          "x-swift-optional": true
+        },
+        "outcome": {
+          "type": "string",
+          "x-swift-optional": true
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string",
+          "x-swift-optional": true
+        },
+        "title": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "body",
+        "outcome",
+        "seq",
+        "conversationID",
+        "messageID",
+        "agentID",
+        "title",
+        "createdAt"
+      ]
+    },
+    "NoticePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "integer"
+        },
+        "notices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Notice"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "notices"
+      ]
+    },
+    "PushDevice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "muted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents whose alerts this device has muted."
+        }
+      },
+      "required": [
+        "id",
+        "token",
+        "environment",
+        "server",
+        "enabled",
+        "muted"
+      ]
+    },
+    "ClientState": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What a client device reports about itself; the server keys it by the authenticated device.",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "ios",
+            "macos"
+          ]
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA zone the device is set to."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "location",
+              "home",
+              "alarms"
+            ]
+          },
+          "description": "Connections the user allowed on this device."
+        }
+      },
+      "required": [
+        "platform",
+        "timezone",
+        "capabilities"
+      ]
+    },
+    "ClientRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A tool call the server asks one client device to run.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string",
+          "description": "JSON-encoded tool arguments."
+        }
+      },
+      "required": [
+        "id",
+        "capability",
+        "input"
+      ]
+    },
+    "ClientResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "type": "string",
+          "description": "JSON-encoded result."
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": []
+    },
+    "Settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "appearance": {
+          "type": "string"
+        },
+        "liveProvider": {
+          "type": "string",
+          "description": "gemini (Gemini Live) or openai (OpenAI Realtime)."
+        },
+        "liveModel": {
+          "type": "string"
+        },
+        "liveVoice": {
+          "type": "string"
+        },
+        "voicePrompt": {
+          "type": "string"
+        },
+        "voiceLanguage": {
+          "type": "string"
+        },
+        "liveFallback": {
+          "$ref": "#/$defs/LiveFallback",
+          "x-swift-default": "LiveFallback(mode: LiveFallbackMode.auto)"
+        },
+        "imageOrder": {
+          "$ref": "#/$defs/MediaOrder",
+          "x-swift-default": "MediaOrder(mode: MediaOrderMode.auto)"
+        },
+        "videoOrder": {
+          "$ref": "#/$defs/MediaOrder",
+          "x-swift-default": "MediaOrder(mode: MediaOrderMode.auto)"
+        },
+        "speechKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "defaultProvider": {
+          "type": "string",
+          "description": "Provider of the model new bots start with; empty means the server's fallback endpoint."
+        },
+        "defaultModel": {
+          "type": "string"
+        },
+        "defaultReasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "updateChannel": {
+          "type": "string",
+          "description": "Which builds the server's automatic deploys follow.",
+          "x-go-value": true,
+          "enum": [
+            "nightly",
+            "stable"
+          ]
+        },
+        "switcherBadges": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "revision",
+        "appearance",
+        "liveProvider",
+        "liveModel",
+        "liveVoice",
+        "voicePrompt",
+        "voiceLanguage",
+        "liveFallback",
+        "imageOrder",
+        "videoOrder",
+        "speechKeys",
+        "defaultProvider",
+        "defaultModel",
+        "defaultReasoning"
+      ]
+    },
+    "SettingsPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "appearance": {
+          "type": "string"
+        },
+        "liveProvider": {
+          "type": "string",
+          "description": "gemini (Gemini Live) or openai (OpenAI Realtime)."
+        },
+        "liveModel": {
+          "type": "string"
+        },
+        "liveVoice": {
+          "type": "string"
+        },
+        "voicePrompt": {
+          "type": "string"
+        },
+        "voiceLanguage": {
+          "type": "string"
+        },
+        "liveFallback": {
+          "$ref": "#/$defs/LiveFallback"
+        },
+        "imageOrder": {
+          "$ref": "#/$defs/MediaOrder"
+        },
+        "videoOrder": {
+          "$ref": "#/$defs/MediaOrder"
+        },
+        "defaultProvider": {
+          "type": "string",
+          "description": "Provider of the model new bots start with; empty means the server's fallback endpoint."
+        },
+        "defaultModel": {
+          "type": "string"
+        },
+        "defaultReasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "updateChannel": {
+          "type": "string",
+          "description": "Which builds the server's automatic deploys follow.",
+          "enum": [
+            "nightly",
+            "stable"
+          ]
+        },
+        "switcherBadges": {
+          "type": "boolean"
+        }
+      },
+      "required": []
+    },
+    "AgentFallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where a bot goes when its model can't answer. Omitted means auto.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "custom",
+            "off"
+          ]
+        },
+        "models": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/FallbackModel"
+          },
+          "description": "The custom order, kept while another mode is selected."
+        }
+      },
+      "required": [
+        "mode",
+        "models"
+      ]
+    },
+    "LiveFallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where voice goes when its model can't connect.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "custom",
+            "off"
+          ]
+        },
+        "models": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/LiveStep"
+          },
+          "description": "The custom order, kept while another mode is selected."
+        }
+      },
+      "required": [
+        "mode",
+        "models"
+      ]
+    },
+    "LiveStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "gemini (Gemini Live) or openai (OpenAI Realtime)."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "voice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "voice"
+      ]
+    },
+    "MediaOrder": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which models generate images or videos. Auto uses the first enabled one.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "custom"
+          ]
+        },
+        "models": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/MediaStep"
+          },
+          "description": "The custom order, kept while auto is selected."
+        }
+      },
+      "required": [
+        "mode",
+        "models"
+      ]
+    },
+    "MediaStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ]
+    },
+    "FallbackModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "reasoning"
+      ]
+    },
+    "Agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "avatar": {
+          "$ref": "#/$defs/AvatarDesign"
+        },
+        "provider": {
+          "type": "string",
+          "description": "Settings provider serving the model; empty means the server's fallback endpoint.",
+          "x-go-value": true
+        },
+        "reasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "x-go-value": true
+        },
+        "fallback": {
+          "$ref": "#/$defs/AgentFallback"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "ID of the bot that created this one; empty when the user did.",
+          "x-go-value": true
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "model",
+        "active"
+      ]
+    },
+    "TaskInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "done"
+          ]
+        },
+        "pinnedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "description",
+        "status",
+        "updatedAt",
+        "workers"
+      ]
+    },
+    "UpdateTaskRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pinned": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "done"
+          ]
+        }
+      },
+      "required": []
+    },
+    "Thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Run"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "lastReadSeq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastSeq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unreadCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastMessage": {
+          "$ref": "#/$defs/Message"
+        },
+        "title": {
+          "type": "string"
+        },
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinOrder": {
+          "type": "number",
+          "minimum": 0
+        },
+        "task": {
+          "$ref": "#/$defs/TaskInfo"
+        },
+        "sectionID": {
+          "type": "string"
+        },
+        "sectionOrder": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "runs",
+        "id",
+        "agentID",
+        "lastReadSeq",
+        "lastSeq",
+        "unreadCount",
+        "title",
+        "agentIDs"
+      ]
+    },
+    "Attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "html",
+            "file"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "url": {
+          "type": "string"
+        },
+        "thumbnailURL": {
+          "type": "string"
+        },
+        "extractedText": {
+          "type": "string"
+        },
+        "indexingState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "error"
+          ]
+        },
+        "width": {
+          "type": "number",
+          "minimum": 44,
+          "maximum": 550,
+          "description": "Requested HTML viewport width in logical CSS pixels; constrained by the native available width."
+        },
+        "height": {
+          "type": "number",
+          "minimum": 44,
+          "maximum": 400,
+          "description": "Requested HTML viewport height in logical CSS pixels; omitted for measured content height."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "mimeType",
+        "size",
+        "url",
+        "indexingState"
+      ]
+    },
+    "Part": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "text",
+            "attachment",
+            "tool",
+            "choice",
+            "credential",
+            "vault"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "name": {
+          "type": "string"
+        },
+        "args": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          }
+        },
+        "answerID": {
+          "type": "string"
+        },
+        "answerText": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "allowText": {
+          "type": "boolean"
+        },
+        "credential": {
+          "$ref": "#/$defs/CredentialRequest"
+        },
+        "vault": {
+          "$ref": "#/$defs/VaultCard"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "ReplyContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageID": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "partIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The selected text or attachment index in the original message Parts; absent for a whole-message quote."
+        }
+      },
+      "required": [
+        "messageID",
+        "role",
+        "text"
+      ]
+    },
+    "Reaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string",
+          "description": "The reacting bot; absent for the user."
+        }
+      },
+      "required": [
+        "emoji"
+      ]
+    },
+    "ReactionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "remove": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "emoji",
+        "remove"
+      ]
+    },
+    "Message": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runID": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "description": "Public reply failure code and message, retained independently of the current run. Never includes private provider detail."
+        },
+        "id": {
+          "type": "string"
+        },
+        "threadID": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system"
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Part"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "streaming",
+            "done",
+            "error",
+            "silent"
+          ]
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Immutable sequence of the message.start event; 0 only for an optimistic unsent client message."
+        },
+        "replyToID": {
+          "type": "string",
+          "description": "The user message ID that triggered this assistant reply; used to correlate queued voice turns."
+        },
+        "reply": {
+          "$ref": "#/$defs/ReplyContext",
+          "description": "A durable snapshot of the message quoted by this user message."
+        },
+        "agentID": {
+          "type": "string",
+          "description": "The assistant member that authored this message."
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Explicit member IDs addressed by this user message."
+        },
+        "reactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Reaction"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "threadID",
+        "role",
+        "parts",
+        "createdAt",
+        "status",
+        "seq"
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "Event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Monotonically increasing durable replay cursor scoped to conversationID."
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "message.start",
+            "message.delta",
+            "message.tool_call",
+            "message.attachment",
+            "message.error",
+            "message.done",
+            "message.reactions",
+            "agent.presence",
+            "run.start",
+            "run.update",
+            "run.done",
+            "tool.start",
+            "tool.update",
+            "tool.done",
+            "peer.delivery",
+            "group.handoff",
+            "activity",
+            "message.read",
+            "message.end",
+            "context.compacted",
+            "run.retrying"
+          ]
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "runID": {
+          "type": "string"
+        },
+        "run": {
+          "$ref": "#/$defs/Run"
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolActivity"
+        },
+        "delivery": {
+          "$ref": "#/$defs/PeerDelivery"
+        },
+        "routineID": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        },
+        "payload": {
+          "$ref": "#/$defs/Activity"
+        }
+      },
+      "required": [
+        "seq",
+        "conversationID",
+        "type",
+        "createdAt"
+      ]
+    },
+    "Usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens"
+      ]
+    },
+    "SendRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachmentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "replyToID": {
+          "type": "string",
+          "description": "An optional existing message in the same conversation to quote in this message."
+        },
+        "replyPart": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional source Parts index to quote one text or attachment; requires replyToID."
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "description": "Optional explicit mention IDs; only conversation members are woken."
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "attachmentIDs"
+      ]
+    },
+    "ReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "seq"
+      ]
+    },
+    "SearchHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "score": {
+          "type": "number"
+        },
+        "snippet": {
+          "type": "string"
+        },
+        "indexingState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "error"
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "score",
+        "snippet"
+      ]
+    },
+    "Routine": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "nextAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "active",
+            "cancelled",
+            "finished",
+            "paused"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "id": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "once",
+            "interval",
+            "cron",
+            "watch"
+          ]
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "IANA zone for a wall-clock recurrence; empty means fixed elapsed intervals"
+        },
+        "crons": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "watch": {
+          "$ref": "#/$defs/RoutineWatch"
+        }
+      },
+      "required": [
+        "at",
+        "intervalSeconds",
+        "status",
+        "createdAt",
+        "id",
+        "agentID",
+        "trigger",
+        "prompt"
+      ]
+    },
+    "RoutineRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary",
+        "createdAt"
+      ]
+    },
+    "RoutineRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timezone": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "IANA zone for a wall-clock recurrence; empty means fixed elapsed intervals"
+        },
+        "crons": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "watch": {
+          "$ref": "#/$defs/RoutineWatch"
+        }
+      },
+      "required": [
+        "prompt",
+        "at",
+        "intervalSeconds"
+      ]
+    },
+    "Proactivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 3600,
+          "maximum": 604800
+        },
+        "nextAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "enabled",
+        "intervalSeconds"
+      ]
+    },
+    "Run": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobID": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "message",
+            "created",
+            "peer",
+            "handoff",
+            "routine",
+            "review",
+            "follow_up",
+            "task",
+            "event",
+            "child",
+            "assigned"
+          ]
+        },
+        "taskID": {
+          "type": "string"
+        },
+        "sourceMessageID": {
+          "type": "string"
+        },
+        "parentRunID": {
+          "type": "string"
+        },
+        "routineID": {
+          "type": "string"
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "toolID": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolActivity"
+          }
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "activity": {
+          "type": "string",
+          "enum": [
+            "preparing",
+            "generating",
+            "tool",
+            "rendering",
+            "handoff",
+            ""
+          ]
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting_input",
+            "waiting_peer",
+            "resuming",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "statusText": {
+          "type": "string",
+          "description": "The model's own line for the current step, shown instead of a tool phrase."
+        },
+        "notice": {
+          "type": "string",
+          "description": "A warning for the user about this run, such as another model replying."
+        }
+      },
+      "required": [
+        "jobID",
+        "id",
+        "agentID",
+        "conversationID",
+        "trigger",
+        "status",
+        "activity",
+        "attempt",
+        "seq",
+        "createdAt",
+        "updatedAt",
+        "summary"
+      ]
+    },
+    "ToolActivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "runID": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "runID",
+        "name",
+        "status"
+      ]
+    },
+    "PeerDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sourceAgentID": {
+          "type": "string"
+        },
+        "targetAgentID": {
+          "type": "string"
+        },
+        "conversationID": {
+          "type": "string"
+        },
+        "parentRunID": {
+          "type": "string"
+        },
+        "runID": {
+          "type": "string"
+        },
+        "intent": {
+          "type": "string",
+          "enum": [
+            "request",
+            "question",
+            "result",
+            "status",
+            "handoff",
+            "fyi"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "delivered",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "hops": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "sourceAgentID",
+        "targetAgentID",
+        "conversationID",
+        "parentRunID",
+        "intent",
+        "status",
+        "createdAt"
+      ]
+    },
+    "ChoiceOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ]
+    },
+    "CreateAgentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initialTask": {
+          "type": "string",
+          "maxLength": 64000
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 64000
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "A configured provider to run model on; omitted runs model on the server's fallback endpoint."
+        },
+        "avatar": {
+          "$ref": "#/$defs/AvatarDesign"
+        },
+        "sectionID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "prompt"
+      ]
+    },
+    "AgentProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/Agent"
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "prompt"
+      ]
+    },
+    "UpdateAgentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 64000
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Set together with model to explicitly remap this bot. Empty selects the server fallback."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reasoning": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "fallback": {
+          "$ref": "#/$defs/AgentFallback"
+        }
+      },
+      "required": []
+    },
+    "AnimationBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "thinking",
+            "wink",
+            "wide",
+            "alert",
+            "notify",
+            "exclaim",
+            "sleep",
+            "egg",
+            "hexagon",
+            "play",
+            "orbit",
+            "burst",
+            "comet",
+            "swirl"
+          ]
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.6,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "duration"
+      ]
+    },
+    "AvatarDesign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "type": "string",
+          "enum": [
+            "cercle",
+            "galet",
+            "squircle",
+            "capsule",
+            "triangle",
+            "hexagone",
+            "nuage",
+            "goutte",
+            "star",
+            "clover",
+            "flower",
+            "burst",
+            "pentagon",
+            "square",
+            "sparkle",
+            "heart",
+            "tablet",
+            "wedge",
+            "house",
+            "pumpkin",
+            "apple",
+            "pear",
+            "strawberry",
+            "bun",
+            "toast",
+            "cupcake",
+            "cat",
+            "dog",
+            "bear",
+            "rabbit",
+            "fox",
+            "hamster",
+            "capybara",
+            "otter",
+            "pig",
+            "deer",
+            "sheep",
+            "alpaca",
+            "cow",
+            "squirrel",
+            "tiger",
+            "lion",
+            "hedgehog",
+            "seal",
+            "beaver",
+            "guinea_pig",
+            "chinchilla",
+            "ferret",
+            "monkey",
+            "chick",
+            "duck",
+            "penguin",
+            "owl",
+            "parrot",
+            "goose",
+            "whale",
+            "bull",
+            "moon",
+            "wave",
+            "blossom",
+            "gumdrop",
+            "peanut",
+            "saucer",
+            "beacon",
+            "plus",
+            "magnet",
+            "acorn",
+            "pebbles",
+            "cushion",
+            "ring",
+            "gem",
+            "banana",
+            "carrot",
+            "pizza",
+            "sushi",
+            "ice_cream",
+            "sun",
+            "leaf",
+            "tree",
+            "cactus",
+            "mushroom",
+            "mountain",
+            "volcano",
+            "rainbow",
+            "snowflake",
+            "rocket",
+            "robot",
+            "camera",
+            "clock",
+            "key",
+            "bell",
+            "book",
+            "teapot",
+            "lemon",
+            "orange_fruit",
+            "watermelon",
+            "avocado",
+            "cherry",
+            "cookie",
+            "cheese",
+            "egg",
+            "candy",
+            "donut",
+            "tulip",
+            "rose",
+            "sprout",
+            "fern",
+            "pinecone",
+            "shell",
+            "coral",
+            "crystal",
+            "comet",
+            "planet",
+            "mug",
+            "lantern",
+            "gift",
+            "pencil",
+            "paintbrush",
+            "umbrella",
+            "backpack",
+            "headphones",
+            "guitar",
+            "telescope"
+          ]
+        },
+        "color": {
+          "type": "string",
+          "enum": [
+            "encre",
+            "brun",
+            "rouge",
+            "orange",
+            "ambre",
+            "vert",
+            "turquoise",
+            "bleu",
+            "violet",
+            "rose",
+            "gris",
+            "creme"
+          ]
+        },
+        "expression": {
+          "type": "string",
+          "enum": [
+            "neutre",
+            "attentif",
+            "surpris",
+            "excite",
+            "heureux",
+            "hilare",
+            "colere",
+            "triste",
+            "effraye",
+            "mefiant",
+            "confus",
+            "curieux",
+            "fier",
+            "timide",
+            "blase",
+            "somnolent"
+          ]
+        },
+        "followCursor": {
+          "type": "boolean"
+        },
+        "animates": {
+          "type": "boolean"
+        },
+        "playSequence": {
+          "type": "boolean"
+        },
+        "blocks": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/AnimationBlock"
+          }
+        }
+      },
+      "required": [
+        "shape",
+        "color",
+        "expression",
+        "followCursor",
+        "animates",
+        "playSequence",
+        "blocks"
+      ]
+    },
+    "DeleteResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted"
+      ]
+    },
+    "CreateThreadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "sectionID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentIDs"
+      ]
+    },
+    "VoiceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ]
+    },
+    "VoiceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "UpdateThreadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinOrder": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "minProperties": 1,
+      "required": []
+    },
+    "Section": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "order": {
+          "type": "number"
+        },
+        "collapsed": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "chatCount": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order",
+        "collapsed",
+        "createdAt",
+        "updatedAt",
+        "chatCount"
+      ]
+    },
+    "AgentConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bundledSkills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "workspace",
+        "tools",
+        "skills"
+      ]
+    },
+    "ConfigurationPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "minProperties": 1
+    },
+    "MCPConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "shared": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "enabled",
+        "hidden",
+        "shared"
+      ]
+    },
+    "SidebarPlacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadID": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinOrder": {
+          "type": "number"
+        },
+        "sectionID": {
+          "type": "string"
+        },
+        "sectionOrder": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "threadID",
+        "pinned"
+      ]
+    },
+    "SidebarSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "integer"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Section"
+          }
+        },
+        "placements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SidebarPlacement"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "sections",
+        "placements"
+      ]
+    },
+    "SidebarEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Section"
+          }
+        },
+        "changedThreadIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "placements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SidebarPlacement"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "type",
+        "sections",
+        "changedThreadIDs",
+        "placements",
+        "createdAt"
+      ]
+    },
+    "SearchResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "snippet": {
+          "type": "string"
+        },
+        "threadID": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "agentID": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "snippet",
+        "threadID",
+        "score"
+      ]
+    },
+    "Activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "verb": {
+          "type": "string"
+        },
+        "objectID": {
+          "type": "string"
+        },
+        "objectLabel": {
+          "type": "string"
+        },
+        "iconOrAgentID": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "x-swift-default": "WireDate.string()"
+        },
+        "agentIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "verb",
+        "objectID",
+        "objectLabel",
+        "iconOrAgentID",
+        "at"
+      ]
+    },
+    "ChoiceAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "optionID": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "optionID"
+      ]
+    },
+    "CredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "api",
+            "ssh"
+          ]
+        },
+        "origin": {
+          "type": "string"
+        },
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "header": {
+          "type": "string"
+        },
+        "scheme": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "ephemeral": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "saved",
+            "skipped"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "kind",
+        "origin",
+        "header",
+        "scheme",
+        "status"
+      ]
+    },
+    "CredentialAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "skip": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "skip"
+      ]
+    },
+    "VaultCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "edit",
+            "import"
+          ]
+        },
+        "itemID": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "keyPath": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "done"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "itemID",
+        "title",
+        "kind",
+        "url",
+        "status"
+      ],
+      "description": "Non-secret reference only. Saved values and import passwords never belong in chat parts."
+    },
+    "VaultImport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "added": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "added",
+        "skipped"
+      ]
+    },
+    "VaultStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "created": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "protection": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "created",
+        "available",
+        "protection"
+      ]
+    },
+    "VaultCode": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "used": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "value",
+        "used"
+      ]
+    },
+    "VaultItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "login",
+            "api",
+            "card",
+            "totp",
+            "note",
+            "recovery",
+            "wifi",
+            "passkey"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "codes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VaultCode"
+          }
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "url",
+        "fields",
+        "codes",
+        "revision",
+        "removed"
+      ]
+    },
+    "VaultSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "origin",
+        "fields",
+        "revision"
+      ]
+    },
+    "VaultBrowser": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "endpoint"
+      ]
+    },
+    "RoutineWatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "jsonPointers": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "ProviderModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tags",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "contextWindow": {
+          "type": "integer",
+          "description": "Input tokens the model accepts, when the provider reports it; zero means unknown.",
+          "x-go-value": true
+        },
+        "reasoning": {
+          "type": "array",
+          "description": "Reasoning levels the model supports; empty means unknown.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "name",
+        "baseURL",
+        "enabled",
+        "order",
+        "models"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "A PiG provider ID, gemini for Google, or a local type: elevenlabs, ollama, lmstudio or custom."
+        },
+        "name": {
+          "type": "string"
+        },
+        "baseURL": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-go-value": true
+        },
+        "sessionHeader": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "status": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "How the provider is signed in, set by the server: oauth or api_key; empty when it has no credential."
+        },
+        "keyHint": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "order": {
+          "type": "integer",
+          "x-go-type": "int"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderModel"
+          }
+        }
+      }
+    },
+    "ProviderOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One way to add a provider: signing in to an account or entering an API key.",
+      "required": [
+        "type",
+        "name",
+        "auth",
+        "label",
+        "subscription"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "oauth",
+            "api_key"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "description": "The sign-in method's name, such as Anthropic (Claude Pro/Max)."
+        },
+        "subscription": {
+          "type": "boolean",
+          "description": "Signing in uses a paid subscription rather than an account."
+        }
+      }
+    },
+    "LoginChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "x-go-value": true
+        }
+      }
+    },
+    "LoginPrompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "message"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "x-go-type": "int",
+          "description": "Answers name the prompt they reply to."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "secret",
+            "manual_code",
+            "select"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "placeholder": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LoginChoice"
+          }
+        }
+      }
+    },
+    "LoginEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "info",
+            "auth_url",
+            "device_code",
+            "progress"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "url": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "instructions": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "userCode": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "verificationUri": {
+          "type": "string",
+          "x-go-value": true
+        }
+      }
+    },
+    "ProviderLogin": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A provider sign-in in progress on the server.",
+      "required": [
+        "id",
+        "revision",
+        "events",
+        "done"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "x-go-type": "int",
+          "description": "Increases with every change; polling with it waits for the next one."
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LoginEvent"
+          }
+        },
+        "prompt": {
+          "$ref": "#/$defs/LoginPrompt"
+        },
+        "done": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "provider": {
+          "$ref": "#/$defs/Provider",
+          "description": "The provider signed in, once done."
+        }
+      }
+    },
+    "MCPStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "connected",
+        "tools"
+      ]
+    },
+    "Plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "selectedSymbol": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "global",
+            "scoped",
+            "both"
+          ]
+        },
+        "surface": {
+          "type": "string"
+        },
+        "page": {
+          "type": "string"
+        },
+        "hideClose": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "installing",
+            "ready",
+            "failed"
+          ]
+        },
+        "issue": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "description",
+        "symbol",
+        "selectedSymbol",
+        "version",
+        "kind",
+        "surface",
+        "state",
+        "source",
+        "chats"
+      ]
+    },
+    "MarketPlugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "homepage": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "compatible": {
+          "type": "boolean"
+        },
+        "installed": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "description",
+        "symbol",
+        "author",
+        "homepage",
+        "kind",
+        "surface",
+        "version",
+        "source",
+        "compatible"
+      ]
+    },
+    "PluginLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "switcher": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "buttons": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "switcher",
+        "buttons"
+      ]
+    },
+    "PluginList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "installed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Plugin"
+          }
+        },
+        "layout": {
+          "$ref": "#/$defs/PluginLayout"
+        }
+      },
+      "required": [
+        "installed",
+        "layout"
+      ]
+    },
+    "InstallPlugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ]
+    },
+    "UpdatePlugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "chats"
+      ]
+    },
+    "HubField": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "secret"
+      ]
+    },
+    "HubFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "HubAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "issue": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "HubPlatform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "stopped",
+            "running",
+            "failed"
+          ]
+        },
+        "issue": {
+          "type": "string"
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubAccount"
+          }
+        },
+        "flows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubFlow"
+          }
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubField"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "accounts",
+        "flows",
+        "setup"
+      ]
+    },
+    "HubMailAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "issue": {
+          "type": "string"
+        },
+        "imap": {
+          "type": "string"
+        },
+        "smtp": {
+          "type": "string"
+        },
+        "auth": {
+          "type": "string"
+        },
+        "signatures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailSignature"
+          }
+        },
+        "defaultSignature": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "email"
+      ]
+    },
+    "HubStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "starting",
+            "ready",
+            "failed"
+          ]
+        },
+        "issue": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubPlatform"
+          }
+        },
+        "mail": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailAccount"
+          }
+        },
+        "incognito": {
+          "type": "boolean"
+        },
+        "mailProviders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailProvider"
+          }
+        },
+        "selector": {
+          "type": "string",
+          "enum": [
+            "text",
+            "both",
+            "logo"
+          ]
+        },
+        "textOnly": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "wechatRename": {
+          "type": "boolean"
+        },
+        "mailPresets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailPreset"
+          }
+        }
+      },
+      "required": [
+        "state",
+        "revision",
+        "platforms",
+        "mail",
+        "incognito",
+        "mailProviders",
+        "textOnly",
+        "wechatRename"
+      ]
+    },
+    "HubLoginStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "login": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "display",
+            "input",
+            "cookies",
+            "done"
+          ]
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "display": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubField"
+          }
+        }
+      },
+      "required": [
+        "login",
+        "step",
+        "kind",
+        "instructions",
+        "display",
+        "code",
+        "fields"
+      ]
+    },
+    "HubLoginStart": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "flow": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "flow"
+      ]
+    },
+    "HubLoginAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "values"
+      ]
+    },
+    "HubReaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "mine": {
+          "type": "boolean"
+        },
+        "people": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMember"
+          }
+        }
+      },
+      "required": [
+        "key",
+        "count",
+        "mine",
+        "people"
+      ]
+    },
+    "HubAttachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mime": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "voice": {
+          "type": "boolean"
+        },
+        "duration": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "uri",
+        "name",
+        "mime",
+        "size",
+        "width",
+        "height",
+        "voice",
+        "duration"
+      ]
+    },
+    "HubMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "chat": {
+          "type": "string"
+        },
+        "sender": {
+          "type": "string"
+        },
+        "senderName": {
+          "type": "string"
+        },
+        "mine": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "file",
+            "sticker",
+            "notice"
+          ]
+        },
+        "attachment": {
+          "$ref": "#/$defs/HubAttachment"
+        },
+        "replyTo": {
+          "type": "string"
+        },
+        "replyText": {
+          "type": "string"
+        },
+        "replySender": {
+          "type": "string"
+        },
+        "reactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubReaction"
+          }
+        },
+        "edited": {
+          "type": "boolean"
+        },
+        "readers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMember"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "chat",
+        "sender",
+        "senderName",
+        "mine",
+        "text",
+        "at",
+        "kind",
+        "reactions",
+        "edited",
+        "readers"
+      ]
+    },
+    "HubPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMessage"
+          }
+        },
+        "before": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messages"
+      ]
+    },
+    "HubChat": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar": {
+          "type": "string"
+        },
+        "group": {
+          "type": "boolean"
+        },
+        "space": {
+          "type": "boolean"
+        },
+        "parents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "preview": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer"
+        },
+        "unread": {
+          "type": "integer"
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "platform",
+        "name",
+        "avatar",
+        "group",
+        "space",
+        "parents",
+        "preview",
+        "at",
+        "unread"
+      ]
+    },
+    "HubChanges": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "chats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubChat"
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "chats"
+      ]
+    },
+    "HubSend": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "replyTo": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/$defs/HubAttachment"
+        },
+        "mentions": {
+          "$ref": "#/$defs/HubMentions"
+        },
+        "sticker": {
+          "type": "boolean",
+          "x-go-value": true
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ]
+    },
+    "HubReact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ]
+    },
+    "HubPerson": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "account": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar": {
+          "type": "string"
+        },
+        "chat": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "platform",
+        "account",
+        "name",
+        "avatar",
+        "chat"
+      ]
+    },
+    "HubChatCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "account": {
+          "type": "string"
+        },
+        "people": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform",
+        "account",
+        "people",
+        "name"
+      ]
+    },
+    "HubLinkMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "chat": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform",
+        "chat",
+        "name"
+      ]
+    },
+    "HubLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubLinkMember"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "members"
+      ]
+    },
+    "HubLinkEdit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubLinkMember"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "members"
+      ]
+    },
+    "HubDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chat": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "chat",
+        "name",
+        "ok"
+      ]
+    },
+    "HubBroadcastMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer"
+        },
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubDelivery"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "at",
+        "deliveries"
+      ]
+    },
+    "HubBroadcast": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recipients": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubLinkMember"
+          }
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubBroadcastMessage"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "recipients",
+        "messages"
+      ]
+    },
+    "HubBroadcastEdit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "recipients": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubLinkMember"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "recipients"
+      ]
+    },
+    "HubMailSetup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "imapHost": {
+          "type": "string"
+        },
+        "imapPort": {
+          "type": "integer"
+        },
+        "smtpHost": {
+          "type": "string"
+        },
+        "smtpPort": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "email",
+        "password",
+        "imapHost",
+        "imapPort",
+        "smtpHost",
+        "smtpPort"
+      ]
+    },
+    "HubMailFolder": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "unread": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "unread",
+        "label"
+      ]
+    },
+    "HubMailEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "account": {
+          "type": "string"
+        },
+        "folder": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer"
+        },
+        "seen": {
+          "type": "boolean"
+        },
+        "flagged": {
+          "type": "boolean"
+        },
+        "attachments": {
+          "type": "integer"
+        },
+        "answered": {
+          "type": "boolean"
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "importance": {
+          "type": "string",
+          "enum": [
+            "high",
+            "normal",
+            "low"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "account",
+        "folder",
+        "from",
+        "address",
+        "subject",
+        "preview",
+        "at",
+        "seen",
+        "flagged",
+        "attachments",
+        "answered",
+        "draft",
+        "importance"
+      ]
+    },
+    "HubMailFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "part": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mime": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "contentId": {
+          "type": "string"
+        },
+        "inline": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "part",
+        "name",
+        "mime",
+        "size",
+        "contentId",
+        "inline"
+      ]
+    },
+    "HubMailMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "envelope": {
+          "$ref": "#/$defs/HubMailEnvelope"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailAddress"
+          }
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailAddress"
+          }
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailAddress"
+          }
+        },
+        "text": {
+          "type": "string"
+        },
+        "html": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailFile"
+          }
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "envelope",
+        "to",
+        "cc",
+        "bcc",
+        "text",
+        "html",
+        "files",
+        "messageId",
+        "references"
+      ]
+    },
+    "HubMailSend": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "type": "string"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "subject": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "html": {
+          "type": "string"
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "importance": {
+          "type": "string"
+        },
+        "inReplyTo": {
+          "type": "string"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailAttach"
+          }
+        },
+        "replaces": {
+          "$ref": "#/$defs/HubMailDraft"
+        }
+      },
+      "required": [
+        "account",
+        "to",
+        "cc",
+        "bcc",
+        "subject",
+        "text"
+      ]
+    },
+    "HubMailChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "seen": {
+          "type": "boolean"
+        },
+        "flagged": {
+          "type": "boolean"
+        },
+        "folder": {
+          "type": "string"
+        },
+        "erase": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ids"
+      ]
+    },
+    "HubMention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ]
+    },
+    "HubMentions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMention"
+          }
+        },
+        "everyone": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "users",
+        "everyone"
+      ]
+    },
+    "HubMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "avatar"
+      ]
+    },
+    "HubRename": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "HubSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "incognito": {
+          "type": "boolean"
+        },
+        "selector": {
+          "type": "string",
+          "enum": [
+            "text",
+            "both",
+            "logo"
+          ]
+        }
+      },
+      "required": [
+        "incognito"
+      ]
+    },
+    "HubMailProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubField"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "setup"
+      ]
+    },
+    "HubMailClient": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "clientSecret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientId",
+        "clientSecret"
+      ]
+    },
+    "HubMailSignIn": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url"
+      ]
+    },
+    "HubMailCallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "state",
+        "error"
+      ]
+    },
+    "HubMailUpload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mime": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "mime",
+        "data"
+      ]
+    },
+    "HubMailAddress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "address"
+      ]
+    },
+    "HubMailSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "html": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "text",
+        "html"
+      ]
+    },
+    "HubMailSignatures": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "signatures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HubMailSignature"
+          }
+        },
+        "defaultSignature": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "signatures"
+      ]
+    },
+    "HubMailPreset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "imapHost": {
+          "type": "string"
+        },
+        "imapPort": {
+          "type": "integer"
+        },
+        "smtpHost": {
+          "type": "string"
+        },
+        "smtpPort": {
+          "type": "integer"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "imapHost",
+        "imapPort",
+        "smtpHost",
+        "smtpPort",
+        "hint",
+        "hidden"
+      ]
+    },
+    "HubMailAttach": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "contentId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "HubMailDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "folder": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "folder"
+      ]
+    },
+    "HubMailSent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/HubMailDraft"
+        }
+      },
+      "required": []
+    },
+    "WorkBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "text",
+            "badge",
+            "status",
+            "progress"
+          ],
+          "description": "What this line of a node shows. An app skips kinds it does not know."
+        },
+        "text": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "symbol": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "SF Symbol name."
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "x-go-value": true
+        },
+        "tint": {
+          "type": "string",
+          "x-go-value": true,
+          "enum": [
+            "",
+            "neutral",
+            "accent",
+            "green",
+            "orange",
+            "red",
+            "purple",
+            "blue"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "WorkDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ]
+    },
+    "WorkNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "The node this one sits under; it decides depth for Compact and Full."
+        },
+        "kind": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "What the node is, such as agent, person, device, server, app, repo or github."
+        },
+        "subtitle": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "symbol": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "SF Symbol name."
+        },
+        "agentID": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "A bot whose avatar stands for the node."
+        },
+        "shape": {
+          "type": "string",
+          "x-go-value": true,
+          "enum": [
+            "",
+            "card",
+            "pill",
+            "circle",
+            "frame"
+          ]
+        },
+        "tint": {
+          "type": "string",
+          "x-go-value": true,
+          "enum": [
+            "",
+            "neutral",
+            "accent",
+            "green",
+            "orange",
+            "red",
+            "purple",
+            "blue"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "x-go-value": true,
+          "enum": [
+            "",
+            "idle",
+            "working",
+            "waiting",
+            "done",
+            "failed"
+          ]
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkBlock"
+          }
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkDetail"
+          }
+        },
+        "chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Chats the node belongs to; empty means it isn’t tied to one."
+        },
+        "updatedAt": {
+          "type": "string",
+          "x-go-value": true
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ]
+    },
+    "WorkWire": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "direction": {
+          "type": "string",
+          "x-go-value": true,
+          "enum": [
+            "",
+            "forward",
+            "back",
+            "both",
+            "none"
+          ]
+        },
+        "line": {
+          "type": "string",
+          "x-go-value": true,
+          "enum": [
+            "",
+            "solid",
+            "dashed",
+            "dotted"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "x-go-value": true,
+          "enum": [
+            "",
+            "idle",
+            "active",
+            "failed"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "x-go-value": true
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkDetail"
+          }
+        },
+        "chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "updatedAt": {
+          "type": "string",
+          "x-go-value": true
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to"
+      ]
+    },
+    "WorkGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkNode"
+          }
+        },
+        "wires": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkWire"
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "nodes",
+        "wires"
+      ]
+    },
+    "WorkReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkNode"
+          }
+        },
+        "wires": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkWire"
+          }
+        },
+        "remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Node and wire IDs to forget."
+        }
+      },
+      "required": []
+    },
+    "WorkActivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "build": {
+          "type": "string"
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Run"
+          }
+        },
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PeerDelivery"
+          }
+        }
+      },
+      "required": [
+        "build",
+        "runs",
+        "deliveries"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Agent"
+    },
+    {
+      "$ref": "#/$defs/Thread"
+    },
+    {
+      "$ref": "#/$defs/Message"
+    },
+    {
+      "$ref": "#/$defs/Event"
+    },
+    {
+      "$ref": "#/$defs/Attachment"
+    },
+    {
+      "$ref": "#/$defs/Routine"
+    },
+    {
+      "$ref": "#/$defs/Run"
+    }
+  ],
+  "x-http": {
+    "GET /vault": {
+      "response": {
+        "$ref": "#/$defs/VaultStatus"
+      },
+      "privacy": "All vault routes require device authentication, a non-browser request, and a private transport. Responses are no-store; vault content never joins chat, search, events, or ordinary client caches."
+    },
+    "GET /vault/items": {
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/VaultSummary"
+        }
+      },
+      "authentication": "Paired device and encrypted transport required. Returns names, origins, field names, and revisions only; no values or unlock session."
+    },
+    "PUT /vault/items/{id}": {
+      "request": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "concurrency": "Client-generated IDs and revisions prevent lost updates; revision 0 creates."
+    },
+    "GET /vault/items/{id}": {
+      "response": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "authentication": "Returns metadata and blank replacement fields only; saved values never leave the server."
+    },
+    "DELETE /vault/items/{id}": {
+      "query": {
+        "revision": "Required current item revision."
+      },
+      "status": 204,
+      "authentication": "Paired device required."
+    },
+    "POST /vault/cards/{id}/save": {
+      "request": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultItem"
+      },
+      "description": "Private card edit: saves encrypted fields and a value-free completion in one transaction; requires device pairing."
+    },
+    "POST /vault/import": {
+      "response": {
+        "$ref": "#/$defs/VaultImport"
+      },
+      "description": "Private Settings import. Requires device pairing. Accepts CSV or JSON up to 8 MiB, or multipart KDBX up to 32 MiB with password and optional keyfile up to 1 MiB. Never accepts server paths or creates chat cards; imports atomically and skips duplicates."
+    },
+    "POST /vault/cards/{id}/import": {
+      "response": {
+        "$ref": "#/$defs/VaultImport"
+      },
+      "description": "Private CSV or JSON upload, raw body up to 8 MiB; never an ordinary chat attachment. Requires device pairing; stores only encrypted entries and completion metadata."
+    },
+    "GET /vault/browser": {
+      "response": {
+        "$ref": "#/$defs/VaultBrowser"
+      }
+    },
+    "PUT /vault/browser": {
+      "request": {
+        "$ref": "#/$defs/VaultBrowser"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultBrowser"
+      },
+      "authentication": "Only an explicit loopback Chromium CDP endpoint is accepted."
+    },
+    "GET /agents": {
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Agent"
+        }
+      }
+    },
+    "GET /threads": {
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Thread"
+        }
+      }
+    },
+    "GET /threads/{id}/messages": {
+      "query": {
+        "before": "exclusive message seq cursor",
+        "limit": "page size, default 100"
+      },
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Message"
+        }
+      }
+    },
+    "GET /threads/{id}/events": {
+      "query": {
+        "after": "exclusive durable event seq, default 0",
+        "limit": "page size, default 100, maximum 1000; keep fetching after last received seq until an empty page"
+      },
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Event"
+        }
+      },
+      "order": "ascending seq; event cursors are scoped to a conversation"
+    },
+    "GET /threads/{id}/stream": {
+      "query": {
+        "after": "exclusive durable event seq, default 0"
+      },
+      "response": "text/event-stream; each data field is one Event JSON; replay before live delivery"
+    },
+    "POST /threads/{id}/messages": {
+      "request": {
+        "$ref": "#/$defs/SendRequest"
+      },
+      "idempotency": "SendRequest.id is the client message identity; retries return the original accepted message without another agent turn"
+    },
+    "POST /threads/{id}/voice": {
+      "request": {
+        "$ref": "#/$defs/VoiceRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/VoiceResponse"
+      },
+      "privacy": "Private agent consultation, never accepted into typed chat or indexed. Only explicit send_to_user/show_html publications become messages.",
+      "cancellation": "Request disconnect cancels only this private task. No automatic replay; duplicate IDs are refused for the server lifetime."
+    },
+    "PATCH /threads/{id}/task": {
+      "request": {
+        "$ref": "#/$defs/UpdateTaskRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/Thread"
+      }
+    },
+    "POST /threads/{id}/read": {
+      "request": {
+        "$ref": "#/$defs/ReadRequest"
+      }
+    },
+    "POST /threads/{id}/stop": {
+      "request": {
+        "type": "object"
+      }
+    },
+    "GET /threads/{id}/search": {
+      "query": {
+        "q": "query text, current conversation only"
+      },
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SearchHit"
+        }
+      }
+    },
+    "POST /attachments": {
+      "request": "multipart/form-data; file field",
+      "response": {
+        "$ref": "#/$defs/Attachment"
+      }
+    },
+    "POST /agents": {
+      "request": {
+        "$ref": "#/$defs/CreateAgentRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/Agent"
+      },
+      "status": 201
+    },
+    "GET /agents/{id}": {
+      "response": {
+        "$ref": "#/$defs/AgentProfile"
+      }
+    },
+    "PATCH /agents/{id}": {
+      "request": {
+        "$ref": "#/$defs/UpdateAgentRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/AgentProfile"
+      }
+    },
+    "PATCH /agents/{id}/avatar": {
+      "request": {
+        "$ref": "#/$defs/AvatarDesign"
+      },
+      "response": {
+        "$ref": "#/$defs/Agent"
+      }
+    },
+    "DELETE /agents/{id}": {
+      "response": {
+        "$ref": "#/$defs/DeleteResponse"
+      },
+      "status": 200,
+      "idempotency": "Deleting an already deleted identity returns deleted=true without recreating it."
+    },
+    "POST /threads": {
+      "request": {
+        "$ref": "#/$defs/CreateThreadRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/Thread"
+      },
+      "status": 201
+    },
+    "PATCH /threads/{id}": {
+      "request": {
+        "$ref": "#/$defs/UpdateThreadRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/Thread"
+      }
+    },
+    "DELETE /threads/{id}": {
+      "response": {
+        "$ref": "#/$defs/DeleteResponse"
+      },
+      "status": 200,
+      "note": "Delete a group chat and its messages while preserving its member bots. Direct bot chats return 409; missing chats return 404."
+    },
+    "POST /threads/{id}/messages/{messageID}/answer": {
+      "request": {
+        "$ref": "#/$defs/ChoiceAnswer"
+      },
+      "response": {
+        "$ref": "#/$defs/Message"
+      },
+      "note": "save a question answer and queue a turn for its author atomically"
+    },
+    "GET /plugins": {
+      "response": {
+        "$ref": "#/$defs/PluginList"
+      },
+      "description": "Installed plugins and the shared layout: the switcher order, which always holds chats, and the ordered groups of Scoped buttons. A group of two or more is merged."
+    },
+    "GET /plugins/market": {
+      "response": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/MarketPlugin"
+        }
+      },
+      "description": "The configured plugin index, read by the server. The last good copy is served when it can't be reached."
+    },
+    "POST /plugins": {
+      "request": {
+        "$ref": "#/$defs/InstallPlugin"
+      },
+      "response": {
+        "$ref": "#/$defs/Plugin"
+      },
+      "status": 202,
+      "description": "Downloads a listed version in the background, verifies its SHA-256, and takes its kind from the package rather than the index."
+    },
+    "PATCH /plugins/{name}": {
+      "request": {
+        "$ref": "#/$defs/UpdatePlugin"
+      },
+      "response": {
+        "$ref": "#/$defs/Plugin"
+      },
+      "description": "Replaces the chats a Scoped plugin is active in."
+    },
+    "DELETE /plugins/{name}": {
+      "status": 204,
+      "description": "Stops a plugin and removes its files and data."
+    },
+    "PUT /plugins/layout": {
+      "request": {
+        "$ref": "#/$defs/PluginLayout"
+      },
+      "response": {
+        "$ref": "#/$defs/PluginLayout"
+      },
+      "description": "Saves the shared layout. The response is normalised against installed plugins."
+    },
+    "ANY /plugins/{name}/api/{path...}": {
+      "description": "Forwards an authenticated request to the plugin's own service. Answers 503 while that service isn't running."
+    },
+    "ANY /plugins/hub/api/{path...}": {
+      "description": "The Hub plugin's API: status, chats, sync, media, logins, links, broadcasts and mail. Its types are the Hub definitions here; docs/plugins.md lists the routes."
+    },
+    "GET /work": {
+      "response": {
+        "$ref": "#/$defs/WorkActivity"
+      },
+      "query": {
+        "limit": "Newest runs and deliveries to return, each at most 200."
+      },
+      "authentication": "Paired device required. Tool output is left out."
+    }
+  }
+}

@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="480" height="150" viewBox="0 0 480 150" role="img" aria-labelledby="title desc">
-  <title id="title">Polymux</title>
-  <desc id="desc">The Polymux logo and name in a white rounded rectangle.</desc>
-  <rect x="1" y="1" width="478" height="148" rx="28" fill="#fff" stroke="#d0d7de" stroke-width="2"/>
-  <path fill="#000" transform="translate(16 19) scale(.56) translate(-10 0)"
-        d="M 40 40 L 120 40 A 60 60 0 0 1 120 160 L 40 160 L 70 120 L 110 120 A 20 20 0 0 0 110 80 L 70 80 Z"/>
-  <text x="130" y="97" fill="#000" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="58" font-weight="700">Polymux</text>
-</svg>

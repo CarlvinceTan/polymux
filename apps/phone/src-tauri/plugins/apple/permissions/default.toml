@@ -1,3 +1,0 @@
-[default]
-description = "Native Apple sign-in and device-only account storage"
-permissions = ["allow-signIn", "allow-secureGet", "allow-secureSet", "allow-secureRemove", "allow-updateAutoFill", "allow-disableAutoFill", "allow-registerPush", "allow-oauth"]

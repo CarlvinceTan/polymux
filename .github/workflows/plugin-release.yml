@@ -1,0 +1,89 @@
+name: Release plugin
+
+# Push a tag named <plugin>-v<version> from dev, or run from Actions with the plugin's name.
+on:
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: Plugin to release
+        required: true
+  push:
+    tags: ['*-v*', '!app-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  plugin:
+    runs-on: ubuntu-24.04
+    outputs:
+      name: ${{ steps.plugin.outputs.name }}
+      tag: ${{ steps.plugin.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: plugin
+        env:
+          PLUGIN: ${{ inputs.plugin }}
+        run: |
+          name=${PLUGIN:-${GITHUB_REF_NAME%-v*}}
+          version=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "plugins/$name/plugin.json")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=$name-v$version" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: plugin
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-26, target: darwin-arm64 }
+          - { runner: ubuntu-24.04, target: linux-amd64 }
+          - { runner: ubuntu-24.04-arm, target: linux-arm64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NAME: ${{ needs.plugin.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: plugins/go.mod
+          cache-dependency-path: plugins/go.sum
+      - run: scripts/test.sh plugins "./$NAME/..."
+      # A plugin that ships other programs beside its service says how to get them.
+      - run: |
+          if [ -x "plugins/$NAME/prepare.sh" ]; then
+            "plugins/$NAME/prepare.sh" ${{ matrix.target }} .build/binaries
+            echo "POLYMUX_PLUGIN_BINARIES=$PWD/.build/binaries" >> "$GITHUB_ENV"
+          fi
+      - run: POLYMUX_PLUGIN_TARGET=${{ matrix.target }} plugins/scripts/package.sh "$NAME" dist/packages
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.target }}
+          path: dist/packages
+
+  publish:
+    needs: [plugin, package]
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NAME: ${{ needs.plugin.outputs.name }}
+      TAG: ${{ needs.plugin.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist/packages
+          merge-multiple: true
+      # Latest stays on the app's own releases.
+      - run: gh release create "$TAG" --target "$GITHUB_SHA" --latest=false --title "$TAG" --notes "$NAME plugin packages." dist/packages/*.tgz
+      - run: python3 plugins/scripts/index.py "$NAME" dist/packages "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" --index plugins/index.json
+      - name: Commit the index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugins/index.json
+          git commit -m "Publish $TAG"
+          git pull --rebase origin dev
+          git push origin dev

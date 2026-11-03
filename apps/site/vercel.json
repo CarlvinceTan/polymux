@@ -1,11 +1,41 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "installCommand": "npm ci && npm ci --prefix ../..",
+  "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "cleanUrls": true,
+  "rewrites": [
+    {"source": "/appcast.xml", "destination": "/api/appcast"},
+    {"source": "/install.sh", "destination": "/api/install"},
+    {"source": "/plugins/index.json", "destination": "https://raw.githubusercontent.com/CarlvinceTan/polymux/dev/plugins/index.json"}
+  ],
+  "redirects": [
+    {"source": "/privacy", "destination": "/privacy-policy/", "permanent": true},
+    {"source": "/docs/browser", "destination": "/docs/skills-and-mcp/#set-up-an-agent", "permanent": true},
+    {"source": "/docs/drive", "destination": "/docs/workspace/#files-and-replies", "permanent": true},
+    {"source": "/docs/hub", "destination": "/docs/skills-and-mcp/#set-up-an-agent", "permanent": true},
+    {"source": "/docs/memory", "destination": "/docs/workspace/#memory", "permanent": true},
+    {"source": "/docs/privacy-and-permissions", "destination": "/docs/skills-and-mcp/#devices-and-permissions", "permanent": true},
+    {"source": "/docs/quickstart", "destination": "/docs/#your-first-conversation", "permanent": true},
+    {"source": "/docs/schedules-and-tasks", "destination": "/docs/workspace/#scheduled-work", "permanent": true},
+    {"source": "/docs/troubleshooting", "destination": "/docs/installation/#if-something-is-not-working", "permanent": true},
+    {"source": "/docs/introduction", "destination": "/docs/", "permanent": true}
+  ],
   "headers": [
+    {
+      "source": "/plugins/index.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, s-maxage=300, stale-while-revalidate=3600"
+        }
+      ]
+    },
     {
       "source": "/(.*)",
       "headers": [
@@ -22,12 +52,6 @@
           "value": "camera=(), microphone=(), geolocation=()"
         }
       ]
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/share/:id",
-      "destination": "/share/index.html"
     }
   ]
 }

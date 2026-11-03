@@ -1,0 +1,9 @@
+{
+  "package": "chart.js",
+  "version": "4.4.1",
+  "tarball": "https://registry.npmjs.org/chart.js/-/chart.js-4.4.1.tgz",
+  "integrity": "sha512-C74QN1bxwV1v2PEujhmKjOZ7iUM4w6BWs23Md/6aOZZSlwMzeCIDGuZay++rBgChYru7/+QFeoQW0fQoP534Dg==",
+  "file": "package/dist/chart.umd.js",
+  "license": "Chart-LICENSE.txt",
+  "sha256": "74401d738dd3e03ee5dfb3b6841210fe2c4ead8a960c4011ca4ba0b78a9fd8f3"
+}

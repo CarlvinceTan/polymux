@@ -1,7 +1,0 @@
-{
-  "name": "com.polymux.tab_context",
-  "description": "Persists the browser tab list for the Polymux desktop agent",
-  "path": "__HOST_PATH__",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://__EXTENSION_ID__/"]
-}

@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {loadPublishedDocs} from '../scripts/docs-content.mjs';
+import {loadPublishedDocs} from '../scripts/content.ts';
 
-test('documentation has ordered, unique pages and an introduction', () => {
+test('documentation has five ordered core guides', () => {
   const pages = loadPublishedDocs();
-  assert.ok(pages.length >= 10);
-  assert.equal(pages[0]?.slug, 'introduction');
+  assert.deepEqual(pages.map((page) => page.slug), ['introduction', 'installation', 'workspace', 'models-and-agents', 'skills-and-mcp']);
   assert.equal(new Set(pages.map((page) => page.slug)).size, pages.length);
   for (let index = 1; index < pages.length; index += 1) {
     const previous = pages[index - 1];

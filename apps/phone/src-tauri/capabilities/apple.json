@@ -1,6 +1,0 @@
-{
-  "identifier": "apple",
-  "platforms": ["iOS"],
-  "windows": ["main"],
-  "permissions": ["polymux-apple:default"]
-}

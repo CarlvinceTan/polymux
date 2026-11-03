@@ -1,0 +1,33 @@
+name: Skills
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: polymux-skills-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freshness:
+    name: Skills up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - name: Checker tests
+        run: node --test scripts/skills.test.mjs
+      - name: Check imported skills (advisory)
+        shell: bash
+        run: |
+          if ! timeout 5m node scripts/skills.mjs; then
+            echo '::warning title=Skills freshness::The check could not complete. This advisory check does not fail CI.'
+          fi

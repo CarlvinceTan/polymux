@@ -1,0 +1,29 @@
+{
+  "source": "https://github.com/CopilotKit/OpenBot/blob/bd4dc94943a9d62aefd05e5e99073ba58919c9c6/server/src/channels/group.ts#L468-L498",
+  "members": [
+    {"id": "ops", "name": "Ops"},
+    {"id": "lead", "name": "Ops Lead"},
+    {"id": "west", "name": "Ops Lead West"},
+    {"id": "ann", "name": "Ann"},
+    {"id": "anna", "name": "Anna"},
+    {"id": "editor", "name": "Éditeur Principal"},
+    {"id": "qa", "name": "QA.Bot"},
+    {"id": "alias", "name": " ops lead "}
+  ],
+  "cases": [
+    {"name": "plain reply", "text": "A useful finding", "speaker": "ops", "want": []},
+    {"name": "text order and deduplication", "text": "@Anna then @Ann and @Anna", "speaker": "ops", "want": ["anna", "ann"]},
+    {"name": "emails", "text": "person@Anna name@Ops Lead", "speaker": "qa", "want": []},
+    {"name": "word prefixes", "text": "@Opsgenie and @Annette", "speaker": "qa", "want": []},
+    {"name": "longest name", "text": "@Ops Lead West and @Ops", "speaker": "qa", "want": ["west", "ops"]},
+    {"name": "self shadows shorter names", "text": "@Ops Lead West", "speaker": "west", "want": []},
+    {"name": "unicode and case", "text": "@ÉDITEUR Principal", "speaker": "ops", "want": ["editor"]},
+    {"name": "literal punctuation", "text": "@QA.Bot then @QAxBot", "speaker": "ops", "want": ["qa"]},
+    {"name": "word boundaries", "text": "@Ops_thing @Ops2 @Ann-more", "speaker": "qa", "want": ["ann"]},
+    {"name": "equal names retain roster order", "text": "(@Ops Lead), @Ops Lead and @Anna", "speaker": "qa", "want": ["lead", "alias", "anna"]},
+    {"name": "exclude speaker", "text": "@Ann @Anna @Ann", "speaker": "ann", "want": ["anna"]},
+    {"name": "no broadcast invitation", "text": "@everyone @all", "speaker": "ops", "want": []},
+    {"name": "newlines", "text": "@Ops Lead\n@Ops", "speaker": "qa", "want": ["lead", "alias", "ops"]},
+    {"name": "whole name only", "text": "@Éditeur", "speaker": "ops", "want": []}
+  ]
+}
