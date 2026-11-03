@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ const (
 	retryMax   = 3
 	retryCap   = 30 * time.Second
 	retryCapMs = 30_000
+	// busyBudget is how long a call keeps waiting out a provider that says it's busy before giving up.
+	busyBudget = 10 * time.Minute
 )
 
 // configureRetry is the PiG settings call. Tests replace it to simulate a failure.
@@ -275,16 +278,23 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 		base = http.DefaultTransport
 	}
 	id := prepareRetry(req)
+	load := loadFor(req.URL.Host)
+	var waited time.Duration
 	for attempt := 0; ; attempt++ {
 		if err := req.Context().Err(); err != nil {
 			return nil, err
 		}
+		if err := load.enter(req.Context()); err != nil {
+			return nil, err
+		}
 		resp, err := base.RoundTrip(req)
 		if ctxErr := req.Context().Err(); ctxErr != nil {
+			load.leave(0)
 			drain(resp)
 			return nil, ctxErr
 		}
 		if err != nil {
+			load.leave(0)
 			if t.fallback || attempt >= retryMax || !rewindable(req) {
 				return nil, err
 			}
@@ -298,7 +308,14 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		// A response body is stream output. Returning it means a later disconnect is not retried.
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			resp.Body = &loadedBody{ReadCloser: resp.Body, load: load}
 			return resp, nil
+		}
+		busy := busyStatus(resp.StatusCode)
+		if busy {
+			load.leave(-1)
+		} else {
+			load.leave(0)
 		}
 		if t.failure != nil {
 			t.failure.status = resp.StatusCode
@@ -314,10 +331,15 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 		if t.fallback || t.failure != nil && t.failure.quota {
 			return resp, nil
 		}
-		if attempt >= retryMax || !retryableStatus(resp.StatusCode) {
+		// A busy provider is waited out for as long as busyBudget, backing off; other failures get a few tries.
+		if !retryableStatus(resp.StatusCode) || !busy && attempt >= retryMax || busy && waited >= busyBudget {
 			return resp, nil
 		}
 		delay := retryAfter(resp.Header)
+		if busy && delay == 0 {
+			delay = backoff(attempt)
+		}
+		waited += capDelay(delay)
 		drain(resp)
 		if waitErr := waitRetry(req.Context(), id, attempt+1, delay); waitErr != nil {
 			return nil, waitErr
@@ -326,6 +348,84 @@ func (t statusRetry) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, rewindErr
 		}
 	}
+}
+
+// busyStatus is a provider saying it has too much on: wait and slow down, don't fail.
+func busyStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable || status == 529
+}
+
+// backoff doubles from a second up to the retry cap, with jitter so many waiting calls don't return together.
+func backoff(attempt int) time.Duration {
+	d := min(retryCap, time.Second<<min(attempt, 5))
+	return d/2 + time.Duration(rand.Int64N(int64(d/2)+1))
+}
+
+// providerLoad keeps the calls to one provider within what it accepts: no limit until it says it's busy, then half of
+// what was in flight, growing back by one with each success until the limit lifts.
+type providerLoad struct {
+	mu       sync.Mutex
+	limit    int // 0 is no limit
+	inflight int
+	changed  chan struct{}
+}
+
+const loadCeiling = 64
+
+var loads sync.Map
+
+func loadFor(host string) *providerLoad {
+	load, _ := loads.LoadOrStore(host, &providerLoad{changed: make(chan struct{})})
+	return load.(*providerLoad)
+}
+
+func (l *providerLoad) enter(ctx context.Context) error {
+	for {
+		l.mu.Lock()
+		if l.limit == 0 || l.inflight < l.limit {
+			l.inflight++
+			l.mu.Unlock()
+			return nil
+		}
+		changed := l.changed
+		l.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// leave ends a call: outcome 1 is a success, -1 the provider being busy, 0 anything else.
+func (l *providerLoad) leave(outcome int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch {
+	case outcome < 0:
+		l.limit = max(1, (l.inflight)/2)
+	case outcome > 0 && l.limit > 0:
+		l.limit++
+		if l.limit >= loadCeiling {
+			l.limit = 0
+		}
+	}
+	l.inflight--
+	close(l.changed)
+	l.changed = make(chan struct{})
+}
+
+// loadedBody holds the provider's slot until a streamed reply ends.
+type loadedBody struct {
+	io.ReadCloser
+	load *providerLoad
+	once sync.Once
+}
+
+func (b *loadedBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(func() { b.load.leave(1) })
+	return err
 }
 
 func retryableStatus(status int) bool {

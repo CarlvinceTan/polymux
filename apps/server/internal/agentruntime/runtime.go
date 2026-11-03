@@ -91,8 +91,8 @@ type Session interface {
 type DurableRuntime struct{ *core.DurableRuntime }
 
 // CodemodeWorkers is how many codemode scripts may run at once on this server. PiG's default of two is shared by
-// every bot and thread in the process, so one long script held up the rest.
-const CodemodeWorkers = 8
+// every bot and thread in the process, and turns aren't capped, so it's sized for many tasks at once.
+const CodemodeWorkers = 32
 
 func NewDurable(ctx context.Context, dir, baseURL, model, key string, client Client, storage durable.Storage, extra ...string) (*DurableRuntime, error) {
 	if os.Getenv("PI_CODEMODE_MAX_WORKERS") == "" {
