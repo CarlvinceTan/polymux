@@ -100,17 +100,21 @@ func (p *Proxy) Exhausted() bool {
 	return p.exhausted
 }
 
-// Failed counts a run's calls the provider refused or broke, which make its score meaningless.
-func (p *Proxy) Failed(run string) int {
+// Broken reports a run the provider spoiled: it refused a call, or failed more than a quarter of them. A few busy
+// errors a harness retries through are part of the run, not a reason to drop it.
+func (p *Proxy) Broken(run string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	n := 0
+	failed := 0
 	for _, c := range p.calls[run] {
-		if c.Status == http.StatusTooManyRequests || c.Status >= 500 {
-			n++
+		if c.Status == http.StatusTooManyRequests {
+			return true
+		}
+		if c.Status >= 500 {
+			failed++
 		}
 	}
-	return n
+	return failed > 0 && failed*4 > len(p.calls[run])
 }
 
 func (p *Proxy) Spent() float64 {

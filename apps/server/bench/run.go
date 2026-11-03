@@ -194,8 +194,8 @@ func (s *Suite) Run(ctx context.Context, system string, sc *Scenario, rep int) R
 		row.Completion += c.Completion
 		row.Cost += c.Cost
 	}
-	if failed := s.Proxy.Failed(id); failed > 0 {
-		problems = append(problems, fmt.Sprintf("provider refused or failed %d model calls", failed))
+	if s.Proxy.Broken(id) {
+		problems = append(problems, "the provider refused or failed its model calls")
 		row.Invalid = true
 	}
 	if len(problems) > 0 {

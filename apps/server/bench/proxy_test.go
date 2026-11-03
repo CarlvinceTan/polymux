@@ -24,7 +24,7 @@ func TestProviderLimitStopsAndIsNotScored(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if !proxy.Exhausted() || proxy.Failed("run") != 1 {
+	if !proxy.Exhausted() || !proxy.Broken("run") {
 		t.Fatal("the usage limit went unnoticed")
 	}
 	summary := Summarize([]Row{{System: "a", Scenario: "s", Invalid: true, Tasks: []Task{{Name: "t"}}}, {System: "a", Scenario: "s", Tasks: []Task{{Name: "t", OK: true}}}})
