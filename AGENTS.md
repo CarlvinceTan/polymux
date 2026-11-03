@@ -140,6 +140,8 @@ Never update it unless explicitly asked; report conflicts or suggest changes ins
 - Use existing scripts and output paths: `.build/` for caches, intermediate builds, and local staging; root `dist/` for app/server distribution artifacts; `apps/site/dist/` for the built website.
 - Reuse stable build directories. Don't create per-run or per-commit build caches or extra artifact copies unless isolation requires them; clean up those temporary outputs when finished.
 - Remove temporary logs, captures, and staging files created for the task once they are no longer needed for verification or the report. Preserve reusable caches and required distribution artifacts.
+- Put one-off outputs (screenshots, GIFs, traces, reports, logs, scratch builds) in your session's temp or scratch directory, not in `.build/` or the repository, and delete them before finishing.
+- `.build/` holds only what scripts, SwiftPM and the editor index reuse: `xcode-test`, `xcode-ios`, `xcode-release`, `xcode-testflight`, `personal`, `e2e-*`, `control`, `sim`, `avatar-preview`, `locks`, `bench` (benchmark results), SwiftPM's own folders and `index-build`. Anything else there is a leftover: remove what you created, and report the rest.
 - Before deleting existing outputs, confirm they are generated, no longer needed, and not in use by another build, process, or agent. If ownership or purpose is unclear, report them rather than deleting them. Don't wipe `.build/` or `dist/` wholesale as routine cleanup.
 
 ## Repository safety
