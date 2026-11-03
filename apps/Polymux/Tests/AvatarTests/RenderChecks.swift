@@ -143,6 +143,8 @@ struct RenderChecks {
 
     /// Every avatar in front of another: cutting its gap must stay quick, and later updates must cost nothing.
     static func meshStacks() {
+        // CI's virtual GPU runs about 20 times slower than a real one and can pause, as in test-avatar.sh.
+        let limit = ProcessInfo.processInfo.environment["CI"] == nil ? 2.0 : 20.0
         for shape in ShapeID.allCases {
             let start = Date()
             for side in [44.0, 120.0] {
@@ -159,7 +161,7 @@ struct RenderChecks {
                 view.update([tile, behind])
                 precondition(bitmap(view.layer!).contains { $0 != 0 }, "\(shape.label) rendered an empty image")
             }
-            precondition(Date().timeIntervalSince(start) < 2, "\(shape.label) stack rendering stalled")
+            precondition(Date().timeIntervalSince(start) < limit, "\(shape.label) stack rendering stalled")
         }
     }
 

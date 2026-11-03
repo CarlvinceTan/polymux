@@ -49,7 +49,8 @@ func TestSealedStreamRoundTrips(t *testing.T) {
 			t.Fatal(err)
 		}
 		data, key, public := sealed(t, plain)
-		if size > 0 && bytes.Contains(data, plain) {
+		// A byte or two can turn up in any ciphertext by chance, so only a longer plaintext shows it wasn't sealed.
+		if size >= 16 && bytes.Contains(data, plain) {
 			t.Fatal("the stream isn't sealed")
 		}
 		got, err := open(t, data, key, public)

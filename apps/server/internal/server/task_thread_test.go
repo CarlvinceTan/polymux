@@ -239,8 +239,13 @@ func TestPiGCreateTask(t *testing.T) {
 	if path, err := api.Store.GroupSession(t.Context(), task.ID, "assistant"); err != nil || path == "" {
 		t.Fatalf("session %q %v", path, err)
 	}
-	messages, err := api.Store.TaskMessages(t.Context(), task.ID, 5)
-	if err != nil || len(messages) != 1 || store.Text(messages[0]) != "Report written" {
-		t.Fatalf("task messages %+v %v", messages, err)
+	// Unread counts a reply while it streams, so wait for it to finish.
+	var messages []contract.Message
+	waitFor(t, "task reply did not finish", func() bool {
+		messages, err = api.Store.TaskMessages(t.Context(), task.ID, 5)
+		return err == nil && len(messages) > 0
+	})
+	if len(messages) != 1 || store.Text(messages[0]) != "Report written" {
+		t.Fatalf("task messages %+v", messages)
 	}
 }

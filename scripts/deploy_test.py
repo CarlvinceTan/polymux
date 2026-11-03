@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -38,6 +39,10 @@ class DeployTests(unittest.TestCase):
           *"release view"*) echo "$*" >> "$TEST_LOG"; echo v9.9.9 ;;
           *) echo "$RESULT" ;;
         esac''')
+        if not shutil.which("plutil"):
+            # deploy.sh runs on macOS; elsewhere, stand in for plutil -extract KEY raw -o - FILE.
+            self.tool("plutil", '''exec python3 -c 'import functools, json, sys
+print(functools.reduce(lambda v, k: v[k], sys.argv[1].split("."), json.load(open(sys.argv[2]))))' "$2" "$6"''')
         self.tool("shlock", 'touch "$2"')
         self.tool("launchctl", 'echo "launchctl $*" >> "$TEST_LOG"; exit 99')
         self.tool("install", '[ "$1" != -S ] || shift; exec /usr/bin/install "$@"')
