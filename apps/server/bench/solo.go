@@ -528,6 +528,15 @@ var soloScenarios = []*Scenario{
 			return []Task{done("flags-the-mismatch", told >= 0, 0, told, 90)}
 		}},
 
+	{Name: "busy-server", Category: "stacked", Tier: 3, Timeout: 10 * time.Minute, Silent: true,
+		Steps: static(say(0, "Run each of these as its own task so I can follow them separately: find the first publication year of every book on my reading shelf; "+
+			"research the three best lightweight laptops under $1,500; plan me a 3-day Tokyo itinerary; and summarise the latest home solar battery news with prices in AUD."),
+			say(25, tipAsk)),
+		Check: func(v *View) []Task {
+			tip := v.SentAt("18%", 25)
+			return []Task{v.task("quick-answer-while-busy", tip, tip, 10, tipOK)}
+		}},
+
 	{Name: "weekday-briefing", Category: "time", Tier: 2,
 		Steps: static(say(0, "Every weekday at 7:30am New York time, send me my agenda for the day and anything urgent in my inbox.")),
 		Check: func(v *View) []Task {

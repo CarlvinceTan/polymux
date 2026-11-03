@@ -197,6 +197,8 @@ var perfects = map[string]perfect{
 
 	"bill-mismatch": {seen: []Message{msg(30, "", "Mostly. One thing: ConEd billed $84.20, but $91.30 is scheduled to come out of checking on Friday. Worth checking with them.")}},
 
+	"busy-server": {sent: []Sent{{At: 25, Channel: "main", Text: tipAsk}}, seen: []Message{msg(30, "", "That's $11.61.")}},
+
 	"weekday-briefing": {routines: []contract.Routine{{Status: "active", Crons: []string{"30 7 * * 1-5"}, Timezone: ptr("America/New_York"), Prompt: "Send Ana today's agenda from her calendar and anything urgent in her inbox."}},
 		seen: []Message{msg(10, "", "Done: every weekday at 7:30am.")}},
 
