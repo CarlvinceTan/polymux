@@ -1,15 +1,6 @@
 import SwiftUI
 import PolymuxKit
 
-/// One entry in the + menu.
-struct PluginAction {
-    let title: String
-    let symbol: String
-    /// Replaces the symbol on iOS, where the menu can show an image.
-    var icon: AvatarIcon?
-    let run: () -> Void
-}
-
 /// What each plugin draws. Plugin screens ship with the app; a package only names one.
 @MainActor enum PluginSurface {
     static let graph = "graph-visualiser"

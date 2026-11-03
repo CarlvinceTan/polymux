@@ -16,7 +16,7 @@ struct WindowChecks {
                     }
                 }
                 .panelBarHost()
-            SidebarControl(state: state, reveal: { reveals += 1 }, search: {}, add: {}, group: {}, settings: {})
+            SidebarControl(state: state, reveal: { reveals += 1 }, search: {}, menu: [], settings: {})
                 .frame(width: 0, height: 0)
         }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760),
