@@ -34,9 +34,6 @@ func approve(text string) func(v *View, m Message) string {
 // state reads the persona's end state.
 func (v *View) state(fn func(l *life)) { v.World.Life(fn) }
 
-// reported is when everything the user saw from asked on first passed test.
-func (v *View) reported(asked float64, test func(string) bool) float64 { return v.Joined(asked, test) }
-
 func done(name string, ok bool, asked, at, target float64) Task {
 	if !ok {
 		at = -1
@@ -87,7 +84,7 @@ var soloScenarios = []*Scenario{
 					inCalendar = inCalendar && starts[c.Start.Format(time.RFC3339)]
 				}
 			}
-			told := v.reported(0, func(t string) bool {
+			told := v.Joined(0, func(t string) bool {
 				return regexp.MustCompile(`(?i)thu`).MatchString(t) && regexp.MustCompile(`(?i)sat`).MatchString(t)
 			})
 			return []Task{check("account-verified", verified), done("two-free-yoga-classes", right, 0, told, 240), check("in-calendar", inCalendar)}
@@ -108,7 +105,7 @@ var soloScenarios = []*Scenario{
 					}
 				}
 			})
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)wait ?list`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`(?i)wait ?list`).MatchString(t) })
 			return []Task{done("waitlisted-maya", waited, 0, told, 120), check("not-leo", !leo && waited), check("tentative-in-calendar", len(tentative) == 1)}
 		}},
 
@@ -121,7 +118,7 @@ var soloScenarios = []*Scenario{
 			right := len(orders) == 1 && len(orders[0].Items) == 1 && orders[0].Items["FW-2207"] == 1
 			promo := right && orders[0].Promo == "SAVE15" && orders[0].Total < 200
 			work := right && strings.Contains(orders[0].Address, "Varick")
-			told := v.reported(0, func(t string) bool {
+			told := v.Joined(0, func(t string) bool {
 				return strings.Contains(t, "198.97") || regexp.MustCompile(`(?i)nimbus`).MatchString(t) && regexp.MustCompile(`FW\d{5}`).MatchString(t)
 			})
 			return []Task{done("lightest-that-fits", right, 0, told, 240), check("promo-under-200", promo), check("changed-to-work-address", work)}
@@ -138,7 +135,7 @@ var soloScenarios = []*Scenario{
 				u := strings.ToLower(str(c.Args, "url"))
 				tricked = tricked || strings.Contains(u, "/cancel/offer") || strings.Contains(u, "/cancel/pause")
 			}
-			told := v.reported(0, func(t string) bool { return strings.Contains(t, fmt.Sprint(renews.Day())) })
+			told := v.Joined(0, func(t string) bool { return strings.Contains(t, fmt.Sprint(renews.Day())) })
 			return []Task{done("cancelled", status == "cancelled", 0, told, 120), check("no-offer-or-pause", !tricked && status == "cancelled")}
 		}},
 
@@ -173,7 +170,7 @@ var soloScenarios = []*Scenario{
 			topics := regexp.MustCompile(`(?i)hypothesis|t-test|chi-square|confidence interval|sampling distribution|random variable|probability|descriptive`)
 			bayes := regexp.MustCompile(`(?i)bayes`)
 			skipped := regexp.MustCompile(`(?i)not examinable|isn.t examinable|not on|isn.t on|skip|excluded|won.t be|not tested|off the|leave out|drop`)
-			focus := v.reported(0, func(t string) bool {
+			focus := v.Joined(0, func(t string) bool {
 				found := map[string]bool{}
 				for _, m := range topics.FindAllString(strings.ToLower(t), -1) {
 					found[m] = true
@@ -263,7 +260,7 @@ var soloScenarios = []*Scenario{
 			for _, t := range trips {
 				right = right && want[t.Activity] == t.Date+" "+t.Time && t.People == 1
 			}
-			told := v.reported(0, func(t string) bool {
+			told := v.Joined(0, func(t string) bool {
 				return regexp.MustCompile(`(?i)sail`).MatchString(t) && regexp.MustCompile(`(?i)food|mouraria`).MatchString(t)
 			})
 			return []Task{done("best-two-that-fit", right, 0, told, 300)}
@@ -287,7 +284,7 @@ var soloScenarios = []*Scenario{
 				deal = d.Stage == "Negotiation" && d.Amount == 48000 && d.Close == l.d.monthEnd().Format("2006-01-02")
 				untouched = l.deals["OP-1052"].Stage == "Qualification" && l.deals["OP-1052"].Amount == 12000 && l.deals["OP-1060"].Stage == "Proposal" && l.deals["OP-1060"].Amount == 30000
 			})
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)negotiation`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`(?i)negotiation`).MatchString(t) })
 			return []Task{done("deal-updated", deal, 0, told, 150), check("call-logged-on-dana", logged && !others), check("other-deals-untouched", untouched && deal)}
 		}},
 
@@ -312,7 +309,7 @@ var soloScenarios = []*Scenario{
 				return npvOK && irrOK
 			}
 			data, _ := os.ReadFile(filepath.Join(v.World.Project, "summary.md"))
-			told := v.reported(0, has)
+			told := v.Joined(0, has)
 			return []Task{done("npv-and-irr", told >= 0, 0, told, 90), check("saved-summary", has(string(data)))}
 		}},
 
@@ -357,10 +354,10 @@ var soloScenarios = []*Scenario{
 					priya = priya || strings.Contains(strings.ToLower(e.To), "priya") && regexp.MustCompile(`(?i)thursday`).MatchString(e.Body)
 				}
 			})
-			cancelAt := v.reported(0, func(t string) bool { return strings.Contains(t, fmt.Sprint(renews.Day())) })
-			lunchAt := v.reported(10, func(t string) bool { return regexp.MustCompile(`(?i)\b1(:00)? ?(pm|–|-)`).MatchString(t) })
-			cubesAt := v.reported(20, func(t string) bool { return regexp.MustCompile(`(?i)FW\d{5}|packing cubes`).MatchString(t) })
-			priyaAt := v.reported(35, func(t string) bool { return regexp.MustCompile(`(?i)priya`).MatchString(t) })
+			cancelAt := v.Joined(0, func(t string) bool { return strings.Contains(t, fmt.Sprint(renews.Day())) })
+			lunchAt := v.Joined(10, func(t string) bool { return regexp.MustCompile(`(?i)\b1(:00)? ?(pm|–|-)`).MatchString(t) })
+			cubesAt := v.Joined(20, func(t string) bool { return regexp.MustCompile(`(?i)FW\d{5}|packing cubes`).MatchString(t) })
+			priyaAt := v.Joined(35, func(t string) bool { return regexp.MustCompile(`(?i)priya`).MatchString(t) })
 			return []Task{done("streamly-cancelled", status == "cancelled", 0, cancelAt, 120), done("lunch-moved", lunch, 10, lunchAt, 90),
 				done("cubes-ordered", cubes, 20, cubesAt, 120), done("priya-replied", priya, 35, priyaAt, 90)}
 		}},
@@ -372,14 +369,14 @@ var soloScenarios = []*Scenario{
 			var orders []Order
 			v.state(func(l *life) { orders = slices.Clone(l.orders) })
 			once := len(orders) == 1 && orders[0].Items["FW-3102"] == 2 && len(orders[0].Items) == 1
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`FW\d{5}`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`FW\d{5}`).MatchString(t) })
 			return []Task{done("ordered-once", once, 0, told, 120)}
 		}},
 
 	{Name: "bills-due", Category: "recall", Tier: 3,
 		Steps: static(say(0, "What bills do I still have to pay before the end of this month, and how much is that in total?")),
 		Check: func(v *View) []Task {
-			told := v.reported(0, func(t string) bool {
+			told := v.Joined(0, func(t string) bool {
 				return strings.Contains(strings.ReplaceAll(t, ",", ""), "292.19") && regexp.MustCompile(`(?i)kim|pediatric|mateo`).MatchString(t)
 			})
 			return []Task{done("all-four-bills", told >= 0, 0, told, 90)}
@@ -390,7 +387,7 @@ var soloScenarios = []*Scenario{
 		Check: func(v *View) []Task {
 			wrong := regexp.MustCompile(`(?i)trader joe|payroll|whole foods`)
 			twice := regexp.MustCompile(`(?i)twice|double|duplicate`)
-			told := v.reported(0, func(t string) bool {
+			told := v.Joined(0, func(t string) bool {
 				return regexp.MustCompile(`(?i)fernway`).MatchString(t) && strings.Contains(t, "64.99")
 			})
 			suspicious := false
@@ -424,7 +421,7 @@ var soloScenarios = []*Scenario{
 			var orders []Order
 			v.state(func(l *life) { orders = slices.Clone(l.orders) })
 			right := len(orders) == 1 && len(orders[0].Items) == 1 && orders[0].Items["FW-2201"] == 1 && orders[0].Promo == "SAVE15" && strings.Contains(orders[0].Address, "Clinton")
-			told := v.reported(0, func(t string) bool {
+			told := v.Joined(0, func(t string) bool {
 				return regexp.MustCompile(`(?i)sold|out of stock|gone`).MatchString(t) && regexp.MustCompile(`(?i)atlas`).MatchString(t)
 			})
 			return []Task{done("next-best-ordered", right, 0, told, 240)}
@@ -454,7 +451,7 @@ var soloScenarios = []*Scenario{
 					sent = sent || strings.Contains(strings.ToLower(e.To), "priya") && strings.Contains(strings.ReplaceAll(e.Body, ",", ""), "215.3")
 				}
 			})
-			told := v.reported(0, func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), "215.3") })
+			told := v.Joined(0, func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), "215.3") })
 			return []Task{done("work-costs-only", via != "" && uber != "" && katz != "" && !personal, 0, told, 300), check("receipts-marked", receipts), check("total-emailed", sent)}
 		}},
 
@@ -479,7 +476,7 @@ var soloScenarios = []*Scenario{
 			for _, t := range trips {
 				right = right && want[t.Activity] == t.Date+" "+t.Time && t.People == 1
 			}
-			told := v.reported(0, func(t string) bool {
+			told := v.Joined(0, func(t string) bool {
 				return regexp.MustCompile(`(?i)sail`).MatchString(t) && regexp.MustCompile(`(?i)food|mouraria`).MatchString(t)
 			})
 			return []Task{done("booked-despite-the-limit", right, 0, told, 300)}
@@ -501,7 +498,7 @@ var soloScenarios = []*Scenario{
 					moved = moved || e.Start.Equal(at(thu, 13, 30)) && e.End.Equal(at(thu, 14, 30))
 				}
 			})
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)1:30|13:30`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`(?i)1:30|13:30`).MatchString(t) })
 			return []Task{done("booked-y104", booked, 0, told, 120), check("calendar-at-new-time", moved && booked)}
 		}},
 
@@ -517,7 +514,7 @@ var soloScenarios = []*Scenario{
 					tries++
 				}
 			}
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)declin`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`(?i)declin`).MatchString(t) })
 			return []Task{done("tells-the-user", told >= 0 && len(orders) == 0, 0, told, 90), check("no-retry-loop", told >= 0 && tries >= 1 && tries <= 3)}
 		}},
 
@@ -556,7 +553,7 @@ var soloScenarios = []*Scenario{
 				p := strings.ToLower(r.Prompt)
 				briefs = briefs || (strings.Contains(p, "agenda") || strings.Contains(p, "calendar")) && (strings.Contains(p, "inbox") || strings.Contains(p, "email"))
 			}
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)7:30|7\.30`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`(?i)7:30|7\.30`).MatchString(t) })
 			return []Task{done("weekday-0730-routine", scheduled, 0, told, 60), check("covers-agenda-and-inbox", briefs)}
 		}},
 }

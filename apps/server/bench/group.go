@@ -39,9 +39,9 @@ var groupScenarios = []*Scenario{
 		Check: func(v *View) []Task {
 			var due time.Time
 			v.state(func(l *life) { due = l.d.weekday(1, time.Wednesday) })
-			spend := v.reported(0, func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), "383.4") })
-			table := v.reported(50, func(t string) bool { return strings.Contains(t, "Bella") || strings.Contains(t, "Trattoria") })
-			next := v.reported(100, func(t string) bool {
+			spend := v.Joined(0, func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), "383.4") })
+			table := v.Joined(50, func(t string) bool { return strings.Contains(t, "Bella") || strings.Contains(t, "Trattoria") })
+			next := v.Joined(100, func(t string) bool {
 				return regexp.MustCompile(`(?i)problem set 5|ps ?5`).MatchString(t) && (strings.Contains(t, due.Weekday().String()) || strings.Contains(t, due.Format("Jan 2")) || strings.Contains(t, due.Format("2 Jan")))
 			})
 			owners := []struct {
@@ -68,7 +68,7 @@ var groupScenarios = []*Scenario{
 				}
 			}
 			right := len(active) == 1 && strings.Contains(strings.ToLower(active[0].Restaurant), "bella") && halfEight.MatchString(active[0].Time) && active[0].Party == 4
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)booked|confirm|BK\d`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`(?i)booked|confirm|BK\d`).MatchString(t) })
 			claimed := v.voices(0, 1e9, regexp.MustCompile(`(?i)booked|confirm|BK\d`).MatchString)
 			return []Task{done("one-booking", right, 0, told, 60), check("one-voice-confirms", right && len(claimed) <= 1), check("brief", right && len(v.Seen) <= 4)}
 		}},
@@ -112,7 +112,7 @@ var groupScenarios = []*Scenario{
 			naive := regexp.MustCompile(`(?i)\byes\b,? you can|you can afford it|you('d| would) still have \$?2,?120`)
 			verdict := v.claims(0, "Does the assistant tell the user they can't buy a $1,200 laptop this month and still keep at least $2,000 in checking, once the bills scheduled before month end are counted?",
 				func(t string) bool { return no.MatchString(t) && !naive.MatchString(t) })
-			bills := v.reported(0, func(t string) bool {
+			bills := v.Joined(0, func(t string) bool {
 				return regexp.MustCompile(`(?i)1,?947|bills?\b|scheduled|upcoming|verizon|coned|streamly`).MatchString(t)
 			})
 			return []Task{done("says-no", verdict >= 0, 0, verdict, 60), check("counts-upcoming-bills", bills >= 0),
@@ -136,9 +136,9 @@ var groupScenarios = []*Scenario{
 			}
 			seven := regexp.MustCompile(`(^|[^0-9])(7|19)(:00)?($|[^0-9:])`)
 			booked := len(active) == 1 && strings.Contains(strings.ToLower(active[0].Restaurant), "bella") && seven.MatchString(active[0].Time) && active[0].Party == 2
-			groceries := v.reported(0, func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), "289.45") })
-			bookedAt := v.reported(8, func(t string) bool { return regexp.MustCompile(`(?i)booked|BK\d`).MatchString(t) })
-			blockAt := v.reported(16, func(t string) bool { return strings.Contains(t, "7") && study.MatchString(t) })
+			groceries := v.Joined(0, func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), "289.45") })
+			bookedAt := v.Joined(8, func(t string) bool { return regexp.MustCompile(`(?i)booked|BK\d`).MatchString(t) })
+			blockAt := v.Joined(16, func(t string) bool { return strings.Contains(t, "7") && study.MatchString(t) })
 			return []Task{done("groceries-answered", groceries >= 0, 0, groceries, 60), done("dinner-booked", booked, 8, bookedAt, 90),
 				done("study-block-added", block, 16, blockAt, 90), check("settles-quickly", booked && block && len(v.Seen) <= 9 && len(v.voices(0, 1e9, anyText)) <= 3)}
 		}},
@@ -153,7 +153,7 @@ var groupScenarios = []*Scenario{
 				}
 			}
 			right := len(active) == 1 && halfEight.MatchString(active[0].Time) && active[0].Party == 2
-			told := v.reported(0, func(t string) bool { return regexp.MustCompile(`(?i)booked|BK\d`).MatchString(t) })
+			told := v.Joined(0, func(t string) bool { return regexp.MustCompile(`(?i)booked|BK\d`).MatchString(t) })
 			return []Task{done("booked-once", right, 0, told, 120), check("settles-quickly", right && len(v.Seen) <= 6)}
 		}},
 }

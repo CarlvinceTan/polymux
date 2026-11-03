@@ -161,10 +161,11 @@ func officeTools() map[string]tool {
 	}
 }
 
-func (l *life) visible(now float64) []Email {
+// visible is the inbox as it stands now: emails due later haven't arrived.
+func (l *life) visible() []Email {
 	var out []Email
 	for _, e := range l.inbox {
-		if e.Arrives <= now {
+		if e.Arrives <= l.now() {
 			out = append(out, e)
 		}
 	}
@@ -174,7 +175,7 @@ func (l *life) visible(now float64) []Email {
 func (l *life) search(query string, unread bool) []map[string]any {
 	words := strings.Fields(strings.ToLower(query))
 	var out []map[string]any
-	for _, e := range slices.Backward(l.visibleNow()) {
+	for _, e := range slices.Backward(l.visible()) {
 		hay := strings.ToLower(e.From + " " + e.Subject + " " + e.Body)
 		match := true
 		for _, word := range words {
@@ -191,8 +192,6 @@ func (l *life) search(query string, unread bool) []map[string]any {
 	}
 	return out
 }
-
-func (l *life) visibleNow() []Email { return l.visible(l.now()) }
 
 func (l *life) read(id string) (any, error) {
 	for n, e := range l.inbox {
