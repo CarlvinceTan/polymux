@@ -537,6 +537,21 @@ var soloScenarios = []*Scenario{
 			return []Task{v.task("quick-answer-while-busy", tip, tip, 10, tipOK)}
 		}},
 
+	{Name: "task-flood", Category: "stacked", Tier: 3, Stacked: true, Timeout: 12 * time.Minute, Silent: true,
+		Steps: static(say(0, "Run each of these as its own task: find the first publication year of every book on my reading shelf; research the three best lightweight laptops under $1,500; "+
+			"plan me a 3-day Tokyo itinerary; summarise the latest home solar battery news with prices in AUD; find a beginner sourdough recipe and shopping list; "+
+			"work out how much I spent eating out last month; and total the bills I still have to pay this month."),
+			say(20, tipAsk)),
+		Check: func(v *View) []Task {
+			tip := v.SentAt("18%", 20)
+			money := func(figure string) func(string) bool {
+				return func(t string) bool { return strings.Contains(strings.ReplaceAll(t, ",", ""), figure) }
+			}
+			return []Task{v.task("shelf-years", 0, 0, 240, func(t string) bool { return nearCount(t, false) >= 18 }), v.task("laptops", 0, 0, 180, laptopsOK),
+				v.task("tokyo", 0, 0, 180, tokyoOK(3)), v.task("solar-aud", 0, 0, 180, audOK), v.task("bread", 0, 0, 180, breadOK),
+				v.task("dining", 0, 0, 120, money("383.4")), v.task("bills", 0, 0, 180, money("292.19")), v.task("quick-answer", tip, tip, 10, tipOK)}
+		}},
+
 	{Name: "weekday-briefing", Category: "time", Tier: 2,
 		Steps: static(say(0, "Every weekday at 7:30am New York time, send me my agenda for the day and anything urgent in my inbox.")),
 		Check: func(v *View) []Task {

@@ -199,6 +199,11 @@ var perfects = map[string]perfect{
 
 	"busy-server": {sent: []Sent{{At: 25, Channel: "main", Text: tipAsk}}, seen: []Message{msg(30, "", "That's $11.61.")}},
 
+	"task-flood": {sent: []Sent{{At: 20, Channel: "main", Text: tipAsk}}, seen: []Message{msg(25, "", "That's $11.61."),
+		msg(60, "", "Laptops: Lumen Aero 13, Halcyon Nimbus Air 14 and Corvid Voyager X13."), msg(70, "", "$383.40 eating out last month."),
+		msg(80, "", "Sourdough: flour, water, salt and starter."), msg(90, "", "Bills left this month: $292.19."),
+		msg(100, "", "Batteries: Helios Home 13 at AUD 14,896 installed."), msg(110, "", tokyoPlan()), msg(150, "", shelfYears())}},
+
 	"weekday-briefing": {routines: []contract.Routine{{Status: "active", Crons: []string{"30 7 * * 1-5"}, Timezone: ptr("America/New_York"), Prompt: "Send Ana today's agenda from her calendar and anything urgent in her inbox."}},
 		seen: []Message{msg(10, "", "Done: every weekday at 7:30am.")}},
 
@@ -271,4 +276,20 @@ func TestDoingNothingPassesNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func tokyoPlan() string {
+	plan := "Day 1, Day 2 and Day 3:"
+	for _, p := range tokyo[:3] {
+		plan += " " + p.Name
+	}
+	return plan
+}
+
+func shelfYears() string {
+	var list []string
+	for _, b := range shelf {
+		list = append(list, fmt.Sprintf("%s (%d)", b.Title, b.Year))
+	}
+	return strings.Join(list, "; ")
 }
