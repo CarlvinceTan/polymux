@@ -237,6 +237,8 @@ POLYMUX_NO_MDNS=1
 POLYMUX_TUNNEL=0
 ENV
   fi
+  # Each app.env line becomes its own --env argument, so the split is intended.
+  # shellcheck disable=SC2046
   open -g -n --env POLYMUX_DATA_DIR="$STATE/data" $(sed 's/^/--env /' "$STATE/app.env") --stdout "$STATE/app.log" --stderr "$STATE/app.log" \
     "$APP" --args "$@"
   attempts=0
