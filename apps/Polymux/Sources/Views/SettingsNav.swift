@@ -151,7 +151,7 @@ struct SettingsEntry: Identifiable {
         }
         switch tab {
         case .general:
-            add("Appearance", ["Theme", "Light", "Dark", "App logo", "Switcher badges"])
+            add("Appearance", ["Theme", "Light", "Dark", "Switcher badges"])
             add("Notifications", ["Allow notifications"])
             #if os(macOS)
             add("Permissions", ["System permissions"])

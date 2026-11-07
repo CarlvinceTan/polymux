@@ -124,7 +124,7 @@ export function pageHead(route: Route): string {
     <meta name="description" content="${description}" />
     <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />
     <link rel="canonical" href="${canonical}" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=8e9ad0097a" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=e5adb39a2c" />
     <link rel="sitemap" type="application/xml" href="${site.origin}/sitemap.xml" />
     <meta property="og:type" content="${route.kind === 'post' ? 'article' : 'website'}" />
     <meta property="og:site_name" content="${site.name}" />

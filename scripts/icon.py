@@ -2,7 +2,7 @@
 # /// script
 # dependencies = ["pillow"]
 # ///
-"""Export app and website icons from the approved Assets/Logo.png master."""
+"""Export app and website icons from the approved Assets/Head.png and Assets/Snow.png masks."""
 
 import hashlib
 from pathlib import Path
@@ -13,10 +13,13 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "apps/Polymux/Assets"
-CATALOG = ROOT / "apps/Polymux/Sources/Assets.xcassets"
+SOURCES = ROOT / "apps/Polymux/Sources"
+CATALOG = SOURCES / "Assets.xcassets"
 SITE = ROOT / "apps/site"
 # Matches the app's connecting screen background in dark mode.
 APP_BG = (30, 30, 30)
+# Layer colours on AppIcon.icon's dark fill.
+COLOURS = {"Head": (255, 255, 255), "Snow": (200, 222, 242)}
 
 
 def rounded(image):
@@ -30,34 +33,34 @@ def rounded(image):
     return result
 
 
-def main():
-    with Image.open(ASSETS / "Logo.png") as source:
-        source = source.convert("L").point(lambda value: 0 if value <= 4 else value)
-        bounds = source.point(lambda value: 255 if value > 64 else 0).getbbox()
-        if bounds is None:
-            raise ValueError("Logo.png has no visible mark")
-        left, top, right, bottom = bounds
-        mark = source.crop((max(0, left - 2), max(0, top - 2),
-                            min(source.width, right + 2), min(source.height, bottom + 2)))
-        mark.thumbnail((704, 704), Image.Resampling.LANCZOS)
-    image = Image.new("RGB", (1024, 1024), "black")
-    image.paste(mark, ((1024 - mark.width) // 2, (1024 - mark.height) // 2))
-    layer = Image.new("RGBA", image.size, "white")
-    layer.putalpha(image.convert("L"))
-    app = Image.new("RGB", image.size, APP_BG)
-    app.paste(layer, (0, 0), layer)
-    app.save(ASSETS / "AppIcon.png")
-    layer.save(CATALOG.parent / "AppIcon.icon/Assets/P.png")
-    # The Light app logo inverts it: this mark on AppIconLight.icon's white fill.
-    light = Image.new("RGBA", image.size, APP_BG)
-    light.putalpha(image.convert("L"))
-    light.save(CATALOG.parent / "AppIconLight.icon/Assets/P.png")
+def layer(mask, colour):
+    image = Image.new("RGBA", mask.size, colour + (255,))
+    image.putalpha(mask)
+    return image
 
-    logo = layer.crop(layer.getchannel("A").getbbox())
+
+def main():
+    masks = {name: Image.open(ASSETS / f"{name}.png").convert("L") for name in COLOURS}
+    if any(mask.size != (1024, 1024) for mask in masks.values()):
+        raise ValueError("Head.png and Snow.png must be 1024×1024")
+    layers = {name: layer(mask, COLOURS[name]) for name, mask in masks.items()}
+    for name, image in layers.items():
+        image.save(SOURCES / f"AppIcon.icon/Assets/{name}.png")
+
+    # Flat stand-ins for the README, website and connecting logo; the snow sits in front.
+    mark = Image.new("RGBA", (1024, 1024))
+    for name in ("Head", "Snow"):
+        mark.alpha_composite(layers[name])
+    app = Image.new("RGBA", mark.size, APP_BG + (255,))
+    app.alpha_composite(mark)
+    app = app.convert("RGB")
+    app.save(ASSETS / "AppIcon.png")
+
+    logo = mark.crop(mark.getchannel("A").getbbox())
     logo.thumbnail((288, 288), Image.Resampling.LANCZOS)
     logo.save(CATALOG / "Logo.imageset/Logo.png")
-    rounded(image).resize((32, 32), Image.Resampling.LANCZOS).save(SITE / "public/favicon-32.png")
-    image.resize((256, 256), Image.Resampling.LANCZOS).save(
+    rounded(app).resize((32, 32), Image.Resampling.LANCZOS).save(SITE / "public/favicon-32.png")
+    app.resize((256, 256), Image.Resampling.LANCZOS).save(
         SITE / "src/assets/app-icon.webp", lossless=True,
     )
     version = hashlib.sha256((SITE / "public/favicon-32.png").read_bytes()).hexdigest()[:10]
@@ -69,7 +72,7 @@ def main():
     if count != 1:
         raise ValueError("Expected one favicon link in routes.ts")
     routes.write_text(content)
-    print("Exported app icons, connecting logo, website logo, and favicon.")
+    print("Exported app icon layers, connecting logo, website logo, and favicon.")
 
 
 if __name__ == "__main__":

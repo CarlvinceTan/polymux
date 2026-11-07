@@ -1,17 +1,19 @@
-Approved Polymux logo, generated with the built-in imagegen tool on 2026-10-29.
+Approved Polymux logo: a frosted glass sable poking its head out of a snow drift. Generated with Gemini 3.1 Pro (Create image) on 2026-11-07, then traced into two layer masks.
 
-Make a faithful OUTLINE version of this exact attached abstract P/ribbon logo. Preserve the exact overall silhouette, the rounded right-hand bowl, flat top, upper-left triangular taper, lower-left diamond/ribbon extension, central angular diamond-shaped negative space and small gap at the left. Replace the black solid fill with black interiors bounded by clean pure-white contour strokes on a flat solid black background. Trace the original external and internal shape boundaries accurately; do not redesign, simplify away any region, bridge gaps, invent connections or change proportions. Use one consistent medium-fine outline width, about 3.5 percent of the mark's overall width, with smoothly rounded joins and caps matching the reference's softened corners. The result should be an elegant hollow outline of the same mark, with no solid white areas. No eyes, shading, gradients, extrusion, shadows, glow, texture, text or extra symbols. Center the mark on a square black canvas at about 62 percent canvas height with generous margins. Standalone preview only; do not apply it to Polymux.
+Starting art, with the old P logo attached for its shape:
 
-Approved production refinement, using the outline above as input:
+Create a macOS app icon in the style of the attached icon: a single soft, frosted white glass mascot silhouette on a vibrant, smooth gradient background, with only one or two simple facial features cut into it. The mascot is a sable (Martes zibellina), shown as a head-and-neck silhouette in side profile, facing right. Sable cues, all kept in the silhouette: one rounded ear with a broad base on top of the head, a short, slightly pointed muzzle with a small rounded nose tip, a soft fluffy cheek ruff at the back of the head, one round dark eye and a small, subtle smile line. Nothing fox-like: no tall pointed ears and no long snout.
 
-Make ONE precise refinement to this exact approved abstract P/ribbon outline logo: increase the white outline thickness by about 30 percent, a modest but clearly noticeable increase so it reads better as an app icon. Keep a single perfectly consistent line weight throughout the mark. Preserve the exact shape, proportions, composition, rounded right bowl, flat top, upper-left triangular shape, lower-left diamond/ribbon extension, angular central opening, softened corners and small open gap on the left. Do not close or narrow away the left gap. Maintain the same centerline geometry, mark scale, position, square black canvas and pure white outline with black interiors. Only the stroke becomes a little heavier; no redesign, no filled white regions, no extra lines, no eyes, no gradient, no extrusion, no glow, no texture, no text. This is the production logo refinement requested by the user.
+Head only:
 
-Stroke refinement requested on 2026-10-29, using the approved outline as the edit target and the installed OpenAI app icon as a line-weight reference:
+Edit the attached app icon so it shows just the sable's head in side profile, facing right, with no neck. Make the face a touch slimmer with a slightly longer, tapered muzzle, so it reads clearly as a sable, not a bear, fox or cat.
 
-Preserve the exact abstract P/ribbon structure, proportions and rounded corners. Increase the white outline to match the visual stroke weight of the OpenAI knot when both appear as app icons. Use a uniform line about twice the previous thickness, keeping the small black opening at the left midpoint clear. Pure white on pure black, without gradients, shadows, extrusion, extra shapes or an outer frame.
+Snow drift:
 
-Spacing refinement requested on 2026-10-29:
+The head currently ends in a rounded throat blob that looks odd and unfinished. Sables live in the snowy Siberian forest, so have the sable poking its head up out of a soft, rounded snow drift. A smooth, simple mound of frosted white-blue glass snow fills the bottom of the icon and hides the neck, with the head emerging from it. Keep the snow minimal: one or two soft rounded bumps, no flakes or texture.
 
-Equalize the three narrow black clearances: above the inner chevron, between the two facing left tips, and below the inner chevron. Keep the existing bold white outline, softened corners and outer P/ribbon silhouette. Open the lower clearance so none of the three almost touch.
+Refinement:
 
-Run uv run --no-project scripts/icon.py to export the transparent native icon layer, connecting logo, website logo and favicon from Logo.png. AppIcon.icon supplies the solid dark background, and AppIconLight.icon the white one for the Light app logo; Xcode generates platform sizes.
+Make the snow drift smaller and lower. Remove the stray snow bump behind the neck; the neck sinks cleanly into the snow, with a soft little rim of snow hugging it. The snow is a cooler, pale icy-blue glass, while the head stays bright white, so the two never merge. Replace the gradient with a deep charcoal night background (around #1e1e1e).
+
+Head.png and Snow.png are white-on-black 1024×1024 masks traced from that art: the eye and smile are cut out of the head, the cheek ruff is redrawn as three tufts, the neck runs under the snow, and the snow's top edge is a drawn curve. Run uv run --no-project scripts/icon.py to export the glass layers for AppIcon.icon (dark fill), plus the README icon, connecting logo, website logo and favicon. There is one app logo, with no Light variant. Snow is the front group and opaque, so the neck doesn't show through; Xcode generates platform sizes.

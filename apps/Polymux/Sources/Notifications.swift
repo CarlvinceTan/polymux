@@ -205,9 +205,6 @@ final class URLRouter {
 
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        AppLogo.apply()
-    }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             Task { @MainActor in URLRouter.shared.handler?(url) }

@@ -560,7 +560,6 @@ struct ConnectionView: View {
                                                       set: { settings?.edit(SettingsPatch(appearance: $0)) }),
                            options: [("Light", "light"), ("Dark", "dark"), ("System", "system")])
             .disabled(settings?.value == nil)
-            LogoPicker()
             if plugins?.tabs.isEmpty == false || !pool.tabs.isEmpty {
                 Toggle("Switcher badges", isOn: Binding(get: { settings?.value?.switcherBadges ?? true },
                                                         set: { settings?.edit(SettingsPatch(switcherBadges: $0)) }))
