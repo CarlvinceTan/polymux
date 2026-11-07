@@ -1,4 +1,4 @@
 .vercel
 .env*
 dist/
-public/sitemap.xml
+.generated/

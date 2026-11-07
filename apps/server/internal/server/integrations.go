@@ -1,0 +1,289 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
+	"github.com/MichaelKinsy/PiG/agent"
+	"github.com/MichaelKinsy/PiG/ai"
+)
+
+type integrationTool struct{ server *Server }
+
+func (*integrationTool) Name() string                           { return "manage_integrations" }
+func (*integrationTool) Label() string                          { return "Configure integrations" }
+func (*integrationTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
+func (*integrationTool) Description() string {
+	return "List shared MCP setup, attach or detach this agent by name, register shared MCP setup, or remove this agent's MCP connections and trusted Markdown skill paths, or enable CLI tools. MCP setup is shared, but use is enabled only for this agent; attach reuses shared setup without copying credentials. Hidden connections cannot be attached. agent_id sets up another bot, otherwise yourself. Changes persist; finish your turn after your own setup and you continue automatically with it loaded, while another bot gets it on its next turn. Prefer CLI plus a skill for occasional/simple work; MCP for frequent structured calls. Decide whether to ask in normal text from the user's task and established preferences. Inspect existing setup; never copy credentials into arguments, URLs, skills or memory. This does not install software or alter OS permissions."
+}
+func (t *integrationTool) Schema() ai.ToolSchema {
+	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"action":      map[string]any{"type": "string", "enum": []string{"list", "mcp", "skill", "remove", "enable_cli", "device", "attach", "detach"}},
+			"agent_id":    map[string]any{"type": "string", "maxLength": 128, "description": "Bot to set up; omit for yourself"},
+			"host":        map[string]any{"type": "string", "description": "Existing SSH alias or user@tailnet-host; uses existing host keys"},
+			"native_only": map[string]any{"type": "boolean", "description": "Exclude browser tools from this MCP connection"},
+			"name":        map[string]any{"type": "string", "description": "MCP connection name"},
+			"url":         map[string]any{"type": "string", "description": "HTTP(S) MCP endpoint without inline credentials"},
+			"headers":     map[string]any{"type": "object", "maxProperties": 16, "additionalProperties": map[string]any{"type": "string"}, "description": "HTTP MCP headers; put saved secrets in as {{secret:name}} or {{vault:id:field}}, filled in at connect time for the URL's origin"},
+			"command":     map[string]any{"type": "string", "description": "Stdio executable, not a shell expression"},
+			"env":         map[string]any{"type": "object", "maxProperties": 32, "additionalProperties": map[string]any{"type": "string"}, "description": "Stdio MCP environment; give saved secrets as {{secret:name}} or {{vault:id:field}}, filled in on the wire for their bound origin"},
+			"args":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 32},
+			"path":        map[string]any{"type": "string", "description": "Absolute path to an existing trusted .md skill"},
+		}, "required": []string{"action"},
+	}}
+}
+func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+	state, err := scopedTurn(ctx, t.server.Store)
+	if err != nil || state.run.AgentID != state.run.ConversationID {
+		if err == nil {
+			err = errors.New("integration setup is direct-chat only")
+		}
+		return agent.AgentToolResult{}, err
+	}
+	// Introductions stay tool-free.
+	if state.work.Trigger == contract.RunTriggerCreated {
+		return agent.AgentToolResult{}, errors.New("integration setup requires a working turn")
+	}
+	var input struct {
+		Action     string            `json:"action"`
+		AgentID    string            `json:"agent_id"`
+		Name       string            `json:"name"`
+		URL        string            `json:"url"`
+		Headers    map[string]string `json:"headers"`
+		Command    string            `json:"command"`
+		Env        map[string]string `json:"env"`
+		Args       []string          `json:"args"`
+		Path       string            `json:"path"`
+		Host       string            `json:"host"`
+		NativeOnly *bool             `json:"native_only"`
+	}
+	if err := json.Unmarshal(args, &input); err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	s := t.server
+	s.actorsMu.RLock()
+	defer s.actorsMu.RUnlock()
+	if input.AgentID == "" {
+		input.AgentID = state.run.AgentID
+	}
+	// Skills and MCP can be shared, but a bot can't hand another one a shell or a device.
+	if input.AgentID != state.run.AgentID && (input.Action == "enable_cli" || input.Action == "device") {
+		return agent.AgentToolResult{}, errors.New("a bot can only set up skills and MCP for another bot")
+	}
+	a := s.actors[input.AgentID]
+	if a == nil || s.closing || s.deletes[a.id] != nil {
+		return agent.AgentToolResult{}, errors.New("integration owner unavailable")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	d := a.definition
+	previous, err := json.Marshal(d)
+	if err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	d.MCP, d.Skills = slices.Clone(d.MCP), slices.Clone(d.Skills)
+	d.Devices = slices.Clone(d.Devices)
+	removedSkill := input.Action == "remove" && slices.Contains(d.Skills, input.Path)
+	switch input.Action {
+	case "list":
+		inventory, err := s.mcpInventory(ctx, a.id, d.MCP, false)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		names := []string{}
+		available := []string{}
+		for _, item := range inventory {
+			if item.Enabled {
+				names = append(names, item.Name)
+			}
+			if item.Shared {
+				available = append(available, item.Name)
+			}
+		}
+		folder := filepath.Join(agentruntime.AgentDir(s.config.DataDir, a.id), "skills")
+		return toolResult(map[string]any{"mcp": names, "availableMCP": available, "skills": d.Skills, "skillFolder": folder, "tools": d.Tools, "devices": d.Devices})
+	case "attach", "detach":
+		legacy := slices.ContainsFunc(d.MCP, func(config agentruntime.MCPServer) bool { return config.Name == input.Name })
+		enabled := input.Action == "attach"
+		if err := s.Store.BindMCP(ctx, a.id, input.Name, &enabled, nil, legacy); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		return t.loaded(ctx, state, a.id)
+	case "device":
+		device := agentruntime.Device{Name: input.Name, Host: input.Host}
+		if !device.Valid() {
+			return agent.AgentToolResult{}, errors.New("choose a simple device name and existing SSH host")
+		}
+		index := slices.IndexFunc(d.Devices, func(item agentruntime.Device) bool { return item.Name == device.Name })
+		if index < 0 {
+			d.Devices = append(d.Devices, device)
+		} else {
+			d.Devices[index] = device
+		}
+	case "enable_cli":
+		d.Tools = []string{"read", "write", "edit", "bash", "find", "ls"}
+	case "skill":
+		if !filepath.IsAbs(input.Path) || filepath.Ext(input.Path) != ".md" || len(input.Path) > 2048 {
+			return agent.AgentToolResult{}, errors.New("use an absolute Markdown skill path")
+		}
+		info, err := os.Stat(input.Path)
+		if err != nil || !info.Mode().IsRegular() {
+			return agent.AgentToolResult{}, errors.New("skill file is unavailable")
+		}
+		if !slices.Contains(d.Skills, input.Path) {
+			d.Skills = append(d.Skills, input.Path)
+		}
+	case "mcp":
+		if input.Name == "" || len(input.Name) > 64 || strings.ContainsAny(input.Name, " /\\.:_") || (input.URL == "") == (input.Command == "") || len(input.Command) > 2048 || len(input.Args) > 32 {
+			return agent.AgentToolResult{}, errors.New("use a unique simple name and exactly one MCP URL or executable")
+		}
+		for _, arg := range input.Args {
+			if len(arg) > 2048 {
+				return agent.AgentToolResult{}, errors.New("MCP argument too long")
+			}
+		}
+		if input.URL != "" {
+			u, err := url.Parse(input.URL)
+			if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || len(input.URL) > 2048 || u.Scheme != "http" && u.Scheme != "https" {
+				return agent.AgentToolResult{}, errors.New("use an HTTP(S) MCP URL without inline credentials or query parameters")
+			}
+		}
+		config := agentruntime.MCPServer{Name: input.Name, URL: input.URL, Headers: input.Headers, Command: input.Command, Args: input.Args, Env: input.Env}
+		index := slices.IndexFunc(d.MCP, func(server agentruntime.MCPServer) bool { return server.Name == input.Name })
+		if index < 0 {
+			d.MCP = append(d.MCP, config)
+		} else {
+			config.NativeOnly = d.MCP[index].NativeOnly
+			if config.Command == d.MCP[index].Command && config.Env == nil {
+				config.Env = d.MCP[index].Env
+			}
+			if config.URL != "" && config.URL == d.MCP[index].URL && config.Headers == nil {
+				config.Headers = d.MCP[index].Headers
+			}
+			d.MCP[index] = config
+		}
+		if input.NativeOnly != nil {
+			index = slices.IndexFunc(d.MCP, func(item agentruntime.MCPServer) bool { return item.Name == input.Name })
+			d.MCP[index].NativeOnly = *input.NativeOnly
+		}
+	case "remove":
+		d.MCP = slices.DeleteFunc(d.MCP, func(server agentruntime.MCPServer) bool { return server.Name == input.Name })
+		d.Devices = slices.DeleteFunc(d.Devices, func(device agentruntime.Device) bool { return device.Name == input.Name })
+		d.Skills = slices.DeleteFunc(d.Skills, func(path string) bool { return path == input.Path })
+	default:
+		return agent.AgentToolResult{}, errors.New("invalid integration action")
+	}
+	if len(d.MCP) > 64 || len(d.Skills) > 16 || len(d.Devices) > 16 {
+		return agent.AgentToolResult{}, errors.New("integration limit reached")
+	}
+	data, err := json.Marshal(d)
+	if err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	if input.Action == "mcp" {
+		index := slices.IndexFunc(d.MCP, func(config agentruntime.MCPServer) bool { return config.Name == input.Name })
+		if err := s.registerMCP(ctx, d.MCP[index], a.id, d.MCP, input.NativeOnly); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+	} else if input.Action == "remove" {
+		mcp, err := json.Marshal(d.MCP)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		devices, err := json.Marshal(d.Devices)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		skills, err := json.Marshal(d.Skills)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		if err := s.Store.RemoveIntegrations(ctx, a.id, input.Name, mcp, devices, skills); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+	} else if bytes.Equal(previous, data) {
+		return toolResult(map[string]any{"configured": true, "available": "already set up"})
+	} else if _, err := s.Store.UpdateDefinition(ctx, d.Agent, data); err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	a.definition = d
+	a.revision++
+	type change struct{ kind, id, label string }
+	changes := []change{}
+	if input.Action == "mcp" {
+		changes = append(changes, change{"connector.added", input.Name, input.Name})
+	}
+	if input.Action == "device" {
+		changes = append(changes, change{"device.added", input.Name, input.Name})
+	}
+	if input.Action == "skill" || removedSkill {
+		label := filepath.Base(input.Path)
+		if label == "SKILL.md" {
+			label = filepath.Base(filepath.Dir(input.Path))
+		}
+		kind := "skill.saved"
+		if input.Action == "remove" {
+			kind = "skill.removed"
+		}
+		changes = append(changes, change{kind, input.Path, label})
+	}
+	if input.Action == "remove" && input.Name != "" {
+		var prior agentruntime.Definition
+		if err := json.Unmarshal(previous, &prior); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		if slices.ContainsFunc(prior.MCP, func(item agentruntime.MCPServer) bool { return item.Name == input.Name }) {
+			changes = append(changes, change{"connector.removed", input.Name, input.Name})
+		}
+		if slices.ContainsFunc(prior.Devices, func(item agentruntime.Device) bool { return item.Name == input.Name }) {
+			changes = append(changes, change{"device.removed", input.Name, input.Name})
+		}
+	}
+	for _, change := range changes {
+		payload, err := store.NewActivity(change.kind, change.id, change.label)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		if err := s.Store.Activity(ctx, state.run.ConversationID, state.run.AgentID, payload); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+	}
+	return t.loaded(ctx, state, a.id)
+}
+
+// loaded arranges for a changed bot to pick up its setup without waiting for another message.
+func (t *integrationTool) loaded(ctx context.Context, state *turnState, target string) (agent.AgentToolResult, error) {
+	if target == state.run.AgentID {
+		if isolatedTurn(state.work.Trigger) {
+			return toolResult(map[string]any{"configured": true, "available": "next turn"})
+		}
+		state.mu.Lock()
+		state.reload = true
+		state.mu.Unlock()
+		return toolResult(map[string]any{"configured": true, "available": "finish this turn and you continue automatically with it loaded"})
+	}
+	run, busy, err := t.server.Store.RunningRun(ctx, target)
+	if err != nil {
+		return agent.AgentToolResult{}, err
+	}
+	if busy {
+		if err := t.server.Store.QueueReload(ctx, run, reloadNote); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+	}
+	return toolResult(map[string]any{"configured": true, "available": "on that bot's next turn"})
+}
+
+const reloadNote = "Your tools and skills were updated and are now loaded. Carry on with what you were doing."

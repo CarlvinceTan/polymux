@@ -1,36 +1,29 @@
 ---
-title: Introduction
+title: Start here
 slug: introduction
-description: Meet Polymux, the desktop workspace that puts your assistant beside your messages, files, browser, and ongoing work.
-section: Getting started
+description: Understand the two parts of Polymux and start your first conversation.
+section: Guides
 sectionOrder: 1
 order: 1
 published: true
 ---
 
-# Introduction
+# Start here
 
-Polymux is an open-source desktop workspace for working with an AI assistant. Chat, messages, email, files, browser tabs, scheduled work, and your choice of models live together instead of being split across separate tools.
+Polymux runs your personal AI agents on your Mac, with a native app for talking to them. Both the server and client are currently for **macOS**.
 
-It is designed to feel useful after a normal desktop install while staying open to deeper configuration when you want it.
+## What runs where
 
-## What Polymux includes
+- **Server:** runs your agents and keeps their conversations and memory.
+- **Client:** the app you use to chat. Pair clients on your other Macs with the same server.
 
-- **Chat** is where you ask for work and follow the agent’s progress.
-- **Hub** brings supported messaging services and email into one inbox.
-- **Drive** works with local files, cloud drives, network folders, and S3-compatible storage.
-- **Browser** gives the agent an in-app browser and controlled access to assigned external tabs.
-- **Tasks and Subagents** keep delegated work visible without crowding the main conversation, including saved requests that run at a recurring time.
-- **Memory** preserves useful context locally between conversations.
+Both parts can run on one Mac. Your agents can keep working when you close a client, as long as the server Mac stays awake and connected.
 
-## Agent-agnostic by design
+## Your first conversation
 
-Polymux includes Polymux Agent, but the workspace is not tied to it. A profile can connect another compatible agent through the open Agent Client Protocol (ACP). Polymux keeps ownership of the interface, conversations, run history, and permissions while the chosen runtime performs the agent work.
+1. [Install Polymux](/docs/installation/). Start with both parts on one Mac if you are unsure.
+2. Open **Settings → Models**, add a provider, and choose a **Default model**. See [Models](/docs/models-and-agents/).
+3. Press **New chat** (+), name your agent, choose its avatar, and press **Create**.
+4. Send a small request, such as “Help me plan my day.”
 
-You can also choose hosted model providers or local runtimes. The rest of the workspace stays the same when the model changes.
-
-## Platform support
-
-Polymux is available for macOS, Windows, and Linux. macOS currently receives the deepest testing and feature coverage, so some integrations and operating-system features may differ on Windows or Linux.
-
-Start with [Quickstart](/docs/quickstart/) for the shortest route from installation to your first useful request.
+Next: [Chats](/docs/workspace/) covers profiles, files, memory, and schedules. [Tools](/docs/skills-and-mcp/) explains browser and device access.

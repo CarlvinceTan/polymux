@@ -2,8 +2,11 @@
 
 branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 
-if [ "$branch" = "main" ]; then
-  echo "Commit blocked: main is protected in this checkout." >&2
-  echo "Switch to dev or a feature branch before committing." >&2
-  exit 1
-fi
+case "$branch" in
+	dev|"") exit 0;;
+	*)
+		echo "Commit blocked: commits belong on dev or a detached temporary worktree." >&2
+		echo "Switch to dev or detach this worktree before committing." >&2
+		exit 1
+		;;
+esac

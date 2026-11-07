@@ -1,0 +1,33 @@
+// @cua
+// Inline profile edits replace on first focus and keep spaces through autosave acknowledgements.
+let app = await cua.getApp(APP);
+const original = "ProfileBot" + Date.now();
+await app.click({ role: "button", name: "New chat" });
+app = await pick(app, "New Bot");
+await app.waitFor({ role: "textfield", name: "Name" });
+await app.typeText(original, { role: "textfield", name: "Name" });
+await app.click({ role: "button", name: "Create" });
+await app.waitFor({ role: "button", name: "Close New Bot", gone: true });
+await app.waitFor({ role: "button", name: `Edit ${original}’s profile` });
+await app.click({ role: "button", name: `Edit ${original}’s profile` });
+const name = { role: "textfield", name: "Name" };
+const role = { role: "textfield", name: "Role" };
+await app.waitFor(name);
+await app.typeText("Linus", name);
+await app.pressKey("space");
+await cua.sleep(1500);
+await app.waitFor({ ...name, value: "Linus " });
+await app.typeText("Torvalds");
+await app.waitFor({ ...name, value: "Linus Torvalds" });
+await app.typeText("Core", role);
+await app.pressKey("space");
+await cua.sleep(1500);
+await app.waitFor({ ...role, value: "Core " });
+await app.typeText("Maintainer");
+await app.waitFor({ ...role, value: "Core Maintainer" });
+await app.click({ role: "button", name: "Close side panel" });
+await app.waitFor({ role: "button", name: "Close side panel", gone: true });
+await app.click({ role: "button", name: "Edit Linus Torvalds’s profile" });
+await app.waitFor({ ...name, value: "Linus Torvalds" });
+await app.waitFor({ ...role, value: "Core Maintainer" });
+return "ok";

@@ -3,16 +3,19 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleResolution": "bundler",
     "noEmit": true,
-    "target": "ESNext"
+    "target": "ESNext",
+    "erasableSyntaxOnly": true
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.svelte",
-    "vite.config.ts",
-    "../desktop/src/renderer/polymux.d.ts",
-    "../desktop/src/renderer/vite-env.d.ts"
+    "lib/**/*.ts",
+    "api/**/*.ts",
+    "scripts/**/*.ts",
+    "vite.config.ts"
   ]
 }

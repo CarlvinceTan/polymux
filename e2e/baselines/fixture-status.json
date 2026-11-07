@@ -1,0 +1,305 @@
+{
+  "start": "ca38353328710015",
+  "scene": "nothing selected",
+  "state": {
+    "w": 1920,
+    "h": 960,
+    "rows": [
+      "AXStaticText|Cached chat|922,472,77,16",
+      "AXButton|Disconnect|914,496,93,24",
+      "AXStaticText|Composer|929,928,63,16"
+    ]
+  },
+  "steps": [
+    {
+      "action": {
+        "ID": "press:AXButton|Disconnect#0",
+        "Kind": "press",
+        "Label": "press Button \"Disconnect\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Disconnect#0",
+        "Text": "",
+        "Group": "controls"
+      },
+      "signature": "bab8702315619ce5",
+      "digest": "24f4ef82b554c2cf",
+      "scene": "nothing selected",
+      "state": {
+        "w": 1920,
+        "h": 960,
+        "rows": [
+          "AXStaticText|Cached chat|922,472,77,16",
+          "AXButton|Connect|922,496,76,24",
+          "AXStaticText|Composer|929,928,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "resize:640x480",
+        "Kind": "resize",
+        "Label": "resize the window to 640x480 to test its layout",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          640,
+          480
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "resize"
+      },
+      "signature": "b3f73a07a1427ce2",
+      "digest": "281c86bd892f747b",
+      "scene": "nothing selected",
+      "state": {
+        "w": 780,
+        "h": 752,
+        "rows": [
+          "AXStaticText|Cached chat|352,368,77,16",
+          "AXButton|Connect|352,392,76,24",
+          "AXStaticText|Composer|359,720,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "key:ESC",
+        "Kind": "key",
+        "Label": "press Escape to dismiss whatever is open",
+        "Key": "ESC",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "key"
+      },
+      "signature": "b3f73a07a1427ce2",
+      "digest": "281c86bd892f747b",
+      "scene": "nothing selected",
+      "state": {
+        "w": 780,
+        "h": 752,
+        "rows": [
+          "AXStaticText|Cached chat|352,368,77,16",
+          "AXButton|Connect|352,392,76,24",
+          "AXStaticText|Composer|359,720,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "idle",
+        "Kind": "idle",
+        "Label": "leave it alone and watch for repainting",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "idle"
+      },
+      "signature": "b3f73a07a1427ce2",
+      "digest": "281c86bd892f747b",
+      "scene": "nothing selected",
+      "state": {
+        "w": 780,
+        "h": 752,
+        "rows": [
+          "AXStaticText|Cached chat|352,368,77,16",
+          "AXButton|Connect|352,392,76,24",
+          "AXStaticText|Composer|359,720,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "press:AXButton|Connect#0",
+        "Kind": "press",
+        "Label": "press Button \"Connect\"",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "AXButton|Connect#0",
+        "Text": "",
+        "Group": "controls"
+      },
+      "signature": "18b06fb4d65f9b19",
+      "digest": "106516b6a85f932b",
+      "scene": "nothing selected",
+      "state": {
+        "w": 780,
+        "h": 752,
+        "rows": [
+          "AXStaticText|Cached chat|352,368,77,16",
+          "AXButton|Disconnect|344,392,93,24",
+          "AXStaticText|Composer|359,720,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "resize:900x600",
+        "Kind": "resize",
+        "Label": "resize the window to 900x600 to test its layout",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          900,
+          600
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "resize"
+      },
+      "signature": "abd72a4d30f4af7c",
+      "digest": "6f0cc774678d23bc",
+      "scene": "nothing selected",
+      "state": {
+        "w": 900,
+        "h": 752,
+        "rows": [
+          "AXStaticText|Cached chat|412,368,77,16",
+          "AXButton|Disconnect|404,392,93,24",
+          "AXStaticText|Composer|419,720,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "key:ESC",
+        "Kind": "key",
+        "Label": "press Escape to dismiss whatever is open",
+        "Key": "ESC",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "key"
+      },
+      "signature": "abd72a4d30f4af7c",
+      "digest": "6f0cc774678d23bc",
+      "scene": "nothing selected",
+      "state": {
+        "w": 900,
+        "h": 752,
+        "rows": [
+          "AXStaticText|Cached chat|412,368,77,16",
+          "AXButton|Disconnect|404,392,93,24",
+          "AXStaticText|Composer|419,720,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "resize:1400x900",
+        "Kind": "resize",
+        "Label": "resize the window to 1400x900 to test its layout",
+        "Key": "",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          1400,
+          900
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "resize"
+      },
+      "signature": "56dbacfcaed28fd3",
+      "digest": "ac8e381466a395f7",
+      "scene": "nothing selected",
+      "state": {
+        "w": 1400,
+        "h": 900,
+        "rows": [
+          "AXStaticText|Cached chat|662,442,77,16",
+          "AXButton|Disconnect|654,466,93,24",
+          "AXStaticText|Composer|669,868,63,16"
+        ]
+      }
+    },
+    {
+      "action": {
+        "ID": "key:ESC",
+        "Kind": "key",
+        "Label": "press Escape to dismiss whatever is open",
+        "Key": "ESC",
+        "Point": [
+          0,
+          0
+        ],
+        "Size": [
+          0,
+          0
+        ],
+        "URL": "",
+        "Element": "",
+        "Text": "",
+        "Group": "key"
+      },
+      "signature": "56dbacfcaed28fd3",
+      "digest": "ac8e381466a395f7",
+      "scene": "nothing selected",
+      "state": {
+        "w": 1400,
+        "h": 900,
+        "rows": [
+          "AXStaticText|Cached chat|662,442,77,16",
+          "AXButton|Disconnect|654,466,93,24",
+          "AXStaticText|Composer|669,868,63,16"
+        ]
+      }
+    }
+  ],
+  "approved": "2026-11-01",
+  "reason": "First baseline of the Polymux UI, reproduced in two runs"
+}

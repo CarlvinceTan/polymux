@@ -1,37 +1,33 @@
 ---
-title: Skills and MCP
+title: Tools
 slug: skills-and-mcp
-description: Extend Polymux with reusable skill instructions and Model Context Protocol servers.
-section: Customising Polymux
-sectionOrder: 3
-order: 2
+description: Choose the tools, browser, and device access your agents can use.
+section: Guides
+sectionOrder: 1
+order: 5
 published: true
 ---
 
-# Skills and MCP
+# Tools
 
-Skills teach an agent how to approach a class of work. MCP servers provide tools, resources, and prompts from another application or service.
+Polymux’s core is small. Connect the tools you want your agents to use:
 
-## Skills
+- **MCP connections** let agents use external tools, including browser tools.
+- **Command-line tools** use programs installed on the server or a configured remote device.
+- **Skills** provide saved instructions for a type of work.
 
-Open **Settings → Skills** to review the skills available to the current profile. Polymux discovers compatible skills from its own folder, shared agent folders, bundled locations, and explicitly configured paths.
+## Set up an agent
 
-A skill is a directory led by a `SKILL.md` file. It can include references, scripts, templates, and assets. The instructions define when the skill applies and how the agent should use those resources.
+In a direct chat, tell the agent which trusted tool, service, or skill file you want to connect. Ask it to explain the access needed before making changes.
 
-Only install skills you trust. A skill can guide the agent to run local tools or work with sensitive applications, subject to Polymux permissions.
+Open **Profile → Capabilities** to see its instructions, skills, and MCP connections. Files and programs on a client Mac are not automatically available on the server.
 
-## MCP servers
+## Devices and permissions
 
-Open **Settings → MCP** to manage Model Context Protocol servers. Polymux supports local standard-input/output servers and remote Streamable HTTP servers.
+Pairing a client lets that Mac chat with your server. It does not give agents unrestricted access to that Mac. **Settings → Connections** controls optional client features such as location.
 
-Advanced users can use the conventional `mcpServers` format in:
+Only enable access you need, and review approval requests before allowing actions on your accounts or devices.
 
-```text
-~/.polymux/mcp.json
-```
+## Your data
 
-Polymux watches this file for changes. If it changes during an active run, the new server configuration becomes available after that run settles.
-
-## Permissions
-
-Connecting a server does not mean every action should run silently. Polymux still applies the current profile’s permissions and may ask before a sensitive or consequential operation.
+Conversations and memory live on the server; clients keep a local cache. Model providers and connected services may receive content needed for a task. Keep keys and pairing links private. See the [privacy policy](/privacy-policy/).

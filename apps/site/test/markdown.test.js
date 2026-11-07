@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {JSDOM} from 'jsdom';
-import {renderSafeMarkdown, renderSafeMarkdownInline} from '../src/lib/markdown.js';
+import {renderSafeMarkdown, renderSafeMarkdownInline} from '../lib/content/markdown.js';
 
 test('renders Markdown while removing executable HTML and unsafe URLs', () => {
   const browserWindow = /** @type {import('dompurify').WindowLike} */ (new JSDOM('').window);

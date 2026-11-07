@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Spreadsheets">
-  <rect width="64" height="64" rx="16" fill="#1F7A4D"/>
-  <rect x="13" y="13" width="38" height="38" rx="4" fill="#FFFFFF"/>
-  <path d="M13 26h38M13 38h38M27 13v38M39 13v38" stroke="#1F7A4D" stroke-width="3"/>
-</svg>

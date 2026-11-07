@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "login",
+    "title": "Settings import login",
+    "url": "https://example.com",
+    "fields": {"username": "vault-user", "password": "settings-import-secret"},
+    "codes": []
+  },
+  {
+    "kind": "passkey",
+    "title": "Settings passkey",
+    "url": "https://example.com",
+    "fields": {
+      "username": "vault-user",
+      "rpID": "example.com",
+      "credentialID": "Rml4dHVyZS1wYXNza2V5",
+      "userHandle": "dmF1bHQtdXNlcg",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgs76Li0g48POtU63S\nhQqUm72/LII7VpTVJ8fWCsy+mt2hRANCAAQc9MhcZ9e9/v+6Va6y5y/SOeNbmbEr\nHU/vz2HZGKz9qBvCep0m22dAJMNCrNd32jCWZt0RHFsCXs7o4AmRlC5O\n-----END PRIVATE KEY-----\n"
+    },
+    "codes": []
+  }
+]

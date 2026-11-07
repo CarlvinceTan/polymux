@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Communication Hub">
-  <rect width="96" height="96" rx="24" fill="#6657C8"/>
-  <path d="M20 25c0-5 4-9 9-9h31c5 0 9 4 9 9v20c0 5-4 9-9 9H42L29 65V54c-5 0-9-4-9-9V25Z" fill="#fff"/>
-  <path d="M45 58h20c6 0 11-5 11-11v-8c3 2 5 6 5 10v17c0 5-4 9-9 9h-8v8L52 75h-7V58Z" fill="#B8F0E3"/>
-  <circle cx="34" cy="35" r="3" fill="#6657C8"/>
-  <circle cx="45" cy="35" r="3" fill="#6657C8"/>
-  <circle cx="56" cy="35" r="3" fill="#6657C8"/>
-</svg>
