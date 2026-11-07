@@ -29,13 +29,8 @@ export type DocsProps = {
 };
 export type ReleaseProps = {release: Omit<Release, 'body'>; releases: ReleaseSummary[]};
 export type LegalProps = {title: string; updated?: string; html: string};
-export type PluginEntry = {
-  name: string; title: string; description: string; author: string; kind: string; version: string; targets: string[];
-  published?: string; homepage?: string; repository?: string; source?: string;
-};
-export type PluginProps = {plugin: PluginEntry | null; plugins: PluginEntry[]};
-export type PageKind = 'home' | 'blog' | 'post' | 'docs' | 'plugins' | 'releases' | 'legal';
+export type PageKind = 'home' | 'blog' | 'post' | 'docs' | 'releases' | 'legal';
 export type Route = {
   path: string; file: string; kind: PageKind; title: string; description: string;
-  updated?: string; props: HomeProps | BlogProps | PostProps | DocsProps | PluginProps | ReleaseProps | LegalProps;
+  updated?: string; props: HomeProps | BlogProps | PostProps | DocsProps | ReleaseProps | LegalProps;
 };

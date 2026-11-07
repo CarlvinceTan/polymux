@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/MichaelKinsy/PiG/agent"
@@ -48,9 +47,6 @@ type turnState struct {
 	posts      int
 	spoke      bool
 	status     func(string) error
-	// gate asks plugins about a tool call. chats are those whose rules bind this run.
-	gate  func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision
-	chats []string
 }
 
 func beforeTool(ctx context.Context, call, name string, args json.RawMessage) agent.ToolCallHookResult {
@@ -60,12 +56,6 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 	state, _ := ctx.Value(turnKey{}).(*turnState)
 	if state == nil {
 		return agent.ToolCallHookResult{Block: true, Reason: "No active Polymux run"}
-	}
-	// Asked outside the lock, since a plugin takes a moment to answer.
-	if state.gate != nil {
-		if decision := state.gate(ctx, name, args); !decision.Allow {
-			return agent.ToolCallHookResult{Block: true, Reason: decision.Reason}
-		}
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()

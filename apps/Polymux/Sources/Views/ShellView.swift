@@ -18,10 +18,6 @@ struct ShellView: View {
     @AppStorage private var botSection: String?
     /// Whether the chat's side panel was open, so a relaunch reopens it.
     @AppStorage private var lastPanel: Bool
-    /// The switcher entry on show: chats, or a Global plugin.
-    @AppStorage private var surface: String
-    /// The Scoped plugin in the side panel; the profile when nil.
-    @State private var panelPlugin: String?
     @Environment(\.scenePhase) private var scenePhase
     @State private var windowID = UUID()
     @State private var visibility = NavigationSplitViewVisibility.all
@@ -86,11 +82,9 @@ struct ShellView: View {
         let panel = AppStorage(wrappedValue: false, "lastPanel.\(session.address)")
         _lastPanel = panel
         _profileOpen = State(initialValue: panel.wrappedValue)
-        _surface = AppStorage(wrappedValue: PluginTab.chats, "lastSurface.\(session.address)")
         #if DEBUG
         // Screenshots of a chat's side panel need it open without a click: --verify-panel <chat id>.
         let arguments = CommandLine.arguments
-        if arguments.contains("--verify-hub-mail-view") { UserDefaults.standard.set(HubStore.plugin, forKey: "lastSurface.\(session.address)") }
         #if os(macOS)
         if arguments.contains("--verify-sidebar-collapsed") {
             _visibility = State(initialValue: .detailOnly)
@@ -107,7 +101,7 @@ struct ShellView: View {
     private var chatSelection: Binding<String?> {
         Binding(get: {
             #if os(macOS)
-            pluginView.map { PluginStore.viewID($0.name) } ?? selectedChat?.id
+            selectedChat?.id
             #else
             selection
             #endif
@@ -119,13 +113,7 @@ struct ShellView: View {
         })
     }
 
-    /// The global view chosen in place of a chat. Its row stays until the plugin list says otherwise.
-    private var pluginView: Plugin? {
-        session.plugins.views.first { PluginStore.viewID($0.name) == selection }
-    }
-
     private var selectedChat: PolymuxKit.Thread? {
-        if PluginStore.isView(selection), session.plugins.list == nil || pluginView != nil { return nil }
         if let task = session.sidebar.displayed(selection), task.isTask { return task }
         let available = conversations
         if let id = session.sidebar.displayed(selection)?.id,
@@ -146,14 +134,10 @@ struct ShellView: View {
     }
 
     /// The chat's panel: an agent's profile, or a group chat's editor.
-    private var profileShown: Bool { profileOpen && selectedChat != nil && globalPlugin == nil }
+    private var profileShown: Bool { profileOpen && selectedChat != nil }
 
     private var profileBinding: Binding<Bool> {
-        Binding(get: { profileOpen && panelPlugin == nil }, set: { value in
-            // The avatar swaps a plugin's panel for the profile at the same width.
-            if value { panelPlugin = nil }
-            setPanel(open: value)
-        })
+        Binding(get: { profileOpen }, set: { setPanel(open: $0) })
     }
 
     private func setPanel(open: Bool) {
@@ -162,37 +146,13 @@ struct ShellView: View {
         withAnimation(Motion.move.unless(reduceMotion)) { profileOpen = open }
     }
 
-    /// Whichever Scoped plugin the side panel shows, opening the panel as needed.
-    private var pluginBinding: Binding<String?> {
-        #if os(macOS)
-        Binding(get: { profileOpen ? panelPlugin : nil }, set: { name in
-            if let name { panelPlugin = name }
-            setPanel(open: name != nil)
-        })
-        #else
-        $panelPlugin
-        #endif
-    }
+    private var tabs: [ServerTab] { pool.tabs }
 
-    private var tabs: [PluginTab] { pool.tabs.isEmpty ? session.plugins.tabs : pool.tabs }
-
-    /// A tab on another server moves the app there, opening that server on the tab.
+    /// A tab on another server moves the app there.
     private var tabSelection: Binding<String> {
-        Binding(get: {
-            pool.tabs.isEmpty ? surface : "\(session.address)#\(surface)"
-        }, set: { id in
-            guard let tab = tabs.first(where: { $0.id == id }) else { return }
-            if let server = tab.server, server != session.address {
-                UserDefaults.standard.set(tab.name, forKey: "lastSurface.\(server)")
-                pool.select(server)
-            } else {
-                surface = tab.name
-            }
+        Binding(get: { session.address }, set: { id in
+            if id != session.address { pool.select(id) }
         })
-    }
-
-    private func unread(_ tab: PluginTab) -> Int {
-        tab.server == nil ? PluginSurface.unread(tab, session: session) : pool.unread(tab)
     }
 
     /// The iPhone's tab bar replaces the sidebar's switcher.
@@ -202,15 +162,6 @@ struct ShellView: View {
         #else
         false
         #endif
-    }
-
-    private var globalPlugin: Plugin? {
-        usesTabBar ? nil : session.plugins.tabs.first { $0.id == surface }?.plugin
-    }
-
-    private func panelContent(_ thread: PolymuxKit.Thread) -> Plugin? {
-        session.plugins.buttons(chat: thread.isTask ? thread.agentID : thread.id).joined()
-            .first { $0.name == panelPlugin }
     }
 
     #if os(macOS)
@@ -225,34 +176,26 @@ struct ShellView: View {
     }
     #endif
 
-    /// Hub's sync runs whenever it's installed, so its count stays right with Hub closed.
-    private var hubActive: Bool {
-        session.plugins.plugin(named: HubStore.plugin)?.state == PluginState.ready && scenePhase != .background
-    }
-
     var body: some View {
-        root.task(id: hubActive) {
-            if hubActive { await session.hub.run() }
-        }
+        root
         #if os(iOS)
         .onChange(of: place) { Keyboard.close() }
         #endif
     }
 
-    /// The tab, chat and side panel on show.
-    private var place: [String?] { [surface, selection, panelPlugin, profileOpen ? "profile" : nil] }
+    /// The chat and side panel on show.
+    private var place: [String?] { [selection, profileOpen ? "profile" : nil] }
 
-    /// What + offers: a Global plugin's own actions while it's on show.
-    private var createActions: [PluginAction] {
-        if let globalPlugin { return PluginSurface.actions(globalPlugin, session: session) }
-        return [botAction(), PluginAction(title: "New Group Chat", symbol: "person.2", icon: .group) { creation = .group }]
+    /// What + offers.
+    private var createActions: [CreateAction] {
+        [botAction(), CreateAction(title: "New Group Chat", symbol: "person.2", icon: .group) { creation = .group }]
     }
 
-    private func botAction(in section: String? = nil) -> PluginAction {
-        PluginAction(title: "New Bot", symbol: "face.smiling", icon: .bot) { newBot(in: section) }
+    private func botAction(in section: String? = nil) -> CreateAction {
+        CreateAction(title: "New Bot", symbol: "face.smiling", icon: .bot) { newBot(in: section) }
     }
 
-    @ViewBuilder private func createRow(_ item: PluginAction) -> some View {
+    @ViewBuilder private func createRow(_ item: CreateAction) -> some View {
         #if os(iOS)
         if let icon = item.icon {
             Button(action: item.run) {
@@ -267,7 +210,7 @@ struct ShellView: View {
     }
 
     private func openSearch() {
-        if let globalPlugin { PluginSurface.search(globalPlugin, session: session) } else { searching = true }
+        searching = true
     }
 
     @ViewBuilder private var root: some View {
@@ -277,26 +220,17 @@ struct ShellView: View {
                 ForEach(tabs) { tab in
                     Tab(value: tab.id) {
                         // A tab's content doesn't reach the app's host.
-                        if tab.server != nil, tab.server != session.address {
+                        if tab.id != session.address {
                             Color.clear
-                        } else if let plugin = tab.plugin {
-                            PluginSurface.page(plugin, session: session) { showSettings = true }.dropdownHost()
                         } else {
                             shell.dropdownHost()
                         }
                     } label: {
-                        let symbol = PluginSwitcher.symbol(tab, selected: tab.id == tabSelection.wrappedValue)
-                        if tab.plugin == nil, let name = tab.serverName {
-                            Label(name, systemImage: symbol)
-                                .environment(\.symbolVariants, .none)
-                                .accessibilityLabel(PluginSwitcher.title(tab))
-                        } else {
-                            Image(systemName: symbol)
-                                .environment(\.symbolVariants, .none)
-                                .accessibilityLabel(PluginSwitcher.title(tab))
-                        }
+                        Label(tab.name, systemImage: ServerSwitcher.symbol(tab, selected: tab.id == tabSelection.wrappedValue))
+                            .environment(\.symbolVariants, .none)
+                            .accessibilityLabel(ServerSwitcher.title(tab))
                     }
-                    .badge(unread(tab))
+                    .badge(pool.unread(tab))
                 }
             }
         } else {
@@ -402,17 +336,10 @@ struct ShellView: View {
                 .allowsHitTesting(false)
             }
             #endif
-            .accessibilityHidden(globalPlugin != nil)
-            .overlay {
-                if let globalPlugin {
-                    PluginSurface.sidebar(globalPlugin, session: session)
-                        .background(sidebarSurface)
-                }
-            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !tabs.isEmpty && !usesTabBar {
-                    PluginSwitcher(tabs: tabs, selection: tabSelection,
-                                   unread: Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, unread($0)) }))
+                    ServerSwitcher(tabs: tabs, selection: tabSelection,
+                                   unread: Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, pool.unread($0)) }))
                 }
             }
             #if os(macOS)
@@ -464,11 +391,7 @@ struct ShellView: View {
             .toolbar(removing: .sidebarToggle)
             .toolbar(removing: .title)
         } detail: {
-            if let globalPlugin {
-                PluginSurface.detail(globalPlugin, session: session)
-            } else if let pluginView {
-                PluginSurface.view(pluginView, session: session) { selection = $0 }
-            } else if let thread = selectedChat,
+            if let thread = selectedChat,
                let agent = participants(thread).first {
                 chatPane(thread, agent: agent)
             } else if let notice = session.sidebar.notice {
@@ -504,12 +427,9 @@ struct ShellView: View {
                 .accessibilityValue("connected=\(session.sidebar.isConnected ? 1 : 0), cache=\(session.sidebar.error == nil && !session.sidebar.chats.isEmpty ? "warm" : "cold")")
         }
         .onChange(of: selection, initial: true) { _, value in
-            if PluginStore.isView(value) {
-                lastChat = value
-            } else if let thread = session.sidebar.displayed(value) {
+            if let thread = session.sidebar.displayed(value) {
                 lastChat = thread.id
             }
-            if let thread = selectedChat, panelContent(thread) == nil { panelPlugin = nil }
             Notifications.shared.visible(scenePhase == .active ? selectedChat?.id : nil, window: windowID)
             warmNeighbours()
         }
@@ -626,7 +546,6 @@ struct ShellView: View {
             while !Task.isCancelled {
                 await session.sidebar.refresh()
                 await session.layout.refresh()
-                await session.plugins.refresh()
                 if session.sidebar.isConnected {
                     session.avatars.sync(agents: session.sidebar.agents)
                     await session.avatars.flush(client: session.client)
@@ -639,24 +558,16 @@ struct ShellView: View {
     private func chatPane(_ thread: PolymuxKit.Thread, agent: Agent) -> some View {
         let pane = ChatPane(agent: agent, thread: thread, session: session,
                             drops: chatDrops(thread.id), files: chatFiles(thread.id),
-                            showProfile: profileBinding, pluginPanel: pluginBinding, openChat: openChat,
+                            showProfile: profileBinding, openChat: openChat,
                             destination: searchTarget, store: session.chat(thread.id))
             .id(thread.id)
         #if os(macOS)
         return HStack(spacing: 0) {
             pane.frame(minWidth: PaneWidth.chat, maxWidth: .infinity, maxHeight: .infinity)
             if profileShown {
-                Group {
-                    if let plugin = panelContent(thread) {
-                        PluginPanel(plugin: plugin, thread: thread, session: session) {
-                            pluginBinding.wrappedValue = nil
-                        }
-                    } else {
-                        ProfilePanel(agent: agent, thread: thread, session: session, openChat: openChat,
-                                     close: { profileBinding.wrappedValue = false }, jump: openChat.jump)
-                            .id(profileID)
-                    }
-                }
+                ProfilePanel(agent: agent, thread: thread, session: session, openChat: openChat,
+                             close: { profileBinding.wrappedValue = false }, jump: openChat.jump)
+                    .id(profileID)
                     .frame(width: panelWidth)
                     .background(SideSurface().ignoresSafeArea())
                     .overlay(alignment: .leading) {
@@ -678,7 +589,6 @@ struct ShellView: View {
         let edges = (first: all.first?.id, last: all.last?.id)
         let selected = selectedChat?.id
         let pins = displayedPins
-        ForEach(session.plugins.views, id: \.name) { pluginRow($0) }
         if !pins.isEmpty {
             PinGrid {
                 ForEach(pins) { thread in pinnedLink(thread, selected: selected == thread.id) }
@@ -715,27 +625,6 @@ struct ShellView: View {
             }
             .opacity(dragging == .section(section.id) ? 0.4 : 1)
         }
-    }
-
-    /// A both plugin's global view, above the chats and sections.
-    @ViewBuilder private func pluginRow(_ plugin: Plugin) -> some View {
-        let id = PluginStore.viewID(plugin.name)
-        let on = selection == id
-        let label = Label(plugin.title, systemImage: plugin.icon(selected: on))
-            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-            .contentShape(Rectangle())
-        Group {
-            #if os(macOS)
-            Button { selection = id } label: { label }
-                .buttonStyle(.plain)
-                .tag(id)
-                .accessibilityAddTraits(on ? .isSelected : [])
-            #else
-            NavigationLink(value: id) { label }
-            #endif
-        }
-        .listRowInsets(sectionInsets)
-        .listRowSeparator(.hidden)
     }
 
     /// The drop zone for a first pin. It floats above the list, because inserting

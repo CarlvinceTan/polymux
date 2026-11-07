@@ -80,9 +80,8 @@ func (s *Server) turnTools(a *actor, work store.Work, state *turnState) []agent.
 		}
 	}
 	if work.Trigger != contract.RunTriggerChild && a.threadID == "" {
-		tools = append(tools, &integrationTool{server: s}, &pluginInstallTool{server: s}, &taskThreadTool{server: s, action: "create"})
+		tools = append(tools, &integrationTool{server: s}, &taskThreadTool{server: s, action: "create"})
 		state.external["manage_integrations"] = true
-		state.external["install_plugin"] = true
 	}
 	if work.Trigger != contract.RunTriggerChild {
 		tools = append(tools, &workTool{store: s.Store}, &taskTool{server: s}, &historyTool{store: s.Store},

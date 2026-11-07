@@ -14,8 +14,7 @@ def affected(paths):
         path.startswith(("apps/Polymux/", "packages/", "tools/control/", "Package.", ".agents/skills/avatar-preview/"))
         and not path.startswith(go_packages) for path in paths
     )
-    plugins = shared or any(path.startswith("plugins/") for path in paths)
-    return {"server": server, "swift": swift, "plugins": plugins}
+    return {"server": server, "swift": swift}
 
 
 def selection(event, kind):
@@ -41,7 +40,7 @@ def changed(base, cwd=None):
 if __name__ == "__main__":
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     base = selection(event, os.environ["GITHUB_EVENT_NAME"])
-    result = {"server": True, "swift": True, "plugins": True}
+    result = {"server": True, "swift": True}
     if base:
         # A missing base runs the full checks, including after a history rewrite.
         paths = changed(base)

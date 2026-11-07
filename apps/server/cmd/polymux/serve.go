@@ -24,7 +24,6 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/fixture"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/link"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/push"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/server"
@@ -49,7 +48,7 @@ func runServer(args []string) error {
 	noMDNS := flagSet.Bool("no-mdns", os.Getenv("POLYMUX_NO_MDNS") == "1", "disable Bonjour LAN advertisement")
 	noTunnel := flagSet.Bool("no-tunnel", os.Getenv("POLYMUX_TUNNEL") == "0", "disable pairing from other networks over iroh")
 	publicURL := flagSet.String("public-url", os.Getenv("POLYMUX_PUBLIC_URL"), "HTTPS origin advertised for remote pairing")
-	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341 with -public-url, else a free port for transport plugins)")
+	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341)")
 	verify := fixture.Register(flagSet)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -164,15 +163,9 @@ func runServer(args []string) error {
 		return err
 	}
 	defer deviceSocket.Close()
-	publicAddress := *publicListen
-	if publicAddress == "" && *publicURL == "" {
-		publicAddress = "127.0.0.1:0"
+	if *publicListen != "" && *publicURL == "" {
+		return errors.New("-public-listen requires -public-url")
 	}
-	publicSocket, err := remoteListener(publicAddress)
-	if err != nil {
-		return err
-	}
-	defer publicSocket.Close()
 	deviceServer := &http.Server{Handler: devices, ReadTimeout: 10 * time.Second, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	defer deviceServer.Close()
 	config, err := loadModel(*dir)
@@ -256,12 +249,11 @@ func runServer(args []string) error {
 		return err
 	}
 	api, err := server.New(ctx, s, server.Config{
-		GroupCaps:   &groups,
-		PluginIndex: os.Getenv("POLYMUX_PLUGIN_INDEX"),
-		BuildSHA:    buildSHA,
-		ServerID:    link.Fingerprint(identity.PublicKey),
-		Exit:        cancel,
-		Supervised:  supervised(),
+		GroupCaps:  &groups,
+		BuildSHA:   buildSHA,
+		ServerID:   link.Fingerprint(identity.PublicKey),
+		Exit:       cancel,
+		Supervised: supervised(),
 		Mover: func(target, drain string, merge bool) error {
 			return spawnMover(*dir, *listen, *logDir, target, drain, merge)
 		},
@@ -276,7 +268,6 @@ func runServer(args []string) error {
 		Devices:     devices,
 		Ticket:      ticket,
 		PublicURL:   *publicURL,
-		Publish:     plugins.Publish{API: publicSocket.Addr().String(), Device: loopbackAddress(deviceSocket.Addr())},
 	})
 	if err != nil {
 		return err
@@ -309,13 +300,20 @@ func runServer(args []string) error {
 	defer listener.Close()
 	log.Info("Polymux is listening", "address", listener.Addr(), "data", *dir, "model", model)
 	done := make(chan error, 4)
-	remote := &http.Server{
-		Handler: remoteHandler(apiHandler), ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
+	if *publicURL != "" {
+		local, err := remoteListener(*publicListen)
+		if err != nil {
+			return err
+		}
+		defer local.Close()
+		remote := &http.Server{
+			Handler: remoteHandler(apiHandler), ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
+		}
+		defer remote.Close()
+		go func() { done <- remote.Serve(local) }()
+		log.Info("HTTPS tunnel listener ready", "address", local.Addr())
 	}
-	defer remote.Close()
-	go func() { done <- remote.Serve(publicSocket) }()
-	log.Info("HTTPS tunnel listener ready", "address", publicSocket.Addr())
 	if !*noTunnel {
 		local, err := tunnelListener(listener)
 		if err != nil {
@@ -357,18 +355,6 @@ func runServer(args []string) error {
 		}
 	}
 	return nil
-}
-
-// loopbackAddress is where a process on this host reaches a listener, whatever interface it binds.
-func loopbackAddress(addr net.Addr) string {
-	tcp, ok := addr.(*net.TCPAddr)
-	if !ok {
-		return addr.String()
-	}
-	if tcp.IP == nil || tcp.IP.IsUnspecified() {
-		return net.JoinHostPort("127.0.0.1", strconv.Itoa(tcp.Port))
-	}
-	return tcp.String()
 }
 
 func tunnelListener(listener net.Listener) (net.Listener, error) {

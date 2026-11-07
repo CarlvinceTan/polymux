@@ -14,6 +14,6 @@ OUT=$(mktemp -d -t polymux-window)
 trap 'rm -rf "$OUT"' EXIT
 xcrun swiftc -swift-version 6 -parse-as-library -module-name WindowChecks -I "$PRODUCTS" \
   apps/Polymux/Sources/Views/{PaneWidth,SidebarLimits,PanelBar,PanelPresentation,Dropdown,PanelView,BubbleStyle,Motion,PointerIntent}.swift \
-  apps/Polymux/Sources/Plugins/PluginAction.swift apps/Polymux/Sources/AvatarUI/AvatarIcon.swift \
+  apps/Polymux/Sources/Views/CreateAction.swift apps/Polymux/Sources/AvatarUI/AvatarIcon.swift \
   apps/Polymux/Tests/WindowTests/WindowChecks.swift "$PRODUCTS/AvatarKit.o" -o "$OUT/checks"
 "$OUT/checks"

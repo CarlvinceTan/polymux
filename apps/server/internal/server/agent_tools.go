@@ -91,10 +91,6 @@ func (t *agentTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 	}
 	switch t.action {
 	case "create":
-		// A first task has no parent run, so it would start free of this chat's rules.
-		if input.Task != nil && t.server.plugins.Gated(ctx, state.chats) {
-			return agent.AgentToolResult{}, errors.New("this chat's rules don't let a new bot start work alone; create it without initial_task, then message it")
-		}
 		creator, err := t.server.Store.Profile(ctx, state.run.AgentID)
 		if err != nil {
 			return agent.AgentToolResult{}, err

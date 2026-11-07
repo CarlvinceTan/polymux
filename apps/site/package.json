@@ -4,7 +4,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node scripts/registry.ts",
     "build": "vite build",
     "vercel-build": "node scripts/api.ts",
     "check": "node scripts/prepare.ts && svelte-check --tsconfig ./tsconfig.json",

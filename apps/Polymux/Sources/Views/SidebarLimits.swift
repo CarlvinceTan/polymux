@@ -361,7 +361,7 @@ struct SidebarControl: View {
     let state: SidebarState
     let reveal: () -> Void
     let search: () -> Void
-    let menu: [PluginAction]
+    let menu: [CreateAction]
     let settings: () -> Void
 
     var body: some View {
@@ -375,7 +375,7 @@ private struct SidebarBridge: NSViewRepresentable {
     let stage: SidebarStage
     let reveal: () -> Void
     let search: () -> Void
-    let menu: [PluginAction]
+    let menu: [CreateAction]
     let settings: () -> Void
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
@@ -489,7 +489,7 @@ private struct SidebarContent {
     let scheme: ColorScheme
     let reveal: () -> Void
     let search: () -> Void
-    let menu: [PluginAction]
+    let menu: [CreateAction]
     let settings: () -> Void
 
 }
@@ -504,7 +504,7 @@ private final class SidebarBar: NSView {
     private let reveal = NSGlassEffectView()
     private var buttons: [NSButton] = []
     private var actions: [() -> Void] = []
-    private var creations: [PluginAction] = []
+    private var creations: [CreateAction] = []
 
     init() {
         super.init(frame: .zero)

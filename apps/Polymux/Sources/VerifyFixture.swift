@@ -319,7 +319,6 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                       createdAt: at, payload: row)
             }
     }()
-    private static let plugins = PluginFixture()
     private var onSecondServer: Bool {
         Self.secondServer.map { request.url?.absoluteString.hasPrefix($0) == true } ?? false
     }
@@ -358,20 +357,6 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             return
         }
         if SiteFixture.handle(self) { return }
-        if CommandLine.arguments.contains("--verify-graph"), path == "/work", let data = try? Self.plugins.response(request) {
-            reply(data)
-            return
-        }
-        if CommandLine.arguments.contains("--verify-plugins"), path.hasPrefix("/plugins"), !onSecondServer {
-            // Hub's wait for changes holds its request, as the real server does.
-            let waits = path.hasSuffix("/chats") && request.url?.query?.contains("since") == true
-            let task = Task { @Sendable [self] in
-                if waits { try? await Task.sleep(for: .seconds(2)) }
-                if let data = try? Self.plugins.response(request) { reply(data, mime: path.hasSuffix(".html") ? "text/html" : "application/json") }
-            }
-            responseLock.withLock { responseTask = task }
-            return
-        }
         if CommandLine.arguments.contains("--verify-model-levels"), path == "/providers" {
             let model = ProviderModel(id: "chat", tags: ["text"], enabled: true, reasoning: ["off", "low", "high", "max"])
             let provider = Provider(id: "levels", type: "fixture", name: "Levels", enabled: true, models: [model])

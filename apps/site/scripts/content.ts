@@ -2,7 +2,6 @@ import {resolve} from 'node:path';
 import {JSDOM} from 'jsdom';
 import {text, slug, date, updated, unique, integer} from '../lib/content/documents.ts';
 import {readRelease} from '../lib/content/releases.ts';
-import {loadPlugins} from '../lib/content/plugins.ts';
 import {site} from '../lib/site.ts';
 import {ALL_PLATFORMS, parseReleaseChangelog, groupReleaseChangelog, filterReleaseChangelog} from '../lib/content/changelog.ts';
 import {renderSafeMarkdown} from '../lib/content/markdown.js';
@@ -12,8 +11,6 @@ import {readCollection, siteRoot} from './files.ts';
 export {siteRoot} from './files.ts';
 export const docsContentRoot = resolve(siteRoot, 'src/content/docs');
 export const releasesContentRoot = resolve(siteRoot, 'src/content/releases');
-// The registry the server reads, so the site lists what Settings › Plugins lists. A build fetches it.
-export const pluginRegistry = () => process.env.POLYMUX_SITE_REGISTRY || resolve(siteRoot, '.generated/registry.json');
 
 function renderDocument(body: string, window: JSDOM['window']): Rendered {
   const element = window.document.createElement('article');
@@ -70,7 +67,7 @@ export function loadContent(root = siteRoot) {
     unique(docs.map((page) => page.slug), 'documentation slug');
     unique(releases.map((release) => release.version), 'release version');
     if (!docs.some((page) => page.slug === 'introduction')) throw new Error('Documentation requires an introduction.');
-    return {posts, docs, releases, plugins: loadPlugins(pluginRegistry())};
+    return {posts, docs, releases};
   } finally { dom.window.close(); }
 }
 

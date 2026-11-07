@@ -31,7 +31,6 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/network"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/proxy"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
@@ -73,10 +72,6 @@ type Config struct {
 	BackgroundTimeout time.Duration
 	GroupCaps         *GroupCaps
 	VaultKeys         vaultstore.Keys
-	// PluginIndex overrides the default plugin index address.
-	PluginIndex string
-	// Publish is what transport plugins may expose.
-	Publish plugins.Publish
 }
 type Server struct {
 	peerOnce   sync.Once
@@ -86,7 +81,6 @@ type Server struct {
 	moveKey    *ecdh.PrivateKey
 	drafts     sync.Map
 	Store      *store.Store
-	plugins    *plugins.Manager
 	memory     *memory.Store
 	settings   *settings.Store
 	secrets    *secrets.Store
@@ -293,11 +287,6 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 		return nil, errors.Join(err, v.memory.Close())
 	}
 	v.vaultJobs = map[string]*vaultJob{}
-	v.plugins, err = plugins.New(ctx, plugins.Config{Dir: filepath.Join(c.DataDir, "plugins"), Index: c.PluginIndex, Publish: c.Publish, Store: s, Log: c.Log})
-	if err != nil {
-		cancel()
-		return nil, errors.Join(err, v.memory.Close())
-	}
 	// Only a runtime that runs commands needs a secret environment: the proxy for web requests
 	// and the local agent socket for SSH keys.
 	if runtime, ok := c.Factory.(shellRuntime); ok {
@@ -387,7 +376,6 @@ func (s *Server) Close() error {
 		for _, group := range groups {
 			errs = append(errs, group.close())
 		}
-		s.plugins.Close()
 		s.vault.Close()
 		if s.proxy != nil {
 			errs = append(errs, s.proxy.Close())
@@ -421,7 +409,7 @@ func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 // invite carries the direct address and, when available, a tunnel ticket for other networks.
-// A transport plugin's address, like a configured public one, replaces both.
+// A configured public address replaces both.
 func (s *Server) invite(r *http.Request, token string) map[string]string {
 	return s.inviteAt(r.Context(), r.Host, token)
 }
@@ -429,11 +417,6 @@ func (s *Server) invite(r *http.Request, token string) map[string]string {
 func (s *Server) inviteAt(ctx context.Context, host, token string) map[string]string {
 	if s.config.PublicURL != "" {
 		return map[string]string{"url": s.config.PublicURL, "token": token}
-	}
-	for _, transport := range s.plugins.Transports(ctx) {
-		if transport.State == contract.PluginStateReady && transport.API != "" {
-			return map[string]string{"url": transport.API, "token": token}
-		}
 	}
 	value := map[string]string{"url": "http://" + host, "token": token}
 	if s.config.Ticket != nil {
@@ -586,8 +569,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /client", s.reportClient)
 	s.mux.HandleFunc("GET /client/requests", s.clientStream)
 	s.mux.HandleFunc("POST /client/requests/{id}", s.answerClient)
-	s.pluginRoutes()
-	s.mux.HandleFunc("GET /work", s.recentWork)
 	s.mux.HandleFunc("GET /settings", s.getSettings)
 	s.mux.HandleFunc("PATCH /settings", s.updateSettings)
 	s.mux.HandleFunc("GET /speech/live", s.speechLive)
@@ -1576,7 +1557,6 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	runCtx = context.WithValue(runCtx, htmlKey{}, scope)
 	d, sess, isolated, err := s.turnSession(runCtx, writeCtx, a, work, run, state, err)
 	scope.cwd = outputCWD(d, s.config.DataDir)
-	err = errors.Join(err, s.bindGate(runCtx, state, scope.cwd))
 	var result agentruntime.Result
 	if err == nil {
 		err = context.Cause(runCtx)
@@ -1960,14 +1940,6 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 				d.ExtraTools = append(d.ExtraTools[:0:0], &chatTool{store: s.Store, question: true})
 			} else {
 				d.ExtraTools = append(slices.Clone(d.ExtraTools), s.turnTools(a, work, state)...)
-				chat := a.threadID
-				if chat == "" {
-					chat = a.id
-				}
-				d.Skills = append(slices.Clone(d.Skills), s.plugins.SkillFiles(runCtx, chat)...)
-				if work.Trigger != contract.RunTriggerReview {
-					d.ExtraTools = append(d.ExtraTools, s.pluginTools(runCtx, chat, a.id, state)...)
-				}
 			}
 			if err == nil && !d.Intro && d.Workspace != "" {
 				// Prepare the conversation's checkout before a session opens; a

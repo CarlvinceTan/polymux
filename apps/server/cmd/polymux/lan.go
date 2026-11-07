@@ -181,8 +181,7 @@ func identityHost(host string) string {
 	return ip.WithZone("").String()
 }
 
-// The API speaks plain HTTP, so it binds only on loopback. Other devices reach it through a
-// tunnel or a transport plugin.
+// The API speaks plain HTTP, so it binds only on loopback. Other devices reach it through a tunnel.
 func validateListen(address string, _ bool) error {
 	ip, err := listenAddr(address)
 	if err != nil {
@@ -191,7 +190,7 @@ func validateListen(address string, _ bool) error {
 	if ip.IsLoopback() {
 		return nil
 	}
-	return errors.New("the API listener must bind loopback; other devices connect through a tunnel or a transport plugin")
+	return errors.New("the API listener must bind loopback; other devices connect through a tunnel")
 }
 
 func validateDevice(address string) error {

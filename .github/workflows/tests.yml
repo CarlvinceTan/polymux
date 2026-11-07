@@ -20,7 +20,6 @@ jobs:
     outputs:
       server: ${{ steps.paths.outputs.server }}
       swift: ${{ steps.paths.outputs.swift }}
-      plugins: ${{ steps.paths.outputs.plugins }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -60,22 +59,6 @@ jobs:
         if: needs.changes.outputs.server != 'true'
         run: echo 'No server inputs changed; retain a successful server check for the deployer.'
 
-  plugins:
-    needs: changes
-    if: needs.changes.outputs.plugins == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: plugins/go.mod
-          cache-dependency-path: plugins/go.sum
-      - name: Vet
-        working-directory: plugins
-        run: GOWORK=off go vet ./...
-      - name: Test (race)
-        run: scripts/test.sh plugins -race -count=1 -timeout=600s ./...
-
   contracts:
     runs-on: ubuntu-latest
     steps:
@@ -90,7 +73,7 @@ jobs:
       - run: scripts/test.sh tools
       - name: Shell and workflow checks
         run: |
-          shellcheck -x -P SCRIPTDIR -S warning scripts/*.sh plugins/scripts/*.sh plugins/hub/prepare.sh
+          shellcheck -x -P SCRIPTDIR -S warning scripts/*.sh
           GOWORK=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
   swift:

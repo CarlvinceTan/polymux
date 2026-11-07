@@ -29,7 +29,6 @@ struct ChatPane: View {
     @State private var dismissedIssue: String?
     /// Whether the profile panel (or a group's editor) is open; it stays open across chats.
     @Binding var showProfile: Bool
-    @Binding var pluginPanel: String?
     /// What the profile panel, which the window owns on macOS, reads from this chat.
     let openChat: OpenChat
     @State private var target: ReplyTarget?
@@ -60,7 +59,6 @@ struct ChatPane: View {
     @Environment(\.connectionDismissed) private var connectionDismissed
     #if os(iOS)
     @Environment(\.self) private var environment
-    @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
     private var verticalToolbar: Bool {
@@ -74,11 +72,10 @@ struct ChatPane: View {
 
     init(agent: Agent, thread: PolymuxKit.Thread, session: AppSession,
          drops: Binding<[DroppedFile]>, files: Binding<[DraftFile]>,
-         showProfile: Binding<Bool>, pluginPanel: Binding<String?>, openChat: OpenChat,
+         showProfile: Binding<Bool>, openChat: OpenChat,
          destination: SearchDestination? = nil, store: ChatStore) {
         self.agent = agent
         _showProfile = showProfile
-        _pluginPanel = pluginPanel
         self.openChat = openChat
         self.thread = thread
         self.session = session
@@ -102,11 +99,6 @@ struct ChatPane: View {
             NavigationStack {
                 conversation
                     .navigationDestination(isPresented: profilePresented) { profile }
-                    .navigationDestination(item: $pluginPanel) { name in
-                        if let plugin = pluginGroups.joined().first(where: { $0.name == name }) {
-                            PluginPanel(plugin: plugin, thread: thread, session: session) { pluginPanel = nil }
-                        }
-                    }
                     .toolbar(.hidden, for: .tabBar)
             }
             #else
@@ -145,14 +137,6 @@ struct ChatPane: View {
             store.isVisible = phase == .active
             if store.isVisible { Task { await store.markRead() } }
         }
-    }
-
-    private var pluginGroups: [[Plugin]] {
-        session.plugins.buttons(chat: thread.isTask ? thread.agentID : thread.id)
-    }
-
-    private func togglePlugin(_ plugin: Plugin) {
-        pluginPanel = pluginPanel == plugin.name ? nil : plugin.name
     }
 
     #if os(iOS)
@@ -298,8 +282,7 @@ struct ChatPane: View {
         .task { dropFolder = try? await DroppedFile.prepare() }
         #endif
         #if os(macOS)
-        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice,
-                                      plugins: pluginGroups, panel: pluginPanel)) {
+        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice)) {
             if showSearch {
                 HStack(spacing: 8) {
                     searchField
@@ -317,7 +300,6 @@ struct ChatPane: View {
                             PanelNavButton(symbol: "chevron.left", label: "Back") { openChat.show(agent.id) }
                         }
                         Spacer(minLength: 0)
-                        PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
                         if !thread.isGroup {
                             PanelNavButton(symbol: "phone", label: "Speech conversation",
                                            enabled: !openingVoice && !showVoice, action: openVoice)
@@ -341,15 +323,6 @@ struct ChatPane: View {
                 }
             }
             .sharedBackgroundVisibility(.hidden)
-            if !showSearch && !pluginGroups.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    if sizeClass == .compact {
-                        PluginMenu(groups: pluginGroups, open: togglePlugin)
-                    } else {
-                        PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
-                    }
-                }
-            }
             if showSearch || !thread.isGroup {
                 ToolbarItem(placement: .primaryAction) {
                     if showSearch {
@@ -850,8 +823,6 @@ private struct ChatBarState: Hashable {
     let search: Bool
     let opening: Bool
     let voice: Bool
-    let plugins: [[Plugin]]
-    let panel: String?
 }
 
 struct ReplyTarget: Hashable, Sendable {
@@ -938,8 +909,6 @@ struct MessageBubble: View, @MainActor Equatable {
     let agents: [Agent]
     let react: (String) -> Void
     let scrollSpace: Namespace.ID
-    /// Hub draws its own reaction bar beneath the bubble.
-    var showsReactions = true
 
     /// Bubbles redraw for what they show. Their actions never change for a given message.
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -1001,7 +970,7 @@ struct MessageBubble: View, @MainActor Equatable {
                             client: client, jump: { jump(reply) },
                              width: replyWidth(reply))
             }
-            if showsReactions, !reactions.isEmpty {
+            if !reactions.isEmpty {
                 ReactionsView(reactions: reactions, agents: agents, react: react)
                     .disabled(!canReact || reacting)
             }

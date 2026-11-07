@@ -8,7 +8,6 @@ let package = Package(
         .library(name: "PolymuxKit", targets: ["PolymuxKit"]),
         .library(name: "AvatarKit", targets: ["AvatarKit"]),
         .library(name: "AvatarKitC", type: .dynamic, targets: ["AvatarKitC"]),
-        .library(name: "GraphKit", targets: ["GraphKit"]),
         .library(name: "PolymuxCall", targets: ["PolymuxCall"]),
         .library(name: "SpeechKit", targets: ["SpeechKit"]),
         .library(name: "PolymuxVoice", targets: ["PolymuxVoice"]),
@@ -36,12 +35,10 @@ let package = Package(
         .target(name: "PolymuxVoice", dependencies: ["PolymuxKit", "PolymuxCall", "SpeechKit"], path: "packages/PolymuxVoice/Sources/PolymuxVoice"),
         .target(name: "PolymuxUpdates", dependencies: [.product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS]))], path: "packages/PolymuxUpdates/Sources/PolymuxUpdates"),
         .executableTarget(name: "MediaText", path: "packages/MediaText/Sources/MediaText"),
-        .target(name: "GraphKit", path: "packages/GraphKit/Sources/GraphKit"),
         .testTarget(name: "PolymuxKitTests", dependencies: ["PolymuxKit", "PolymuxAvatar", "AvatarKit"], path: "packages/PolymuxKit/Tests/PolymuxKitTests"),
         .testTarget(name: "SpeechKitTests", dependencies: ["SpeechKit"], path: "packages/SpeechKit/Tests/SpeechKitTests"),
         .testTarget(name: "PolymuxVoiceTests", dependencies: ["PolymuxVoice", "PolymuxKit", "SpeechKit"], path: "packages/PolymuxVoice/Tests/PolymuxVoiceTests"),
         .testTarget(name: "AvatarKitTests", dependencies: ["AvatarKit"], path: "packages/AvatarKit/Tests/AvatarKitTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "AvatarKitCTests", dependencies: ["AvatarKit", "AvatarKitC", "AvatarKitCTypes"], path: "packages/AvatarKitC/Tests/AvatarKitCTests"),
-        .testTarget(name: "GraphKitTests", dependencies: ["GraphKit"], path: "packages/GraphKit/Tests/GraphKitTests", resources: [.copy("Fixtures")])
     ]
 )

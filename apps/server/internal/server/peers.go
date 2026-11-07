@@ -72,7 +72,7 @@ func (s *Server) runPeers(ctx context.Context) {
 	s.peers().Run(ctx)
 }
 
-// empty reports whether retiring this server would lose nothing: no chats, bots, plugins, providers
+// empty reports whether retiring this server would lose nothing: no chats, bots, providers
 // or vault entries. Anything it can't confirm counts as data.
 func (s *Server) empty(ctx context.Context) bool {
 	if len(s.settings.Providers()) > 0 {
@@ -80,9 +80,6 @@ func (s *Server) empty(ctx context.Context) bool {
 	}
 	var used bool
 	if err := s.Store.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages) OR EXISTS(SELECT 1 FROM agents)`).Scan(&used); err != nil || used {
-		return false
-	}
-	if list, err := s.plugins.List(ctx); err != nil || len(list.Installed) > 0 {
 		return false
 	}
 	if s.vault != nil {
