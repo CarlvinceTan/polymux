@@ -93,6 +93,11 @@ public struct CharacterLayer: @unchecked Sendable {
     public var alpha: Double = 1
     /// Stack-gap silhouette override; an empty path omits an interior layer.
     public var outline: CGPath? = nil
+
+    public init(path: CGPath, color: String, front: Bool, surface: Bool, alpha: Double = 1, outline: CGPath? = nil) {
+        self.path = path; self.color = color; self.front = front; self.surface = surface
+        self.alpha = alpha; self.outline = outline
+    }
 }
 
 extension CharacterModel {

@@ -99,7 +99,7 @@ struct ThinkingMorph {
     }
 }
 
-func thinkingDot(_ index: Int, time: Double, amount: Double, reducedMotion: Bool) -> DotRender {
+public func thinkingDot(_ index: Int, time: Double, amount: Double, reducedMotion: Bool) -> DotRender {
     let phase = (time / 1.4 + 0.119).truncatingRemainder(dividingBy: 1)
     let distance = abs(phase - Double(index) / 3)
     let wave = reducedMotion ? 1 : exp(-pow(min(distance, 1 - distance), 2) / 0.045)

@@ -1,4 +1,5 @@
 import SwiftUI
+import PolymuxVoice
 import PolymuxKit
 import AvatarKit
 import CoreTransferable
@@ -689,11 +690,14 @@ struct ShellView: View {
             .listRowBackground(sidebarSurface)
             .listRowSeparator(.hidden)
         }
-        ForEach(dropSections, id: \.id) { section in
+        let sections = dropSections
+        // Unassigned only needs a header beside other sections.
+        let plain = sections.allSatisfy { $0.id == SidebarLayout.unassignedID }
+        ForEach(sections, id: \.id) { section in
             let rows = chats(in: section.id, from: all)
             Section {
-                sectionHeader(section, count: rows.count, selected: selected == section.id)
-                if !section.collapsed {
+                if !plain { sectionHeader(section, count: rows.count, selected: selected == section.id) }
+                if plain || !section.collapsed {
                     if rows.isEmpty {
                         Text("No chats yet.")
                             .foregroundStyle(Color.primary.opacity(0.7))
@@ -1033,8 +1037,10 @@ struct ShellView: View {
                     Label(section.name, systemImage: thread.sectionID == section.id ? "checkmark" : "folder")
                 }
             }
-            Button("Unassigned") { move(thread, to: nil) }
-            Divider()
+            if !session.layout.customSections.isEmpty {
+                Button("Unassigned") { move(thread, to: nil) }
+                Divider()
+            }
             Button("Create section", systemImage: "folder.badge.plus") { createSection(for: thread) }
         }
         .disabled(session.layout.isSaving)
@@ -1170,7 +1176,9 @@ struct ShellView: View {
             ForEach(session.layout.customSections, id: \.id) { section in
                 Button("Move to \(section.name)") { move(thread, to: section.id) }
             }
-            Button("Move to Unassigned") { move(thread, to: nil) }
+            if !session.layout.customSections.isEmpty {
+                Button("Move to Unassigned") { move(thread, to: nil) }
+            }
             Button("Create section") { createSection(for: thread) }
             Button(thread.isGroup ? "Edit chat" : "Edit profile") { edit(thread) }
             if !thread.isGroup, let agent = participants(thread).first {

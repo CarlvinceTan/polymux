@@ -502,6 +502,25 @@
         "reasoning"
       ]
     },
+    "AgentACP": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Executable that speaks the Agent Client Protocol over stdio."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
     "Agent": {
       "type": "object",
       "additionalProperties": false,
@@ -544,6 +563,10 @@
         },
         "fallback": {
           "$ref": "#/$defs/AgentFallback"
+        },
+        "acp": {
+          "$ref": "#/$defs/AgentACP",
+          "description": "When set, the bot runs on this external Agent Client Protocol process instead of a model."
         },
         "createdBy": {
           "type": "string",
@@ -1630,6 +1653,9 @@
         },
         "sectionID": {
           "type": "string"
+        },
+        "acp": {
+          "$ref": "#/$defs/AgentACP"
         }
       },
       "required": [
@@ -1695,6 +1721,10 @@
         },
         "fallback": {
           "$ref": "#/$defs/AgentFallback"
+        },
+        "acp": {
+          "$ref": "#/$defs/AgentACP",
+          "description": "Attach the bot to an external ACP process. An empty command detaches it back to a model."
         }
       },
       "required": []

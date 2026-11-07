@@ -22,7 +22,6 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
-	"github.com/CarlvinceTan/polymux/apps/server/internal/embedproc"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/fixture"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/link"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
@@ -32,12 +31,6 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/tunnel"
 	engine "github.com/CarlvinceTan/polymux/packages/search"
-)
-
-const (
-	embedModel     = "google/embeddinggemma-2"
-	embedDims      = 768
-	extractTimeout = 3 * time.Minute
 )
 
 var buildSHA = "unknown"
@@ -220,40 +213,24 @@ func runServer(args []string) error {
 		}
 		seen[d.Agent.ID] = true
 	}
-	client := &http.Client{Timeout: 2 * time.Minute}
-	index := &search.Index{Store: s, Log: log}
-	if bin := os.Getenv("POLYMUX_EXTRACTOR"); bin != "" {
-		index.Extractor = &engine.SubprocessExtractor{Bin: bin, Timeout: extractTimeout}
+	backend, stopSearch, err := engine.Start(ctx, engine.Config{
+		Llama: os.Getenv("POLYMUX_LLAMA"), Model: os.Getenv("POLYMUX_EMBED_MODEL"),
+		Projector: os.Getenv("POLYMUX_EMBED_MMPROJ"), URL: os.Getenv("POLYMUX_EMBED_URL"),
+		Extractor: os.Getenv("POLYMUX_EXTRACTOR"), Log: log,
+	})
+	if err != nil {
+		return err
 	}
-	var embedder *engine.HTTPEmbedder
-	if bin := os.Getenv("POLYMUX_LLAMA"); bin != "" {
-		process, err := embedproc.Start(ctx, embedproc.Config{Bin: bin, Model: os.Getenv("POLYMUX_EMBED_MODEL"),
-			Mmproj: os.Getenv("POLYMUX_EMBED_MMPROJ"), Log: log})
-		if err != nil {
-			return err
-		}
-		defer process.Close()
-		embedder = &engine.HTTPEmbedder{URL: process.URL(), Model: embedModel, Dims: embedDims, Client: client,
-			Media: os.Getenv("POLYMUX_EMBED_MMPROJ") != ""}
-	} else if url := os.Getenv("POLYMUX_EMBED_URL"); url != "" {
-		// An external endpoint's capabilities are unknown here, so it embeds text only.
-		embedder = &engine.HTTPEmbedder{URL: url, Model: embedModel, Dims: embedDims, Client: client}
+	if stopSearch != nil {
+		defer stopSearch()
 	}
-	if embedder != nil {
-		index.Embedder = embedder
-		if err := index.Reindex(ctx); err != nil {
-			log.Warn("reindex stale vectors", "error", err)
-		}
-		if embedder.Media {
-			if err := embedder.CheckMedia(ctx); err != nil {
-				log.Error("media embedding disabled", "error", err)
-				embedder.Media = false
-			}
-		}
+	index := &search.Index{Store: s, Embedder: backend.Embedder, Extractor: backend.Extractor, Log: log}
+	if err := index.PrepareSemantic(ctx); err != nil {
+		return err
 	}
 	if index.Embedder != nil {
-		if _, err := s.DB.ExecContext(ctx, `UPDATE messages SET indexing_state='pending' WHERE indexing_state='error'`); err != nil {
-			return err
+		if err := index.Reindex(ctx); err != nil {
+			log.Warn("reindex stale vectors", "error", err)
 		}
 	}
 	log.Info("search providers", "semantic", index.Embedder != nil, "extractor", index.Extractor != nil)

@@ -21,11 +21,7 @@ struct ProgressiveTime: FormatStyle {
         } else if let week = calendar.dateInterval(of: .weekOfYear, for: now), week.contains(value) {
             day = value.formatted(.dateTime.weekday(.wide))
         } else if calendar.component(.year, from: value) == calendar.component(.year, from: now) {
-            if separator {
-                day = value.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "en_GB")))
-            } else {
-                return String(format: "%02d/%02d", calendar.component(.day, from: value), calendar.component(.month, from: value))
-            }
+            day = value.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "en_GB")))
         } else {
             day = value.formatted(.dateTime.day().month(.abbreviated).year().locale(Locale(identifier: "en_GB")))
         }

@@ -358,7 +358,7 @@ func request(t *testing.T, routes http.Handler, method, path, body string) *http
 	return recorder
 }
 
-func TestIncognitoLeavesChatsUnread(t *testing.T) {
+func TestIncognitoReadsStayPrivate(t *testing.T) {
 	fake := &fakeServer{bodies: map[string]string{}}
 	server := httptest.NewServer(fake)
 	defer server.Close()
@@ -380,13 +380,17 @@ func TestIncognitoLeavesChatsUnread(t *testing.T) {
 	if got := request(t, routes, "POST", "/chats/!a:x/messages/$1/read", ""); got.Code != 204 {
 		t.Fatalf("%d", got.Code)
 	}
-	if len(fake.requests) != 0 || m.chats()[0].Unread != 4 {
-		t.Fatalf("read while incognito: %v %+v", fake.requests, m.chats())
+	path := "/_matrix/client/v3/rooms/!a:x/read_markers"
+	if body := fake.bodies[path]; !strings.Contains(body, `"m.read.private":"$1"`) || strings.Contains(body, `"m.read":`) {
+		t.Fatalf("incognito read wasn't private: %s", body)
+	}
+	if m.chats()[0].Unread != 0 {
+		t.Fatalf("the count didn't clear: %+v", m.chats())
 	}
 	request(t, routes, "PUT", "/settings", `{"incognito":false}`)
-	request(t, routes, "POST", "/chats/!a:x/messages/$1/read", "")
-	if len(fake.requests) != 1 || m.chats()[0].Unread != 0 {
-		t.Fatalf("%v %+v", fake.requests, m.chats())
+	request(t, routes, "POST", "/chats/!a:x/messages/$2/read", "")
+	if body := fake.bodies[path]; strings.Contains(body, "m.read.private") || !strings.Contains(body, `"m.read":"$2"`) {
+		t.Fatalf("a normal read wasn't public: %s", body)
 	}
 }
 

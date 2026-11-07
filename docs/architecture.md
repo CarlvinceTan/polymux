@@ -43,6 +43,17 @@ A bot's prompt is built in layers, in this order. A layer only adds to the ones 
 - A long command or codemode script steps aside when a message is waiting: it keeps running in the background and its result arrives as a new message. A script that has run a few seconds also stops at its next tool call, handing back what finished, so a change of mind lands before more tools run.
 - A blank field follows `DefaultPrompt`, and clients are shown that text. Saving it unchanged keeps the field blank, so a bot only stops following the default once its instructions are edited.
 
+## External agents
+
+- A bot can run its turns on an external Agent Client Protocol (ACP) process instead of a model, such as Claude Code or opencode. PiG stays the default runtime; an attached agent is a worker for that bot, reachable through delegation like any other bot.
+- The server launches the process over stdio for the bot's conversation and relays its text and tool activity into the chat. The external agent brings its own model, tools and sandbox; Polymux passes no tools into it and adds no filesystem or terminal capability to the protocol.
+- Only a client can attach a bot or change its command; a bot's own edit tool can't. An agent that exits is started again on the next turn, and closing asks it to exit before its process group is stopped.
+- The agent's session ID is saved with an `acp:` prefix, so the next turn loads that external conversation when the agent supports `session/load`; otherwise it starts fresh. A saved path is only passed to the runtime that owns its prefix: a durable conversation ID never reaches the external agent, and its ID never reaches `durable.db`. Detaching therefore starts a fresh model conversation.
+- Delegation is unchanged: the `task` tool's `agent_id` chooses the bot, and a child task on a bot attached to an external agent runs on that process. Children still cannot delegate.
+- An attached bot runs no model, provider, reasoning or fallback of its own; detaching returns it to a model, keeping the one it had before if it was edited rather than created with an agent. Permissions: Polymux answers `session/request_permission` with the least-privilege allow option (allow once before allow always) and declines reject-only prompts. The external agent's own sandbox is the boundary for what it may do.
+
+Code: `internal/acp`, `internal/agentruntime/runtime.go`, and the ACP fields in `contracts/polymux.schema.json`.
+
 ## Bot quality
 
 How a bot's handling of work is judged. A change to how bots run, delegate or schedule work must hold or improve each of these.
@@ -61,6 +72,7 @@ How a bot's handling of work is judged. A change to how bots run, delegate or sc
 
 - Every GUI (macOS, iOS, web, or any future one) is a client only.
 - No GUI embeds the server. The Mac app carries a copy and has launchd run it, so it outlives the app. A new install starts it; an update never does. Joining a network retires it while it's empty; a server with data stays until someone merges it or turns it off.
+- That copy is `Contents/Helpers/Polymux Server.app`, so System Settings lists it by name and icon, and bots inherit what it's granted. A new install opens with a welcome whose permissions step, like Settings › General, opens the Grant window (`apps/Polymux/Sources/Permissions/`). It docks beside System Settings, where its icon is dragged into the Full Disk Access or Screen Recording list, and reads the server's own answer from `GET /privacy`.
 - Clients talk to the server through one documented API (`contracts`). No client gets a private or privileged path.
 - Any client can be removed or replaced without affecting the server or other clients.
 - Clients are interchangeable: the same server works with any number of them at once.

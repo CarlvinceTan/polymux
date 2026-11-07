@@ -106,6 +106,7 @@ struct HubFind: View {
                 }
             }
         }
+        .panelDismiss(onClose: { close() })
     }
 
     @ViewBuilder private func row(_ result: Result) -> some View {

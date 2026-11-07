@@ -39,7 +39,7 @@ struct HubAvatar: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(Circle())
+        .clipShape(shape)
         .accessibilityHidden(true)
     }
 
@@ -47,8 +47,15 @@ struct HubAvatar: View {
 
     static func file(_ name: String) -> String { "avatar-" + name }
 
+    /// A rounded square, matching the app icon rather than a circle.
+    static func shape(_ size: CGFloat) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+    }
+
+    private var shape: RoundedRectangle { HubAvatar.shape(size) }
+
     private var initial: some View {
-        Circle().fill(.primary.opacity(PanelStyle.selectedTint)).overlay {
+        shape.fill(.primary.opacity(PanelStyle.selectedTint)).overlay {
             Text(name.prefix(1).uppercased()).font(.system(size: size * 0.42, weight: .medium)).foregroundStyle(.muted)
         }
     }
@@ -94,7 +101,11 @@ struct HubRow: View {
         if calendar.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
         if calendar.isDateInYesterday(date) { return "Yesterday" }
         if calendar.isDate(date, equalTo: .now, toGranularity: .weekOfYear) { return date.formatted(.dateTime.weekday(.wide)) }
-        return date.formatted(date: .numeric, time: .omitted)
+        let locale = Locale(identifier: "en_GB")
+        if calendar.component(.year, from: date) == calendar.component(.year, from: .now) {
+            return date.formatted(.dateTime.day().month(.abbreviated).locale(locale))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year().locale(locale))
     }
 }
 

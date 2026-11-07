@@ -42,4 +42,4 @@ When every model a bot can use is out of allowance, rate-limited or down, the bo
 
 ## Voice
 
-**Settings → Voice** uses Gemini Live or OpenAI Realtime with the API key of your connected Gemini or OpenAI provider. Talk naturally and interrupt replies; the live spokesperson consults your agents for tasks and context. Voice settings don't change the default text model.
+**Settings → Voice** uses Gemini Live or OpenAI Realtime with the API key of your connected Gemini or OpenAI provider. Speech conversations are in direct chats, not group chats. Talk naturally and interrupt replies; the live spokesperson consults your agents for tasks and context. Voice settings don't change the default text model.

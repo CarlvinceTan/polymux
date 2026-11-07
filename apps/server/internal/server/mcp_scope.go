@@ -161,7 +161,7 @@ func (s *Server) mcpInventory(ctx context.Context, id string, local []agentrunti
 	return result, nil
 }
 
-func (s *Server) registerMCP(ctx context.Context, config agentruntime.MCPServer, owner string, local []agentruntime.MCPServer, devices []agentruntime.Device, nativeOnly *bool) error {
+func (s *Server) registerMCP(ctx context.Context, config agentruntime.MCPServer, owner string, local []agentruntime.MCPServer, nativeOnly *bool) error {
 	if !validateMCP(config) {
 		return errors.New("invalid MCP configuration")
 	}
@@ -205,14 +205,7 @@ func (s *Server) registerMCP(ctx context.Context, config agentruntime.MCPServer,
 			return err
 		}
 	}
-	var deviceJSON json.RawMessage
-	if devices != nil {
-		deviceJSON, err = json.Marshal(devices)
-		if err != nil {
-			return err
-		}
-	}
-	return s.Store.RegisterMCP(ctx, config.Name, raw, owner, legacy, deviceJSON)
+	return s.Store.RegisterMCP(ctx, config.Name, raw, owner, legacy)
 }
 
 func (s *Server) mcpRoutes() {
@@ -247,7 +240,7 @@ func (s *Server) setupMCP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_mcp", "Choose a simple name and one MCP endpoint or executable without inline credentials.")
 		return
 	}
-	if err := s.registerMCP(r.Context(), config, "", nil, nil, request.NativeOnly); err != nil {
+	if err := s.registerMCP(r.Context(), config, "", nil, request.NativeOnly); err != nil {
 		if !s.mcpError(w, err) {
 			s.respond(w, nil, err)
 		}

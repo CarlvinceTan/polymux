@@ -24,7 +24,8 @@ struct RenderChecks {
         restyled()
         stateFaces()
         released()
-        print("Avatar rendering: placement, stacks, layer reuse, resize, clipping, clocks, proximity, state expressions and teardown passed")
+        delegated()
+        print("Avatar rendering: placement, stacks, layer reuse, resize, clipping, clocks, proximity, state expressions, teardown and injection passed")
     }
 
     static func input(_ hex: String = "#E05020") -> AvatarInput {
@@ -499,5 +500,103 @@ struct RenderChecks {
                                     input: moving, rect: view.bounds)])
         }
         precondition(released == nil, "The display-link target retains the surface")
+    }
+
+    static func delegated() {
+        let renderer = RendererProbe()
+        let view = AvatarSurfaceView { renderer }
+        view.frame = CGRect(origin: .zero, size: size)
+        view.update([slot(view.bounds)])
+        precondition(renderer.applied == 1, "A custom renderer was not asked to draw")
+        precondition(view.layer?.sublayers?.contains { $0 === renderer.root } == true,
+                     "A custom renderer was not installed")
+        view.stop()
+
+        let engine = EngineProbe()
+        let canvas = AvatarCanvasState(motion: AvatarMotion { _, _, _, _ in engine })
+        canvas.input = input()
+        canvas.update(Date(timeIntervalSince1970: 0), size: size)
+        precondition(engine.samples > 0, "A custom engine was not sampled")
+        let frame = canvas.frame!
+        precondition(frame.bodyPath.boundingBoxOfPath == CGRect(x: -80, y: -60, width: 160, height: 120)
+                     && frame.bodyAlpha == 0.9, "A custom engine lost its body")
+        precondition(frame.eyes.count == 1 && frame.eyes[0].alpha == 0.8
+                     && frame.eyes[0].matrix == frame.transform, "A custom engine lost its eyes")
+        precondition(frame.dotsBehind && frame.dots.count == 2 && frame.dots[0].color == nil
+                     && frame.dots[1].d == frame.eyes[0].d && frame.dots[1].depth == 0.5
+                     && frame.dots[1].rot == 0.4, "A custom engine lost its dots")
+        precondition(frame.arcs.count == 1 && frame.arcs[0].id == "probe"
+                     && frame.arcs[0].front == frame.eyes[0].d && frame.arcs[0].back == frame.bodyPath
+                     && frame.arcs[0].grad.stops == ["#112233", "#445566"], "A custom engine lost its arcs")
+        precondition(frame.notif?.r == 8 && frame.notch?.r == 10, "A custom engine lost its notification")
+        precondition(frame.parts.count == 2 && frame.parts[0].alpha == 1 && frame.parts[0].outline == nil
+                     && frame.parts[1].alpha == 0.5 && frame.parts[1].outline == frame.eyes[0].d,
+                     "A custom engine lost its character layers")
+        precondition(frame.transform == CGAffineTransform(translationX: 3, y: 4) && frame.bare == 0.25,
+                     "A custom engine lost its frame options")
+        let defaults = BotFrame(bodyPath: frame.bodyPath, bodyAlpha: 1, eyes: [], dots: [], dotsBehind: false, arcs: [])
+        precondition(defaults.notif == nil && defaults.notch == nil && defaults.parts.isEmpty
+                     && defaults.transform == .identity && defaults.bare == 0, "Frame constructor defaults changed")
+    }
+}
+
+@MainActor
+private final class RendererProbe: AvatarRenderer {
+    let root = CALayer()
+    private(set) var applied = 0
+    var silhouette: [CGPath] { [] }
+
+    func apply(_: AvatarCanvasState, in box: CGRect, scale _: CGFloat) {
+        applied += 1
+        root.frame = box
+    }
+
+    func cut(_: [AvatarCover], scale _: CGFloat) {}
+}
+
+private final class EngineProbe: AvatarEngine, @unchecked Sendable {
+    private(set) var samples = 0
+
+    var state: StateID = .idle
+    var displaySize = 316.0
+    var reducedMotion = false
+    var character: CharacterModel?
+    var interactive = false
+    var personality: UInt32 = 0
+    var resting = false
+    var live = false
+    var solid: Solid?
+
+    func pet(_: Bool, _: Double) {}
+    func twirl(_: Double) {}
+    func setExpression(_: BotExpression?, _: Double) {}
+    func setShape(_: [Double]?, _: Double) {}
+    func setLook(_: Look?, _: Double, morph _: Double) {}
+    func poke(_: Poke, _: Double) {}
+    func setGaze(_: [Double]?) {}
+    func settled(_: Double) -> Bool { true }
+    func setMood(_: MoodID?, interaction _: Bool) {}
+    func setTurn(_: Turn, _: Double) {}
+    func reset(_ id: StateID, _: Double) { state = id }
+    func setState(_ id: StateID, _: Double, restart _: Bool) { state = id }
+    func sample(_: Double) -> BotFrame {
+        samples += 1
+        let body = CGPath(ellipseIn: CGRect(x: -80, y: -60, width: 160, height: 120), transform: nil)
+        let mark = CGPath(rect: CGRect(x: -10, y: -20, width: 20, height: 40), transform: nil)
+        let transform = CGAffineTransform(translationX: 3, y: 4)
+        return BotFrame(bodyPath: body, bodyAlpha: 0.9,
+                        eyes: [RenderedEye(d: mark, matrix: transform, alpha: 0.8)],
+                        dots: [DotRender(x: 20, y: 30, r: 4, opacity: 0.7),
+                               DotRender(x: -20, y: -30, r: 5, opacity: 0.6, color: "#112233",
+                                         depth: 0.5, d: mark, rot: 0.4)],
+                        dotsBehind: true,
+                        arcs: [ArcRender(id: "probe", front: mark, back: body, width: 2, opacity: 0.6,
+                                         grad: ArcGradient(x1: -80, y1: -60, x2: 80, y2: 60,
+                                                           stops: ["#112233", "#445566"]))],
+                        notif: FrameDot(x: 40, y: -40, r: 8), notch: FrameDot(x: 40, y: -40, r: 10),
+                        parts: [CharacterLayer(path: mark, color: "#112233", front: true, surface: false),
+                                CharacterLayer(path: body, color: "#445566", front: false, surface: true,
+                                               alpha: 0.5, outline: mark)],
+                        transform: transform, bare: 0.25)
     }
 }

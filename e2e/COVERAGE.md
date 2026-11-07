@@ -11,8 +11,8 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Flow | Checked | Status | Evidence |
 | --- | --- | --- | --- |
 | Launch with cached chats | First frame shows chats and open chat | done | `relaunch.js`; first frame reads the chat from cache before the window shows |
-| Launch behind the logo | Sync, likely chats, drafts, profile and images ready when it ends | done | Empty cache and 100 unsynced messages: the first frame after the logo shows the chat list and the chat at its end |
-| Launch with nothing cached | Quiet placeholder, no flash | flow | `empty-groups.js`, `fixture-startup.js`; the placeholder now waits for the server |
+| Launch without a splash | Shell opens as soon as the session restores, without an animation delay | flow | `fixture-launch.js` |
+| Launch with nothing cached | Quiet connecting state, no empty-account flash | flow | `empty-groups.js`, `fixture-startup.js`; chats wait for the session to restore |
 | Launch offline | Cached content, one status | flow | `fixture-status.js` |
 | Hover across rows | Only touched rows redraw, highlight follows pointer | done | Real pointer, 72 chats: shell 2, pane 6 for 90 moves |
 | Scroll with a still pointer | No highlight trail, window does not redraw | done | Shell 0 during scroll; `PointerIntent` ignores rows sliding under the pointer |
@@ -53,7 +53,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Every avatar in a group stack | Gap wraps the front avatar and never stalls the app | flow | `meshStacks()` and `gapPlacement()` in `RenderChecks.swift`; the iPhone mask was checked by hand |
 | Avatar working dots in an unfocused window | Keep animating | done | Six captures while unfocused all differed; they were identical before the fix |
 | Typing and working row | No flicker on switch | flow | `fixture-actions.js`, `fixture-tasks.js`; uses the server connection, so switching chats no longer drops it |
-| Open, pin and finish a task | Own thread, row updates at once, stays out of the chat list | flow | `fixture-task-threads.js` on macOS; iPhone compiled but not exercised |
+| A bot's tasks | Show their state only, don't open, stay out of the chat list | flow | `fixture-task-threads.js` on macOS; iPhone compiled but not exercised |
 | Streaming reply | Sidebar preview stable | flow | `fixture-sidebar-preview.js` |
 | Failed reply warning | One quiet bubble | flow | `fixture-reply-error.js`, `fixture-reply-recovered.js` |
 | Replaced model warning | Says why another model replied | flow | `fixture-reply-notice.js` |
@@ -64,7 +64,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Choice, credential, vault cards | Answer once, no shift | flow | `fixture-cards.js`, `fixture-credentials.js`, `vault.js` |
 | Drop, paste, attach | Previews animate in | flow | `fixture-composer-layout.js` |
 | Attachment menu | Opens above + from its leading edge, Esc keeps the draft, Emoji inserts at the caret | flow | `fixture-attachment-menu.js` |
-| Dictation and voice | Controls swap smoothly | flow | `fixture-dictation.js`, `voice-model.js`; a live voice call was not tested |
+| Dictation and voice | Controls swap smoothly, hesitations leave the draft, group chats offer no speech conversation | flow | `fixture-dictation.js`, `fixture-dictation-text.js`, `voice-model.js`, `fixture-panel-close.js`; a live voice call was not tested |
 | Mentions list | Opens above field, keyboard works | flow | `fixture-mentions.js`, new |
 
 ## Panels and menus
@@ -87,6 +87,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Devices | A network's page lists them; loading, failed, pair | flow | `fixture-devices.js`, `-slow`, `-failed`, `fixture-pairing.js` |
 | Networks | Join a second, switch, each keeps its place, numbered names, rename, leave | flow | `servers.js`, `fixture-servers.js` |
 | This Mac's server | New install, relaunch, off and on, join keeps it or retires it, or merges it from the join screen | flow | `fresh.js`, `join-empty.js`, `join-keeps.js`, `join-merge.js` |
+| First-run welcome | Shown once on a new install, steps to permissions counted from the server, Settings reopens them | flow | `fresh.js`, `fixture-onboarding.js` |
 | Move | Preview, move, app follows, old copy, a new server beside it | flow | `move.js` |
 | Merge | Preview, merge, both sets of bots, same names told apart, old server goes | flow | `merge.js` |
 | Vault | Locked, unlocked, import | flow | `vault.js`, `vault_browser.js`, `vault_kdbx.js`, `vault_passkey.js` (always on Control), `vault_values.js` |
@@ -99,7 +100,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Connection lost and back | One status, clears itself | done | `fixture-status.js`. A frozen server only shows after the 20 s request timeout |
 | Empty chats, sections, search, models | Centred, names the state | flow | `fixture-profile-empty.js`, `fixture-providers.js`; wording unified |
 | Failed action in each store | Rolls back, one line, clears | flow | Package tests; sidebar notes now float over the list |
-| Reduce Motion | Nothing animates | gap | Launch checked in the simulator: the logo shows without drawing. All other animation goes through `Motion`; not run on macOS, where it is a system setting |
+| Reduce Motion | Nothing animates | gap | No launch animation remains. Other transitions go through `Motion`; not run on macOS, where it is a system setting |
 | Light and dark | Fills and fades match | flow | Tints use the adaptive primary colour; `fixture-site.js` runs dark, most flows light |
 | iPhone | Pages, sheets, no hover state | done | Simulator: list, first and repeat chat opens, profile, New Bot sheet, dark mode. Keyboard stays down, chats open at their end |
 
@@ -145,7 +146,7 @@ Release builds have no fixture, so the render counts are Debug numbers.
 | Hub chat search | Reaches older pages, filters, returns to the message | flow | `fixture-hub-search.js` |
 | Hub mentions and rename | Menu above the box, identity sent, optimistic rename | flow | `fixture-hub-mentions.js` |
 | Hub composer, stickers and voice notes | + menu, emoji above +, picker sends, record, pause, discard, send | flow | `fixture-hub-media.js`; a stand-in replaces the microphone, so a real recording is still unverified |
-| Hub OAuth and Incognito | Provider sign-in, client setup, counts stay | flow | `fixture-hub-account.js`; the browser step is skipped, so a real Google or Microsoft sign-in is still unverified |
+| Hub OAuth and Incognito | Provider sign-in, client setup, private reads clear the count | flow | `fixture-hub-account.js`; the browser step is skipped, so a real Google or Microsoft sign-in is still unverified |
 | Hub reactions and read marks | Who reacted, instant toggle, add from the bar, who read | flow | `fixture-hub-reactions.js`; the hover tooltip was checked in a screenshot through the read mark, which shares it |
 | Hub WeChat chats | Rename offered, pictures offered, voice notes not | flow | `fixture-hub-wechat.js`; the helper is tested against a stand-in by `TestRenameHelperCallsTheExactFunction`, and it renamed a real group and back on 4.1.15, confirmed by reading the name back. The Hub button itself hasn't been pressed on a real chat |
 | Hub iMessage and WeChat | Connect against a real Mac and relay | gap | Go tests use fakes. Neither ran against real Messages or WeChat, which would touch real conversations |

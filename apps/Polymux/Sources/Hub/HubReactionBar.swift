@@ -11,9 +11,9 @@ private struct HubFaces: View {
         HStack(spacing: -size * 0.35) {
             ForEach(people.prefix(4), id: \.id) { person in
                 HubAvatar(name: person.name, uri: person.avatar, client: client, size: size)
-                    .background(Color(white: 0.86), in: Circle())
+                    .background(Color(white: 0.86), in: HubAvatar.shape(size))
                     .padding(1)
-                    .background(Color(white: 0.5), in: Circle())
+                    .background(Color(white: 0.5), in: HubAvatar.shape(size + 2))
             }
         }
     }

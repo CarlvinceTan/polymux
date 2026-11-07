@@ -22,10 +22,6 @@ struct TaskThreadTests {
         #expect(await sidebar.thread(for: arlo)?.id == "arlo")
         #expect(await sidebar.groups.isEmpty)
         #expect(await sidebar.tasks(of: "arlo").map(\.id) == ["task-report"])
-        await #expect(throws: (any Error).self) {
-            try await sidebar.updateTask("task-report", status: TaskInfoStatus.done)
-        }
-        #expect(await sidebar.tasks(of: "arlo").first?.task?.status == TaskInfoStatus.open)
     }
 
     @Test func pinnedComeFirstThenUnfinishedThenFinished() {

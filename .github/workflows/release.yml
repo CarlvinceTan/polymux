@@ -147,7 +147,7 @@ jobs:
           test -d "$APP/Contents/Frameworks/Sparkle.framework"
           dyld_info -rpaths "$APP/Contents/MacOS/Polymux" | grep -q '@executable_path/../Frameworks'
           SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
-          for item in "$APP/Contents/Helpers/polymux" "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" \
+          for item in "$APP/Contents/Helpers/Polymux Server.app" "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" \
             "$SPARKLE/XPCServices/Downloader.xpc" "$SPARKLE/XPCServices/Installer.xpc"; do
             codesign -dv --verbose=4 "$item" 2>&1 | grep -q '^Timestamp='
           done

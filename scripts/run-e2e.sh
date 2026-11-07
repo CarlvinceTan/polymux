@@ -303,7 +303,7 @@ for index, part in enumerate(parts):
         relaunch(markers[index] == "crash")
     # After a launch or relaunch, wait for the new window before the part runs.
     ready = "for (let i = 0; ; i++) { try { await cua.getApp(APP); break; } catch (error) { if (i >= 60) throw error; await cua.sleep(500); } }\n"
-    # The launch animation keeps the app's own window title until the chats appear; fixture flows may check it.
+    # A background launch can show the default window title before the shell; fixture flows check startup themselves.
     if not fixture:
         ready += "for (let i = 0; i < 40; i++) { try { const state = await (await cua.getApp(APP)).getState({ include_screenshot: false, max_elements: 1 }); if (state.window_title === 'Polymux') break; } catch (error) {} await cua.sleep(250); }\n"
     kdbx = os.path.abspath(os.path.join(os.path.dirname(flow), "..", "fixtures", "vault-kdbx.kdbx"))

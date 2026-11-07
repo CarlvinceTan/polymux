@@ -33,3 +33,12 @@ except subprocess.TimeoutExpired:
     raise SystemExit(f"Avatar rendering stalled for more than {limit} seconds")
 raise SystemExit(code)
 PY
+
+swift build --product AvatarKitC
+BIN=$(swift build --show-bin-path)
+xcrun clang -std=c11 -Wall -Wextra -Werror \
+  -I packages/AvatarKitC/Sources/AvatarKitCTypes/include \
+  packages/AvatarKitC/Tests/Client/main.c \
+  -L "$BIN" -lAvatarKitC -framework CoreGraphics \
+  -Wl,-rpath,"$BIN" -o "$OUT/c-client"
+"$OUT/c-client"

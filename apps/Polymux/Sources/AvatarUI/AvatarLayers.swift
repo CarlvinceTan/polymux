@@ -8,9 +8,19 @@ struct AvatarCover: Equatable {
     let gap: CGFloat
 }
 
+@MainActor
+protocol AvatarRenderer: AnyObject {
+    var root: CALayer { get }
+    var silhouette: [CGPath] { get }
+    func apply(_ canvas: AvatarCanvasState, in box: CGRect, scale contents: CGFloat)
+    func cut(_ covers: [AvatarCover], scale: CGFloat)
+}
+
+typealias AvatarRendererFactory = @MainActor () -> any AvatarRenderer
+
 /// One avatar tile as Core Animation layers, so compositing replaces per-frame rasterisation.
 @MainActor
-final class AvatarLayers {
+final class AvatarLayers: AvatarRenderer {
     let root = CALayer()
     private let space = AvatarLayers.container()
     private let figure = AvatarLayers.container()

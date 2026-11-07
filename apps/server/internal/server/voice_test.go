@@ -159,75 +159,66 @@ func TestVoicePrivacyAndPermissions(t *testing.T) {
 }
 
 func TestVoiceMemoryScope(t *testing.T) {
-	for _, mode := range []string{"peer", "group"} {
-		t.Run(mode, func(t *testing.T) {
-			var group string
-			factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, message contract.Message) (agentruntime.Result, error) {
-				if d.TurnContext == nil {
-					return agentruntime.Result{}, fmt.Errorf("private tools lost their turn context")
-				}
-				restored, ok := d.TurnContext()
-				if !ok || restored.Value(turnKey{}) == nil || restored.Value(voiceKey{}) == nil || restored.Value(htmlKey{}) == nil {
-					return agentruntime.Result{}, fmt.Errorf("private tool context is incomplete")
-				}
-				state := restored.Value(turnKey{}).(*turnState)
-				want := d.Agent.ID + " private fact"
-				other := "b private fact"
-				if d.Agent.ID == "b" {
-					other = "a private fact"
-				}
-				if mode == "group" {
-					want, other = "group fact", "private fact"
-					if state.run.ConversationID != group {
-						return agentruntime.Result{}, fmt.Errorf("group consultation changed memory scope")
-					}
-				} else if state.run.ConversationID != d.Agent.ID {
-					return agentruntime.Result{}, fmt.Errorf("peer consultation used the sender's memory scope")
-				}
-				if text := store.Text(message); !strings.Contains(text, want) || strings.Contains(text, other) {
-					return agentruntime.Result{}, fmt.Errorf("private context lost or mixed scoped memory")
-				}
-				recalled, err := botCall(restored, d, "recall_memory", `{}`)
-				if err != nil || !strings.Contains(recalled.Text(), want) || strings.Contains(recalled.Text(), other) {
-					return agentruntime.Result{}, fmt.Errorf("private tool lost or mixed scoped memory: %v", err)
-				}
-				if d.Agent.ID == "a" {
-					name, args := "message_agent", `{"agent_id":"b","message":"Consult privately","intent":"request"}`
-					if mode == "group" {
-						name, args = "handoff_agent", `{"agent_id":"b","message":"Consult privately"}`
-					}
-					_, err = botCall(restored, d, name, args)
-				}
-				return agentruntime.Result{Text: "Private result"}, err
-			}}
-			api, web := voiceTest(t, factory)
-			for _, id := range []string{"a", "b"} {
-				if _, err := api.memory.Save(t.Context(), id, id, memory.Document{Name: "private", Text: id + " private fact"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			thread := "a"
-			if mode == "group" {
-				created, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				group, thread = created.ID, created.ID
-				for _, id := range []string{"a", "b"} {
-					if _, err := api.memory.Save(t.Context(), id, group, memory.Document{Name: "shared", Text: "group fact"}); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			if status, _ := voicePost(t, web, thread, "scoped-voice"); status != http.StatusOK {
-				t.Fatal("private consultation failed", status)
-			}
-			factory.mu.Lock()
-			defer factory.mu.Unlock()
-			if len(factory.opened) != 2 {
-				t.Fatal("consultation did not reach the peer")
-			}
-		})
+	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, message contract.Message) (agentruntime.Result, error) {
+		if d.TurnContext == nil {
+			return agentruntime.Result{}, fmt.Errorf("private tools lost their turn context")
+		}
+		restored, ok := d.TurnContext()
+		if !ok || restored.Value(turnKey{}) == nil || restored.Value(voiceKey{}) == nil || restored.Value(htmlKey{}) == nil {
+			return agentruntime.Result{}, fmt.Errorf("private tool context is incomplete")
+		}
+		state := restored.Value(turnKey{}).(*turnState)
+		want := d.Agent.ID + " private fact"
+		other := "b private fact"
+		if d.Agent.ID == "b" {
+			other = "a private fact"
+		}
+		if state.run.ConversationID != d.Agent.ID {
+			return agentruntime.Result{}, fmt.Errorf("peer consultation used the sender's memory scope")
+		}
+		if text := store.Text(message); !strings.Contains(text, want) || strings.Contains(text, other) {
+			return agentruntime.Result{}, fmt.Errorf("private context lost or mixed scoped memory")
+		}
+		recalled, err := botCall(restored, d, "recall_memory", `{}`)
+		if err != nil || !strings.Contains(recalled.Text(), want) || strings.Contains(recalled.Text(), other) {
+			return agentruntime.Result{}, fmt.Errorf("private tool lost or mixed scoped memory: %v", err)
+		}
+		if d.Agent.ID == "a" {
+			_, err = botCall(restored, d, "message_agent", `{"agent_id":"b","message":"Consult privately","intent":"request"}`)
+		}
+		return agentruntime.Result{Text: "Private result"}, err
+	}}
+	api, web := voiceTest(t, factory)
+	for _, id := range []string{"a", "b"} {
+		if _, err := api.memory.Save(t.Context(), id, id, memory.Document{Name: "private", Text: id + " private fact"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status, _ := voicePost(t, web, "a", "scoped-voice"); status != http.StatusOK {
+		t.Fatal("private consultation failed", status)
+	}
+	factory.mu.Lock()
+	defer factory.mu.Unlock()
+	if len(factory.opened) != 2 {
+		t.Fatal("consultation did not reach the peer")
+	}
+}
+
+func TestVoiceRefusesGroupChats(t *testing.T) {
+	t.Parallel()
+	factory := &voiceFactory{}
+	api, web := voiceTest(t, factory)
+	created, err := api.newGroup(t.Context(), contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := voicePost(t, web, created.ID, "group-voice"); status != http.StatusBadRequest {
+		t.Fatal("group speech conversation was accepted", status)
+	}
+	factory.mu.Lock()
+	defer factory.mu.Unlock()
+	if len(factory.opened) != 0 {
+		t.Fatal("a refused group conversation opened a session")
 	}
 }
 
@@ -284,62 +275,59 @@ func TestVoiceExplicitPublication(t *testing.T) {
 	}
 }
 
-func TestVoicePrivatePeerAndGroupHandoff(t *testing.T) {
+func TestVoiceInTaskThread(t *testing.T) {
 	t.Parallel()
-	for _, group := range []bool{false, true} {
-		name := "peer"
-		if group {
-			name = "group"
+	const task = "task-voice"
+	factory := &voiceFactory{script: func(_ context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		restored, _ := d.TurnContext()
+		if state := restored.Value(turnKey{}).(*turnState); state.run.ConversationID != task {
+			return agentruntime.Result{}, fmt.Errorf("task consultation left the task thread: %s", state.run.ConversationID)
 		}
-		t.Run(name, func(t *testing.T) {
-			pairings, err := device.Open(t.Context(), t.TempDir(), "127.0.0.1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			broker := device.New(pairings)
-			t.Cleanup(func() { pairings.Close() })
-			factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
-				if d.Agent.ID == "a" {
-					toolName, args := "message_agent", json.RawMessage(`{"agent_id":"b","message":"Private delegated question","intent":"question"}`)
-					if group {
-						toolName, args = "handoff_agent", json.RawMessage(`{"agent_id":"b","message":"Private group task"}`)
-					}
-					for _, tool := range d.ExtraTools {
-						if tool.Name() == toolName {
-							if _, err := tool.Execute(ctx, "dispatch", args, nil); err != nil {
-								return agentruntime.Result{}, err
-							}
-						}
-					}
-				}
-				return agentruntime.Result{Text: "Private result from " + d.Agent.ID}, nil
-			}}
-			api, web := voiceTest(t, factory, func(config *Config) { config.Devices = broker })
-			thread := "a"
-			if group {
-				created, err := api.Store.CreateThread(t.Context(), "team", contract.CreateThreadRequest{AgentIDs: []string{"a", "b"}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				thread = created.ID
-			}
-			status, result := voicePost(t, web, thread, "private-coordination")
-			if status != 200 || !strings.Contains(result.Text, "Private result from b") {
-				t.Fatalf("did not wait for private descendant: %d %+v", status, result)
-			}
-			factory.mu.Lock()
-			opened := slices.Clone(factory.opened)
-			factory.mu.Unlock()
-			if len(opened) != 2 {
-				t.Fatal("voice scope probe did not open both agents")
-			}
-			privateChat(t, api, "a")
-			privateChat(t, api, "b")
-			if group {
-				privateChat(t, api, thread)
-			}
-		})
+		return agentruntime.Result{Text: "Task result"}, nil
+	}}
+	api, web := voiceTest(t, factory)
+	if _, _, err := api.Store.CreateTask(t.Context(), task, "a", "a", "Launch report", "Draft it"); err != nil {
+		t.Fatal(err)
 	}
+	if status, result := voicePost(t, web, task, "task-voice"); status != http.StatusOK || !strings.Contains(result.Text, "Task result") {
+		t.Fatalf("task speech conversation failed: %d %+v", status, result)
+	}
+}
+
+func TestVoicePrivatePeer(t *testing.T) {
+	t.Parallel()
+	pairings, err := device.Open(t.Context(), t.TempDir(), "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker := device.New(pairings)
+	t.Cleanup(func() { pairings.Close() })
+	factory := &voiceFactory{script: func(ctx context.Context, d agentruntime.Definition, _ contract.Message) (agentruntime.Result, error) {
+		if d.Agent.ID == "a" {
+			args := json.RawMessage(`{"agent_id":"b","message":"Private delegated question","intent":"question"}`)
+			for _, tool := range d.ExtraTools {
+				if tool.Name() == "message_agent" {
+					if _, err := tool.Execute(ctx, "dispatch", args, nil); err != nil {
+						return agentruntime.Result{}, err
+					}
+				}
+			}
+		}
+		return agentruntime.Result{Text: "Private result from " + d.Agent.ID}, nil
+	}}
+	api, web := voiceTest(t, factory, func(config *Config) { config.Devices = broker })
+	status, result := voicePost(t, web, "a", "private-coordination")
+	if status != 200 || !strings.Contains(result.Text, "Private result from b") {
+		t.Fatalf("did not wait for private descendant: %d %+v", status, result)
+	}
+	factory.mu.Lock()
+	opened := slices.Clone(factory.opened)
+	factory.mu.Unlock()
+	if len(opened) != 2 {
+		t.Fatal("voice scope probe did not open both agents")
+	}
+	privateChat(t, api, "a")
+	privateChat(t, api, "b")
 }
 
 func TestVoiceCancellationIsPrivate(t *testing.T) {

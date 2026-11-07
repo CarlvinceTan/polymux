@@ -1,6 +1,6 @@
 // @fixture --verify-fixture --verify-profile
-// A bot's tasks open in their own thread, stay out of the chat list, and finish from their row.
-let app = await cua.getApp(APP);
+// A bot's tasks show only their state in its profile: they don't open, have no actions, and stay out of the chat list.
+const app = await cua.getApp(APP);
 let rows = [];
 for (let i = 0; i < 60 && !rows.length; i++) {
   rows = (await app.query({ role: "button", name: "Chief" })).filter((item) => item.label.startsWith("Chief, "));
@@ -10,24 +10,22 @@ if (!rows.length) throw new Error("Chief row is missing");
 await app.click(rows[0].element_token);
 await app.waitFor({ text: "Profile fixture reply", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Edit Chief’s profile" });
-await app.waitFor({ text: "Launch report", timeout_ms: 10000 });
-for (const name of ["Open task Visa renewal, needs attention", "Open task Venue shortlist, new reply", "Open done task Archive photos"]) {
-  if (!(await app.query({ role: "button", name })).length) throw new Error(`${name} is missing`);
+await app.waitFor({ text: "Archive photos", timeout_ms: 10000 });
+for (const name of ["Launch report", "Visa renewal", "Venue shortlist", "Archive photos"]) {
+  if ((await app.query({ role: "button", name })).some((item) => item.label.includes(name))) throw new Error(`${name} can be pressed`);
 }
-const list = await app.query({ role: "button", name: "Launch report" });
-if (list.some((item) => item.label.startsWith("Launch report, "))) throw new Error("a task is in the chat list");
-await app.click({ role: "button", name: "Open task Venue shortlist, new reply" });
-await app.waitFor({ text: "Venue shortlist", timeout_ms: 5000 });
-await app.waitFor({ role: "button", name: "Back", timeout_ms: 5000 });
-await app.click({ role: "button", name: "Back" });
-await app.waitFor({ text: "Profile fixture reply", timeout_ms: 5000 });
-await app.waitFor({ role: "button", name: "Open task Venue shortlist", timeout_ms: 5000 });
-const more = { role: "menubutton", name: "More actions for Launch report" };
-for (const item of ["Pin", "Unpin", "Finish"]) {
-  await pick(app, item, more);
-  // A closing menu keeps its window for a moment.
-  await cua.sleep(750);
-  app = await cua.getApp(APP);
+if ((await app.query({ role: "menubutton", name: "More actions for Launch report" })).length) throw new Error("a task has actions");
+const state = await app.getState({ include_screenshot: false, timeout_ms: 5000, max_elements: 500 });
+if (state.truncated) throw new Error("Tasks lookup is incomplete");
+const heading = state.tree_markdown.search(/AX(?:StaticText = "Tasks"|Heading \(Tasks\))/);
+if (heading < 0) throw new Error("Tasks section heading is missing");
+const tree = state.tree_markdown.slice(heading);
+// Each task's state comes just before its title.
+const order = ["Open", "Venue shortlist", "Open", "Visa renewal", "In progress", "Launch report", "Done", "Archive photos"];
+let at = 0;
+for (const text of order) {
+  const next = tree.indexOf(text, at);
+  if (next < 0) throw new Error(`${text} is missing or out of order`);
+  at = next + text.length;
 }
-await app.waitFor({ role: "button", name: "Open done task Launch report", timeout_ms: 5000 });
 return "ok";

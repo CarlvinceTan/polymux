@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# Sign Sparkle's nested executables before signing the enclosing app.
+# Sign the server and Sparkle's nested executables before signing the enclosing app.
 sign_item() {
   if [ "$2" = - ]; then
     codesign --force --options runtime --sign - "$1"
@@ -19,7 +19,7 @@ sign_app() (
     cp "$POLYMUX_MAC_PROFILE" "$1/Contents/embedded.provisionprofile" || exit 1
     entitlements=$prepared
   fi
-  for item in "$1/Contents/Helpers/polymux" \
+  for item in "$1/Contents/Helpers/Polymux Server.app" \
     "$1/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate" \
     "$1/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app" \
     "$1/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc" \

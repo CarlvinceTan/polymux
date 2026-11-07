@@ -130,6 +130,8 @@ final class PluginFixture: @unchecked Sendable {
     private var teamSent: [HubMessage] = []
     private var names: [String: String] = [:]
     private var incognito = false
+    private var readChats: Set<String> = []
+    private var revision: Int64 = 1
     private var mail: [HubMailAccount] = []
     private let mailFixture = HubMailFixture()
     private var clients: Set<String> = ["google"]
@@ -237,7 +239,18 @@ final class PluginFixture: @unchecked Sendable {
                 value.name = names[chat.id] ?? chat.name
                 return value
             }
-            return try encoder.encode(HubChanges(revision: 1, chats: chats + Self.fillerChats + (HubMailFixture.enabled ? Self.accountChats : [])))
+            let all = chats + Self.fillerChats + (HubMailFixture.enabled ? Self.accountChats : [])
+            return try encoder.encode(HubChanges(revision: revision, chats: all.map { chat in
+                var value = chat
+                if readChats.contains(chat.id) { value.unread = 0 }
+                return value
+            }))
+        case ("POST", _) where path.hasSuffix("/read"):
+            if let chat = path.split(separator: "/").dropFirst().first {
+                readChats.insert(String(chat))
+                revision += 1
+            }
+            return Data()
         case ("GET", "chats/!priya/messages"):
             if request.url?.query?.contains("before") == true { return try encoder.encode(HubPage(messages: Self.older)) }
             let thread = Self.thread.map { message in

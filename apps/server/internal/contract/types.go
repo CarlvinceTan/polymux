@@ -172,6 +172,11 @@ const (
 	FallbackModelReasoningMax     = "max"
 )
 
+type AgentACP struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+}
+
 type Agent struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
@@ -182,6 +187,7 @@ type Agent struct {
 	Provider  string         `json:"provider,omitempty"`
 	Reasoning string         `json:"reasoning,omitempty"`
 	Fallback  *AgentFallback `json:"fallback,omitempty"`
+	ACP       *AgentACP      `json:"acp,omitempty"`
 	CreatedBy string         `json:"createdBy,omitempty"`
 }
 
@@ -586,6 +592,7 @@ type CreateAgentRequest struct {
 	Provider    *string       `json:"provider,omitempty"`
 	Avatar      *AvatarDesign `json:"avatar,omitempty"`
 	SectionID   *string       `json:"sectionID,omitempty"`
+	ACP         *AgentACP     `json:"acp,omitempty"`
 }
 
 type AgentProfile struct {
@@ -601,6 +608,7 @@ type UpdateAgentRequest struct {
 	Model     *string        `json:"model,omitempty"`
 	Reasoning *string        `json:"reasoning,omitempty"`
 	Fallback  *AgentFallback `json:"fallback,omitempty"`
+	ACP       *AgentACP      `json:"acp,omitempty"`
 }
 
 const (

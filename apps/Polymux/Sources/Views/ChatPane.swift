@@ -1,5 +1,6 @@
 import SwiftUI
 import PolymuxKit
+import PolymuxVoice
 #if os(macOS)
 import AppKit
 #else
@@ -223,7 +224,7 @@ struct ChatPane: View {
         }
         .overlay {
             if showVoice, let voiceStore {
-                VoiceOverlay(store: voiceStore, name: thread.isGroup ? chatTitle : agent.name, dismiss: { showVoice = false })
+                VoiceOverlay(store: voiceStore, name: agent.name, dismiss: { showVoice = false })
             }
         }
         #if os(iOS)
@@ -317,8 +318,10 @@ struct ChatPane: View {
                         }
                         Spacer(minLength: 0)
                         PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
-                        PanelNavButton(symbol: "phone", label: "Speech conversation",
-                                       enabled: !openingVoice && !showVoice, action: openVoice)
+                        if !thread.isGroup {
+                            PanelNavButton(symbol: "phone", label: "Speech conversation",
+                                           enabled: !openingVoice && !showVoice, action: openVoice)
+                        }
                     }
                 }
             }
@@ -347,12 +350,14 @@ struct ChatPane: View {
                     }
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
-                if showSearch {
-                    Button("Close search", systemImage: "xmark", action: closeSearch)
-                        .keyboardShortcut(.escape, modifiers: [])
-                } else {
-                    voiceButton
+            if showSearch || !thread.isGroup {
+                ToolbarItem(placement: .primaryAction) {
+                    if showSearch {
+                        Button("Close search", systemImage: "xmark", action: closeSearch)
+                            .keyboardShortcut(.escape, modifiers: [])
+                    } else {
+                        voiceButton
+                    }
                 }
             }
         }
@@ -555,7 +560,8 @@ struct ChatPane: View {
 
     /// Opens at once from the settings already loaded; only a first launch waits for them.
     private func openVoice() {
-        guard !openingVoice, !showVoice else { return }
+        // Speech conversations are one to one.
+        guard !thread.isGroup, !openingVoice, !showVoice else { return }
         if let settings = session.settings.value {
             startVoice(settings)
             return
@@ -575,7 +581,7 @@ struct ChatPane: View {
         let config = VoiceConfig(settings: settings)
         voiceStore = config.session(client: session.client,
             reply: VoiceBridge(client: session.client, threadID: thread.id),
-            agent: thread.isGroup ? members.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") : "\(agent.name) (\(agent.id))"
+            agent: "\(agent.name) (\(agent.id))"
         )
         showVoice = true
     }

@@ -46,6 +46,10 @@ public struct APIClient: Sendable {
         try await get("network")
     }
 
+    public func privacy() async throws -> PrivacyStatus {
+        try await get("privacy", retrying: false)
+    }
+
     public func invite() async throws -> Invite {
         try await get("network/invite", retrying: false)
     }
@@ -321,16 +325,6 @@ public struct APIClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(CreateThreadRequest(agentIDs: agentIDs, title: title))
-        let (data, response) = try await session.data(for: request)
-        try validate(response, data: data)
-        return try JSONDecoder().decode(Thread.self, from: data)
-    }
-
-    public func updateTask(id: String, pinned: Bool? = nil, status: String? = nil) async throws -> Thread {
-        var request = try await request("threads/\(id)/task")
-        request.httpMethod = "PATCH"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(UpdateTaskRequest(pinned: pinned, status: status))
         let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
         return try JSONDecoder().decode(Thread.self, from: data)

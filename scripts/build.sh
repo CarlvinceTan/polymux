@@ -13,6 +13,8 @@ PROJECT="$ROOT/apps/Polymux/Polymux.xcodeproj"
 DIST="$ROOT/dist"
 # shellcheck source=lib/sign.sh
 . "$ROOT/scripts/lib/sign.sh"
+# shellcheck source=lib/server-app.sh
+. "$ROOT/scripts/lib/server-app.sh"
 
 # Sparkle compares CFBundleVersion, so derive a monotonic build number from the
 # marketing version (0.4.0 -> 4000, 0.4.10 -> 4010, 1.0.0 -> 1000000).
@@ -51,8 +53,7 @@ macos() {
   symbols
   # The app runs this copy itself on a Mac with no other server.
   server
-  mkdir -p "$DIST/macos/Polymux.app/Contents/Helpers"
-  cp "$DIST/server/polymux" "$DIST/macos/Polymux.app/Contents/Helpers/polymux"
+  server_app "$DIST/server/polymux" "$DIST/macos/Polymux.app"
   if [ -n "${POLYMUX_FEED_URL:-}" ]; then
     plist="$DIST/macos/Polymux.app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :SUFeedURL $POLYMUX_FEED_URL" "$plist"

@@ -34,6 +34,8 @@ case ${1:-} in
   *) echo "usage: $0 [--watch|--no-watch|--server|--fresh|--fixture <flags>...]" >&2; exit 2 ;;
 esac
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=lib/server-app.sh
+. "$ROOT/scripts/lib/server-app.sh"
 # Share instance numbers even when callers override TMPDIR.
 PLATFORM=$(uname -s)
 if [ "$PLATFORM" = Darwin ]; then
@@ -161,8 +163,7 @@ build_app() {
 
   # A new install's copy of the server; other instances run theirs from here instead.
   if [ "$fresh" = 1 ]; then
-    mkdir -p "$staged/Contents/Helpers"
-    cp "$STATE/polymux" "$staged/Contents/Helpers/polymux"
+    server_app "$STATE/polymux" "$staged" "$BUNDLE.server" || return 1
   fi
   # Rename the build so it has its own name, bundle id and preferences.
   PLIST="$staged/Contents/Info.plist"

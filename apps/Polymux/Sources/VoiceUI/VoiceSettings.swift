@@ -1,5 +1,6 @@
 import SwiftUI
 import PolymuxKit
+import PolymuxVoice
 
 struct VoiceSettings: View {
     let store: SettingsStore

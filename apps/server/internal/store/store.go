@@ -399,9 +399,13 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	if err != nil {
 		return a, err
 	}
+	acp, err := json.Marshal(a.ACP)
+	if err != nil {
+		return a, err
+	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?,'$.fallback',json(?)) WHERE id=?`,
-		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, string(fallback), a.ID,
+		`UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?,'$.fallback',json(?),'$.acp',json(?)) WHERE id=?`,
+		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, string(fallback), string(acp), a.ID,
 	); err != nil {
 		return a, err
 	}

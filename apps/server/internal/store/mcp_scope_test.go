@@ -20,7 +20,7 @@ func TestMCPLimit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = s.RegisterMCP(t.Context(), name, raw, "", nil, nil)
+		err = s.RegisterMCP(t.Context(), name, raw, "", nil)
 		if index == 64 {
 			if !errors.Is(err, ErrMCPLimit) {
 				t.Fatal("registry cap was not enforced", err)
@@ -30,7 +30,7 @@ func TestMCPLimit(t *testing.T) {
 		}
 	}
 	raw := json.RawMessage(`{"name":"connection-0","command":"updated"}`)
-	if err := s.RegisterMCP(t.Context(), "connection-0", raw, "", nil, nil); err != nil {
+	if err := s.RegisterMCP(t.Context(), "connection-0", raw, "", nil); err != nil {
 		t.Fatal("existing setup could not update at cap", err)
 	}
 	records, err := s.MCPServers(t.Context())

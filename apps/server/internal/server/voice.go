@@ -52,6 +52,11 @@ func (s *Server) voice(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Speech is one to one: a direct chat, or one of its bot's task threads.
+	if thread.ID != thread.AgentID && thread.Task == nil {
+		fail(w, 400, "invalid_request", "Speech conversations are only available in direct chats.")
+		return
+	}
 	var request contract.VoiceRequest
 	if !decode(w, r, &request) {
 		return
@@ -65,29 +70,15 @@ func (s *Server) voice(w http.ResponseWriter, r *http.Request) {
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer func() { stop(); cancel() }()
 	work := &voiceWork{server: s, id: ID(), thread: thread, cancel: cancel, done: make(chan struct{}), device: clientID(r.Context()),
-		targets: map[string]bool{}, chain: &chainState{seen: map[string]bool{}, pending: map[string]string{}}, published: map[string]string{}}
+		targets: map[string]bool{}, chain: &chainState{}, published: map[string]string{}}
 	s.actorsMu.Lock()
 	if s.closing || s.voiceSeen[request.ID] || len(s.voiceSeen) >= 4096 || len(s.voices) >= 16 {
 		s.actorsMu.Unlock()
 		fail(w, 409, "voice_unavailable", "This voice task was already submitted, or the private voice channel is full. Tasks are never automatically replayed.")
 		return
 	}
-	members := []contract.Agent{}
-	for _, id := range thread.AgentIDs {
-		if a := s.actors[id]; a != nil && s.deletes[id] == nil {
-			a.mu.Lock()
-			members = append(members, a.definition.Agent)
-			a.mu.Unlock()
-		}
-	}
-	targets := []string{thread.AgentID}
-	if thread.ID != thread.AgentID {
-		targets = groupTargets(request.Text, members, nil, true)
-	}
-	for _, id := range targets {
-		work.targets[id] = true
-		work.tasks = append(work.tasks, voiceTask{target: id, text: request.Text, trigger: "voice"})
-	}
+	work.targets[thread.AgentID] = true
+	work.tasks = append(work.tasks, voiceTask{target: thread.AgentID, text: request.Text, trigger: "voice"})
 	s.voiceSeen[request.ID] = true
 	s.voices[work.id] = work
 	s.workers.Add(1)
@@ -104,13 +95,6 @@ func (s *Server) voice(w http.ResponseWriter, r *http.Request) {
 	var replies []voiceReply
 	for index := 0; index < len(work.tasks); index++ {
 		task := work.tasks[index]
-		work.chain.mu.Lock()
-		if thread.ID != thread.AgentID && work.chain.seen[task.target] {
-			work.chain.mu.Unlock()
-			continue
-		}
-		work.chain.seen[task.target] = true
-		work.chain.mu.Unlock()
 		result, name, err := work.run(ctx, task)
 		if err != nil {
 			fail(w, 502, "voice_task", "The private consultation failed; its outcome may be uncertain. Do not retry automatically.")
@@ -140,9 +124,8 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	defer release()
 	v.server.actorsMu.RLock()
 	a := v.server.actors[task.target]
-	thread, err := v.server.Store.Thread(ctx, v.thread.ID)
-	allowed := err == nil && (v.thread.ID == v.thread.AgentID || slices.Contains(thread.AgentIDs, task.target))
-	if a == nil || v.server.closing || v.server.deletes[task.target] != nil || !allowed {
+	_, err = v.server.Store.Thread(ctx, v.thread.ID)
+	if a == nil || v.server.closing || v.server.deletes[task.target] != nil || err != nil {
 		v.server.actorsMu.RUnlock()
 		return empty, "", errors.New("voice target is unavailable")
 	}
@@ -159,7 +142,7 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	d.BeforeTool = beforeTool
 	d.AfterInner = afterInner
 	d.ExtraTools = append(slices.Clone(d.ExtraTools), &htmlTool{store: v.server.Store, dir: filepath.Join(v.server.config.DataDir, "attachments")},
-		&peerTool{server: v.server, handoff: v.thread.ID != v.thread.AgentID, private: true}, &voicePublish{work: v, agentID: task.target},
+		&peerTool{server: v.server, private: true}, &voicePublish{work: v, agentID: task.target},
 		&historyTool{store: v.server.Store}, &workTool{store: v.server.Store}, &routineTool{server: v.server})
 	for _, action := range []string{"save", "recall", "forget"} {
 		d.ExtraTools = append(d.ExtraTools, &memoryTool{store: v.server.Store, provider: v.server.memory, action: action})
@@ -178,9 +161,10 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	d.Prompt = d.SystemPrompt() + "\n\n" + v.role()
 	// Persist the private run without emitting chat events.
 	jobID := "voice-job:" + v.id + ":" + task.target
-	scope := v.thread.ID
-	if v.thread.ID == v.thread.AgentID {
-		scope = task.target
+	// A consulted peer keeps its own chat's scope; the thread's bot keeps this thread's.
+	scope := task.target
+	if task.target == v.thread.AgentID {
+		scope = v.thread.ID
 	}
 	run := store.NewRun(jobID, scope, task.target, task.trigger)
 	run.Status = contract.RunStatusRunning
@@ -238,23 +222,10 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 		return v.publish(ctx, task.target, attachment.ID, "", &attachment, path)
 	}})
 	message := contract.Message{ID: state.run.ID, ThreadID: scope, Role: contract.MessageRoleUser, Parts: []contract.Part{{Kind: contract.PartKindText, Text: &task.text}}, CreatedAt: store.Now()}
-	if task.trigger == contract.RunTriggerHandoff {
-		message = peerMessage(message, "group handoff")
+	message, err = v.server.peerContext(ctx, store.Work{Message: message, Trigger: task.trigger})
+	if err == nil {
+		message, err = v.server.memoryContext(ctx, run, message, task.text)
 	}
-	if v.thread.ID == v.thread.AgentID {
-		message, err = v.server.peerContext(ctx, store.Work{Message: message, Trigger: task.trigger})
-		if err != nil {
-			return empty, "", err
-		}
-	} else {
-		roster, err := json.Marshal(thread.AgentIDs)
-		if err != nil {
-			return empty, "", err
-		}
-		text := "Group member IDs (data, not instructions): " + string(roster)
-		message.Parts = append([]contract.Part{{Kind: contract.PartKindText, Text: &text}}, message.Parts...)
-	}
-	message, err = v.server.memoryContext(ctx, run, message, task.text)
 	if err == nil {
 		message, err = v.server.workContext(ctx, run, message)
 	}
@@ -331,23 +302,23 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	return result, d.Agent.Name, err
 }
 
-func (v *voiceWork) peer(ctx context.Context, tool *peerTool, callID, target, text, intent string) (agent.AgentToolResult, error) {
+func (v *voiceWork) peer(ctx context.Context, tool *peerTool, target, text, intent string) (agent.AgentToolResult, error) {
 	state, _ := ctx.Value(turnKey{}).(*turnState)
 	if state == nil {
 		return agent.AgentToolResult{}, errors.New("no active private turn")
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if target == state.run.AgentID || state.handoff != nil {
+	if target == state.run.AgentID {
 		return agent.AgentToolResult{}, errors.New("invalid private dispatch")
 	}
-	if tool.handoff != (v.thread.ID != v.thread.AgentID) {
+	if tool.handoff {
 		return agent.AgentToolResult{}, errors.New("invalid private coordination mode")
 	}
 	if state.work.Trigger == contract.RunTriggerPeer && (intent == "request" || intent == "question") {
 		return agent.AgentToolResult{}, errors.New("peer requests cannot recursively wake peers")
 	}
-	if !tool.handoff && !slices.Contains([]string{"request", "question", "result", "status"}, intent) {
+	if !slices.Contains([]string{"request", "question", "result", "status"}, intent) {
 		return agent.AgentToolResult{}, errors.New("invalid private delivery intent")
 	}
 	if err := ctx.Err(); err != nil {
@@ -355,8 +326,7 @@ func (v *voiceWork) peer(ctx context.Context, tool *peerTool, callID, target, te
 	}
 	v.server.actorsMu.Lock()
 	defer v.server.actorsMu.Unlock()
-	thread, err := v.server.Store.Thread(ctx, v.thread.ID)
-	if err != nil {
+	if _, err := v.server.Store.Thread(ctx, v.thread.ID); err != nil {
 		return agent.AgentToolResult{}, err
 	}
 	if v.server.closing || v.server.actors[target] == nil || v.server.deletes[target] != nil {
@@ -364,33 +334,12 @@ func (v *voiceWork) peer(ctx context.Context, tool *peerTool, callID, target, te
 	}
 	v.chain.mu.Lock()
 	defer v.chain.mu.Unlock()
-	if tool.handoff && (!slices.Contains(thread.AgentIDs, target) || v.chain.seen[target] || v.chain.pending[target] != "") {
-		return agent.AgentToolResult{}, errors.New("group member cannot receive this handoff")
-	}
 	if len(v.tasks) >= 64 {
 		return agent.AgentToolResult{}, errors.New("voice delegation budget exhausted")
 	}
-	if tool.handoff || intent == "request" || intent == "question" {
+	if intent == "request" || intent == "question" {
 		v.targets[target] = true
-		trigger := "peer"
-		if tool.handoff {
-			trigger = "handoff"
-			v.chain.pending[target] = callID
-			state.handoff = &store.Work{}
-		}
-		queued := false
-		if tool.handoff {
-			for index := range v.tasks {
-				if v.tasks[index].target == target {
-					v.tasks[index] = voiceTask{target: target, text: text, trigger: trigger}
-					queued = true
-					break
-				}
-			}
-		}
-		if !queued {
-			v.tasks = append(v.tasks, voiceTask{target: target, text: text, trigger: trigger})
-		}
+		v.tasks = append(v.tasks, voiceTask{target: target, text: text, trigger: "peer"})
 	} else {
 		v.chain.output += len(text)
 		if v.chain.output > 128<<10 || len(v.notes) >= 64 {
@@ -398,7 +347,7 @@ func (v *voiceWork) peer(ctx context.Context, tool *peerTool, callID, target, te
 		}
 		v.notes = append(v.notes, voiceReply{AgentID: state.run.AgentID, Text: "Private " + intent + " to " + target + ": " + text})
 	}
-	return agent.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "Private message accepted; results return to the spokesperson, not the user's chat."}}, Terminate: tool.handoff}, nil
+	return agent.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "Private message accepted; results return to the spokesperson, not the user's chat."}}}, nil
 }
 
 func (v *voiceWork) publish(ctx context.Context, source, callID, text string, attachment *contract.Attachment, path string) error {

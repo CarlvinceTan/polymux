@@ -17,7 +17,7 @@ Routes, relative to `/plugins/hub/api`: `status`, `settings`, `chats?since=`, `c
 - **Read marks**: the sidecar keeps each person's latest `m.read` receipt from the sync stream and puts their avatar on the newest message they've reached, not on their own. Networks whose bridges send no receipts show none.
 - **Voice notes**: recorded as AAC and sent as audio with the voice flag and duration. Bridges for networks that need another format convert it, which needs `ffmpeg` beside them; Hub's package doesn't carry it.
 - **Accounts**: a chat lists the logins it belongs to. A bridge's `whoami` names each login's filtering Space, and a chat in that Space is that login's; a split portal also names its receiver. A group two logins share lists both, and a chat with neither signal shows only under All accounts. The app narrows a platform's list with a dropdown when it has more than one account.
-- **Incognito**: the sidecar keeps this, so it covers every device. While it's on, opening a chat sends no read receipt and leaves its unread count. Mail still marks messages read.
+- **Incognito**: the sidecar keeps this, so it covers every device. While it's on, opening a chat marks it read privately: the count clears here and on your own devices, but other people see no receipt. Mail still marks messages read.
 
 ## Mail
 

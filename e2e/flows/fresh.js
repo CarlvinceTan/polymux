@@ -1,6 +1,10 @@
 // @fresh
 // A new Mac app needs no terminal: it runs its own server, and what's on it survives a relaunch.
 let app = await cua.getApp(APP);
+// A new install opens with the welcome once its server is up.
+for (let i = 0; i < 80 && !(await app.query({ role: "button", name: "Skip" })).length; i++) await cua.sleep(500);
+await app.waitFor({ role: "statictext", name: "Get Started with Polymux" });
+await app.click({ role: "button", name: "Skip" });
 const name = "Fresh" + Date.now();
 await app.waitFor({ role: "button", name: "New chat", timeout_ms: 10000 });
 await app.click({ role: "button", name: "New chat" });

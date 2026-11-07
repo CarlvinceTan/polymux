@@ -1,6 +1,7 @@
 import CoreImage
 import CryptoKit
 import SwiftUI
+import AvatarKit
 import PolymuxKit
 #if os(macOS)
 import AppKit
@@ -148,7 +149,7 @@ final class AppSession {
         await chat(id).warm()
     }
 
-    /// Runs behind the launch animation, so what's likely to be opened first is ready when it ends.
+    /// Warms what's likely to be opened after cached content appears.
     func prepare() async {
         EmojiCatalogue.warm()
         Task { await prepareHub() }
@@ -225,7 +226,10 @@ struct AppRoot: View {
     @State private var settingsTab = SettingsTab.verifying ?? .general
     @State private var pairingTask: Task<Void, Error>?
     @State private var pairingIssue: String?
-    @State private var splashDone = false
+    #if os(macOS)
+    /// Set when a new install starts its own server.
+    @AppStorage("onboarding.pending") private var onboarding = Onboarding.verifying
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -250,6 +254,8 @@ struct AppRoot: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = CommandLine.arguments.contains("--keep-awake") }
         #endif
         .neutralBackground()
+        // Decodes the avatars the first frame shows, while the session is still loading.
+        .task { await Task.detached(priority: .userInitiated) { preloadMascots() }.value }
         .task(id: address) {
             #if DEBUG
             guard !CommandLine.arguments.contains("--verify-approval"),
@@ -312,6 +318,13 @@ struct AppRoot: View {
                            onClose: { showSettings = false })
                 .id(activeSession?.client.id)
         }
+        #if os(macOS)
+        .panel(isPresented: $onboarding) {
+            Onboarding { onboarding = false }
+        }
+        .task(id: localSession?.client.id) { Permissions.shared.client = localSession?.client }
+        .onChange(of: appearance, initial: true) { Permissions.shared.appearance = $1 }
+        #endif
         .panelHost()
         #if os(macOS)
         .toolbar(removing: .title)
@@ -375,6 +388,14 @@ struct AppRoot: View {
     private var activeSession: AppSession? { pool.sessions[address] }
     private var error: String? { pool.issues[address] }
 
+    /// This Mac's own server, which reports its permissions to the Grant window.
+    private var localSession: AppSession? {
+        #if DEBUG
+        if CommandLine.arguments.contains("--verify-permissions") { return activeSession }
+        #endif
+        return pool.sessions[ServerHost.address]
+    }
+
     private var appearance: String {
         #if DEBUG
         if VerifyFixture.enabled || CommandLine.arguments.contains("--verify-status") {
@@ -389,10 +410,9 @@ struct AppRoot: View {
 
     private var content: some View {
         Group {
-            if let session = activeSession, splashDone {
+            if let session = activeSession {
                 ShellView(session: session, pool: pool, showSettings: $showSettings)
                     .id(session.client.id)
-                    .transition(.opacity)
             } else if let error, activeSession == nil {
                 ContentUnavailableView {
                     Label("Can’t reach your server", systemImage: "network")
@@ -402,12 +422,10 @@ struct AppRoot: View {
                     Button("Connection settings") { showSettings = true }
                 }
             } else {
-                SplashView { splashDone = true }
-                    .onAppear { splashDone = false }
-                    .transition(.opacity)
+                Text("Connecting…").foregroundStyle(.muted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .motion(Motion.fade, value: splashDone)
     }
 }
 
@@ -432,11 +450,7 @@ struct ConnectionView: View {
     @State private var arrangingPlugins = false
     @State private var editingVoice = false
     @State private var editingMedia: MediaKind?
-    @State private var hoveredTab: SettingsTab?
     @Environment(\.horizontalSizeClass) private var sizeClass
-
-    /// The settings modal's left tab column, matching the macOS Settings shape.
-    static let navWidth: CGFloat = 200
 
     init(pool: SessionPool, settings: SettingsStore?, client: APIClient?,
          join: @escaping (URL) async throws -> Void, joinIssue: String?, joined: Binding<String?>,
@@ -488,11 +502,11 @@ struct ConnectionView: View {
 
     private var settingsPanel: some View {
         PanelView(category.title, onClose: onClose, header: compact ? AnyView(compactTabs) : nil,
-                  scrollUnder: false, width: PanelSize.width + Self.navWidth, height: PanelSize.maximumHeight,
+                  scrollUnder: false, width: PanelSize.width + SettingsNav.width, height: PanelSize.maximumHeight,
                   closeLabel: "Close Settings") {
             HStack(spacing: 0) {
                 if !compact {
-                    settingsNav
+                    SettingsNav(category: $category)
                     Divider()
                 }
                 settingsPane
@@ -512,44 +526,6 @@ struct ConnectionView: View {
         .edgeFade()
         .scrollIndicators(.hidden)
         .padding(.horizontal, 14)
-    }
-
-    private var settingsNav: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(SettingsTab.allCases) { tab in
-                navRow(tab)
-            }
-            Spacer(minLength: 12)
-        }
-        .padding(.horizontal, 10)
-        // The first tab lines up with the pane's first section title.
-        .padding(.top, 4)
-        .frame(width: Self.navWidth)
-    }
-
-    private func navRow(_ tab: SettingsTab) -> some View {
-        Button {
-            category = tab
-        } label: {
-            HStack(spacing: 9) {
-                tab.icon.frame(width: 20)
-                Text(tab.title)
-            }
-            .font(.body)
-            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-            .padding(.horizontal, 10)
-            .background {
-                RoundedRectangle(cornerRadius: PanelStyle.rowRadius)
-                    .fill(.primary.opacity(category == tab ? PanelStyle.selectedTint : hoveredTab == tab ? PanelStyle.hoverTint : 0))
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .pointerHover { inside in
-            if inside { hoveredTab = tab } else if hoveredTab == tab { hoveredTab = nil }
-        }
-        .accessibilityLabel(tab.title)
-        .accessibilityAddTraits(category == tab ? [.isSelected] : [])
     }
 
     @ViewBuilder private var settingsPane: some View {
@@ -606,6 +582,19 @@ struct ConnectionView: View {
             }
         }
         .panelRow()
+        #if os(macOS)
+        Section("Permissions") {
+            LabeledContent("System permissions") {
+                HStack {
+                    Text(Permissions.shared.summary).foregroundStyle(.muted)
+                    Button("Grant…") { GrantWindow.shared.show() }
+                        .accessibilityLabel("Grant permissions")
+                }
+            }
+            .task { await Permissions.shared.refresh() }
+        }
+        .panelRow()
+        #endif
         Section {
             ForEach(Connections.available, id: \.self) { capability in
                 Toggle(Connections.title(capability), isOn: Binding(get: { Connections.shared.enabled.contains(capability) },
@@ -654,12 +643,24 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     /// Plugins draws its own plug, because SF Symbols has none at this angle.
     var icon: Image {
         switch self {
-        case .general: Image(systemName: "gearshape")
+        case .general: Image(systemName: "gearshape.fill")
         case .network: Image(systemName: "network")
-        case .models: Image(systemName: "cpu")
-        case .vault: Image(systemName: "lock")
+        case .models: Image(systemName: "cpu.fill")
+        case .vault: Image(systemName: "lock.fill")
         case .plugins: Image("plug")
-        case .updates: Image(systemName: "arrow.down.circle")
+        case .updates: Image(systemName: "arrow.down.circle.fill")
+        }
+    }
+
+    /// The icon's tile colour, like System Settings.
+    var tint: Color {
+        switch self {
+        case .general: .gray
+        case .network: .blue
+        case .models: .purple
+        case .vault: .green
+        case .plugins: .orange
+        case .updates: .red
         }
     }
 }

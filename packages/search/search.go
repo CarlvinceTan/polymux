@@ -1,4 +1,5 @@
-// Package search provides storage-independent hybrid retrieval, embeddings and media extraction.
+// Package search provides storage-independent hybrid retrieval. Lexical search always
+// stands alone; embeddings and media extraction are an optional Backend.
 package search
 
 import (

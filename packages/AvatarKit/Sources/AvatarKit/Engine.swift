@@ -5,10 +5,18 @@ public struct RenderedEye: @unchecked Sendable {
     public var d: CGPath
     public var matrix: CGAffineTransform
     public var alpha: Double
+
+    public init(d: CGPath, matrix: CGAffineTransform, alpha: Double) {
+        self.d = d; self.matrix = matrix; self.alpha = alpha
+    }
 }
 
 public struct FrameDot: Sendable {
     public var x, y, r: Double
+
+    public init(x: Double, y: Double, r: Double) {
+        self.x = x; self.y = y; self.r = r
+    }
 }
 
 public struct BotFrame: @unchecked Sendable {
@@ -23,6 +31,14 @@ public struct BotFrame: @unchecked Sendable {
     public var transform = CGAffineTransform.identity
     /// How far the body has shrunk to a plain dot (thinking, spawning), where it reads like the decor dots.
     public var bare = 0.0
+
+    public init(bodyPath: CGPath, bodyAlpha: Double, eyes: [RenderedEye], dots: [DotRender],
+                dotsBehind: Bool, arcs: [ArcRender], notif: FrameDot? = nil, notch: FrameDot? = nil,
+                parts: [CharacterLayer] = [], transform: CGAffineTransform = .identity, bare: Double = 0.0) {
+        self.bodyPath = bodyPath; self.bodyAlpha = bodyAlpha; self.eyes = eyes; self.dots = dots
+        self.dotsBehind = dotsBehind; self.arcs = arcs; self.notif = notif; self.notch = notch
+        self.parts = parts; self.transform = transform; self.bare = bare
+    }
 }
 
 public struct Look: Equatable, Codable, Sendable {
@@ -60,7 +76,33 @@ private func blendPose(_ a: Pose, _ b: Pose, _ t: Double) -> Pose {
 
 private typealias FaceFit = (width: Double, height: Double, gap: Double, y: Double)
 
-public final class BotEngine {
+public protocol AvatarEngine: AnyObject {
+    var state: StateID { get }
+    var displaySize: Double { get set }
+    var reducedMotion: Bool { get set }
+    var character: CharacterModel? { get set }
+    var interactive: Bool { get set }
+    var personality: UInt32 { get set }
+    var resting: Bool { get set }
+    var live: Bool { get set }
+    var solid: Solid? { get set }
+
+    func pet(_ active: Bool, _ now: Double)
+    func twirl(_ now: Double)
+    func setExpression(_ expression: BotExpression?, _ now: Double)
+    func setShape(_ radii: [Double]?, _ now: Double)
+    func setLook(_ target: Look?, _ now: Double, morph: Double)
+    func poke(_ poke: Poke, _ now: Double)
+    func setGaze(_ point: [Double]?)
+    func settled(_ now: Double) -> Bool
+    func setMood(_ mood: MoodID?, interaction: Bool)
+    func setTurn(_ target: Turn, _ now: Double)
+    func reset(_ id: StateID, _ now: Double)
+    func setState(_ id: StateID, _ now: Double, restart: Bool)
+    func sample(_ now: Double) -> BotFrame
+}
+
+public final class BotEngine: AvatarEngine {
     public static let SHAPE_MORPH = 0.45
     public static let LOOK_MORPH = 0.24
     public static let FRAME_SIZE = 316.0

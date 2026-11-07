@@ -2,6 +2,9 @@
 // @second-server
 // Joining a network from a new install leaves no extra server behind.
 const app = await cua.getApp(APP);
+// A new install opens with the welcome once its server is up; this flow starts past it.
+for (let i = 0; i < 80 && !(await app.query({ role: "button", name: "Skip" })).length; i++) await cua.sleep(500);
+await app.click({ role: "button", name: "Skip" });
 await app.waitFor({ role: "button", name: "Settings", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Network" });

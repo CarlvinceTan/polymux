@@ -299,14 +299,15 @@ struct HubThread: View {
     }
 
     private var header: some View {
-        VStack(spacing: -4) {
-            HubAvatar(name: chat.name, uri: chat.avatar, client: client, size: 46).zIndex(1)
-            VStack(spacing: 2) {
-                Text(chat.name).font(.headline).lineLimit(1)
-                Text(platformName).font(.caption).foregroundStyle(.muted).lineLimit(1)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 6)
-            .glassEffect(.regular, in: Capsule())
+        VStack(spacing: 2) {
+            Text(chat.name).font(.headline).lineLimit(1)
+            Text(platformName).font(.caption).foregroundStyle(.muted).lineLimit(1)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 6)
+        .glassEffect(.regular, in: Capsule())
+        .padding(.top, 42)
+        .overlay(alignment: .top) {
+            HubAvatar(name: chat.name, uri: chat.avatar, client: client, size: 46)
         }
         .frame(maxWidth: 260)
         .accessibilityElement(children: .combine)
@@ -368,6 +369,7 @@ private struct HubRenameGroup: View {
             }
             .padding(PanelStyle.contentInset)
         }
+        .panelDismiss(onClose: { close() })
         .onAppear { name = chat.name }
     }
 }

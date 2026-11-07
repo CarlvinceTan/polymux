@@ -7,7 +7,7 @@ public struct StatePlayback {
 
     public init() {}
 
-    public mutating func update(_ engine: BotEngine, state next: StateID, now: Double,
+    public mutating func update(_ engine: any AvatarEngine, state next: StateID, now: Double,
                                 controlled: Bool, repeating: Bool, cueID: String?) {
         let newCue = cueID != nil && cueID != self.cueID
         if state == nil {

@@ -61,9 +61,9 @@ Polymux supplies the macOS Keychain/Linux key-file implementation in [`vault_key
 
 ### Search
 
-[`search`](../packages/search/) owns reciprocal-rank fusion, deterministic tie-breaking, lexical fallback, embedding requests and normalization, FTS5 query escaping and media extraction. It has no dependency on Polymux or SQLite and needs no paid service.
+[`search`](../packages/search/) owns reciprocal-rank fusion, deterministic tie-breaking, lexical fallback, optional embedding requests and normalization, FTS5 query escaping and media extraction. It has no dependency on Polymux or SQLite and needs no paid service. Keyword search does not require an embedding backend.
 
-Implement `search.Source` for your corpus: `Lexical` returns relevance-ordered candidates for a raw query; `Vector` returns ordered candidates for the supplied embedding/model key. Your adapter owns indexing, persistence, filtering and access scope. `search.Engine.Search` combines both lists, returns at most 40 hits and reports whether semantic retrieval succeeded. A nil embedder, an embedding error or a vector-query error leaves lexical retrieval available; lexical errors are returned.
+Implement `search.Source` for your corpus: `Lexical` returns relevance-ordered candidates for a raw query; `Vector` returns ordered candidates for the supplied embedding/model key. Your adapter owns indexing, persistence, filtering and access scope. `search.Engine.Search` combines both lists, returns at most 40 hits and reports whether semantic retrieval succeeded. A nil embedder, an embedding error or a vector-query error leaves lexical retrieval available; lexical errors are returned. `search.Start` builds that optional backend from a local `llama-server`, a remote embeddings URL, and a `media-text` extractor. With none of those set, it returns a zero `Backend` and keyword search stands on its own.
 
 See the executable [`ExampleEngine_Search`](../packages/search/example_test.go) for a minimal standalone corpus. Use `search.Query` only when your lexical backend needs escaped FTS5 syntax. `HTTPEmbedder` supports EmbeddingGemma-compatible endpoints; supply positive dimensions and an HTTP client with a timeout. Optional video embedding needs `ffmpeg`/`ffprobe`; non-text extraction can use `SubprocessExtractor` with the `media-text` executable.
 

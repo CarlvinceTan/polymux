@@ -3,11 +3,14 @@ package agentruntime
 
 import (
 	"context"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/acp"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/skills"
 	core "github.com/CarlvinceTan/polymux/packages/runtime"
@@ -88,7 +91,10 @@ type Session interface {
 	Path() string
 	Close() error
 }
-type DurableRuntime struct{ *core.DurableRuntime }
+type DurableRuntime struct {
+	*core.DurableRuntime
+	dir string
+}
 
 // CodemodeWorkers is how many codemode scripts may run at once on this server. PiG's default of two is shared by
 // every bot and thread in the process, and turns aren't capped, so it's sized for many tasks at once.
@@ -117,14 +123,63 @@ func NewDurable(ctx context.Context, dir, baseURL, model, key string, client Cli
 	if err != nil {
 		return nil, err
 	}
-	return &DurableRuntime{runtime}, nil
+	return &DurableRuntime{DurableRuntime: runtime, dir: dir}, nil
 }
 func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (Session, error) {
+	if d.Agent.ACP != nil {
+		return r.openACP(ctx, d, path)
+	}
 	opened, err := r.DurableRuntime.Open(ctx, runtimeDefinition(d), path)
 	if err != nil {
 		return nil, err
 	}
 	return &session{opened}, nil
+}
+
+// acpPrefix marks a saved session that belongs to an external agent, so a
+// durable conversation ID is never passed to it, or the reverse.
+const acpPrefix = "acp:"
+
+// acpSessionID is the external agent's session to load, if the saved path is its own.
+func acpSessionID(path string) string {
+	id, ok := strings.CutPrefix(path, acpPrefix)
+	if !ok {
+		return ""
+	}
+	return id
+}
+
+// openACP attaches the conversation to an external Agent Client Protocol process.
+// The external agent owns its tools and model; Polymux only relays the turn.
+func (r *DurableRuntime) openACP(ctx context.Context, d Definition, path string) (Session, error) {
+	cwd := d.Worktree
+	if cwd == "" {
+		cwd = filepath.Join(r.dir, "acp", d.Agent.ID)
+		if err := os.MkdirAll(cwd, 0700); err != nil {
+			return nil, err
+		}
+	}
+	opened, err := acp.Open(ctx, acp.Config{
+		Command:   d.Agent.ACP.Command,
+		Args:      d.Agent.ACP.Args,
+		Cwd:       cwd,
+		SessionID: acpSessionID(path),
+		Log:       slog.Default(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &acpSession{opened}, nil
+}
+
+// acpSession adapts an external ACP session to the server's contract-typed Session.
+type acpSession struct{ *acp.Session }
+
+func (s *acpSession) Path() string { return acpPrefix + s.Session.Path() }
+
+func (s *acpSession) Send(ctx context.Context, m contract.Message, emit func(Delta) error) (Result, error) {
+	result, err := s.Session.Send(ctx, runtimeMessage(m), emit)
+	return Result{Text: result.Text, Usage: contract.Usage(result.Usage)}, err
 }
 func runtimeDefinition(d Definition) core.Definition {
 	extra := d.ExtraTools

@@ -494,6 +494,8 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                                          sectionID: $0.sectionID, sectionOrder: $0.sectionOrder)
                     }
                     data = try JSONEncoder().encode(SidebarSnapshot(cursor: 0, sections: [Section(id: SidebarLayout.unassignedID, name: "Unassigned", order: 0)], placements: placements))
+                case "privacy":
+                    data = try JSONEncoder().encode(PrivacyStatus(fullDiskAccess: false, screenRecording: true))
                 case "settings":
                     let theme = CommandLine.arguments.contains("--verify-tools")
                         ? (CommandLine.arguments.contains("--tools-dark") ? "dark" : "light") : Self.appearance
@@ -676,16 +678,6 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                     let count = stream.read(&bytes, maxLength: bytes.count)
                     guard count > 0 else { break }
                     body.append(contentsOf: bytes.prefix(count))
-                }
-            }
-            if request.url?.lastPathComponent == "task" {
-                let id = request.url?.deletingLastPathComponent().lastPathComponent
-                let edit = try JSONDecoder().decode(UpdateTaskRequest.self, from: body)
-                return try lock.withLock {
-                    guard let index = values.firstIndex(where: { $0.id == id }) else { throw URLError(.resourceUnavailable) }
-                    if let status = edit.status { values[index].task?.status = status }
-                    if let pinned = edit.pinned { values[index].task?.pinnedAt = pinned ? "2026-10-23T12:00:00Z" : nil }
-                    return try JSONEncoder().encode(values[index])
                 }
             }
             let patch = try JSONDecoder().decode(UpdateThreadRequest.self, from: body)

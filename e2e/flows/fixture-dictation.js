@@ -24,7 +24,9 @@ await app.waitFor({ role: "button", name: "Pause dictation", timeout_ms: 6000 })
 if ((await app.query({ role: "textfield", name: "Message" })).length) {
   throw new Error("Recording did not replace the message input with a waveform");
 }
+// Let the fixture's sentence finish, so pausing leaves a draft the composer can send.
+await cua.sleep(1200);
 await app.click({ role: "button", name: "Pause dictation" });
 await app.waitFor({ role: "textfield", name: "Message", timeout_ms: 3000 });
-await app.waitFor({ role: "button", name: "Start dictation", timeout_ms: 3000 });
+await app.waitFor({ role: "button", name: "Send message", timeout_ms: 3000 });
 return "ok";

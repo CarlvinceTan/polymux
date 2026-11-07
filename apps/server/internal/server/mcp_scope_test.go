@@ -207,7 +207,7 @@ func TestMCPSetupReuse(t *testing.T) {
 func TestMCPSharedFlags(t *testing.T) {
 	api, _ := startTest(t, &testFactory{})
 	config := agentruntime.MCPServer{Name: "notes", Command: "fixture-notes", NativeOnly: true, Env: map[string]string{"MOCK_CONFIG": "preserve"}}
-	if err := api.registerMCP(t.Context(), config, "", nil, nil, nil); err != nil {
+	if err := api.registerMCP(t.Context(), config, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := api.Store.BindMCP(t.Context(), "assistant", "notes", new(true), nil, false); err != nil {
@@ -280,7 +280,7 @@ func TestMCPVoiceScope(t *testing.T) {
 	api, web := voiceTest(t, factory, func(config *Config) {
 		config.Definitions[0].MCP = []agentruntime.MCPServer{{Name: "private", Command: "fixture-private"}}
 	})
-	if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: "shared", Command: "fixture-shared", ReadOnly: true}, "", nil, nil, nil); err != nil {
+	if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: "shared", Command: "fixture-shared", ReadOnly: true}, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := api.Store.BindMCP(t.Context(), "a", "private", nil, new(true), true); err != nil {
@@ -313,7 +313,7 @@ func TestMCPAutomaticScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: "notes", Command: "fixture-notes"}, "", nil, nil, nil); err != nil {
+	if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: "notes", Command: "fixture-notes"}, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for index, enabled := range []bool{true, false} {
@@ -366,7 +366,7 @@ func TestMCPStatus(t *testing.T) {
 	deadURL := dead.URL
 	dead.Close()
 	for name, url := range map[string]string{"live": live.URL, "dead": deadURL, "masked": live.URL} {
-		if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: name, URL: url}, "", nil, nil, nil); err != nil {
+		if err := api.registerMCP(t.Context(), agentruntime.MCPServer{Name: name, URL: url}, "", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := api.Store.BindMCP(t.Context(), "assistant", name, new(name != "masked"), new(name == "masked"), false); err != nil {

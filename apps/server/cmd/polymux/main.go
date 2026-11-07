@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/CarlvinceTan/polymux/apps/server/internal/privacy"
 )
 
 func main() {
@@ -20,6 +23,10 @@ func run(args []string) error {
 	if args[0] == "version" {
 		fmt.Println(buildSHA)
 		return nil
+	}
+	// The server's /privacy runs this, so each answer comes from a fresh process.
+	if args[0] == "privacy" {
+		return json.NewEncoder(os.Stdout).Encode(privacy.Check())
 	}
 	if args[0] == "drain" {
 		return drain(args[1:])

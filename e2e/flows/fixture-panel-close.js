@@ -1,5 +1,5 @@
 // @fixture --verify-fixture --verify-tools --verify-profile
-// The side panel closes without losing the chat window or displacing its phone button.
+// The side panel closes without losing the chat window or displacing its phone button; group chats have no phone button.
 const app = await cua.getApp(APP);
 const main = await app.getState({ include_screenshot: false, max_elements: 50 });
 async function row(name) {
@@ -11,7 +11,12 @@ async function row(name) {
     if (matches.length !== 1) throw new Error("Chat row is missing or ambiguous: " + name);
     await app.click(matches[0].element_token);
 }
-async function phone() {
+async function phone(present = true) {
+    if (!present) {
+        await app.waitFor({ role: "button", name: "Start dictation" });
+        if ((await app.query({ role: "button", name: "Speech conversation" })).length) throw new Error("A group chat offers a speech conversation");
+        return;
+    }
     for (let i = 0; i < 20; i++) {
         const buttons = await app.query({ role: "button", name: "Speech conversation" });
         const [mic] = await app.query({ role: "button", name: "Start dictation" });
@@ -22,8 +27,8 @@ async function phone() {
     }
     throw new Error("The phone button is not attached to the chat pane’s right edge");
 }
-async function closePanel() {
-    await phone();
+async function closePanel(call = true) {
+    await phone(call);
     const [search] = await app.query({ role: "button", name: "Search this chat" });
     const [close] = await app.query({ role: "button", name: "Close side panel" });
     if (!search?.frame || !close?.frame || close.frame.x < search.frame.x + search.frame.w ||
@@ -35,7 +40,7 @@ async function closePanel() {
     const state = await cua.call("list_windows", { pid: main.pid });
     if (!state.windows.some(window => window.window_id === main.window_id)) throw new Error("Closing the side panel closed the chat window");
     await app.waitFor({ role: "textfield", name: "Message" });
-    await phone();
+    await phone(call);
 }
 await row("Chief");
 await phone();
@@ -48,7 +53,7 @@ for (let i = 0; i < 3; i++) {
 await row("grp-trip");
 await app.click({ role: "button", name: "Edit chat" });
 await app.waitFor({ role: "textfield", name: "Chat name" });
-await closePanel();
+await closePanel(false);
 await app.waitFor({ role: "textfield", name: "Chat name", gone: true });
 await app.click({ role: "button", name: "Edit chat" });
 await app.click({ role: "button", name: "Add agents to chat" });
@@ -56,5 +61,5 @@ await app.waitFor({ role: "textfield", name: "Search agents to add" });
 await app.click({ role: "button", name: "Close side panel" });
 await app.waitFor({ role: "textfield", name: "Search agents to add", gone: true });
 await app.waitFor({ role: "textfield", name: "Message" });
-await phone();
+await phone(false);
 return "ok";

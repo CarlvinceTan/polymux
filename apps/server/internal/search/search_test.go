@@ -195,3 +195,156 @@ func (e *fixedEmbedding) Embed(context.Context, engine.Input) ([]float32, string
 	e.calls++
 	return []float32{1, 0, 0}, e.model, e.err
 }
+
+func TestLexicalIndexWithoutEmbedder(t *testing.T) {
+	ctx := t.Context()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Register(ctx, []contract.Agent{{ID: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	text := "orange balloon"
+	message := contract.Message{ID: "keyword", ThreadID: "a", Role: "user", Status: "done", CreatedAt: store.Now(),
+		Parts: []contract.Part{{Kind: "text", Text: &text}}}
+	if _, err := db.Append(ctx, contract.Event{ConversationID: "a", Type: "message.done"}, &message); err != nil {
+		t.Fatal(err)
+	}
+	var log bytes.Buffer
+	index := &Index{Store: db, Log: slog.New(slog.NewTextHandler(&log, nil))}
+	if err := index.Batch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := db.DB.QueryRowContext(ctx, `SELECT indexing_state FROM messages WHERE id='keyword'`).Scan(&state); err != nil || state != "ready" {
+		t.Fatalf("keyword index state = %s (%v)", state, err)
+	}
+	if strings.Contains(log.String(), "index message") || strings.Contains(log.String(), "semantic provider") {
+		t.Fatalf("keyword indexing was reported as a failure: %s", log.String())
+	}
+	hits, semantic, err := index.Search(ctx, "a", "balloon")
+	if err != nil || semantic || len(hits) != 1 || hits[0].Message.ID != "keyword" {
+		t.Fatalf("lexical hits=%+v semantic=%v err=%v", hits, semantic, err)
+	}
+	if err := index.PrepareSemantic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRowContext(ctx, `SELECT indexing_state FROM messages WHERE id='keyword'`).Scan(&state); err != nil || state != "ready" {
+		t.Fatalf("preparing without an embedder changed state to %s (%v)", state, err)
+	}
+}
+
+func TestSemanticReenableAfterLexicalUpdate(t *testing.T) {
+	ctx := t.Context()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Register(ctx, []contract.Agent{{ID: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	index := &Index{Store: db, Embedder: testEmbedding{}, Log: log}
+	for _, id := range []string{"a-updated", "b-untouched"} {
+		body := "orange balloon"
+		message := contract.Message{ID: id, ThreadID: "a", Role: "user", Status: "done", CreatedAt: store.Now(),
+			Parts: []contract.Part{{Kind: "text", Text: &body}}}
+		if _, err := db.Append(ctx, contract.Event{ConversationID: "a", Type: "message.done"}, &message); err != nil {
+			t.Fatal(err)
+		}
+		if err := index.Ingest(ctx, message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	message, err := db.Message(ctx, "a-updated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "blue bicycle"
+	message.Parts = []contract.Part{{Kind: "text", Text: &body}}
+	if _, err := db.Append(ctx, contract.Event{ConversationID: "a", Type: "message.done"}, &message); err != nil {
+		t.Fatal(err)
+	}
+	lexical := &Index{Store: db, Log: log}
+	if err := lexical.Batch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hits, semantic, err := lexical.Search(ctx, "a", "bicycle")
+	if err != nil || semantic || len(hits) != 1 || hits[0].Message.ID != "a-updated" {
+		t.Fatalf("lexical hits=%+v semantic=%v err=%v", hits, semantic, err)
+	}
+	var count int
+	if err := db.DB.QueryRowContext(ctx, `SELECT count(*) FROM media_vectors WHERE message_id='a-updated'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("keyword-only update retained the old embedding")
+	}
+	restarted := &Index{Store: db, Embedder: testEmbedding{}, Log: log}
+	if err := restarted.PrepareSemantic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Reindex(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"a-updated": "pending", "b-untouched": "ready"} {
+		var state string
+		if err := db.DB.QueryRowContext(ctx, `SELECT indexing_state FROM messages WHERE id=?`, id).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		if state != want {
+			t.Fatalf("%s state=%s, want %s", id, state, want)
+		}
+	}
+	if err := restarted.Batch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hits, semantic, err = restarted.Search(ctx, "a", "fruit")
+	if err != nil || !semantic || len(hits) != 2 || hits[0].Message.ID != "b-untouched" {
+		t.Fatalf("semantic hits=%+v semantic=%v err=%v", hits, semantic, err)
+	}
+}
+
+func TestPrepareSemanticBackfillsKeywordIndex(t *testing.T) {
+	ctx := t.Context()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Register(ctx, []contract.Agent{{ID: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"keyword", "embedded"} {
+		body := id
+		message := contract.Message{ID: id, ThreadID: "a", Role: "user", Status: "done", CreatedAt: store.Now(),
+			Parts: []contract.Part{{Kind: "text", Text: &body}}}
+		if _, err := db.Append(ctx, contract.Event{ConversationID: "a", Type: "message.done"}, &message); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.DB.ExecContext(ctx, `UPDATE messages SET indexing_state='ready' WHERE id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.DB.ExecContext(ctx, `INSERT INTO media_vectors(message_id,thread_id,embedding,model) VALUES(?,?,?,?)`, "embedded", "a", []byte{1, 0, 0}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	index := &Index{Store: db, Embedder: testEmbedding{}}
+	if err := index.PrepareSemantic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, id := range []string{"keyword", "embedded"} {
+		var state string
+		if err := db.DB.QueryRowContext(ctx, `SELECT indexing_state FROM messages WHERE id=?`, id).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		got[id] = state
+	}
+	if got["keyword"] != "pending" || got["embedded"] != "ready" {
+		t.Fatalf("states = %+v", got)
+	}
+}

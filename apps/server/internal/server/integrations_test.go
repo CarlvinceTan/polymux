@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -75,6 +76,72 @@ func TestIntegrationSetup(t *testing.T) {
 		if _, err := tool.Execute(ctx, "setup", json.RawMessage(`{"action":"enable_cli"}`), nil); err != nil {
 			t.Fatal("unattended turn could not configure tools", trigger, err)
 		}
+	}
+}
+
+func TestIntegrationMCP(t *testing.T) {
+	tool := &integrationTool{}
+	properties := tool.Schema().Parameters["properties"].(map[string]any)
+	for _, field := range []string{"cua_binary", "cua_socket"} {
+		if _, ok := properties[field]; ok {
+			t.Fatalf("integration schema offers Cua-specific field %q", field)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		config agentruntime.MCPServer
+	}{
+		{
+			name: "local",
+			config: agentruntime.MCPServer{
+				Name: "desktop", Command: "cua-driver", Args: []string{"mcp", "--socket", "/tmp/desktop.sock"},
+			},
+		},
+		{
+			name: "ssh",
+			config: agentruntime.MCPServer{
+				Name: "desktop", Command: "/usr/bin/ssh",
+				Args: []string{"-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "--", "test-host", "cua-driver mcp --socket /tmp/desktop.sock"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api, _ := startTest(t, &testFactory{})
+			tool := &integrationTool{server: api}
+			state := &turnState{run: contract.Run{AgentID: "assistant", ConversationID: "assistant"}, work: store.Work{Trigger: "message"}}
+			ctx := context.WithValue(t.Context(), turnKey{}, state)
+			args, err := json.Marshal(map[string]any{
+				"action": "mcp", "name": tc.config.Name, "command": tc.config.Command, "args": tc.config.Args,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tool.Execute(ctx, "setup", args, nil); err != nil {
+				t.Fatal(err)
+			}
+			data, err := api.Store.Definition(t.Context(), "assistant")
+			var d agentruntime.Definition
+			if err != nil || json.Unmarshal(data, &d) != nil || len(d.Devices) != 0 {
+				t.Fatal("MCP setup changed SSH devices", err)
+			}
+			for _, host := range []string{"test-host", "updated-host"} {
+				args, err := json.Marshal(map[string]string{"action": "device", "name": "desktop", "host": host})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tool.Execute(ctx, "device", args, nil); err != nil {
+					t.Fatal(err)
+				}
+				data, err = api.Store.Definition(t.Context(), "assistant")
+				if err != nil || json.Unmarshal(data, &d) != nil || !reflect.DeepEqual(d.Devices, []agentruntime.Device{{Name: "desktop", Host: host}}) {
+					t.Fatal("SSH device setup was not persisted", err)
+				}
+				effective, err := api.effectiveMCP(t.Context(), "assistant", d.MCP)
+				if err != nil || !reflect.DeepEqual(effective, []agentruntime.MCPServer{tc.config}) || !reflect.DeepEqual(d.MCP, effective) {
+					t.Fatal("SSH device setup changed MCP configuration", err)
+				}
+			}
+		})
 	}
 }
 

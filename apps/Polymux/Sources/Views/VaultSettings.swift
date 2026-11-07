@@ -171,7 +171,7 @@ private struct VaultBrowser: View {
     }
 }
 
-private enum VaultCategory: String, CaseIterable, Identifiable {
+enum VaultCategory: String, CaseIterable, Identifiable {
     case all, login, card, api, totp, note, recovery, wifi, passkey
     var id: String { rawValue }
     var title: String {

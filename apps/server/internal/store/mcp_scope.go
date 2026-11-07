@@ -61,8 +61,8 @@ func (s *Store) MCPBindings(ctx context.Context, id string) ([]MCPBinding, error
 	return out, rows.Err()
 }
 
-func (s *Store) RegisterMCP(ctx context.Context, name string, data json.RawMessage, owner string, local, devices json.RawMessage) error {
-	if !json.Valid(data) || local != nil && !json.Valid(local) || devices != nil && !json.Valid(devices) {
+func (s *Store) RegisterMCP(ctx context.Context, name string, data json.RawMessage, owner string, local json.RawMessage) error {
+	if !json.Valid(data) || local != nil && !json.Valid(local) {
 		return ErrMCPUnknown
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -100,17 +100,9 @@ func (s *Store) RegisterMCP(ctx context.Context, name string, data json.RawMessa
 		if _, err := tx.ExecContext(ctx, `INSERT INTO mcp_bindings(agent_id,name,enabled,hidden) VALUES(?,?,1,0) ON CONFLICT(agent_id,name) DO UPDATE SET enabled=1`, owner, name); err != nil {
 			return err
 		}
-		for _, field := range []struct {
-			data  json.RawMessage
-			query string
-		}{
-			{local, `UPDATE agent_definitions SET data=json_set(data,'$.mcp',json(?)) WHERE agent_id=?`},
-			{devices, `UPDATE agent_definitions SET data=json_set(data,'$.devices',json(?)) WHERE agent_id=?`},
-		} {
-			if field.data != nil {
-				if _, err := tx.ExecContext(ctx, field.query, string(field.data), owner); err != nil {
-					return err
-				}
+		if local != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_definitions SET data=json_set(data,'$.mcp',json(?)) WHERE agent_id=?`, string(local), owner); err != nil {
+				return err
 			}
 		}
 	}

@@ -265,22 +265,6 @@ public final class SidebarStore {
         }
     }
 
-    /// Shows the change at once and puts the task back if the server refuses it.
-    public func updateTask(_ id: String, pinned: Bool? = nil, status: String? = nil) async throws {
-        guard let index = threads.firstIndex(where: { $0.id == id }), let before = threads[index].task else { return }
-        var edited = before
-        if let pinned { edited.pinnedAt = pinned ? (before.pinnedAt ?? WireDate.string()) : nil }
-        if let status { edited.status = status }
-        threads[index].task = edited
-        do {
-            let saved = try await client.updateTask(id: id, pinned: pinned, status: status)
-            if let index = threads.firstIndex(where: { $0.id == id }) { threads[index].task = saved.task }
-        } catch {
-            if let index = threads.firstIndex(where: { $0.id == id }) { threads[index].task = before }
-            throw error
-        }
-    }
-
     public func participants(in thread: Thread) -> [Agent] {
         thread.participantIDs.compactMap { id in agents.first { $0.id == id } }
     }

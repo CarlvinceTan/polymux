@@ -83,12 +83,14 @@ final class AvatarSurfaceView: AvatarSurfaceBase {
     fileprivate var frameRate: Float = 0
     private var sampled: [ObjectIdentifier: CFTimeInterval] = [:]
     private(set) var clock: AvatarClock?
-    private var layered: [ObjectIdentifier: AvatarLayers] = [:]
+    private let makeRenderer: AvatarRendererFactory
+    private var layered: [ObjectIdentifier: any AvatarRenderer] = [:]
     #if os(macOS)
     private var monitor: Any?
     #endif
 
-    init() {
+    init(makeRenderer: @escaping AvatarRendererFactory = { AvatarLayers() }) {
+        self.makeRenderer = makeRenderer
         super.init(frame: .zero)
         #if os(macOS)
         wantsLayer = true
@@ -194,12 +196,12 @@ final class AvatarSurfaceView: AvatarSurfaceBase {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         var order: [CALayer] = []
-        var kept: [ObjectIdentifier: AvatarLayers] = [:]
+        var kept: [ObjectIdentifier: any AvatarRenderer] = [:]
         // Back tiles first, so the ones in front overlap them.
         let tiles = visible.enumerated().sorted { ($0.element.order, $1.offset) > ($1.element.order, $0.offset) }
         for tile in tiles.map(\.element) {
             let id = ObjectIdentifier(tile.canvas)
-            let layers = layered[id] ?? AvatarLayers()
+            let layers = layered[id] ?? makeRenderer()
             layers.apply(tile.canvas, in: rect(tile), scale: scale)
             kept[id] = layers
             order.append(layers.root)
@@ -266,14 +268,16 @@ final class AvatarSurfaceView: AvatarSurfaceBase {
 #if os(macOS)
 struct AvatarSurface: NSViewRepresentable {
     let tiles: [AvatarSlot]
-    func makeNSView(context: Context) -> AvatarSurfaceView { AvatarSurfaceView() }
+    var makeRenderer: AvatarRendererFactory = { AvatarLayers() }
+    func makeNSView(context: Context) -> AvatarSurfaceView { AvatarSurfaceView(makeRenderer: makeRenderer) }
     func updateNSView(_ view: AvatarSurfaceView, context: Context) { view.update(tiles) }
     static func dismantleNSView(_ view: AvatarSurfaceView, coordinator: ()) { view.stop(); view.untrackPointer() }
 }
 #else
 struct AvatarSurface: UIViewRepresentable {
     let tiles: [AvatarSlot]
-    func makeUIView(context: Context) -> AvatarSurfaceView { AvatarSurfaceView() }
+    var makeRenderer: AvatarRendererFactory = { AvatarLayers() }
+    func makeUIView(context: Context) -> AvatarSurfaceView { AvatarSurfaceView(makeRenderer: makeRenderer) }
     func updateUIView(_ view: AvatarSurfaceView, context: Context) { view.update(tiles) }
     static func dismantleUIView(_ view: AvatarSurfaceView, coordinator: ()) { view.stop() }
 }

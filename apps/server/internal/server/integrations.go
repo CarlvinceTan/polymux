@@ -33,8 +33,6 @@ func (t *integrationTool) Schema() ai.ToolSchema {
 			"action":      map[string]any{"type": "string", "enum": []string{"list", "mcp", "skill", "remove", "enable_cli", "device", "attach", "detach"}},
 			"agent_id":    map[string]any{"type": "string", "maxLength": 128, "description": "Bot to set up; omit for yourself"},
 			"host":        map[string]any{"type": "string", "description": "Existing SSH alias or user@tailnet-host; uses existing host keys"},
-			"cua_binary":  map[string]any{"type": "string", "description": "Optional absolute Cua executable on the device; requires cua_socket too"},
-			"cua_socket":  map[string]any{"type": "string", "description": "Existing Cua daemon socket on the device"},
 			"native_only": map[string]any{"type": "boolean", "description": "Exclude browser tools from this MCP connection"},
 			"name":        map[string]any{"type": "string", "description": "MCP connection name"},
 			"url":         map[string]any{"type": "string", "description": "HTTP(S) MCP endpoint without inline credentials"},
@@ -69,8 +67,6 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 		Args       []string          `json:"args"`
 		Path       string            `json:"path"`
 		Host       string            `json:"host"`
-		CuaBinary  string            `json:"cua_binary"`
-		CuaSocket  string            `json:"cua_socket"`
 		NativeOnly *bool             `json:"native_only"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -136,21 +132,6 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 		} else {
 			d.Devices[index] = device
 		}
-		if input.CuaBinary != "" || input.CuaSocket != "" {
-			for _, path := range []string{input.CuaBinary, input.CuaSocket} {
-				if !filepath.IsAbs(path) || len(path) > 2048 || strings.ContainsAny(path, "\x00\r\n") {
-					return agent.AgentToolResult{}, errors.New("provide both existing absolute Cua paths")
-				}
-			}
-			quote := func(text string) string { return "'" + strings.ReplaceAll(text, "'", "'\"'\"'") + "'" }
-			config := agentruntime.MCPServer{Name: input.Name, Command: "/usr/bin/ssh", Args: []string{"-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "--", input.Host, quote(input.CuaBinary) + " mcp --socket " + quote(input.CuaSocket)}, NativeOnly: true}
-			index := slices.IndexFunc(d.MCP, func(item agentruntime.MCPServer) bool { return item.Name == config.Name })
-			if index < 0 {
-				d.MCP = append(d.MCP, config)
-			} else {
-				d.MCP[index] = config
-			}
-		}
 	case "enable_cli":
 		d.Tools = []string{"read", "write", "edit", "bash", "find", "ls"}
 	case "skill":
@@ -211,17 +192,9 @@ func (t *integrationTool) Execute(ctx context.Context, _ string, args json.RawMe
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
-	if input.Action == "mcp" || input.Action == "device" && input.CuaBinary != "" {
+	if input.Action == "mcp" {
 		index := slices.IndexFunc(d.MCP, func(config agentruntime.MCPServer) bool { return config.Name == input.Name })
-		var devices []agentruntime.Device
-		if input.Action == "device" {
-			devices = d.Devices
-		}
-		nativeOnly := input.NativeOnly
-		if input.Action == "device" {
-			nativeOnly = new(true)
-		}
-		if err := s.registerMCP(ctx, d.MCP[index], a.id, d.MCP, devices, nativeOnly); err != nil {
+		if err := s.registerMCP(ctx, d.MCP[index], a.id, d.MCP, input.NativeOnly); err != nil {
 			return agent.AgentToolResult{}, err
 		}
 	} else if input.Action == "remove" {

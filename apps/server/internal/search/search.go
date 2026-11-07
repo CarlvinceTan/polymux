@@ -87,6 +87,18 @@ func (i *Index) Reindex(ctx context.Context) error {
 	return i.reindex(ctx, true)
 }
 
+// PrepareSemantic queues keyword-only and failed rows once an embedding backend is configured.
+// With no embedder it does nothing, and keyword search stays as it is.
+func (i *Index) PrepareSemantic(ctx context.Context) error {
+	if i.Embedder == nil {
+		return nil
+	}
+	_, err := i.Store.DB.ExecContext(ctx, `UPDATE messages SET indexing_state='pending'
+		WHERE indexing_state='error'
+		OR (indexing_state='ready' AND NOT EXISTS (SELECT 1 FROM media_vectors WHERE message_id=messages.id))`)
+	return err
+}
+
 func (i *Index) reindex(ctx context.Context, force bool) error {
 	i.modelMu.Lock()
 	defer i.modelMu.Unlock()
@@ -95,7 +107,7 @@ func (i *Index) reindex(ctx context.Context, force bool) error {
 	}
 	i.model = ""
 	if i.Embedder == nil {
-		return fmt.Errorf("semantic provider unavailable")
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -254,11 +266,17 @@ func (i *Index) Ingest(ctx context.Context, m contract.Message) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO media_index(message_id,text) VALUES(?,?) ON CONFLICT(message_id) DO UPDATE SET text=excluded.text`, m.ID, input.Text); err != nil {
 		return err
 	}
+	if i.Embedder == nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM media_vectors WHERE message_id=?`, m.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE messages SET indexing_state='ready' WHERE id=? AND thread_id=?`, m.ID, m.ThreadID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if err := tx.Commit(); err != nil {
 		return err
-	}
-	if i.Embedder == nil {
-		return fmt.Errorf("semantic provider unavailable; lexical indexing completed")
 	}
 	vector, model, err := i.Embedder.Embed(ctx, input)
 	if err != nil {

@@ -120,6 +120,8 @@
 				A10000000000000000000051 /* GraphKit */,
 				A10000000000000000000024 /* PolymuxUpdates */,
 				A10000000000000000000031 /* PolymuxCall */,
+				A10000000000000000000070 /* SpeechKit */,
+				A10000000000000000000071 /* PolymuxVoice */,
 			);
 			productName = Polymux;
 			productReference = A10000000000000000000002 /* Polymux.app */;
@@ -411,6 +413,16 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000070 /* SpeechKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
+			productName = SpeechKit;
+		};
+		A10000000000000000000071 /* PolymuxVoice */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
+			productName = PolymuxVoice;
+		};
 		A10000000000000000000020 /* PolymuxKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;

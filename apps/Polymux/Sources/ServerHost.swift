@@ -26,9 +26,12 @@ final class ServerHost {
         return arguments.first?.contains(".app/Contents/Helpers/") == true
     }
 
+    /// What System Settings lists: bots inherit the permissions it's given.
+    static let bundle = Bundle.main.bundleURL.appending(path: "Contents/Helpers/Polymux Server.app")
+
     private static var helper: URL? {
         #if os(macOS)
-        let url = Bundle.main.bundleURL.appending(path: "Contents/Helpers/polymux")
+        let url = bundle.appending(path: "Contents/MacOS/polymux")
         guard FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
         #if DEBUG
         // A development build only ever runs a job of its own.
@@ -60,6 +63,7 @@ final class ServerHost {
         let fresh = defaults.object(forKey: "serverAddress") == nil && defaults.object(forKey: "serverDevices") == nil
         if fresh, !running {
             await start()
+            if running { defaults.set(true, forKey: "onboarding.pending") }
         } else if running {
             Task { _ = await self.run("update") }
         }

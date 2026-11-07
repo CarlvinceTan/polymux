@@ -1,5 +1,6 @@
 import SwiftUI
 import PolymuxKit
+import AvatarKit
 
 struct ProfileView: View {
     let agent: Agent
@@ -9,7 +10,6 @@ struct ProfileView: View {
     /// The chat's runs, live, for the Work tab's tasks.
     var runs: [Run] = []
     var jump: (String) -> Void = { _ in }
-    var show: (String) -> Void = { _ in }
     var locate: (Attachment) -> Void = { _ in }
     /// Embedded beside the chat or on its own navigation page, with avatar editing and search as modals.
     var inspector = false
@@ -33,6 +33,9 @@ struct ProfileView: View {
     @State private var choosingModel = false
     @State private var fallback: AgentFallback
     @State private var editingFallbacks = false
+    /// The external agent this bot runs on, if it is attached to one.
+    @State private var acp: AgentACP?
+    @State private var editingACP = false
     @State private var modelSaving = false
     @State private var modelIssue: String?
     @State private var saved: ProfileValues
@@ -49,12 +52,11 @@ struct ProfileView: View {
     @State private var mcpTools: [String: [String]] = [:]
     @State private var notificationNote: Bool?
     @State private var retries = 0
-    @State private var taskIssue: String?
     /// Whether an unsaved edit kept from last time has been put back.
     @State private var restored = false
 
     init(agent: Agent, session: AppSession, threadID: String? = nil, attachments: [Attachment] = [],
-         runs: [Run] = [], inspector: Bool = false, onBack: (() -> Void)? = nil, show: @escaping (String) -> Void = { _ in }, locate: @escaping (Attachment) -> Void = { _ in },
+         runs: [Run] = [], inspector: Bool = false, onBack: (() -> Void)? = nil, locate: @escaping (Attachment) -> Void = { _ in },
          jump: @escaping (String) -> Void = { _ in }) {
         self.agent = agent
         self.session = session
@@ -63,7 +65,6 @@ struct ProfileView: View {
         self.runs = runs
         self.inspector = inspector
         self.onBack = onBack
-        self.show = show
         self.locate = locate
         self.jump = jump
         _tab = State(initialValue: inspector ? .work : .capabilities)
@@ -72,6 +73,7 @@ struct ProfileView: View {
         _provider = State(initialValue: agent.provider ?? "")
         _reasoning = State(initialValue: agent.reasoning ?? "off")
         _fallback = State(initialValue: agent.fallbacks)
+        _acp = State(initialValue: agent.acp)
         _role = State(initialValue: agent.role)
         let store = session.profile(agent.id)
         _store = State(initialValue: store)
@@ -270,7 +272,7 @@ struct ProfileView: View {
         // The iPhone's toolbar has no room for the bell's note.
         let bell = inspector ? bellText : nil
         #endif
-        let note = issue ?? taskIssue ?? store.cancelIssue ?? store.issue ?? bell
+        let note = issue ?? store.cancelIssue ?? store.issue ?? bell
         return details
             .overlay(alignment: .bottom) {
                 if let note { QuietNote(text: note).padding(.bottom, 12) }
@@ -320,46 +322,49 @@ struct ProfileView: View {
 
     private var work: some View { workSection }
 
-    /// What shapes how the bot works: its instructions, skills and MCP connections.
+    /// What shapes how the bot works: its model or external agent, instructions, skills and MCP connections.
     private var capabilities: some View {
         VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
-            PanelSection("Model", accessory: loaded ? fallbackAccessory : nil) {
-                Button { choosingModel = true } label: {
-                    HStack {
-                        Label {
-                            ModelLabel(name: modelName)
-                        } icon: {
-                            Image(systemName: "cpu")
+            if acp == nil {
+                PanelSection("Model", accessory: loaded ? fallbackAccessory : nil) {
+                    Button { choosingModel = true } label: {
+                        HStack {
+                            Label {
+                                ModelLabel(name: modelName)
+                            } icon: {
+                                Image(systemName: "cpu")
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
                         }
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .sectionRow()
+                    .accessibilityLabel("Model")
+                    .accessibilityValue(modelName.title)
+                    .disabled(!loaded || modelSaving)
+                    .dropdown(isPresented: $choosingModel) {
+                        ModelPicker(providers: providers, provider: provider, model: model, choose: remap)
+                    }
+                    Divider().padding(.horizontal, PanelStyle.rowInset)
+                    ReasoningPicker(selection: Binding(get: { reasoning }, set: {
+                        saveModel(UpdateAgentRequest(reasoning: $0))
+                    }), inset: true, levels: providers.levels(provider: provider, model: model))
+                    .disabled(!loaded || modelSaving)
+                    if let modelIssue {
+                        Text(modelIssue).font(.footnote).foregroundStyle(.muted)
+                    } else if providersLoaded, !provider.isEmpty, !providers.contains(where: { $0.id == provider && $0.enabled }) {
+                        Text("Provider unavailable. Choose another model.").font(.footnote).foregroundStyle(.muted)
+                    }
                 }
-                .buttonStyle(.plain)
-                .sectionRow()
-                .accessibilityLabel("Model")
-                .accessibilityValue(modelName.title)
-                .disabled(!loaded || modelSaving)
-                .dropdown(isPresented: $choosingModel) {
-                    ModelPicker(providers: providers, provider: provider, model: model, choose: remap)
-                }
-                Divider().padding(.horizontal, PanelStyle.rowInset)
-                ReasoningPicker(selection: Binding(get: { reasoning }, set: {
-                    saveModel(UpdateAgentRequest(reasoning: $0))
-                }), inset: true, levels: providers.levels(provider: provider, model: model))
-                .disabled(!loaded || modelSaving)
-                if let modelIssue {
-                    Text(modelIssue).font(.footnote).foregroundStyle(.muted)
-                } else if providersLoaded, !provider.isEmpty, !providers.contains(where: { $0.id == provider && $0.enabled }) {
-                    Text("Provider unavailable. Choose another model.").font(.footnote).foregroundStyle(.muted)
+                .panel(isPresented: $editingFallbacks) {
+                    FallbackPanel(fallback: fallback, reasoning: reasoning, providers: providers, saving: modelSaving, issue: modelIssue) {
+                        saveModel(UpdateAgentRequest(fallback: $0))
+                    }
                 }
             }
-            .panel(isPresented: $editingFallbacks) {
-                FallbackPanel(fallback: fallback, reasoning: reasoning, providers: providers, saving: modelSaving, issue: modelIssue) {
-                    saveModel(UpdateAgentRequest(fallback: $0))
-                }
-            }
+            externalAgent
             VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
                 instructions
                 sectionCard("Skills", count: configuration == nil ? nil : skillNames.count, empty: skillNames.isEmpty) {
@@ -393,6 +398,45 @@ struct ProfileView: View {
 
     private var fallbackAccessory: PanelAccessory {
         PanelAccessory(symbol: "gearshape", label: "Fallback settings") { editingFallbacks = true }
+    }
+
+    /// Attaches the bot to an external Agent Client Protocol process, which then runs its turns.
+    private var externalAgent: some View {
+        PanelSection("External agent") {
+            if let acp {
+                HStack(spacing: PanelStyle.rowInset) {
+                    Label {
+                        Text(([acp.command] + (acp.args ?? [])).joined(separator: " ")).lineLimit(1)
+                    } icon: {
+                        Image(systemName: "bolt.horizontal")
+                    }
+                    Spacer(minLength: 8)
+                    Button("Detach") { saveACP(nil) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.muted)
+                        .disabled(!loaded || modelSaving)
+                        .accessibilityLabel("Detach external agent")
+                }
+                .sectionRow()
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("External agent")
+                if let modelIssue {
+                    Text(modelIssue).font(.footnote).foregroundStyle(.muted).sectionRow()
+                }
+            } else {
+                Button { editingACP = true } label: {
+                    Label("Attach", systemImage: "plus")
+                }
+                .buttonStyle(SectionButton())
+                .disabled(!loaded || modelSaving)
+                .accessibilityLabel("Attach external agent")
+            }
+        }
+        .panel(isPresented: $editingACP) {
+            ACPPanel(attached: acp, saving: modelSaving) { command, arguments in
+                saveACP(AgentACP(command: command, args: arguments))
+            }
+        }
     }
 
     private var expandAccessory: PanelAccessory {
@@ -511,34 +555,11 @@ struct ProfileView: View {
             let threads = session.sidebar.tasks(of: agent.id)
             sectionCard("Tasks", count: threads.count + tasks.count, empty: threads.isEmpty && tasks.isEmpty) {
                 if threads.isEmpty && tasks.isEmpty { Text("No tasks yet.").foregroundStyle(.muted) }
-                ForEach(threads) { thread in
-                    TaskThreadRow(thread: thread, marker: taskMarker(thread), open: { show(thread.id) },
-                                  pin: { updateTask(thread, pinned: thread.task?.pinnedAt == nil) },
-                                  finish: { finish(thread) })
-                        .sectionRow()
-                }
+                ForEach(threads) { thread in TaskRow(thread: thread).sectionRow() }
                 ForEach(tasks, id: \.id) { run in TaskRow(run: run).sectionRow() }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func taskMarker(_ thread: PolymuxKit.Thread) -> ActivityMarker? {
-        session.sidebar.activity.marker(conversationID: thread.id, agentIDs: [agent.id], unread: thread.unreadCount > 0)
-    }
-
-    private func updateTask(_ thread: PolymuxKit.Thread, pinned: Bool? = nil, status: String? = nil) {
-        taskIssue = nil
-        Task {
-            do { try await session.sidebar.updateTask(thread.id, pinned: pinned, status: status) }
-            catch { taskIssue = error.isOffline ? "Not saved yet." : error.reason(or: "Couldn’t update that task.") }
-        }
-    }
-
-    /// A finished task's thread closes, like Grok Bot's.
-    private func finish(_ thread: PolymuxKit.Thread) {
-        if threadID == thread.id { show(agent.id) }
-        updateTask(thread, status: TaskInfoStatus.done)
     }
 
     /// Delegated work only, active first and then newest.
@@ -650,6 +671,32 @@ struct ProfileView: View {
             } catch {
                 (provider, model, reasoning, fallback) = previous
                 modelIssue = error.isOffline ? "Not saved. Connect before changing model settings." : error.reason(or: "Couldn’t save model settings.")
+            }
+        }
+    }
+
+    private func saveACP(_ next: AgentACP?) {
+        guard !modelSaving else { return }
+        let previous = acp
+        acp = next
+        modelSaving = true
+        modelIssue = nil
+        Task {
+            defer { modelSaving = false }
+            do {
+                let profile = try await session.client.updateAgent(id: agent.id,
+                    request: UpdateAgentRequest(acp: next ?? AgentACP()))
+                acp = profile.agent.acp
+                provider = profile.agent.provider ?? ""
+                model = profile.agent.model
+                reasoning = profile.agent.reasoning ?? "off"
+                fallback = profile.agent.fallbacks
+                editingACP = false
+                await store.accept(profile)
+                await session.sidebar.accept(profile.agent)
+            } catch {
+                acp = previous
+                modelIssue = error.isOffline ? "Not saved. Connect before changing the external agent." : error.reason(or: "Couldn’t save the external agent.")
             }
         }
     }
@@ -814,6 +861,48 @@ private struct PromptPanel: View {
     }
 }
 
+/// Attaches a bot to an external Agent Client Protocol process, or edits its launch command.
+private struct ACPPanel: View {
+    let attached: AgentACP?
+    let saving: Bool
+    let save: (String, [String]) -> Void
+    @Environment(\.panelClose) private var dismiss
+    @State private var command: String
+    @State private var arguments: String
+
+    init(attached: AgentACP?, saving: Bool, save: @escaping (String, [String]) -> Void) {
+        self.attached = attached
+        self.saving = saving
+        self.save = save
+        _command = State(initialValue: attached?.command ?? "")
+        _arguments = State(initialValue: (attached?.args ?? []).joined(separator: " "))
+    }
+
+    private var clean: String { command.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        PanelView("External agent", enabled: !saving, onClose: { dismiss() }) {
+            Form {
+                Section {
+                    SettingsField(title: "Command", text: $command, prompt: "Agent executable")
+                    SettingsField(title: "Arguments", text: $arguments, prompt: "Separated by spaces")
+                }
+                .panelRow()
+            }
+            .formStyle(.grouped)
+            .disabled(saving)
+        } actions: {
+            Button { save(clean, arguments.split(whereSeparator: \.isWhitespace).map(String.init)) } label: {
+                if saving { ProgressView().controlSize(.small) } else { Text(attached == nil ? "Attach" : "Save") }
+            }
+            .disabled(clean.isEmpty || saving)
+            .keyboardShortcut(.defaultAction)
+        }
+        .interactiveDismissDisabled(saving)
+        .panelDismiss(enabled: !saving, onClose: { dismiss() })
+    }
+}
+
 /// Hovering with a pointer, or pressing on touch, darkens the face and centres a pencil on it.
 private struct AvatarEditStyle: ButtonStyle {
     @Binding var hovered: Bool
@@ -833,90 +922,85 @@ private struct AvatarEditStyle: ButtonStyle {
 }
 
 
-/// A bot's task: opens its thread, with its state and actions beside the name.
-private struct TaskThreadRow: View {
-    let thread: PolymuxKit.Thread
-    let marker: ActivityMarker?
-    let open: () -> Void
-    let pin: () -> Void
-    let finish: () -> Void
-
-    private var done: Bool { thread.task?.status == TaskInfoStatus.done }
-    private var pinned: Bool { thread.task?.pinnedAt != nil }
-
-    private var label: String {
-        let name = done ? "Open done task \(thread.title)" : "Open task \(thread.title)"
-        switch marker {
-        case .attention: return "\(name), needs attention"
-        case .unread: return "\(name), new reply"
-        case nil: return name
-        }
-    }
-
-    @ViewBuilder private var actions: some View {
-        Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin", action: pin)
-        if !done { Button("Finish", systemImage: "checkmark", action: finish) }
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Button(action: open) {
-                HStack(spacing: 8) {
-                    Group {
-                        if thread.isWorking {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: done ? "checkmark" : "bubble.left.and.bubble.right")
-                                .foregroundStyle(.muted)
-                        }
-                    }
-                    .frame(width: 20)
-                    Text(thread.title)
-                        .lineLimit(1)
-                        .foregroundStyle(done ? AnyShapeStyle(.muted) : AnyShapeStyle(.primary))
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(label)
-            .contextMenu { actions }
-            if let marker { ActivityDot(marker: marker) }
-            Menu { actions } label: {
-                Image(systemName: "ellipsis")
-                    .foregroundStyle(.muted)
-                    #if os(iOS)
-                    .frame(width: 44, height: 44)
-                    #else
-                    .frame(width: 20, height: 20)
-                    #endif
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .fixedSize()
-            .accessibilityLabel("More actions for \(thread.title)")
-        }
-    }
-}
-
+/// A bot's task or delegated work, shown with its state only.
 private struct TaskRow: View {
-    let run: Run
+    enum Phase { case working, open, done, stopped }
+
+    let title: String
+    let phase: Phase
+
+    init(thread: PolymuxKit.Thread) {
+        title = thread.title
+        phase = thread.isWorking ? .working : thread.task?.status == TaskInfoStatus.done ? .done : .open
+    }
+
+    init(run: Run) {
+        let active = Self.active(run)
+        title = active && !run.activity.isEmpty ? run.activity : run.summary
+        switch run.status {
+        case _ where active: phase = .working
+        case RunStatus.completed: phase = .done
+        case RunStatus.failed, RunStatus.cancelled, RunStatus.interrupted: phase = .stopped
+        default: phase = .open
+        }
+    }
 
     static func active(_ run: Run) -> Bool {
         [RunStatus.queued, RunStatus.running, RunStatus.waitingPeer, RunStatus.resuming].contains(run.status)
     }
 
+    private var status: String {
+        switch phase {
+        case .working: "In progress"
+        case .open: "Open"
+        case .done: "Done"
+        case .stopped: "Stopped"
+        }
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            if Self.active(run) {
-                ProgressView().controlSize(.small).accessibilityLabel("Active")
+            Group {
+                switch phase {
+                case .working: WorkingDots()
+                case .open: Image(systemName: "circle")
+                case .done: Image(systemName: "checkmark")
+                case .stopped: Image(systemName: "xmark")
+                }
             }
-            Text(Self.active(run) && !run.activity.isEmpty ? run.activity : run.summary)
+            .foregroundStyle(.muted)
+            .frame(width: 20)
+            .accessibilityLabel(status)
+            Text(title)
                 .lineLimit(2)
+                .foregroundStyle(phase == .working || phase == .open ? AnyShapeStyle(.primary) : AnyShapeStyle(.muted))
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// Three dots that rise in turn, with the avatar's thinking motion.
+private struct WorkingDots: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            Canvas { canvas, size in
+                let time = context.date.timeIntervalSinceReferenceDate
+                // Points per avatar body radius: the three dots span 168 of its 114.27 units.
+                let unit = size.width * 114.2705 / 168
+                for index in 0..<3 {
+                    let dot = thinkingDot(index, time: time, amount: 1, reducedMotion: reduceMotion)
+                    let radius = dot.r * unit
+                    let x = size.width / 2 + dot.x * unit, y = size.height / 2 + dot.y * unit
+                    var layer = canvas
+                    layer.opacity = dot.opacity
+                    layer.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: 2 * radius, height: 2 * radius)),
+                               with: .foreground)
+                }
+            }
+        }
+        .frame(width: 18, height: 8)
     }
 }
 

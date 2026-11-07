@@ -145,11 +145,6 @@ func (t *peerTool) Schema() ai.ToolSchema {
 }
 func (t *peerTool) Description() string {
 	if t.private {
-		if t.handoff {
-			return "Privately pass a distinct next stage to another current group member by stable ID and end your stage. " +
-				"Each member participates at most once in this consultation. Findings return to the spokesperson; " +
-				"these exchanges do not appear in the typed group chat. Plain @mentions never hand off."
-		}
 		return "Message a bot privately by stable ID during this voice consultation. " +
 			"request/question start a private consultation with its scoped memory and typed history; " +
 			"result/status add private notes for the spokesperson. Peer consultations cannot recursively request other peers. " +
@@ -175,7 +170,7 @@ func (t *peerTool) Execute(ctx context.Context, callID string, args json.RawMess
 		return agent.AgentToolResult{}, errors.New("invalid peer message")
 	}
 	if voice, _ := ctx.Value(voiceKey{}).(*voiceWork); voice != nil {
-		return voice.peer(ctx, t, callID, input.AgentID, input.Message, input.Intent)
+		return voice.peer(ctx, t, input.AgentID, input.Message, input.Intent)
 	}
 	state, _ := ctx.Value(turnKey{}).(*turnState)
 	if state == nil {

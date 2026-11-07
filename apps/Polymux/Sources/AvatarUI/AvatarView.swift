@@ -134,8 +134,10 @@ struct AvatarView: View {
 }
 
 @MainActor final class AvatarMotion {
-    nonisolated init() {}
-    private var engine: BotEngine?
+    typealias Factory = @Sendable (Double, StateID, [Double]?, BotExpression?) -> any AvatarEngine
+
+    nonisolated let makeEngine: Factory
+    private var engine: (any AvatarEngine)?
     private var options: AvatarOptions?
     private var appliedExpression: ExpressionID?
     private var playback = StatePlayback()
@@ -162,6 +164,12 @@ struct AvatarView: View {
     var twirling = false
 
     private var queued: [Poke] = []
+
+    nonisolated init(makeEngine: @escaping Factory = { scale, initial, shape, expression in
+        BotEngine(scale: scale, initial: initial, shape: shape, expression: expression)
+    }) {
+        self.makeEngine = makeEngine
+    }
 
     func suspend() { lastDate = nil }
 
@@ -243,7 +251,7 @@ struct AvatarView: View {
                     if index > blockIndex {
                         var start = origin + blocks.prefix(blockIndex + 1).reduce(0) { $0 + $1.duration }
                         for prior in blocks[(blockIndex + 1)...index] {
-                            self.engine!.setState(prior.state, start)
+                            self.engine!.setState(prior.state, start, restart: false)
                             start += prior.duration
                         }
                     }
@@ -272,15 +280,14 @@ struct AvatarView: View {
     }
 
     private func rebuild(_ options: AvatarOptions, expression: ExpressionID, initial: StateID) {
-        engine = BotEngine(scale: 100, initial: initial, shape: options.shape.radii,
-                           expression: expression.expression)
+        engine = makeEngine(100, initial, options.shape.radii, expression.expression)
         engine?.solid = options.shape.solid
         engine?.character = options.shape.character
         aimed = false
         cycleNumber = nil
     }
 
-    private func aim(_ engine: BotEngine, state: StateID, now: Double, follows: Bool) {
+    private func aim(_ engine: any AvatarEngine, state: StateID, now: Double, follows: Bool) {
         guard follows, STATE_BY_ID[state]?.baseFace == true, let target = pointer else {
             if aimed { engine.setTurn(Turn(), now); aimed = false }
             return

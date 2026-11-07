@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import PolymuxKit
+import SpeechKit
 
 nonisolated struct DraftFile: Identifiable, Sendable {
     let id = UUID()
@@ -567,6 +568,7 @@ struct ComposerView: View {
 
     private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty }
     private var recording: Bool { dictation.ready && !dictation.stopping }
+    private var vocabularyNames: [String] { ([agentName] + members.map(\.name)).filter { !$0.isEmpty } }
     private var isExpanded: Bool { !recording && (!files.isEmpty || reply != nil) }
 
     private var controlSize: CGFloat { ComposerMetrics.control }
@@ -603,6 +605,7 @@ struct ComposerView: View {
         ignoresDictation = false
         dictationDraft.stop()
         dictated = nil
+        dictation.setVocabulary(vocabularyNames)
         dictation.start { value in
             guard !ignoresDictation else { return }
             if let result = dictationDraft.update(value.text, start: value.start, final: value.final,
@@ -629,13 +632,16 @@ struct ComposerView: View {
         let raw = String(decoding: utf16[span], as: UTF16.self)
         polishing = true
         defer { polishing = false }
+        // Hesitations leave deterministically; the model polish may add nothing.
+        let cleaned = FillerWords.apply(raw)
+        let final = await DictationPolish.run(cleaned) ?? cleaned
         // Apply only if the draft is untouched, so edits made meanwhile are never overwritten.
-        guard let better = await DictationPolish.run(raw), better != raw, text == before else { return }
+        guard final != raw, text == before else { return }
         var updated = Array(utf16)
-        updated.replaceSubrange(span, with: Array(better.utf16))
+        updated.replaceSubrange(span, with: Array(final.utf16))
         let result = String(decoding: updated, as: UTF16.self)
         editText(result, range: NSRange(location: span.lowerBound, length: raw.utf16.count))
-        selection = TextSelection(insertionPoint: String.Index(utf16Offset: span.lowerBound + better.utf16.count, in: result))
+        selection = TextSelection(insertionPoint: String.Index(utf16Offset: span.lowerBound + final.utf16.count, in: result))
     }
 
     private func submit() {

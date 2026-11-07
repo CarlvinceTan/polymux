@@ -41,6 +41,10 @@ public struct ArcSpec: Sendable {
 public struct ArcGradient: Sendable {
     public var x1, y1, x2, y2: Double
     public var stops: [String]
+
+    public init(x1: Double, y1: Double, x2: Double, y2: Double, stops: [String]) {
+        self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2; self.stops = stops
+    }
 }
 
 public struct ArcRender: @unchecked Sendable {
@@ -48,6 +52,11 @@ public struct ArcRender: @unchecked Sendable {
     public var front, back: CGPath
     public var width, opacity: Double
     public var grad: ArcGradient
+
+    public init(id: String, front: CGPath, back: CGPath, width: Double, opacity: Double, grad: ArcGradient) {
+        self.id = id; self.front = front; self.back = back
+        self.width = width; self.opacity = opacity; self.grad = grad
+    }
 }
 
 public func wheel(_ hue: Double, _ s: Double = 0.55, _ l: Double = 0.62) -> String {

@@ -600,6 +600,7 @@ func (s *Server) routes() {
 		write(w, 200, map[string]any{"status": health, "runtime": "PiG", "buildSHA": s.config.BuildSHA, "semanticSearch": s.config.Index.Embedder != nil, "maintenance": maintenance})
 	})
 	s.mux.HandleFunc("GET /network", s.network)
+	s.mux.HandleFunc("GET /privacy", s.privacy)
 	s.mux.HandleFunc("GET /network/invite", s.networkInvite)
 	s.mux.HandleFunc("PATCH /network/devices/self", s.renameDevice)
 	s.mux.HandleFunc("PATCH /network/devices/{id}", s.labelDevice)
@@ -711,8 +712,15 @@ func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentReque
 		avatar := defaultAvatar()
 		request.Avatar = &avatar
 	}
+	acpCfg, err := cleanACP(request.ACP)
+	if err != nil {
+		return contract.Agent{}, err
+	}
 	provider, model, reasoning := s.defaultModel()
-	if request.Model != nil {
+	if acpCfg != nil {
+		// The external agent brings its own model; no provider is involved.
+		provider, model = "", ""
+	} else if request.Model != nil {
 		// An explicit model runs on the fallback endpoint, as before providers existed.
 		provider, model = "", strings.TrimSpace(*request.Model)
 		if model == "" || len(model) > 256 {
@@ -729,7 +737,7 @@ func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentReque
 	}
 	d := agentruntime.Definition{
 		Agent: contract.Agent{ID: ID(), Name: request.Name, Role: request.Role, Model: model, Avatar: request.Avatar,
-			Provider: provider, Reasoning: reasoning, CreatedBy: creator.ID},
+			Provider: provider, Reasoning: reasoning, ACP: acpCfg, CreatedBy: creator.ID},
 		Prompt: request.Prompt,
 		Tools:  []string{"read", "write", "edit", "bash", "find", "ls"},
 	}
@@ -766,6 +774,32 @@ func (s *Server) defaultModel() (provider, model, reasoning string) {
 	return "", "", settings.DefaultReasoning
 }
 
+// cleanACP validates an optional external-agent attachment. An empty command means
+// the agent is not attached (and, on update, detaches it back to a model).
+func cleanACP(a *contract.AgentACP) (*contract.AgentACP, error) {
+	if a == nil {
+		return nil, nil
+	}
+	command := strings.TrimSpace(a.Command)
+	if command == "" {
+		return nil, nil
+	}
+	if len(command) > 4096 || strings.ContainsAny(command, "\x00\r\n") {
+		return nil, invalidProfile("Enter a valid ACP command.")
+	}
+	if len(a.Args) > 64 {
+		return nil, invalidProfile("Too many ACP arguments.")
+	}
+	args := make([]string, len(a.Args))
+	for i, arg := range a.Args {
+		if len(arg) > 4096 || strings.ContainsAny(arg, "\x00") {
+			return nil, invalidProfile("Enter valid ACP arguments.")
+		}
+		args[i] = arg
+	}
+	return &contract.AgentACP{Command: command, Args: args}, nil
+}
+
 var errNoProvider = errors.New("no provider is set up")
 
 // autoModel is what a Not set bot runs on: the default model, else the first provider's preferred
@@ -795,7 +829,7 @@ func (s *Server) autoModel() (provider, model string, err error) {
 
 // withModel fills in this turn's model for a Not set bot.
 func (s *Server) withModel(d agentruntime.Definition) (agentruntime.Definition, error) {
-	if d.Agent.Model != "" {
+	if d.Agent.ACP != nil || d.Agent.Model != "" {
 		return d, nil
 	}
 	var err error
@@ -861,6 +895,8 @@ type agentPatch struct {
 	Model          *string                 `json:"model,omitempty"`
 	Reasoning      *string                 `json:"reasoning,omitempty"`
 	Fallback       *contract.AgentFallback `json:"fallback,omitempty"`
+	// The bot-facing edit tool decodes its input into this patch; only the API may set a command.
+	ACP *contract.AgentACP `json:"-"`
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
@@ -870,7 +906,7 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	profile, err := s.editAgent(r.Context(), r.PathValue("id"), agentPatch{
 		Name: request.Name, Role: request.Role, Prompt: request.Prompt, Workspace: request.Workspace,
-		Provider: request.Provider, Model: request.Model, Reasoning: request.Reasoning, Fallback: request.Fallback,
+		Provider: request.Provider, Model: request.Model, Reasoning: request.Reasoning, Fallback: request.Fallback, ACP: request.ACP,
 	})
 	if !s.profileError(w, err) {
 		s.respond(w, profile, err)
@@ -903,6 +939,14 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		if strings.TrimSpace(*patch.Model) == "" || len(*patch.Model) > 256 || len(*patch.Provider) > 128 || strings.ContainsAny(*patch.Model, "\x00\r\n") || (*patch.Provider != "" && !s.enabledModel(*patch.Provider, *patch.Model)) || (*patch.Provider == "" && !fallback(s.config.Factory)) {
 			return empty, invalidProfile("Choose an available model for this bot.")
 		}
+	}
+	var acpCfg *contract.AgentACP
+	if patch.ACP != nil {
+		cleaned, err := cleanACP(patch.ACP)
+		if err != nil {
+			return empty, err
+		}
+		acpCfg = cleaned
 	}
 	s.actorsMu.RLock()
 	defer s.actorsMu.RUnlock()
@@ -951,6 +995,9 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		fallback.Models = append([]contract.FallbackModel{}, fallback.Models...)
 		d.Agent.Fallback = &fallback
 	}
+	if patch.ACP != nil {
+		d.Agent.ACP = acpCfg
+	}
 	d.Agent.Active = false
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -961,7 +1008,7 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		return empty, err
 	}
 	changedPrompt := a.definition.Prompt != d.Prompt
-	if changedPrompt || a.definition.DelegationDisabled != d.DelegationDisabled || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace || a.definition.Agent.Model != d.Agent.Model || a.definition.Agent.Provider != d.Agent.Provider || a.definition.Agent.Reasoning != d.Agent.Reasoning || !reflect.DeepEqual(a.definition.Agent.Fallback, d.Agent.Fallback) {
+	if changedPrompt || a.definition.DelegationDisabled != d.DelegationDisabled || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace || a.definition.Agent.Model != d.Agent.Model || a.definition.Agent.Provider != d.Agent.Provider || a.definition.Agent.Reasoning != d.Agent.Reasoning || !reflect.DeepEqual(a.definition.Agent.Fallback, d.Agent.Fallback) || !reflect.DeepEqual(a.definition.Agent.ACP, d.Agent.ACP) {
 		a.revision++
 	}
 	a.definition = d

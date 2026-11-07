@@ -116,9 +116,11 @@ final class MenuAnchor: NSView {
                 choice.representedObject = section.id
                 choice.state = !pinned && sectionID == section.id ? .on : .off
             }
-            let main = add("Unassigned", symbol: "folder", action: #selector(moveChat(_:)), to: destinations)
-            main.state = !pinned && sectionID == nil ? .on : .off
-            destinations.addItem(.separator())
+            if !sections.isEmpty {
+                let main = add("Unassigned", symbol: "folder", action: #selector(moveChat(_:)), to: destinations)
+                main.state = !pinned && sectionID == nil ? .on : .off
+                destinations.addItem(.separator())
+            }
             add("Create section", symbol: "folder.badge.plus", action: #selector(createSection), to: destinations)
             item.submenu = destinations
         }

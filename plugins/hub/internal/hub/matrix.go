@@ -1001,9 +1001,15 @@ func (m *matrix) redact(ctx context.Context, chat, id string) error {
 	return m.do(ctx, http.MethodPut, path, map[string]any{}, nil)
 }
 
-func (m *matrix) markRead(ctx context.Context, chat, id string) error {
+// markRead clears up to id. An incognito read is private, so the count clears for this account
+// and its other devices but nobody else sees a receipt.
+func (m *matrix) markRead(ctx context.Context, chat, id string, incognito bool) error {
 	path := fmt.Sprintf("/_matrix/client/v3/rooms/%s/read_markers", url.PathEscape(chat))
-	body := map[string]string{"m.fully_read": id, "m.read": id}
+	receipt := "m.read"
+	if incognito {
+		receipt = "m.read.private"
+	}
+	body := map[string]string{"m.fully_read": id, receipt: id}
 	if err := m.do(ctx, http.MethodPost, path, body, nil); err != nil {
 		return err
 	}

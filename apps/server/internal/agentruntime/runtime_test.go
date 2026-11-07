@@ -16,3 +16,16 @@ func openDurable(t *testing.T, provider *httptest.Server) *DurableRuntime {
 	t.Cleanup(func() { _ = runtime.Close() })
 	return runtime
 }
+
+func TestACPSessionID(t *testing.T) {
+	for path, want := range map[string]string{
+		"":          "",
+		"acp:abc":   "abc",
+		"durable:7": "",
+		"other":     "",
+	} {
+		if got := acpSessionID(path); got != want {
+			t.Fatalf("acpSessionID(%q) = %q, want %q", path, got, want)
+		}
+	}
+}

@@ -198,7 +198,7 @@ public final class HubStore {
     }
 
     private func markRead(_ id: String) async {
-        guard !incognito, let index = chats.firstIndex(where: { $0.id == id }), chats[index].unread > 0,
+        guard let index = chats.firstIndex(where: { $0.id == id }), chats[index].unread > 0,
               let last = messages[id]?.last(where: { !$0.id.hasPrefix(Self.sendingPrefix) })?.id,
               reading.insert(id).inserted else { return }
         chats[index].unread = 0

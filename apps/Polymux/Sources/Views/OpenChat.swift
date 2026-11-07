@@ -45,7 +45,7 @@ struct ProfilePanel: View {
                 GroupEditor(thread: thread, session: session, jump: jump).id(thread.id)
             } else {
                 ProfileView(agent: agent, session: session, threadID: thread.id, attachments: openChat.attachments,
-                            runs: runs, inspector: true, show: openChat.show, locate: { attachment in
+                            runs: runs, inspector: true, locate: { attachment in
                                 #if os(iOS)
                                 close()
                                 #endif

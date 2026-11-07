@@ -378,6 +378,19 @@ public enum FallbackModelReasoning {
     public static let max = "max"
 }
 
+public struct AgentACP: Codable, Hashable, Sendable {
+    public var command: String
+    public var args: [String]?
+
+    public init(
+        command: String = "",
+        args: [String]? = nil
+    ) {
+        self.command = command
+        self.args = args
+    }
+}
+
 public struct Agent: Codable, Hashable, Sendable {
     public var id: String
     public var name: String
@@ -388,6 +401,7 @@ public struct Agent: Codable, Hashable, Sendable {
     public var provider: String?
     public var reasoning: String?
     public var fallback: AgentFallback?
+    public var acp: AgentACP?
     public var createdBy: String?
 
     public init(
@@ -400,6 +414,7 @@ public struct Agent: Codable, Hashable, Sendable {
         provider: String? = nil,
         reasoning: String? = nil,
         fallback: AgentFallback? = nil,
+        acp: AgentACP? = nil,
         createdBy: String? = nil
     ) {
         self.id = id
@@ -411,6 +426,7 @@ public struct Agent: Codable, Hashable, Sendable {
         self.provider = provider
         self.reasoning = reasoning
         self.fallback = fallback
+        self.acp = acp
         self.createdBy = createdBy
     }
 }
@@ -1272,6 +1288,7 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
     public var provider: String?
     public var avatar: AvatarDesign?
     public var sectionID: String?
+    public var acp: AgentACP?
 
     public init(
         initialTask: String? = nil,
@@ -1281,7 +1298,8 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         model: String? = nil,
         provider: String? = nil,
         avatar: AvatarDesign? = nil,
-        sectionID: String? = nil
+        sectionID: String? = nil,
+        acp: AgentACP? = nil
     ) {
         self.initialTask = initialTask
         self.name = name
@@ -1291,6 +1309,7 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         self.provider = provider
         self.avatar = avatar
         self.sectionID = sectionID
+        self.acp = acp
     }
 }
 
@@ -1315,6 +1334,7 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
     public var model: String?
     public var reasoning: String?
     public var fallback: AgentFallback?
+    public var acp: AgentACP?
 
     public init(
         name: String? = nil,
@@ -1323,7 +1343,8 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
         provider: String? = nil,
         model: String? = nil,
         reasoning: String? = nil,
-        fallback: AgentFallback? = nil
+        fallback: AgentFallback? = nil,
+        acp: AgentACP? = nil
     ) {
         self.name = name
         self.role = role
@@ -1332,6 +1353,7 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
         self.model = model
         self.reasoning = reasoning
         self.fallback = fallback
+        self.acp = acp
     }
 }
 

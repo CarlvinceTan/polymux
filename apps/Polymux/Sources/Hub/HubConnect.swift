@@ -496,6 +496,7 @@ struct HubMerge: View {
                 .padding(PanelStyle.contentInset)
             }
         }
+        .panelDismiss(onClose: { close() })
     }
 }
 
@@ -524,5 +525,6 @@ struct HubBroadcastEditor: View {
                 .padding(PanelStyle.contentInset)
             }
         }
+        .panelDismiss(onClose: { close() })
     }
 }

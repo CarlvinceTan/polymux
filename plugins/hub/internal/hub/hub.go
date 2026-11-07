@@ -393,9 +393,8 @@ func (s *service) chatRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /chats/{chat}/messages/{message}/read", func(w http.ResponseWriter, r *http.Request) {
 		client, err := s.client()
-		// Incognito reads leave no trace, so nobody sees them and the count stays.
-		if err == nil && !s.prefs.get().Incognito {
-			err = client.markRead(r.Context(), r.PathValue("chat"), r.PathValue("message"))
+		if err == nil {
+			err = client.markRead(r.Context(), r.PathValue("chat"), r.PathValue("message"), s.prefs.get().Incognito)
 		}
 		s.reply(w, err)
 	})
