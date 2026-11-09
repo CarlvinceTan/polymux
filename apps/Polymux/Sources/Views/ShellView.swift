@@ -22,6 +22,7 @@ struct ShellView: View {
     @State private var windowID = UUID()
     @State private var visibility = NavigationSplitViewVisibility.all
     @State private var connectionDismissed = false
+    @State private var serverUpdating = false
     @State private var searching = false
     @State private var searchTarget: SearchDestination?
     @State private var hover = RowHover()
@@ -412,6 +413,16 @@ struct ShellView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .environment(\.connectionDismissed, $connectionDismissed)
+        .environment(\.serverUpdating, serverUpdating)
+        .task {
+            // Quiet check; the notice also covers the restart that follows, when the server can't answer.
+            var last = Date.distantPast
+            while !Task.isCancelled {
+                if await session.client.serverUpdating() { last = .now }
+                serverUpdating = Date.now.timeIntervalSince(last) < 60 && (Date.now.timeIntervalSince(last) < 12 || !session.sidebar.isConnected)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
         #if os(macOS)
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .panelBarHost()

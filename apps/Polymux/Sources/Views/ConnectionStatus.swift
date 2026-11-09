@@ -6,11 +6,12 @@ struct ConnectionStatus: View {
     @State private var shown = false
     @State private var everConnected = false
     @State private var stalled = false
+    @Environment(\.serverUpdating) private var updating
 
     var body: some View {
-        WarningBubble(text: everConnected || stalled ? "Can’t reach server" : "Connecting…",
-                      symbol: everConnected || stalled ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath",
-                      visible: !connected && shown && !dismissed) { dismissed = true }
+        WarningBubble(text: updating ? "Server updating…" : everConnected || stalled ? "Can’t reach server" : "Connecting…",
+                      symbol: updating ? "arrow.triangle.2.circlepath" : everConnected || stalled ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath",
+                      visible: updating || !connected && shown && !dismissed) { dismissed = true }
             .frame(maxWidth: .infinity)
             .accessibilityIdentifier("connection.status")
             .task(id: connected) {
@@ -32,4 +33,6 @@ struct ConnectionStatus: View {
 
 extension EnvironmentValues {
     @Entry var connectionDismissed: Binding<Bool> = .constant(false)
+    /// The server is applying an update: a quiet status, not an error.
+    @Entry var serverUpdating = false
 }

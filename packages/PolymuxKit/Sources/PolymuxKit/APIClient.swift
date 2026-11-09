@@ -94,6 +94,12 @@ public struct APIClient: Sendable {
     /// The credential in use, to save for a server that's moving.
     public func currentToken() async -> String? { await credential.value() }
 
+    /// True while the server reports it is draining for an update; a failed check counts as no.
+    public func serverUpdating() async -> Bool {
+        struct Health: Decodable { let status: String }
+        return (try? await get("health", retrying: false) as Health)?.status == "updating"
+    }
+
     public func allowDevice(_ id: String) async throws {
         var request = try await request("network/devices/\(id)/allow")
         request.httpMethod = "POST"

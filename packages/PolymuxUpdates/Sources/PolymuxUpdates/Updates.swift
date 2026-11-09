@@ -18,15 +18,9 @@ import Sparkle
         #else
         let start = ProcessInfo.processInfo.environment["POLYMUX_UPDATES"] != "0"
         #endif
+        // Opening the app counts as overdue, so Sparkle checks as it starts instead of waiting out its interval.
+        if start { UserDefaults.standard.removeObject(forKey: "SULastCheckTime") }
         controller = SPUStandardUpdaterController(startingUpdater: start, updaterDelegate: self, userDriverDelegate: nil)
-        // Look for an update as the app opens, not only on Sparkle's schedule.
-        if start { DispatchQueue.main.async { [weak self] in self?.launchCheck() } }
-    }
-
-    private func launchCheck() {
-        let updater = controller.updater
-        guard updater.automaticallyChecksForUpdates, !updater.sessionInProgress else { return }
-        updater.checkForUpdatesInBackground()
     }
 
     /// Sparkle's scheduled-check preference; safe to read and write before the updater starts.
