@@ -582,7 +582,9 @@ struct ShellView: View {
                     .frame(width: panelWidth)
                     .background(SideSurface().ignoresSafeArea())
                     .overlay(alignment: .leading) {
+                        // The panel's surface runs behind the toolbar, so the divider does too.
                         SideDivider(width: $profileWidth) { profileBinding.wrappedValue = false }
+                            .ignoresSafeArea(.container, edges: .top)
                     }
                     .transition(EdgeSlide(width: panelWidth).combined(with: .opacity))
             }
