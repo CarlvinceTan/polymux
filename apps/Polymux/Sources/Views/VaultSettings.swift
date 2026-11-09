@@ -40,7 +40,10 @@ private struct VaultBrowser: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(PanelStyle.contentInset)
+        // The search bar tops the pane's first row, like the settings search beside it.
+        .padding(.top, 4)
+        .padding(.horizontal, PanelStyle.contentInset)
+        .padding(.bottom, PanelStyle.contentInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .privacySensitive()
         .task {
