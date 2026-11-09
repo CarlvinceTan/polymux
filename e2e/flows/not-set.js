@@ -21,7 +21,7 @@ if (state.truncated || buttons.length !== 1) throw new Error("Custom provider ac
 await app.click(buttons[0].element_token);
 await app.setValue({ role: "textfield", name: "Name" }, "");
 await app.typeText("Routing QA", { role: "textfield", name: "Name" });
-await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL" });
+await app.typeText(`${ADDRESS}/v1`, { role: "textfield", name: "Base URL" });
 await app.typeText("qa-model", { role: "textfield", name: "Model ID" });
 await app.click({ role: "button", name: "Add" });
 await app.click({ role: "button", name: "Save" });

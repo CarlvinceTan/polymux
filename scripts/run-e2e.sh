@@ -4,6 +4,7 @@
 # A "// @relaunch" line quits and reopens the app midway; "// @crash" kills it instead.
 # A "// @fresh" line starts no server, so the app runs its own as a new install does.
 # A "// @second-server" line starts another live server and gives the flow its pairing link as SECOND_LINK.
+# ADDRESS is the instance's own server, which flows can use as a provider that rejects every request.
 # "// @linked-job" links that server with this one first and runs it under launchd, so it can restart into a server moved to it.
 # Flows can call pick(app, item[, trigger]) to choose a menu item (trigger, a query or an opener function, defaults to New chat and reopens a menu that closed early); it returns a fresh handle once the menu has closed.
 # The signed fixture bundle is reused, but each flow gets fresh data and preferences.
@@ -307,7 +308,7 @@ for index, part in enumerate(parts):
     if not fixture:
         ready += "for (let i = 0; i < 40; i++) { try { const state = await (await cua.getApp(APP)).getState({ include_screenshot: false, max_elements: 1 }); if (state.window_title === 'Polymux') break; } catch (error) {} await cua.sleep(250); }\n"
     kdbx = os.path.abspath(os.path.join(os.path.dirname(flow), "..", "fixtures", "vault-kdbx.kdbx"))
-    script = "const APP = %s;\nconst PREVIOUS = %s;\nconst KDBX = %s;\nconst SECOND_LINK = %s;\n%s%s%s" % (json.dumps(app), json.dumps(previous), json.dumps(kdbx), json.dumps(os.environ.get("POLYMUX_SECOND_LINK", "")), PICK, ready, part)
+    script = "const APP = %s;\nconst PREVIOUS = %s;\nconst KDBX = %s;\nconst SECOND_LINK = %s;\nconst ADDRESS = %s;\n%s%s%s" % (json.dumps(app), json.dumps(previous), json.dumps(kdbx), json.dumps(os.environ.get("POLYMUX_SECOND_LINK", "")), json.dumps(os.environ.get("POLYMUX_ADDRESS", "")), PICK, ready, part)
     ui_start = time.monotonic()
     ok, out = driver("run_script", {"script": script, "timeout_ms": 120000, "max_calls": 500})
     ui_time += time.monotonic() - ui_start
