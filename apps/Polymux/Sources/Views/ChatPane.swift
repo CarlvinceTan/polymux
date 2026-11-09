@@ -231,29 +231,38 @@ struct ChatPane: View {
         .navigationTitle("")
         .overlay(alignment: .top) {
             if !showSearch {
-                ZStack(alignment: .top) {
-                    ChatHeader(title: chatTitle, subtitle: headerRole, members: members,
-                               isGroup: thread.isGroup, conversationID: thread.id, runs: store.runs, activity: store.activity,
-                               connected: session.sidebar.isConnected,
-                               edit: { showProfile.toggle() })
-                        .padding(.top, 8)
-                        .offset(y: -headerInset)
-                        .accessibilityLabel(thread.isGroup ? "Edit chat" : "Edit \(agent.name)’s profile")
-                        .help(thread.isGroup ? "Edit chat" : "Edit agent profile")
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
-                }
-                #if os(macOS)
-                .background {
-                    ToolbarAnchor { inset in
-                        ToolbarInset.last = inset
-                        toolbarInset = inset
+                ChatHeader(title: chatTitle, subtitle: headerRole, members: members,
+                           isGroup: thread.isGroup, conversationID: thread.id, runs: store.runs, activity: store.activity,
+                           connected: session.sidebar.isConnected,
+                           edit: { showProfile.toggle() })
+                    .padding(.top, 8)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+                    #if os(macOS)
+                    // Pinned to the window top, so it sits in place from the first frame
+                    // while the toolbar's height is still settling.
+                    .ignoresSafeArea(.container, edges: .top)
+                    #else
+                    .offset(y: -headerInset)
+                    #endif
+                    .accessibilityLabel(thread.isGroup ? "Edit chat" : "Edit \(agent.name)’s profile")
+                    .help(thread.isGroup ? "Edit chat" : "Edit agent profile")
+            }
+        }
+        .overlay(alignment: .top) {
+            if !showSearch {
+                Color.clear
+                    #if os(macOS)
+                    .background {
+                        ToolbarAnchor { inset in
+                            ToolbarInset.last = inset
+                            toolbarInset = inset
+                        }
                     }
-                }
-                #else
-                .background {
-                    ToolbarAnchor { top, safeTop in alignHeader(top: top, safeTop: safeTop) }
-                }
-                #endif
+                    #else
+                    .background {
+                        ToolbarAnchor { top, safeTop in alignHeader(top: top, safeTop: safeTop) }
+                    }
+                    #endif
             }
         }
         #if os(macOS)
