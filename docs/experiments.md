@@ -6,6 +6,6 @@ Experimental work lives on `experimental/*` branches so `dev` and `main` stay fr
 | --- | --- |
 | `experimental/plugins` | A plugin system: versioned packages from a JSON registry (`plugins/index.json`), a server-side plugin host, native plugin screens, and the Hub plugin that adopts a running Matrix Hub. Removed from `dev` in "Move plugins to experimental/plugins". |
 | `experimental/tauri` | A work-in-progress Tauri port of the app. |
-| `experimental/kmp` | A Kotlin Multiplatform client in `apps/kmp/`: a shared API client generated from `contracts/` plus a Compose desktop app, to test sharing client logic across Android, iOS, macOS, Windows and Linux. |
+| `experimental/kmp` | A Kotlin Multiplatform client and shared Compose Multiplatform UI in `apps/kmp/` for Android, iOS, macOS, Windows and Linux, generated from `contracts/`. |
 
 Add a row when you start a new experimental branch, and remove it when the branch is merged or deleted.
