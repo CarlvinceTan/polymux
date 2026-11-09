@@ -3,10 +3,13 @@
 branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 
 case "$branch" in
-	dev|"") exit 0;;
+	dev|"") ;;
 	*)
 		echo "Commit blocked: commits belong on dev or a detached temporary worktree." >&2
 		echo "Switch to dev or detach this worktree before committing." >&2
 		exit 1
 		;;
 esac
+
+root=$(git rev-parse --show-toplevel)
+exec python3 -B "$root/scripts/docs_check.py"

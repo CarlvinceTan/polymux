@@ -1,4 +1,3 @@
-// @cua
 // Four sidebar tabs stay in sync, and reopening returns to General.
 const app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });

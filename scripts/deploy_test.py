@@ -88,6 +88,16 @@ print(functools.reduce(lambda v, k: v[k], sys.argv[1].split("."), json.load(open
         self.assertEqual((self.state / "sha").read_text().strip(), "old")
         self.assertNotIn("install", (self.home / "calls").read_text())
 
+    def test_manual_mode_waits_until_asked(self):
+        data = self.home / ".polymux/data"
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "settings.json").write_text('{"settings":{"updateMode":"manual"}}')
+        self.assertEqual(self.deploy().returncode, 0)
+        self.assertEqual((self.state / "sha").read_text().strip(), "old")
+        result = subprocess.run(["/bin/sh", str(SCRIPT), "now"], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.state / "sha").read_text().strip(), "new-sha")
+
     def test_unset_channel_follows_dev(self):
         result = self.deploy()
         self.assertEqual(result.returncode, 0, result.stderr)

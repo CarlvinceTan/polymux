@@ -18,6 +18,7 @@ tool_tests() {
     basename "$test"
     python3 -B "$test"
   done
+  python3 -B "$ROOT/scripts/docs_check.py"
 }
 
 case "$TARGET" in

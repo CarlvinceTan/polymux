@@ -90,7 +90,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | First-run welcome | Shown once on a new install, steps to permissions counted from the server, Settings reopens them | flow | `fresh.js`, `fixture-onboarding.js` |
 | Move | Preview, move, app follows, old copy, a new server beside it | flow | `move.js` |
 | Merge | Preview, merge, both sets of bots, same names told apart, old server goes | flow | `merge.js` |
-| Vault | Locked, unlocked, import | flow | `vault.js`, `vault_browser.js`, `vault_kdbx.js`, `vault_passkey.js` (always on Control), `vault_values.js` |
+| Vault | Locked, unlocked, import | flow | `vault.js`, `vault_browser.js`, `vault_kdbx.js`, `vault_passkey.js`, `vault_values.js` |
 | Updates | Check and states | flow | `fixture-updates.js` |
 
 ## States

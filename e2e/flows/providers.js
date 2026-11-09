@@ -1,4 +1,3 @@
-// @cua
 // Provider methods stay distinct; keys and manual endpoints feed the searchable default model picker.
 let app = await cua.getApp(APP);
 async function confirm(label) {

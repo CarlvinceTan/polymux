@@ -149,6 +149,7 @@ public struct Settings: Codable, Hashable, Sendable {
     public var defaultModel: String
     public var defaultReasoning: String
     public var updateChannel: String?
+    public var updateMode: String?
     public var switcherBadges: Bool?
 
     public init(
@@ -167,6 +168,7 @@ public struct Settings: Codable, Hashable, Sendable {
         defaultModel: String = "",
         defaultReasoning: String = "",
         updateChannel: String? = nil,
+        updateMode: String? = nil,
         switcherBadges: Bool? = nil
     ) {
         self.revision = revision
@@ -184,6 +186,7 @@ public struct Settings: Codable, Hashable, Sendable {
         self.defaultModel = defaultModel
         self.defaultReasoning = defaultReasoning
         self.updateChannel = updateChannel
+        self.updateMode = updateMode
         self.switcherBadges = switcherBadges
     }
 }
@@ -203,6 +206,11 @@ public enum SettingsUpdateChannel {
     public static let stable = "stable"
 }
 
+public enum SettingsUpdateMode {
+    public static let automatic = "automatic"
+    public static let manual = "manual"
+}
+
 public struct SettingsPatch: Codable, Hashable, Sendable {
     public var appearance: String?
     public var liveProvider: String?
@@ -217,6 +225,7 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
     public var defaultModel: String?
     public var defaultReasoning: String?
     public var updateChannel: String?
+    public var updateMode: String?
     public var switcherBadges: Bool?
 
     public init(
@@ -233,6 +242,7 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         defaultModel: String? = nil,
         defaultReasoning: String? = nil,
         updateChannel: String? = nil,
+        updateMode: String? = nil,
         switcherBadges: Bool? = nil
     ) {
         self.appearance = appearance
@@ -248,6 +258,7 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         self.defaultModel = defaultModel
         self.defaultReasoning = defaultReasoning
         self.updateChannel = updateChannel
+        self.updateMode = updateMode
         self.switcherBadges = switcherBadges
     }
 }
@@ -265,6 +276,11 @@ public enum SettingsPatchDefaultReasoning {
 public enum SettingsPatchUpdateChannel {
     public static let nightly = "nightly"
     public static let stable = "stable"
+}
+
+public enum SettingsPatchUpdateMode {
+    public static let automatic = "automatic"
+    public static let manual = "manual"
 }
 
 public struct AgentFallback: Codable, Hashable, Sendable {

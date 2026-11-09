@@ -1,4 +1,3 @@
-// @cua
 // Accounts stay within one provider row; reordering moves and persists whole provider groups.
 let app = await cua.getApp(APP);
 async function confirm(label) {

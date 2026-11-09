@@ -49,24 +49,18 @@ class E2ETests(unittest.TestCase):
         tool = Path(args[0]).name
         output, code = "", 0
         if tool == "cua-driver":
+            args = [args[0], *args[2:]] if args[1] == "call" else args
             request = json.loads(args[2])
             if args[1] == "run_script":
                 self.scripts.append(request)
                 result = self.results.pop(0) if self.results else {"ok": True, "value": "ok"}
+            elif args[1] == "list_windows":
+                result = {"windows": [{"is_on_screen": True}]}
             elif args[1] == "list_apps":
-                result = {"apps": [{"pid": int(self.front), "active": True}] if self.front else []}
+                # An empty front means the driver can't observe the desktop: no apps key, as on a failed call.
+                result = {"apps": [{"pid": int(self.front), "active": True}]} if self.front else {"ok": False}
             else:
                 result = {"ok": not (args[1] == "start_session" and self.session_error)}
-            output = json.dumps(result)
-        elif tool == "control.sh":
-            if args[1] == "windows":
-                output = json.dumps({"windows": [{"onscreen": True}]})
-            else:
-                output = json.dumps({"ok": True, "frontmost": int(self.front) if self.front else 0})
-        elif tool == "node":
-            self.scripts.append(json.loads(kwargs["input"]))
-            self.control_env = kwargs["env"]
-            result = self.results.pop(0) if self.results else {"ok": True, "value": "ok"}
             output = json.dumps(result)
             code = 0 if result.get("ok") else 1
         elif tool == "ditto":
@@ -136,18 +130,6 @@ class E2ETests(unittest.TestCase):
         })
         self.assertFalse(self.driver_calls("set_config"))
         self.assertFalse(self.driver_calls("set_agent_cursor_enabled"))
-
-    def test_control_driver_has_no_cua_fallback_and_cleans_up(self):
-        self.env["POLYMUX_E2E_DRIVER"] = "control"
-        source = "// @fixture --verify-fixture --verify-tools\nreturn 'ok';"
-        self.assertIn("ok   flow.js", self.run_flow(source))
-        self.assertEqual(self.control_env["POLYMUX_CONTROL_FIXTURE"], "1")
-        self.results = [{"ok": False, "code": "unsupported_action", "error": "native refusal"}]
-        with self.assertRaises(SystemExit):
-            self.run_flow(source)
-        self.assertFalse(any(args[0] == "cua-driver" for args in self.calls))
-        self.assertEqual(self.signals, [(901, signal.SIGTERM), (902, signal.SIGTERM)])
-        self.assertFalse((self.root / "fixture.pid").exists())
 
     def test_fixture_reuses_bundle_but_not_data_or_preferences(self):
         source = "// @fixture --verify-fixture --verify-tools\nreturn 'ok';"

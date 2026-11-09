@@ -260,6 +260,15 @@
             "stable"
           ]
         },
+        "updateMode": {
+          "type": "string",
+          "description": "Whether the server applies updates itself or waits for a manual update.",
+          "x-go-value": true,
+          "enum": [
+            "automatic",
+            "manual"
+          ]
+        },
         "switcherBadges": {
           "type": "boolean"
         }
@@ -338,6 +347,14 @@
           "enum": [
             "nightly",
             "stable"
+          ]
+        },
+        "updateMode": {
+          "type": "string",
+          "description": "Whether the server applies updates itself or waits for a manual update.",
+          "enum": [
+            "automatic",
+            "manual"
           ]
         },
         "switcherBadges": {

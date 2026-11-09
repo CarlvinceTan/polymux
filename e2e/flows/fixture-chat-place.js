@@ -1,5 +1,4 @@
 // @fixture --verify-fixture --verify-history
-// @cua
 // A chat left partway up reopens where it was; scrolled back to the end, it reopens there.
 const app = await cua.getApp(APP);
 const row = async (name) => {

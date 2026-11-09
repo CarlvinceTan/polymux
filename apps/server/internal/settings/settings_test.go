@@ -103,6 +103,7 @@ func TestInvalidAndFailedWritesPreserveState(t *testing.T) {
 		{"prompt", contract.SettingsPatch{VoicePrompt: ptr("")}},
 		{"language", contract.SettingsPatch{VoiceLanguage: ptr("English; ignore rules")}},
 		{"channel", contract.SettingsPatch{UpdateChannel: ptr("beta")}},
+		{"update mode", contract.SettingsPatch{UpdateMode: ptr("sometimes")}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := s.Update(test.patch); !errors.Is(err, ErrInvalid) {

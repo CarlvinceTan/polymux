@@ -1,4 +1,3 @@
-// @cua
 // The compact native creation menu clears its trigger and opens both forms. APP is injected by scripts/run-e2e.sh.
 let app = await cua.getApp(APP);
 await app.waitFor({ role: "button", name: "Search" });

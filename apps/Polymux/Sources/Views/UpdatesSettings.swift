@@ -43,6 +43,10 @@ struct UpdatesSettings: View {
                                                                set: { settings?.edit(SettingsPatch(updateChannel: $0)) }),
                            options: [("Nightly", SettingsUpdateChannel.nightly), ("Stable", SettingsUpdateChannel.stable)])
                 .disabled(settings?.value == nil)
+            SettingsPicker("Server updates", selection: Binding(get: { settings?.value?.updateMode ?? SettingsUpdateMode.automatic },
+                                                               set: { settings?.edit(SettingsPatch(updateMode: $0)) }),
+                           options: [("Automatic", SettingsUpdateMode.automatic), ("Manual", SettingsUpdateMode.manual)])
+                .disabled(settings?.value == nil)
             #if os(macOS)
             if let status = Updates.shared.status {
                 Text(status).font(.footnote).foregroundStyle(.muted)

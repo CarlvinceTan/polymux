@@ -1,4 +1,3 @@
-// @cua
 // Unassigned shows only beside other sections, excludes pins and assigned chats, and persists its section controls.
 let app = await cua.getApp(APP);
 const state = await app.getState({ include_screenshot: false });

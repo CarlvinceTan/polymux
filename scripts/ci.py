@@ -11,7 +11,7 @@ def affected(paths):
     go_packages = ("packages/runtime/", "packages/memory/", "packages/search/", "packages/vault/")
     server = shared or any(path.startswith(("apps/server/", "go.work", *go_packages)) for path in paths)
     swift = shared or any(
-        path.startswith(("apps/Polymux/", "packages/", "tools/control/", "Package.", ".agents/skills/avatar-preview/"))
+        path.startswith(("apps/Polymux/", "packages/", "Package.", ".agents/skills/avatar-preview/"))
         and not path.startswith(go_packages) for path in paths
     )
     return {"server": server, "swift": swift}

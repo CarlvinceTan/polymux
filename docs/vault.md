@@ -121,7 +121,6 @@ From the repository root:
 swift test --filter VaultTests
 scripts/check.sh all
 scripts/run-e2e.sh e2e/flows/vault.js e2e/flows/vault_kdbx.js e2e/flows/settings.js e2e/flows/vault_browser.js e2e/flows/vault_values.js
-scripts/run-e2e.sh --driver control e2e/flows/vault_passkey.js
 ```
 
 The flows cover browsing/search, direct entry and replacement, clearing values, recovery-code entry, private chat cards, passkeys, and encrypted KDBX import. Server and client tests verify that no read or save response returns saved values, metadata edits preserve hidden content, stale edits fail, cancelled editors stay closed, imports are atomic, edits keep fields other KeePass apps added, synced copies merge (including offline edits, deletions and conflict copies), and credential-use operations retain their existing boundaries. Optional Chromium tests exercise real filling and WebAuthn use.

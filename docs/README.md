@@ -21,7 +21,6 @@ Paths below are relative to the repository root.
 | [`contracts/`](../contracts/) | Shared API schema and code generation for the server and clients. |
 | [`scripts/`](../scripts/) | Build, run, test, installation, and delivery commands. |
 | [`e2e/`](../e2e/) | UI test flows and fixtures. |
-| [`tools/`](../tools/) | Developer tools, including the experimental Control observer. |
 | [`.agents/skills/`](../.agents/skills/) | Task-specific guidance and helper tools for coding agents. See [Project skills](skills.md). |
 | [`docs/`](./) | Developer overviews and focused references, indexed below. |
 | [`.github/workflows/`](../.github/workflows/) | CI checks and release workflows. |
@@ -37,7 +36,7 @@ Generated output is separate from source: `.build/` holds caches and local build
 | [Project skills](skills.md) | Available coding-agent skills, what they do, and when to use them. |
 | [Development delivery](development.md) | Development-channel builds, deployment, TestFlight, and delivery status—not general local setup. |
 | [Vault](vault.md) | Credential handling, private cards, secret references, and security boundaries. |
-| [Control candidate](control.md) | The observation-only UI tooling experiment and its current limits. E2E input still uses Cua. |
+| [Experiments](experiments.md) | Experimental branches kept out of `dev` and `main`, and what each is about. |
 | [References](references.md) | Other products that inform Polymux's behaviour. |
 | [Benchmarks](benchmarks.md) | The planned benchmark index: quality, speed and cost across harnesses, and how it stays honest. |
 

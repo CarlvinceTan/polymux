@@ -1,6 +1,5 @@
 """Check command forwarding, build ownership, cancellation, and Control caching."""
 
-from importlib.util import module_from_spec, spec_from_file_location
 import os
 from pathlib import Path
 import signal
@@ -9,13 +8,9 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parent
 LOCKED = SCRIPTS / "lib/locked.py"
-spec = spec_from_file_location("control_build", SCRIPTS / "control.py")
-control = module_from_spec(spec)
-spec.loader.exec_module(control)
 
 
 class ToolingTests(unittest.TestCase):
@@ -81,31 +76,6 @@ class ToolingTests(unittest.TestCase):
             self.assertEqual(calls.read_text().splitlines(), ["build"])
         finally:
             if process.poll() is None: process.terminate(); process.communicate(timeout=6)
-
-    def test_control_rebuilds_only_for_changed_inputs(self):
-        package = self.root / "tools/control"
-        (package / "Sources/Control").mkdir(parents=True)
-        (package / "Package.swift").write_text("package")
-        source = package / "Sources/Control/Main.swift"
-        source.write_text("first")
-        binary = self.root / ".build/control/debug/control"
-
-        def build(*_args, **_kwargs):
-            binary.parent.mkdir(parents=True, exist_ok=True)
-            binary.write_text(source.read_text())
-
-        with patch.object(control.subprocess, "run", side_effect=build) as run:
-            control.prepare(self.root, "toolchain-1")
-            control.prepare(self.root, "toolchain-1")
-            self.assertEqual(run.call_count, 1)
-            source.write_text("other")
-            control.prepare(self.root, "toolchain-1")
-            self.assertEqual(run.call_count, 2)
-            control.prepare(self.root, "toolchain-2")
-            self.assertEqual(run.call_count, 3)
-            binary.unlink()
-            control.prepare(self.root, "toolchain-2")
-            self.assertEqual(run.call_count, 4)
 
     def test_check_does_not_replace_existing_destination(self):
         scripts = self.root / "scripts"

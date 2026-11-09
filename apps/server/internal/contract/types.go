@@ -69,6 +69,7 @@ type Settings struct {
 	DefaultModel     string       `json:"defaultModel"`
 	DefaultReasoning string       `json:"defaultReasoning"`
 	UpdateChannel    string       `json:"updateChannel,omitempty"`
+	UpdateMode       string       `json:"updateMode,omitempty"`
 	SwitcherBadges   *bool        `json:"switcherBadges,omitempty"`
 }
 
@@ -82,6 +83,8 @@ const (
 	SettingsDefaultReasoningMax     = "max"
 	SettingsUpdateChannelNightly    = "nightly"
 	SettingsUpdateChannelStable     = "stable"
+	SettingsUpdateModeAutomatic     = "automatic"
+	SettingsUpdateModeManual        = "manual"
 )
 
 type SettingsPatch struct {
@@ -98,6 +101,7 @@ type SettingsPatch struct {
 	DefaultModel     *string       `json:"defaultModel,omitempty"`
 	DefaultReasoning *string       `json:"defaultReasoning,omitempty"`
 	UpdateChannel    *string       `json:"updateChannel,omitempty"`
+	UpdateMode       *string       `json:"updateMode,omitempty"`
 	SwitcherBadges   *bool         `json:"switcherBadges,omitempty"`
 }
 
@@ -111,6 +115,8 @@ const (
 	SettingsPatchDefaultReasoningMax     = "max"
 	SettingsPatchUpdateChannelNightly    = "nightly"
 	SettingsPatchUpdateChannelStable     = "stable"
+	SettingsPatchUpdateModeAutomatic     = "automatic"
+	SettingsPatchUpdateModeManual        = "manual"
 )
 
 type AgentFallback struct {

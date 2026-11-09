@@ -1,4 +1,3 @@
-// @cua
 // A section's New Bot action retains its destination across relaunch without affecting global creation.
 let app = await cua.getApp(APP);
 const state = await app.getState({ include_screenshot: false });

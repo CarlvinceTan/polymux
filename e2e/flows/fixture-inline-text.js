@@ -1,5 +1,4 @@
 // @fixture --verify-fixture --verify-profile
-// @cua
 // First focus selects an inline value; later caret movement remains ordinary editing.
 const app = await cua.getApp(APP);
 let chief;

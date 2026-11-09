@@ -206,6 +206,9 @@ func snapshot(d document) contract.Settings {
 	if v.UpdateChannel == "" {
 		v.UpdateChannel = contract.SettingsUpdateChannelNightly
 	}
+	if v.UpdateMode == "" {
+		v.UpdateMode = contract.SettingsUpdateModeAutomatic
+	}
 	v.SpeechKeys = []string{}
 	return v
 }
@@ -261,6 +264,9 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	if p.UpdateChannel != nil {
 		v.UpdateChannel = *p.UpdateChannel
 	}
+	if p.UpdateMode != nil {
+		v.UpdateMode = *p.UpdateMode
+	}
 	if !valid(*v) {
 		return contract.Settings{}, ErrInvalid
 	}
@@ -296,6 +302,9 @@ func valid(v contract.Settings) bool {
 		return false
 	}
 	if v.UpdateChannel != "" && v.UpdateChannel != contract.SettingsUpdateChannelNightly && v.UpdateChannel != contract.SettingsUpdateChannelStable {
+		return false
+	}
+	if v.UpdateMode != "" && v.UpdateMode != contract.SettingsUpdateModeAutomatic && v.UpdateMode != contract.SettingsUpdateModeManual {
 		return false
 	}
 	if !ValidReasoning(v.DefaultReasoning) || v.DefaultModel != "" && !chatModel.MatchString(v.DefaultModel) ||

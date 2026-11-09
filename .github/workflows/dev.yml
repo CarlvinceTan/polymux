@@ -1,7 +1,10 @@
 name: Development updates
 
-# Keep delivery manual while TestFlight credentials and first-install checks are pending.
+# A push to dev builds the Mac Nightly (and the iPhone build when IOS_RUNNER is set) once the repository
+# variable DEV_DELIVERY is "true". Until then delivery stays manual; see docs/development.md.
 on:
+  push:
+    branches: [dev]
   workflow_dispatch:
     inputs:
       ios:
@@ -18,7 +21,7 @@ concurrency:
 
 jobs:
   verify:
-    if: github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux'
+    if: github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')
     uses: ./.github/workflows/tests.yml
 
   version:
@@ -35,9 +38,10 @@ jobs:
         run: python3 scripts/dev-version.py "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   ios:
-    if: inputs.ios
+    # IOS_RUNNER names a self-hosted Mac signed in to Xcode, so no App Store Connect key is needed.
+    if: inputs.ios || (github.event_name == 'push' && vars.IOS_RUNNER != '')
     needs: version
-    runs-on: xcode-27
+    runs-on: ${{ vars.IOS_RUNNER || 'xcode-27' }}
     environment: development
     env:
       POLYMUX_BUILD_NUMBER: ${{ needs.version.outputs.ios }}
@@ -47,9 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: maxim-lobanov/setup-xcode@v1
+        if: vars.IOS_RUNNER == ''
         with:
           xcode-version: latest-stable
       - name: Install App Store Connect key
+        if: vars.IOS_RUNNER == ''
         env:
           ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
         run: |

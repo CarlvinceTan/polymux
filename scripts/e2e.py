@@ -6,8 +6,7 @@ Usage: scripts/e2e.py [--jobs N] [--changed [BASE]] [--dry-run] [flow.js ...]
 Flows run side by side on Cua at the pace that gets the most done: the run starts from the last good pace, adds a job
 while flows keep close to their best times, stops when they slow, gives one back when they crawl, drops by a quarter
 after a failure, and waits while the machine is busy. --jobs N holds it at N.
-With --driver control, flows with a "// @cua" line take turns on Cua alongside. Flows with a "// @control" line always
-run alone on Control. Fixture flows share an instance per batch; real-server flows each get a fresh server, so one
+Fixture flows share an instance per batch; real-server flows each get a fresh server, so one
 flow's data can't affect the next. A failure is retried alone before it counts.
 """
 
@@ -34,8 +33,6 @@ HOPELESS = 6
 BUSY = 1.6
 CROWDED = 2.2
 RESULT = re.compile(r"^\s*(ok|FAIL)\s+(\S+\.js)\b(?:.*?\(([\d.]+)s)?")
-CUA = re.compile(r"^// @cua", re.M)
-CONTROL = re.compile(r"^// @control", re.M)
 APP_SOURCES = ("apps/Polymux/", "apps/server/", "packages/", "contracts/", "Package.swift", "go.work", "scripts/run")
 
 
@@ -66,17 +63,11 @@ def affected(changed, config, available):
 
 
 def lanes(names, read):
-    """Splits flows into (fixture, server, cua)."""
-    fixture, server, cua = [], [], []
+    """Splits flows into (fixture, server)."""
+    fixture, server = [], []
     for name in names:
-        text = read(name)
-        if CUA.search(text):
-            cua.append(name)
-        elif text.startswith("// @fixture"):
-            fixture.append(name)
-        else:
-            server.append(name)
-    return fixture, server, cua
+        (fixture if read(name).startswith("// @fixture") else server).append(name)
+    return fixture, server
 
 
 def batches(names, times):
@@ -190,12 +181,12 @@ class Run:
         self.times = json.loads(TIMES.read_text()) if TIMES.exists() else {}
         self.pace = None
 
-    def execute(self, names, driver, parallel):
+    def execute(self, names, parallel):
         environment = dict(os.environ, POLYMUX_E2E_PREBUILT="1")
         if parallel:
             environment["POLYMUX_E2E_PARALLEL"] = "1"
         paths = [str(FLOWS / name) for name in names]
-        process = subprocess.Popen([str(ROOT / "scripts/run-e2e.sh"), "--driver", driver, *paths], cwd=ROOT, env=environment,
+        process = subprocess.Popen([str(ROOT / "scripts/run-e2e.sh"), *paths], cwd=ROOT, env=environment,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         seen, last = set(), None
         for line in process.stdout:
@@ -242,7 +233,6 @@ def build():
 def main():
     parser = argparse.ArgumentParser(description="Run UI flows quickly.")
     parser.add_argument("--jobs", type=int, help="run exactly this many at once instead of pacing")
-    parser.add_argument("--driver", choices=["control", "cua"], default="cua")
     parser.add_argument("--changed", nargs="?", const="HEAD", help="only flows affected by changes since this ref")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("flows", nargs="*")
@@ -252,18 +242,13 @@ def main():
     if options.changed:
         names = affected(changed_files(options.changed), json.loads((ROOT / "e2e/areas.json").read_text()), available)
     read = lambda name: (FLOWS / name).read_text()
-    control = [name for name in names if CONTROL.search(read(name))]
-    fixture, server, cua = lanes([name for name in names if name not in control], read)
-    if options.driver == "cua":
-        for name in cua:
-            (fixture if read(name).startswith("// @fixture") else server).append(name)
-        cua = []
-    print("%d flows: %d fixture, %d real server, %d on Cua, %d on Control" % (len(names), len(fixture), len(server), len(cua), len(control)))
+    fixture, server = lanes(names, read)
+    print("%d flows: %d fixture, %d real server" % (len(names), len(fixture), len(server)))
     if options.dry_run or not names:
         print("\n".join(names))
         return 0
     started = time.monotonic()
-    prepare = start_driver if options.driver == "cua" or cua else lambda: None
+    prepare = start_driver
     prepare()
     build()
     print("Built in %ds" % (time.monotonic() - started), flush=True)
@@ -274,27 +259,18 @@ def main():
     pace = Pace(options.jobs, options.jobs, options.jobs) if options.jobs else Pace(int(saved or FLOOR), ceiling())
     run.pace = pace
 
-    def cua_lane():
-        for name in cua:
-            run.execute([name], "cua", True)
-
-    lane = threading.Thread(target=cua_lane)
-    lane.start()
-    dispatch(work, pace, lambda group: run.execute(group, options.driver, True), lock=run.lock, hopeless=run.hopeless,
+    dispatch(work, pace, lambda group: run.execute(group, True), lock=run.lock, hopeless=run.hopeless,
              prepare=prepare)
-    lane.join()
     if run.hopeless():
         print("Stopped early: the first %d flows all failed, so check the setup, not the flows." % len(run.results))
         return 1
-    for name in control:
-        run.execute([name], "control", False)
     failed = [name for name, passed in run.results.items() if not passed]
     print("All flows done in %ds" % (time.monotonic() - started), flush=True)
     if failed:
         print("Retrying %d alone" % len(failed), flush=True)
     for name in failed:
         prepare()
-        run.execute([name], "control" if name in control else "cua" if name in cua else options.driver, False)
+        run.execute([name], False)
     still = sorted(name for name, passed in run.results.items() if not passed)
     TIMES.parent.mkdir(exist_ok=True)
     TIMES.write_text(json.dumps(run.times, indent=1, sort_keys=True))

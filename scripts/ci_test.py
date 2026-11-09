@@ -19,7 +19,7 @@ class SelectionTests(unittest.TestCase):
         for path in ("apps/server/internal/example_test.go", "go.work.sum", "packages/runtime/runtime.go",
                      "packages/memory/memory_test.go", "packages/vault/go.mod", "packages/search/search_test.go"):
             self.assertEqual(affected([path]), {"server": True, "swift": False})
-        for path in ("Package.resolved", "apps/Polymux/Info.plist", "packages/AvatarKit/removed.swift", "tools/control/client.mjs"):
+        for path in ("Package.resolved", "apps/Polymux/Info.plist", "packages/AvatarKit/removed.swift"):
             self.assertEqual(affected([path]), {"server": False, "swift": True})
 
     def test_manual_delivery_runs_every_check(self):

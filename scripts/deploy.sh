@@ -1,8 +1,9 @@
 #!/bin/sh
 # Keep this Mac's server on its update channel, chosen in Settings: Nightly is the newest dev
 # commit whose server tests passed in CI, and Stable is the latest published release.
-# Usage: scripts/deploy.sh setup   once, from a checkout; it then runs every five minutes
+# Usage: scripts/deploy.sh setup   once, from a checkout; it then runs every 30 seconds
 #        polymux-deploy            one deploy pass, as the login job runs it
+#        polymux-deploy now        update now, even when server updates are Manual
 set -eu
 SRC="$HOME/.polymux/src"
 STATE="$HOME/.polymux/deploy"
@@ -29,7 +30,7 @@ setup() {
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array><string>$BIN/polymux-deploy</string></array>
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>$PATH</string></dict>
-  <key>StartInterval</key><integer>300</integer>
+  <key>StartInterval</key><integer>30</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$HOME/.polymux/logs/deploy.log</string>
   <key>StandardErrorPath</key><string>$HOME/.polymux/logs/deploy.log</string>
@@ -38,7 +39,7 @@ setup() {
 PLIST_EOF
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
   launchctl bootstrap "$DOMAIN" "$AGENTS/$LABEL.plist"
-  echo "Deploying $BRANCH every five minutes. Log: ~/.polymux/logs/deploy.log"
+  echo "Deploying $BRANCH every 30 seconds. Log: ~/.polymux/logs/deploy.log"
 }
 
 repository() {
@@ -47,6 +48,11 @@ repository() {
 
 channel() {
   plutil -extract settings.updateChannel raw -o - "$HOME/.polymux/data/settings.json" 2>/dev/null || echo nightly
+}
+
+# Automatic unless Settings turned server updates to Manual.
+mode() {
+  plutil -extract settings.updateMode raw -o - "$HOME/.polymux/data/settings.json" 2>/dev/null || echo automatic
 }
 
 # Prints success, pending, or the failed conclusion of the commit's CI check.
@@ -72,6 +78,8 @@ rollback() {
 }
 
 deploy() {
+  # A manual pass (polymux-deploy now) updates even when server updates are set to Manual.
+  [ "${1:-}" = now ] || [ "$(mode)" != manual ] || return 0
   mkdir -p "$STATE"
   shlock -f "$STATE/lock" -p $$ || return 0
   trap 'rm -f "$STATE/lock"' EXIT
@@ -131,5 +139,6 @@ deploy() {
 case ${1:-deploy} in
   setup) setup ;;
   deploy) deploy ;;
-  *) echo "usage: $0 [setup|deploy]" >&2; exit 2 ;;
+  now) deploy now ;;
+  *) echo "usage: $0 [setup|deploy|now]" >&2; exit 2 ;;
 esac

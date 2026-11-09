@@ -1,7 +1,15 @@
 # Development delivery
 
 The development channel follows `dev`; it is separate from public `app-v*` releases.
-Client delivery is manual-only while TestFlight setup is paused. Pushing `dev` runs validation, not client uploads or development-feed publishing. Configure credentials and complete the first-install checks before dispatching delivery.
+Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac Nightly and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to internal TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
+
+To turn it on:
+
+1. Register a self-hosted runner on the Mac signed in to Xcode with the FlareHQ account (Settings → Actions → Runners → New self-hosted runner), and give it a label such as `polymux-ios`. This replaces the App Store Connect API key until the Account Holder enables one.
+2. In Settings → Secrets and variables → Actions → Variables, set `IOS_RUNNER` to that label and `DEV_DELIVERY` to `true`.
+3. Keep `scripts/local/testflight-job.sh` stopped (`launchctl bootout gui/$(id -u)/com.flarehq.polymux.testflight`) so the poller and the runner don't upload the same commit twice.
+
+The server follows `dev` through `scripts/deploy.sh`, which checks every 30 seconds and applies a passing commit through the safe drain below. Clients check for updates when the app opens, in addition to their scheduled checks.
 
 Progress — November 1, 2026: build 1.0.1 was uploaded to internal TestFlight from the local Mac using the Xcode account (no API key). CI still needs the Account Holder to enable App Store Connect API access.
 
@@ -135,13 +143,13 @@ POLYMUX_TEST_TOKEN_FILE=/path/to/test/data/devices/local-token \
 Several comma-separated test addresses exercise the same server through multiple
 providers. Never point these checks at a personal installation.
 
-On the server Mac, run `scripts/deploy.sh setup` from a checkout once. The launch agent polls `dev` every five minutes from its own `~/.polymux/src` checkout. The **Server channel** in Settings → Updates picks what it follows: Nightly is `dev`, and Stable is the latest published release. Stable never moves a server backwards, so switching to it waits for the next release newer than the running build. Nightly requires a successful `server` check on the candidate commit and does not run pull-request code on the server.
+On the server Mac, run `scripts/deploy.sh setup` from a checkout once. The launch agent polls `dev` every 30 seconds from its own `~/.polymux/src` checkout. The **Server channel** in Settings → Updates picks what it follows: Nightly is `dev`, and Stable is the latest published release. Stable never moves a server backwards, so switching to it waits for the next release newer than the running build. Nightly requires a successful `server` check on the candidate commit and does not run pull-request code on the server.
 
 - `~/.polymux/deploy/sha` records the last successfully applied commit, not failed CI candidates.
 - If there are no server/build-script changes, it advances that marker without restarting.
 - Build first, then acquire the server's owner-authenticated drain protocol. New messages stay queued, while admitted work finishes. `seal` closes mutations atomically before restart; a busy server waits rather than being force-stopped. Unsupported or cancelled drains defer installation without quarantining the commit.
 - The candidate starts with admission still paused. Health requires an authenticated maintenance response with the expected build identity and the same PID across five samples; only then does the installer release queued work.
-- A failed candidate is quarantined in `~/.polymux/deploy/failed-sha`; it is not retried every five minutes. Binary rollback requires another successful safe-drain handshake, compatible data, and verified rollback health. If the candidate cannot answer or safety cannot be established, admission remains paused and recovery is manual.
+- A failed candidate is quarantined in `~/.polymux/deploy/failed-sha`; it is not retried on every pass. Binary rollback requires another successful safe-drain handshake, compatible data, and verified rollback health. If the candidate cannot answer or safety cannot be established, admission remains paused and recovery is manual.
 - To retry a quarantined commit after diagnosing it, remove that marker deliberately and run `~/.local/bin/polymux-deploy`. Prefer pushing a fixed commit.
 - Logs: `~/.polymux/logs/deploy.log` and `~/.polymux/logs/launchd.log`.
 
@@ -209,6 +217,8 @@ Keep SSH or another independent coding route available if the app/server fails. 
 
 ## Local checks
 
+Enable the repository's Git hooks once per clone with `git config core.hooksPath .githooks`. The pre-commit hook allows commits only on `dev` (or a detached worktree) and runs `scripts/docs_check.py`, which fails when `README.md`, `AGENTS.md`, `DESIGN.md` or `docs/` link to or name files that no longer exist, or when `docs/README.md` omits a guide. The pre-push hook allows pushing only `dev`. Hooks are local, so CI repeats the docs check on every push and pull request.
+
 Use the shared entrypoints rather than duplicating build commands:
 
 | Command | Purpose |
@@ -222,7 +232,7 @@ Use the shared entrypoints rather than duplicating build commands:
 | `scripts/run.sh --server` | A server with throwaway data; also used by `make run` in `apps/server`. |
 | `scripts/run.sh --fixture <flags>` | An isolated fixture app without building or launching the Go server. |
 | `scripts/run.sh --fresh` | The app as a new install: no server is started, so it runs its own under a launchd job of that instance's. |
-| `scripts/run-e2e.sh [--driver cua\|control] [flows...]` | Shared UI flows; Cua is the default, Control is opt-in. Fixture-only selections skip the Go server. A `// @fresh` line runs the flow on `run.sh --fresh`, which opens on the first-run welcome once its server is up. A `// @second-server` line starts another live server and gives the flow `SECOND_LINK`, a pairing link to it; `// @linked-job` links that server with the first and runs it under launchd. Every flow gets `ADDRESS`, the instance's own server, which works as a provider that refuses every model request. |
+| `scripts/run-e2e.sh [flows...]` | Shared UI flows, driven by Cua. Fixture-only selections skip the Go server. A `// @fresh` line runs the flow on `run.sh --fresh`, which opens on the first-run welcome once its server is up. A `// @second-server` line starts another live server and gives the flow `SECOND_LINK`, a pairing link to it; `// @linked-job` links that server with the first and runs it under launchd. Every flow gets `ADDRESS`, the instance's own server, which works as a provider that refuses every model request. |
 | `scripts/e2e.py [--changed [base]] [--jobs n] [--dry-run] [flows...]` | The fast way to run flows: builds once, starts the Cua daemon if it's down, gives each real-server flow a fresh server, and retries failures alone. It paces itself for throughput: it starts from the last run's pace, adds jobs while flows stay close to their best times, holds when they slow, drops after a failure and waits while the machine is busy. If nothing passes it stops early. `--jobs n` holds it at n. `--changed` picks flows from `e2e/areas.json`. |
 | `scripts/sim.sh out.png [flags...]` | A fresh simulator and renamed app, deleted after capture. |
 
@@ -240,7 +250,7 @@ Outstanding manual checks include live theme-switch colour refresh, the scroll-t
 
 CI selects native jobs from changed inputs, including shared scripts/contracts. Site-only changes skip native compilation, while the server job still reports a successful check for the deployer's exact-commit requirement. Manual and release validation runs the full selection. Releases reuse the test and site workflows, and Sparkle signing uses the package resolved by the app build. Title validation has one workflow.
 
-The remaining tooling work is targeted: add client-facing maintenance status; generator inputs should be pinned before regenerating reference assets; and the polling watcher should be replaced only if measured overhead warrants another dependency. Control's current capability and migration gates are in [Control](control.md).
+The remaining tooling work is targeted: add client-facing maintenance status; generator inputs should be pinned before regenerating reference assets; and the polling watcher should be replaced only if measured overhead warrants another dependency.
 
 ```sh
 python3 -B scripts/dev-version_test.py

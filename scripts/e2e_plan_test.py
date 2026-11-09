@@ -29,15 +29,14 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(plan.affected(["apps/Polymux/Sources/Views/Unknown.swift"], CONFIG, AVAILABLE), AVAILABLE)
 
     def test_docs_run_nothing(self):
-        self.assertEqual(plan.affected(["docs/control.md", "README.md"], CONFIG, AVAILABLE), [])
+        self.assertEqual(plan.affected(["docs/development.md", "README.md"], CONFIG, AVAILABLE), [])
 
     def test_a_changed_flow_runs_itself(self):
         self.assertEqual(plan.affected(["e2e/flows/other.js"], CONFIG, AVAILABLE), ["other.js", "smoke.js"])
 
-    def test_cua_flows_are_kept_apart(self):
-        texts = {"a.js": "// @fixture --x\n", "b.js": "await app.click(1);\n", "c.js": "// @fixture --x\n// @cua\nawait 1;\n",
-                 "d.js": "// @cua\nawait 1;\n"}
-        self.assertEqual(plan.lanes(sorted(texts), texts.get), (["a.js"], ["b.js"], ["c.js", "d.js"]))
+    def test_fixture_flows_are_kept_apart(self):
+        texts = {"a.js": "// @fixture --x\n", "b.js": "await app.click(1);\n"}
+        self.assertEqual(plan.lanes(sorted(texts), texts.get), (["a.js"], ["b.js"]))
 
     def test_batches_stay_short_so_slots_free_up_often(self):
         times = {"a": 70, "b": 30, "c": 30, "d": 10, "e": 10}
