@@ -4,6 +4,7 @@
   import atlas from '../assets/app-demo/atlas.webp';
   import nova from '../assets/app-demo/nova.webp';
   import fern from '../assets/app-demo/fern.webp';
+  import {agent as face} from '../lib/agents';
 
   const captures: Record<string, string> = {atlas, nova, fern};
   const regions: Record<string, {x: number; y: number; width: number; height: number}> = manifest.hotspots;
@@ -50,7 +51,7 @@
   <div class="preview-tools">
     <div class="agent-choices" role="group" aria-label="Example agents">
       {#each examples as example, index (example.id)}
-        <button type="button" class:selected={selected === index} aria-pressed={selected === index} onclick={() => selected = index}>{example.name}</button>
+        <button type="button" class:selected={selected === index} aria-pressed={selected === index} onclick={() => selected = index}><img src={face(example.id as 'atlas').src} alt="" width="24" height="24" />{example.name}</button>
       {/each}
     </div>
     <button class="zoom-button" type="button" aria-haspopup="dialog" aria-controls="capture-dialog" bind:this={zoomButton} onclick={() => dialog.showModal()}>Zoom</button>
@@ -83,17 +84,19 @@
   .hotspots { position: absolute; inset: 0; }
   .hotspots button { position: absolute; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; appearance: none; cursor: pointer; }
   .hotspots button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-  .preview-tools { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
-  .agent-choices { display: flex; gap: 8px; }
-  .preview-tools button, .capture-dialog header button { min-height: 44px; padding: 0 18px; border: 1px solid var(--focus); border-radius: 8px; color: var(--ink); background: transparent; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
-  @media (hover: hover) and (pointer: fine) { .preview-tools button:hover, .capture-dialog header button:hover { background: var(--soft); } }
-  .agent-choices button.selected { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+  .preview-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+  .agent-choices { display: flex; gap: 2px; padding: 4px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-edge); }
+  .preview-tools button, .capture-dialog header button { min-height: 44px; padding: 0 18px; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; color: var(--ink); background: var(--glass); box-shadow: var(--glass-edge); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 200ms ease, color 200ms ease, box-shadow 200ms ease; }
+  .agent-choices button { min-height: 38px; padding: 0 14px 0 6px; color: var(--muted); background: transparent; box-shadow: none; }
+  .agent-choices img { width: 28px; height: 28px; }
+  @media (hover: hover) and (pointer: fine) { .preview-tools button:hover, .capture-dialog header button:hover { color: var(--ink); background: var(--glass-hover); } }
+  .agent-choices button.selected { color: var(--on-accent); background: var(--solid); box-shadow: var(--solid-edge); }
   .demo-note { margin: 14px 0 0; font-size: 12px; line-height: 1.65; }
   .demo-caption { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; min-height: 130px; padding: 28px 0 0; }
   .demo-caption h2 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 550; letter-spacing: -.025em; }
   .demo-caption p { max-width: 510px; margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
-  .demo-guide { display: inline-flex; align-items: center; justify-content: center; gap: 16px; min-height: 44px; padding: 0 16px; border: 1px solid var(--focus); border-radius: 8px; font-size: 12px; font-weight: 600; }
-  @media (hover: hover) and (pointer: fine) { .demo-guide:hover { background: var(--soft); } }
+  .demo-guide { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-edge); font-size: 13px; font-weight: 600; transition: background 200ms ease; }
+  @media (hover: hover) and (pointer: fine) { .demo-guide:hover { background: var(--glass-hover); } }
   .transcript { border-top: 1px solid var(--line); }
   .transcript summary { display: flex; align-items: center; min-height: 44px; font-size: 12px; cursor: pointer; }
   .transcript summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

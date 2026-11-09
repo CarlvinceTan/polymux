@@ -1,6 +1,6 @@
 import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
-import {site} from '../lib/site.ts';
+import {docsPath, releasePath, site} from '../lib/site.ts';
 import type {Route} from '../lib/content/types.ts';
 import {loadContent, siteRoot} from './content.ts';
 import {createRoutes, escapeHtml, pageShell, releaseSummary} from './routes.ts';
@@ -26,12 +26,25 @@ export function writeRoutes(routes: Route[], root = siteRoot) {
   }
 }
 
+// The header's menu panels read this on every page.
+export function writeMenu(content: ReturnType<typeof loadContent>, root = siteRoot) {
+  const menu = {
+    docs: content.docs.map(({title, slug, description}) => ({title, description, href: docsPath(slug)})),
+    posts: content.posts.slice(0, 3).map(({title, slug, date, readingMinutes}) => ({title, date, readingMinutes, href: `/blog/${slug}/`})),
+    releases: content.releases.slice(0, 3).map(({version, title, date}) => ({version, title, date, href: releasePath(version)})),
+  };
+  const path = outputPath(root, '.generated/menu.json');
+  mkdirSync(dirname(path), {recursive: true});
+  writeFileSync(path, `${JSON.stringify(menu, null, 2)}\n`);
+}
+
 export function prepare({root = siteRoot, output = root}: {root?: string; output?: string} = {}) {
   const content = loadContent(root);
   const routes = createRoutes(content, root);
   outputPath(output, '.generated/releases.json');
   writeRoutes(routes, output);
   writeReleaseData(output, content.releases.map(releaseSummary));
+  writeMenu(content, output);
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${routes.map((route) =>
     `  <url><loc>${escapeHtml(`${site.origin}${route.path}`)}</loc>${route.updated ? `<lastmod>${route.updated}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`;
   return {content, routes, sitemap};
