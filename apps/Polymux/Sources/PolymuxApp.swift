@@ -396,8 +396,8 @@ struct AppRoot: View {
                     Button("Connection settings") { showSettings = true }
                 }
             } else {
-                Text("Connecting…").foregroundStyle(.muted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Opening the saved session is local and takes milliseconds, so nothing is drawn meanwhile.
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
