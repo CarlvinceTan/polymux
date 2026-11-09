@@ -44,6 +44,8 @@ class DeployTests(unittest.TestCase):
             self.tool("plutil", '''exec python3 -c 'import functools, json, sys
 print(functools.reduce(lambda v, k: v[k], sys.argv[1].split("."), json.load(open(sys.argv[2]))))' "$2" "$6"''')
         self.tool("shlock", 'touch "$2"')
+        # The old server is reachable unless a test sets CURL_EXIT.
+        self.tool("curl", 'exit "${CURL_EXIT:-0}"')
         self.tool("launchctl", 'echo "launchctl $*" >> "$TEST_LOG"; exit 99')
         self.tool("install", '[ "$1" != -S ] || shift; exec /usr/bin/install "$@"')
         self.executable(self.src / "install.sh", '''echo install >> "$TEST_LOG"
@@ -141,6 +143,15 @@ print(functools.reduce(lambda v, k: v[k], sys.argv[1].split("."), json.load(open
         calls = (self.home / "calls").read_text()
         self.assertLess(calls.index("--id test-update-identity"), calls.index("launchctl bootout"))
         self.assertLess(calls.index("--build original --ready"), calls.index("--cancel"))
+        self.assertIn("rolled back; commit quarantined", result.stdout)
+
+    def test_rollback_restarts_previous_build_when_the_server_already_stopped(self):
+        self.rollback_fixture()
+        result = self.deploy(INSTALL_RESULT="1", CURL_EXIT="7")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        calls = (self.home / "calls").read_text()
+        self.assertIn("launchctl bootout", calls)
+        self.assertNotIn("--id test-update-identity", calls.split("launchctl bootout")[0])
         self.assertIn("rolled back; commit quarantined", result.stdout)
 
     def test_failed_restore_never_starts_or_resumes_candidate(self):
