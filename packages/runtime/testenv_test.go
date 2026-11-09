@@ -22,14 +22,6 @@ func isolatePiG(t *testing.T) {
 		t.Setenv(name, "")
 	}
 }
-func builtinProvider(id string) *ai.ModelsProvider {
-	for _, p := range ai.BuiltinProviders() {
-		if p.ID == id {
-			return p
-		}
-	}
-	return nil
-}
 
 type testCredentials struct {
 	Secrets modelSecrets

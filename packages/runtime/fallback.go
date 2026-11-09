@@ -420,12 +420,17 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 				}
 			}
 			failure := &providerFailure{now: f.now()}
-			client := http.Client{}
-			if params.Fetch != nil {
-				client = *params.Fetch
+			// Google's adapters refuse a custom client, so their status comes from the error text instead.
+			if ownsClient(model) {
+				params.Fetch = nil
+			} else {
+				client := http.Client{}
+				if params.Fetch != nil {
+					client = *params.Fetch
+				}
+				client.Transport = statusRetry{base: client.Transport, failure: failure, fallback: len(chain) > 1}
+				params.Fetch = &client
 			}
-			client.Transport = statusRetry{base: client.Transport, failure: failure, fallback: len(chain) > 1}
-			params.Fetch = &client
 			attemptCtx, cancel := context.WithCancel(ctx)
 			timeout := f.timeout
 			if timeout <= 0 {
@@ -463,6 +468,9 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 			if failed {
 				reason := failureReason(result, err)
 				failure.note(reason)
+				if failure.status == 0 && ownsClient(model) {
+					failure.status = leadingStatus(reason)
+				}
 				slog.Warn("model attempt failed", "model", id, "status", failure.status, "error", reason)
 			}
 			// A rejected request says nothing about the provider's health, so it stays available.
@@ -546,6 +554,25 @@ func endFallback(target *ai.AssistantMessageEventStream, model *ai.Model, messag
 		Content: []ai.AssistantContentBlock{}, StopReason: reason, ErrorMessage: message, Timestamp: time.Now().UnixMilli()}
 	_ = target.Push(ai.ErrorEvent{Reason: reason, Error: result})
 	target.End(result)
+}
+
+// ownsClient reports a provider adapter that makes its own HTTP requests and rejects a custom client.
+func ownsClient(model *ai.Model) bool {
+	api := model.ProviderMeta.API
+	return api == ai.APIGoogleGenerativeAI || api == ai.APIGoogleVertex
+}
+
+// leadingStatus reads the HTTP status an adapter puts at the start of its error, such as "429 [{...}]".
+func leadingStatus(reason string) int {
+	reason = strings.TrimSpace(reason)
+	if len(reason) < 3 {
+		return 0
+	}
+	status, err := strconv.Atoi(reason[:3])
+	if err != nil || status < 400 || status > 599 || (len(reason) > 3 && reason[3] >= '0' && reason[3] <= '9') {
+		return 0
+	}
+	return status
 }
 
 type providerFailure struct {

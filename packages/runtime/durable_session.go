@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -372,10 +373,22 @@ type modelRegistry struct {
 }
 
 // newModelRegistry serves the configured OpenAI-compatible endpoint, the development fallback.
+// Google's endpoint, including its OpenAI-compatible path, is served by PiG's Gemini provider,
+// since the compatible path loses the thought signatures Gemini needs between tool calls.
 func newModelRegistry(baseURL, key string, client Client) *modelRegistry {
 	r := &modelRegistry{id: DurableProvider, api: ai.APIOpenAICompletions, baseURL: baseURL, key: key, client: client, providers: make(map[string]ai.Provider)}
 	r.open = func(model string) ai.Provider {
 		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: baseURL, APIKey: key, Model: model, ProviderID: r.id, ExtraHeaders: client.Headers})
+	}
+	if u, err := url.Parse(baseURL); err == nil && u.Hostname() == "generativelanguage.googleapis.com" {
+		if google := builtinProvider("google"); google != nil {
+			store := ai.NewInMemoryCredentialStore()
+			if _, err := store.Modify(context.Background(), r.id, func(*ai.Credential) (*ai.Credential, error) {
+				return &ai.Credential{Type: ai.CredentialAPIKey, Key: key}, nil
+			}); err == nil {
+				r.builtin, r.credentials, r.baseURL = google, store, ""
+			}
+		}
 	}
 	return r
 }
@@ -423,6 +436,16 @@ func newBuiltinRegistry(spec ProviderSpec) *modelRegistry {
 		r.add(model)
 	}
 	return r
+}
+
+// builtinProvider is PiG's own provider with this ID, or nil.
+func builtinProvider(id string) *ai.ModelsProvider {
+	for _, p := range ai.BuiltinProviders() {
+		if p.ID == id {
+			return p
+		}
+	}
+	return nil
 }
 
 func (r *modelRegistry) catalogued(id string) *ai.Model {
@@ -569,7 +592,8 @@ func passthrough(open ai.ModelsStreamFunction, session string) ai.ModelsStreamFu
 		id := markerID(transcript)
 		opts.MaxRetries = new(0)
 		opts.Headers = sessionHeaders(opts.Headers, session, opts.SessionID)
-		if opts.Fetch == nil {
+		// Google's adapters make their own requests and refuse a custom client.
+		if opts.Fetch == nil && !ownsClient(model) {
 			opts.Fetch = retryClient()
 		}
 		// Upstream owns the summarizer prompt, so pin facts here; the summary entry stores the copy.
