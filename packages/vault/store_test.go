@@ -2,7 +2,6 @@ package vault
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,9 +9,9 @@ import (
 	"slices"
 	"sync"
 	"testing"
-
-	_ "github.com/mattn/go-sqlite3"
 )
+
+func init() { kdfMemory, kdfIterations = 1<<20, 1 }
 
 type testKeys struct{ key []byte }
 
@@ -22,20 +21,14 @@ func (*testKeys) Protection() string      { return "test" }
 
 func testStore(t *testing.T) (*Store, string, *testKeys) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "vault.db")
-	db, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_busy_timeout=5000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
+	dir := t.TempDir()
 	keys := &testKeys{}
-	s, err := Open(t.Context(), db, keys)
+	s, err := Open(t.Context(), dir, keys)
 	if err != nil {
-		db.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close(); db.Close() })
-	return s, path, keys
+	t.Cleanup(s.Close)
+	return s, dir, keys
 }
 
 func testItem() Item {
@@ -60,19 +53,17 @@ func TestEncryptedLifecycle(t *testing.T) {
 			t.Fatal("metadata exposed a field value")
 		}
 	}
-	for _, file := range []string{path, path + "-wal"} {
-		data, err := os.ReadFile(file)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatal(err)
-		}
-		for _, value := range []string{item.Title, item.Fields["username"], item.Fields["password"], item.Fields["notes"]} {
-			if bytes.Contains(data, []byte(value)) {
-				t.Fatal("database contains plaintext vault content")
-			}
+	data, err := os.ReadFile(filepath.Join(path, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{item.Title, item.Fields["username"], item.Fields["password"], item.Fields["notes"]} {
+		if bytes.Contains(data, []byte(value)) {
+			t.Fatal("vault file contains plaintext vault content")
 		}
 	}
 	s.Close()
-	reopened, err := Open(ctx, s.db, keys)
+	reopened, err := Open(ctx, path, keys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,11 +134,17 @@ func TestItemIntegrityAndConflicts(t *testing.T) {
 	if err := s.Delete(t.Context(), stale.ID, stale.Revision); !errors.Is(err, ErrConflict) {
 		t.Fatal("stale delete won")
 	}
-	if _, err := s.db.ExecContext(t.Context(), `UPDATE vault_items SET id='swapped' WHERE id=?`, item.ID); err != nil {
+	path := filepath.Join(s.dir, FileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(t.Context(), "swapped"); !errors.Is(err, ErrUnavailable) {
-		t.Fatal("ciphertext identity was not authenticated")
+	data[len(data)-40] ^= 1
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(t.Context(), item.ID); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("tampered vault was not refused", err)
 	}
 }
 

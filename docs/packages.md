@@ -46,14 +46,14 @@ See [`ExampleNew`](../packages/memory/example_test.go) for saving, reopening and
 
 ### Vault
 
-[`vault`](../packages/vault/) owns its domain types, the `vault_meta` and `vault_items` tables, encrypted storage, revision checks, imports, TOTP and origin-bound credential operations. It does not own the caller's database connection. `Open` creates its tables if absent; the version-1 encrypted records are preserved when retiring the password wrapper. Future format changes belong to this module, not the HTTP adapter.
+[`vault`](../packages/vault/) owns its domain types, the KeePass (KDBX 4) file it stores them in, revision checks, merging, the optional sync location, imports, TOTP and origin-bound credential operations. It is pure Go and needs no database. Future format changes belong to this module, not the HTTP adapter.
 
 Start with the executable [`ExampleOpen`](../packages/vault/example_test.go):
 
-1. Open a SQLite `*sql.DB` using your chosen compatible driver. The tests use `go-sqlite3`, which requires cgo and a C compiler.
-2. Implement `vault.Keys` with secure unattended-key storage. The example's memory-only keys are for demonstrations, not persistent use.
-3. Call `vault.Open`; storage initializes on first use with the host key.
-4. Use `vault.Item`, `Save`, `List` and the credential-use operations. Close the vault before closing its database.
+1. Choose a folder for the embedded vault (`vault.kdbx`) and its per-host settings (`config.json`).
+2. Implement `vault.Keys` with secure unattended storage for the vault password. The example's memory-only keys are for demonstrations, not persistent use.
+3. Call `vault.Open`; the vault is created on first use with a random password.
+4. Use `vault.Item`, `Save`, `List` and the credential-use operations. `SetSync` adds a sync location.
 
 **Authorization belongs to the host.** Data methods are trusted APIs: `Get`, `Save`, `Values` and `File` do not authenticate devices themselves. Authenticate devices before management operations; expose blank replacement fields instead of saved values. Only expose value-free metadata, references and receipts to models. This is not a sandbox against an agent with unrestricted host access.
 

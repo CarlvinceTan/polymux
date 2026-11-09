@@ -2,14 +2,11 @@ package vault_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/CarlvinceTan/polymux/packages/vault"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // memoryKeys is only for examples/tests, not persistent unattended use.
@@ -25,14 +22,8 @@ func ExampleOpen() {
 		panic(err)
 	}
 	defer os.RemoveAll(dir)
-	db, err := sql.Open("sqlite3", filepath.Join(dir, "vault.db"))
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
 	ctx := context.Background()
-	store, err := vault.Open(ctx, db, &memoryKeys{})
+	store, err := vault.Open(ctx, dir, &memoryKeys{})
 	if err != nil {
 		panic(err)
 	}

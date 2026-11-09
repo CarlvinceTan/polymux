@@ -33,18 +33,12 @@ var durableSkipped = []string{"conversations", "document_revisions", "documents"
 // imports is what a merge must decrypt with the other server's keys. Reading it all up front means
 // a missing key stops the merge before anything here changes.
 type imports struct {
-	items       []vaultstore.Item
+	vault       string
+	password    string
 	credentials map[string][]secrets.Credential
 	providers   []settings.Provider
 	keys        map[string]string
 }
-
-// memoryKeys is a vault key that travelled with a move, rather than one in this host's Keychain.
-type memoryKeys struct{ key []byte }
-
-func (k memoryKeys) Load() ([]byte, error) { return k.key, nil }
-func (k memoryKeys) Save([]byte) error     { return nil }
-func (k memoryKeys) Protection() string    { return "move" }
 
 func openRead(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", "file:"+path)
@@ -62,42 +56,17 @@ func (s *Server) readImports(ctx context.Context, folder string, note network.Mo
 		return found, err
 	}
 	defer db.Close()
-	var keys vaultstore.Keys = hostKeys{Dir: filepath.Join(folder, "vault")}
-	if value, ok := note.Key("com.polymux.vault", ""); ok {
-		key, err := hex.DecodeString(value)
-		if err != nil {
-			return found, err
-		}
-		keys = memoryKeys{key: key}
-	}
-	var hasVault int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name='vault_meta'`).Scan(&hasVault); err != nil {
-		return found, err
-	}
-	if hasVault > 0 {
-		vault, err := vaultstore.Open(ctx, db, keys)
-		if err != nil {
-			return found, err
-		}
-		defer vault.Close()
-		status, err := vault.Status(ctx)
-		if err != nil {
-			return found, err
-		}
-		if status.Created {
-			list, err := vault.List(ctx)
-			if err != nil {
+	if _, err := os.Stat(filepath.Join(folder, "vault", vaultstore.FileName)); err == nil {
+		found.vault = filepath.Join(folder, "vault", vaultstore.FileName)
+		var password []byte
+		if value, ok := note.Key("com.polymux.vault", "/password"); ok {
+			if password, err = hex.DecodeString(value); err != nil {
 				return found, err
 			}
-			for _, summary := range list {
-				item, err := vault.Get(ctx, summary.ID)
-				if err != nil {
-					return found, err
-				}
-				item.Revision = 0
-				found.items = append(found.items, item)
-			}
+		} else if password, err = (hostKeys{Dir: filepath.Join(folder, "vault")}).Load(); err != nil {
+			return found, err
 		}
+		found.password = string(password)
 	}
 	sealed, err := secrets.Open(filepath.Join(folder, "credentials"), db)
 	if err != nil {
@@ -139,21 +108,10 @@ func (s *Server) readImports(ctx context.Context, folder string, note network.Mo
 
 // apply saves what was decrypted under this server's own keys. This server's version wins.
 func (s *Server) apply(ctx context.Context, found imports) error {
-	if len(found.items) > 0 {
-		if status, err := s.vault.Status(ctx); err != nil {
-			return err
-		} else if !status.Created {
-			if err := s.vault.Initialize(ctx); err != nil {
-				return err
-			}
-		}
-	}
-	// One bad entry mustn't cost the rest, so each failure is kept and the others go on.
+	// One bad part mustn't cost the rest, so each failure is kept and the others go on.
 	var failed error
-	for _, item := range found.items {
-		if _, err := s.vault.Save(ctx, item); err != nil && !errors.Is(err, vaultstore.ErrConflict) {
-			failed = errors.Join(failed, err)
-		}
+	if found.vault != "" {
+		failed = s.vault.MergeFile(ctx, found.vault, found.password)
 	}
 	for owner, list := range found.credentials {
 		for _, credential := range list {

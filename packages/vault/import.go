@@ -3,11 +3,7 @@ package vault
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"database/sql"
 	"encoding/csv"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,53 +172,34 @@ var importColumns = map[string][]string{
 }
 
 // Import is atomic and skips identical source entries without overwriting later edits.
-func (s *Store) Import(ctx context.Context, items []Item, complete func(*sql.Tx) error) (ImportResult, error) {
+// complete runs after the entries are saved.
+func (s *Store) Import(ctx context.Context, items []Item, complete func() error) (ImportResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := ImportResult{}
 	if len(items) == 0 || len(items) > 1000 {
 		return result, ErrInvalid
 	}
-	if err := s.loadKey(ctx); err != nil {
-		return result, err
-	}
 	for _, item := range items {
 		if err := Validate(item); err != nil {
 			return result, ErrInvalid
 		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	err := s.mutate(ctx, func() error {
+		for _, item := range items {
+			item.ID, item.Revision = s.fingerprint(item), 0
+			if s.find(item.ID) != nil {
+				result.Skipped++
+				continue
+			}
+			if _, err := s.saveItem(item); err != nil {
+				return err
+			}
+			result.Added++
+		}
+		return nil
+	}, complete)
 	if err != nil {
-		return result, err
-	}
-	defer tx.Rollback()
-	for _, item := range items {
-		item.ID, item.Revision = "import", 0
-		plain, _ := json.Marshal(item)
-		digest := hmac.New(sha256.New, s.key)
-		digest.Write([]byte("polymux-vault-import-v1"))
-		digest.Write(plain)
-		clear(plain)
-		item.ID = "import_" + hex.EncodeToString(digest.Sum(nil))
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM vault_items WHERE id=?`, item.ID).Scan(&exists); err != nil {
-			return ImportResult{}, err
-		}
-		if exists != 0 {
-			result.Skipped++
-			continue
-		}
-		if _, err := s.saveItem(ctx, tx, item); err != nil {
-			return ImportResult{}, err
-		}
-		result.Added++
-	}
-	if complete != nil {
-		if err := complete(tx); err != nil {
-			return ImportResult{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
 		return ImportResult{}, err
 	}
 	return result, nil

@@ -44,11 +44,12 @@ else
   [ "$server_only" = 1 ] || { echo 'The app runner requires macOS.' >&2; exit 2; }
   BASE=${TMPDIR:-/tmp}/polymux-test-$(id -u)
 fi
-# Removes an instance's vault key from the login Keychain; the server names it by its vault folder's SHA-256.
+# Removes an instance's vault password from the login Keychain; the server names it by its vault
+# folder's SHA-256 plus /password.
 forget_key() {
   [ "$PLATFORM" = Darwin ] || return 0
   account=$(printf %s "$1/data/vault" | shasum -a 256 | cut -d' ' -f1)
-  /usr/bin/security delete-generic-password -s com.polymux.vault -a "$account" >/dev/null 2>&1 || true
+  /usr/bin/security delete-generic-password -s com.polymux.vault -a "$account/password" >/dev/null 2>&1 || true
 }
 # Removes an instance's launchd job, if its app started one.
 forget_job() {

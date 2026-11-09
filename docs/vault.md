@@ -6,11 +6,11 @@ Add, edit and import stay inside the existing Settings view. There is no vault s
 
 ## Reusable component boundary
 
-The standalone Go module [`packages/vault`](../packages/vault/) owns encrypted storage, its tables, imports and the `Keys` interface. Callers supply a SQLite database, secure host-key storage and authorization. HTTP routes, agent tools and private cards are server adapters. See [Packages](packages.md#vault).
+The standalone Go module [`packages/vault`](../packages/vault/) owns the vault file, merging, sync, imports and the `Keys` interface. Callers supply a folder, secure storage for the vault password and authorization. HTTP routes, agent tools and private cards are server adapters. See [Packages](packages.md#vault).
 
 ## Security boundary
 
-Entries remain encrypted with a random data key held by macOS Keychain, or an owner-only key file on Linux. Existing vaults keep their encrypted entries and host key; after verifying that key, storage removes the retired password wrapper. A missing or invalid host key fails closed and never creates a replacement vault over existing entries. Keep that host key with the database when moving or recovering a server.
+Entries are encrypted in a KeePass file whose password is held by macOS Keychain, or an owner-only file on Linux. Until a sync location is set, that password is random and nobody needs to know it. A missing or wrong password fails closed and never creates a replacement vault over an existing file. Keep the password with the vault folder when moving or recovering a server.
 
 Paired-device authentication and encrypted transport protect management requests. Read and save responses contain metadata, empty field values and recovery-code identifiers/status only. The server merges replacements with the stored entry under its revision check. Password, biometric, reveal and TOTP-read endpoints are removed. Clients use ephemeral requests without cookies, disk caching or redirects, and responses are `Cache-Control: no-store`. Typed replacements are cleared when their editor closes; saved values never reach the client.
 
@@ -78,6 +78,7 @@ The wire types and routes are in `contracts/polymux.schema.json`. All routes req
 | `PUT /vault/items/{id}` | Create or replace fields; current revision required for edits |
 | `DELETE /vault/items/{id}?revision=N` | Delete only the specified current revision |
 | `GET /vault/browser`, `PUT /vault/browser` | Manage the browser endpoint |
+| `GET /vault/sync`, `PUT /vault/sync` | Read or set the sync location; the password is accepted, never returned |
 | `POST /vault/import` | Import a private CSV/JSON or multipart KDBX body from Settings; no chat card or server paths |
 | `POST /vault/cards/{id}/save` | Save a private edit and its value-free acknowledgement atomically |
 | `POST /vault/cards/{id}/import` | Import a private raw CSV/JSON or multipart KDBX body; never a chat attachment |
@@ -86,24 +87,31 @@ Blank field values preserve existing content. Nonempty values replace it, and `r
 
 ## Storage format
 
-The standalone Go server owns two tables in its existing SQLite database:
+The vault is one KeePass file, `<data-dir>/vault/vault.kdbx` (KDBX 4, ChaCha20, Argon2d), so any KeePass app can open it with the vault password. Fields use the keys those apps and the vault CLI use: `UserName`, `Password`, `URL`, `Notes`, `otp` (an `otpauth://` URI), `recovery.codes`, card fields `cardholder`, `number`, `expiry`, `cvc`, `pin`, and KeePassXC's `KPEX_PASSKEY_*` passkey fields. Polymux-only state uses `polymux.id`, `polymux.kind`, `polymux.revision` and `polymux.codes` (which recovery codes are used). Values Polymux doesn't know, such as a field or attachment another app added, are kept when Polymux edits an entry, and each edit leaves the previous version in the entry's history. Entries made by other apps appear with a kind inferred from their fields. The per-host Chromium endpoint and sync location are in `<data-dir>/vault/config.json`, which is never synced.
 
-- `vault_meta`: one row (`id=1`) with encrypted key `proof` and `browser` configuration.
-- `vault_items`: item ID, revision, and encrypted item JSON, including its title, website, fields, and recovery-code usage.
+Every save writes the whole file in one rename, with fresh seeds. A private card's acknowledgement is recorded right after its save; if recording it fails, the previous file is put back.
 
-Version 1 uses a random 32-byte data key and AES-256-GCM. Each encrypted blob has a fresh nonce and associated data binding it to its purpose and item ID/revision. The ciphertext format is preserved for existing entries. The exact encoding is defined in `packages/vault/store.go`.
+On macOS the password is stored as hex under Keychain service `com.polymux.vault`, with an account equal to the SHA-256 hex digest of the absolute server vault-directory path followed by `/password`. Keychain writes do not put it in process arguments. On Linux it is in `<data-dir>/vault/password`, mode `0600`, under a `0700` directory. Earlier releases kept a SQLite vault (`vault_items`) under the account without `/password`; that data and its key are left untouched and are not read.
 
-On macOS the unattended key is stored as hex under Keychain service `com.polymux.vault`, with an account equal to the SHA-256 hex digest of the absolute server vault-directory path. Keychain writes do not put the key in process arguments. On Linux the raw key is in `<data-dir>/vault/key`, mode `0600`, under a `0700` directory. Key material must not be included in an unprotected export alongside the database.
+## Sync
 
-The SQLite representation can be exported without vendor tooling. A usable restore needs both the database and its protected host key; the retired vault password cannot recreate a missing key. Protect any export containing both. KDBX and vendor JSON can be imported; there is no KDBX export.
+The embedded vault always works on its own. A sync location (`PUT /vault/sync` with `location`: a folder, which uses `vault.kdbx` in it, or a `.kdbx` path) keeps it in step with a KeePass file that another service syncs, such as an iCloud Drive or Syncthing folder. Polymux doesn't sync anything itself. It only reads and writes that file:
+
+- **Joining.** An existing file must open with `password` (or the current vault password when it is left out). A new file needs a `password` of at least 8 characters. Either way that password becomes the vault's, so the synced file opens on other devices and in KeePass apps such as KeePassium or Strongbox.
+- **Merging.** When the file changes, and after every save, both copies are merged entry by entry: the newer modification wins and the older version joins the entry's history. Deletions carry over, unless the entry was edited after the delete. An outside change gives the entry a new revision, so an editor that loaded the old one gets a conflict instead of overwriting it.
+- **Offline.** If the folder can't be reached, saves go to the embedded copy and the state is `unavailable`, then `synced` once a later exchange succeeds.
+- **Conflict copies.** Copies a sync service leaves beside the file (iCloud `vault 2.kdbx`, Syncthing `.sync-conflict-…`, Dropbox `(… conflicted copy …)`, `vault (1).kdbx`) are merged in and removed when they open with the vault password.
+- **iCloud placeholders.** A file that is only in the cloud is asked to download and reported `unavailable` until it arrives. Keeping the folder downloaded avoids this.
+
+Group moves and deletions aren't merged. An empty `location` turns sync off and keeps the vault and its password.
 
 ## Verification
 
-Tests use throwaway databases, synthetic credentials, and disposable Chromium profiles—not the user's vault or browser profile.
+Tests use throwaway vault folders, synthetic credentials, and disposable Chromium profiles—not the user's vault or browser profile.
 
 ```sh
 cd apps/server
-go test -race -tags sqlite_fts5 ./internal/server -run 'Test(Vault|Credential)'
+go test -race -tags sqlite_fts5 ./internal/server -run 'Test(Vault|Credential|Merge)'
 (cd ../../packages/vault && GOWORK=off go test -race ./... && GOWORK=off go test -tags integration -run '^TestChromium' -v)
 ```
 
@@ -116,4 +124,4 @@ scripts/run-e2e.sh e2e/flows/vault.js e2e/flows/vault_kdbx.js e2e/flows/settings
 scripts/run-e2e.sh --driver control e2e/flows/vault_passkey.js
 ```
 
-The flows cover browsing/search, direct entry and replacement, clearing values, recovery-code entry, private chat cards, passkeys, and encrypted KDBX import. Server and client tests verify that no read or save response returns saved values, metadata edits preserve hidden content, stale edits fail, cancelled editors stay closed, imports are atomic, old encrypted entries migrate without re-encryption, and credential-use operations retain their existing boundaries. Optional Chromium tests exercise real filling and WebAuthn use.
+The flows cover browsing/search, direct entry and replacement, clearing values, recovery-code entry, private chat cards, passkeys, and encrypted KDBX import. Server and client tests verify that no read or save response returns saved values, metadata edits preserve hidden content, stale edits fail, cancelled editors stay closed, imports are atomic, edits keep fields other KeePass apps added, synced copies merge (including offline edits, deletions and conflict copies), and credential-use operations retain their existing boundaries. Optional Chromium tests exercise real filling and WebAuthn use.

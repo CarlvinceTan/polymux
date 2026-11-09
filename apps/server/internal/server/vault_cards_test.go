@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -218,9 +217,7 @@ func TestVaultCardWorksInGroupChat(t *testing.T) {
 	}
 	item := contract.VaultItem{ID: card.Parts[0].Vault.ItemID, Kind: "login", Title: "Group login", URL: "https://example.com",
 		Fields: map[string]string{"password": "group-card-password"}, Codes: []contract.VaultCode{}}
-	if _, err := api.vault.SaveWith(t.Context(), vaultItem(item), func(tx *sql.Tx) error {
-		return api.Store.FinishVault(t.Context(), tx, card.ID)
-	}); err != nil {
+	if _, err := api.vault.SaveWith(t.Context(), vaultItem(item), api.finishVault(t.Context(), card.ID)); err != nil {
 		t.Fatal(err)
 	}
 	done, err := api.Store.VaultCard(t.Context(), card.ID)

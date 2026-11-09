@@ -2,17 +2,21 @@ package vault
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
-	"database/sql"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tobischo/gokeepasslib/v3"
+	w "github.com/tobischo/gokeepasslib/v3/wrappers"
 )
 
 var (
@@ -22,180 +26,211 @@ var (
 	ErrInvalid     = errors.New("invalid vault entry")
 )
 
-// Store owns encrypted records; callers authorize metadata and replacement operations.
+// FileName is the embedded vault inside a store's folder, and the default name in a sync folder.
+const FileName = "vault.kdbx"
+
+// Store keeps the vault in a KeePass file in its own folder (the embedded copy). With a sync
+// location set, that copy is merged both ways with the file there, and keeps working offline.
+// Callers authorize metadata and replacement operations.
 type Store struct {
-	db   *sql.DB
-	keys Keys
-	mu   sync.Mutex
-	key  []byte
-	now  func() time.Time
+	dir      string
+	keys     Keys
+	mu       sync.Mutex
+	db       *gokeepasslib.Database
+	password string
+	local    stamp
+	config   config
+	sync     syncState
+	now      func() time.Time
 }
 
-// Open creates the vault tables in a caller-owned SQLite database; keys supplies secure unattended access.
-func Open(ctx context.Context, db *sql.DB, keys Keys) (*Store, error) {
-	_, err := db.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS vault_meta (
- id INTEGER PRIMARY KEY CHECK(id=1), proof BLOB NOT NULL, browser BLOB NOT NULL);
-CREATE TABLE IF NOT EXISTS vault_items (
- id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data BLOB NOT NULL);`)
-	if err != nil {
+type config struct {
+	Browser Browser `json:"browser"`
+	Sync    string  `json:"sync,omitempty"`
+}
+
+// Open uses dir for the embedded vault and its settings; keys holds the vault password.
+func Open(ctx context.Context, dir string, keys Keys) (*Store, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	return &Store{db: db, keys: keys, now: time.Now}, nil
+	s := &Store{dir: dir, keys: keys, now: time.Now}
+	if data, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil {
+		if err := json.Unmarshal(data, &s.config); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return s, nil
 }
 
-// Close forgets the cached key, but does not close the caller's database.
+func (s *Store) path() string { return filepath.Join(s.dir, FileName) }
+
+// Close forgets the decrypted vault and its password.
 func (s *Store) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	clear(s.key)
-	s.key = nil
+	s.db, s.password = nil, ""
 }
 
-// Status checks initialization and attempts to load the unattended key if a vault exists.
+// Status checks initialization and attempts to open the vault if one exists.
 func (s *Store) Status(ctx context.Context) (Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM vault_meta`).Scan(&count)
-	status := Status{Created: count != 0, Protection: s.keys.Protection()}
-	if err == nil {
-		status.Available = s.loadKey(ctx) == nil
-		status.Created = status.Created || status.Available
+	_, created := stampOf(s.path())
+	status := Status{Created: created, Protection: s.keys.Protection()}
+	if created {
+		status.Available = s.load(ctx) == nil
 	}
-	return status, err
+	return status, nil
 }
 
 // Initialize creates a host-protected vault or verifies access to an existing one.
 func (s *Store) Initialize(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.loadKey(ctx)
+	return s.load(ctx)
 }
 
-func (s *Store) create(ctx context.Context) error {
-	key := random(32)
-	defer clear(key)
-	proof, err := seal(key, "proof", []byte("polymux-vault-v1"))
-	if err != nil {
+// load opens the embedded vault, creating it on first use, and brings in outside changes.
+func (s *Store) load(ctx context.Context) error {
+	if err := s.open(); err != nil {
 		return err
 	}
-	browser, err := seal(key, "browser", []byte(`{"endpoint":""}`))
-	if err != nil {
-		return err
-	}
-	if err := s.keys.Save(key); err != nil {
+	s.pull()
+	if s.db == nil {
+		// Merging in the sync location's changes failed to save locally.
 		return ErrUnavailable
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO vault_meta(id,proof,browser) VALUES(1,?,?)`, proof, browser); err != nil {
-		return err
-	}
-	s.key = slices.Clone(key)
 	return nil
 }
 
-// migrate removes the retired password wrapper after verifying the host key.
-func (s *Store) migrate(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(vault_meta)`)
-	if err != nil {
-		return err
-	}
-	var password bool
-	for rows.Next() {
-		var id, required, primary int
-		var name, kind string
-		var value any
-		if err := rows.Scan(&id, &name, &kind, &required, &value, &primary); err != nil {
-			rows.Close()
-			return err
-		}
-		if name == "salt" {
-			password = true
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil || !password {
-		return err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE vault_meta DROP COLUMN salt`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE vault_meta DROP COLUMN wrapped`); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Store) loadKey(ctx context.Context) error {
-	if len(s.key) == 32 {
+func (s *Store) open() error {
+	current, exists := stampOf(s.path())
+	if s.db != nil && exists && current == s.local {
 		return nil
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM vault_meta`).Scan(&count); err != nil {
-		return err
+	if !exists {
+		return s.create()
 	}
-	if count == 0 {
-		if err := s.migrate(ctx); err != nil {
-			return err
-		}
-		return s.create(ctx)
-	}
-	key, err := s.keys.Load()
-	if err != nil || len(key) != 32 {
-		clear(key)
+	password, err := s.keys.Load()
+	if err != nil || len(password) == 0 {
 		return ErrUnavailable
 	}
-	defer clear(key)
-	var proof []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT proof FROM vault_meta WHERE id=1`).Scan(&proof); err != nil {
+	db, err := readDatabase(s.path(), string(password))
+	if err != nil {
 		return ErrUnavailable
 	}
-	plain, err := open(key, "proof", proof)
-	defer clear(plain)
-	if err != nil || string(plain) != "polymux-vault-v1" {
-		return ErrUnavailable
-	}
-	if err := s.migrate(ctx); err != nil {
-		return err
-	}
-	s.key = slices.Clone(key)
+	s.db, s.password, s.local = db, string(password), current
 	return nil
+}
+
+// create starts an embedded vault with a random password. With a sync location set and its
+// password still held, it starts from the synced file instead.
+func (s *Store) create() error {
+	if s.config.Sync != "" {
+		if password, err := s.keys.Load(); err == nil && len(password) > 0 {
+			if db, err := readDatabase(s.config.Sync, string(password)); err == nil {
+				s.db, s.password = db, string(password)
+				return s.writeLocal()
+			}
+		}
+	}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	password := hex.EncodeToString(key)
+	if err := s.keys.Save([]byte(password)); err != nil {
+		return ErrUnavailable
+	}
+	s.db, s.password = newDatabase(password), password
+	return s.writeLocal()
+}
+
+func (s *Store) writeLocal() error {
+	data, err := encodeDatabase(s.db)
+	if err == nil {
+		err = writeAtomic(s.path(), data)
+	}
+	if err != nil {
+		s.db = nil
+		return err
+	}
+	s.local, _ = stampOf(s.path())
+	return nil
+}
+
+// mutate applies change to the vault and saves it, then runs complete (a caller's
+// acknowledgement), then syncs. A failed change or acknowledgement restores the previous
+// file. Only a crash between the two can leave a save without its acknowledgement, so
+// acknowledgements must tolerate repeats.
+func (s *Store) mutate(ctx context.Context, change func() error, complete func() error) error {
+	if err := s.load(ctx); err != nil {
+		return err
+	}
+	if err := change(); err != nil {
+		s.db = nil
+		return err
+	}
+	previous, err := os.ReadFile(s.path())
+	if err != nil {
+		s.db = nil
+		return err
+	}
+	if err := s.writeLocal(); err != nil {
+		return err
+	}
+	if complete != nil {
+		if err := complete(); err != nil {
+			s.db = nil
+			return errors.Join(err, writeAtomic(s.path(), previous))
+		}
+	}
+	s.push()
+	return nil
+}
+
+func (s *Store) root() *gokeepasslib.Group { return &s.db.Content.Root.Groups[0] }
+
+// entries visits live entries, leaving out the recycle bin.
+func (s *Store) entries(visit func(*gokeepasslib.Entry)) {
+	recycle := s.db.Content.Meta.RecycleBinUUID
+	var walk func(*gokeepasslib.Group)
+	walk = func(group *gokeepasslib.Group) {
+		if !recycle.IsZero() && group.UUID == recycle {
+			return
+		}
+		for i := range group.Entries {
+			visit(&group.Entries[i])
+		}
+		for i := range group.Groups {
+			walk(&group.Groups[i])
+		}
+	}
+	walk(s.root())
+}
+
+func (s *Store) find(id string) *gokeepasslib.Entry {
+	var found *gokeepasslib.Entry
+	s.entries(func(e *gokeepasslib.Entry) {
+		if found == nil && entryID(e) == id {
+			found = e
+		}
+	})
+	return found
 }
 
 // List returns discoverable metadata without field values.
 func (s *Store) List(ctx context.Context) ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.loadKey(ctx); err != nil {
+	if err := s.load(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,revision,data FROM vault_items ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	items := []Summary{}
-	for rows.Next() {
-		var id string
-		var revision int64
-		var data []byte
-		if err := rows.Scan(&id, &revision, &data); err != nil {
-			return nil, err
-		}
-		item, err := s.decodeItem(id, revision, data)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, Summarize(item))
-	}
+	s.entries(func(e *gokeepasslib.Entry) { items = append(items, Summarize(entryItem(e))) })
 	slices.SortFunc(items, func(a, b Summary) int { return strings.Compare(a.Title, b.Title) })
-	return items, rows.Err()
+	return items, nil
 }
 
 // Get returns plaintext only to trusted server-side adapters.
@@ -206,31 +241,14 @@ func (s *Store) Get(ctx context.Context, id string) (Item, error) {
 }
 
 func (s *Store) get(ctx context.Context, id string) (Item, error) {
-	if err := s.loadKey(ctx); err != nil {
+	if err := s.load(ctx); err != nil {
 		return Item{}, err
 	}
-	var revision int64
-	var data []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT revision,data FROM vault_items WHERE id=?`, id).Scan(&revision, &data); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = ErrMissing
-		}
-		return Item{}, err
+	e := s.find(id)
+	if e == nil {
+		return Item{}, ErrMissing
 	}
-	return s.decodeItem(id, revision, data)
-}
-
-func (s *Store) decodeItem(id string, revision int64, data []byte) (Item, error) {
-	plain, err := open(s.key, itemAAD(id, revision), data)
-	if err != nil {
-		return Item{}, ErrUnavailable
-	}
-	defer clear(plain)
-	var item Item
-	if json.Unmarshal(plain, &item) != nil || item.ID != id || item.Revision != revision {
-		return Item{}, ErrUnavailable
-	}
-	return item, nil
+	return entryItem(e), nil
 }
 
 // Save validates an entry and requires its current revision, or revision zero for a new ID.
@@ -238,40 +256,22 @@ func (s *Store) Save(ctx context.Context, item Item) (Item, error) {
 	return s.SaveWith(ctx, item, nil)
 }
 
-// SaveWith commits an edit and the optional callback in the same transaction.
-func (s *Store) SaveWith(ctx context.Context, item Item, complete func(*sql.Tx) error) (Item, error) {
+// SaveWith saves an entry, then runs complete.
+func (s *Store) SaveWith(ctx context.Context, item Item, complete func() error) (Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := Validate(item); err != nil {
 		return Item{}, err
 	}
-	if err := s.loadKey(ctx); err != nil {
-		return Item{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Item{}, err
-	}
-	defer tx.Rollback()
-	saved, err := s.saveItem(ctx, tx, item)
-	if err != nil {
-		return Item{}, err
-	}
-	if complete != nil {
-		if err := complete(tx); err != nil {
-			return Item{}, err
-		}
-	}
-	return saved, tx.Commit()
+	var saved Item
+	err := s.mutate(ctx, func() (err error) { saved, err = s.saveItem(item); return }, complete)
+	return saved, err
 }
 
 // EditWith preserves hidden values unless replaced or explicitly removed.
-func (s *Store) EditWith(ctx context.Context, item Item, removed []string, complete func(*sql.Tx) error) (Item, error) {
+func (s *Store) EditWith(ctx context.Context, item Item, removed []string, complete func() error) (Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.loadKey(ctx); err != nil {
-		return Item{}, err
-	}
 	if item.Revision > 0 {
 		previous, err := s.get(ctx, item.ID)
 		if err != nil {
@@ -308,58 +308,52 @@ func (s *Store) EditWith(ctx context.Context, item Item, removed []string, compl
 	if err := Validate(item); err != nil {
 		return Item{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Item{}, err
-	}
-	defer tx.Rollback()
-	saved, err := s.saveItem(ctx, tx, item)
-	if err != nil {
-		return Item{}, err
-	}
-	if complete != nil {
-		if err := complete(tx); err != nil {
-			return Item{}, err
-		}
-	}
-	return saved, tx.Commit()
+	var saved Item
+	err := s.mutate(ctx, func() (err error) { saved, err = s.saveItem(item); return }, complete)
+	return saved, err
 }
 
-type executor interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
+// save stores one item for an operation already holding the lock.
 func (s *Store) save(ctx context.Context, item Item) (Item, error) {
-	if err := s.loadKey(ctx); err != nil {
-		return Item{}, err
-	}
-	return s.saveItem(ctx, s.db, item)
+	var saved Item
+	err := s.mutate(ctx, func() (err error) { saved, err = s.saveItem(item); return }, nil)
+	return saved, err
 }
 
-func (s *Store) saveItem(ctx context.Context, db executor, item Item) (Item, error) {
-	previous := item.Revision
-	item.Revision++
-	plain, err := json.Marshal(item)
-	if err != nil {
-		return Item{}, err
+func (s *Store) saveItem(item Item) (Item, error) {
+	now := w.TimeWrapper{Time: s.now().UTC()}
+	e := s.find(item.ID)
+	if item.Revision == 0 {
+		if e != nil {
+			return Item{}, ErrConflict
+		}
+		entry := gokeepasslib.NewEntry()
+		if raw, err := hex.DecodeString(item.ID); err == nil && len(raw) == 16 {
+			copy(entry.UUID[:], raw)
+		}
+		item.Revision = 1
+		applyItem(&entry, Item{Fields: map[string]string{}}, item)
+		entry.Times.LastModificationTime = &now
+		s.root().Entries = append(s.root().Entries, entry)
+		return item, nil
 	}
-	defer clear(plain)
-	data, err := seal(s.key, itemAAD(item.ID, item.Revision), plain)
-	if err != nil {
-		return Item{}, err
-	}
-	var result sql.Result
-	if previous == 0 {
-		result, err = db.ExecContext(ctx, `INSERT INTO vault_items(id,revision,data) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING`, item.ID, item.Revision, data)
-	} else {
-		result, err = db.ExecContext(ctx, `UPDATE vault_items SET revision=?,data=? WHERE id=? AND revision=?`, item.Revision, data, item.ID, previous)
-	}
-	if err != nil {
-		return Item{}, err
-	}
-	if count, err := result.RowsAffected(); err != nil || count != 1 {
+	if e == nil {
 		return Item{}, ErrConflict
 	}
+	before := entryItem(e)
+	if before.Revision != item.Revision {
+		return Item{}, ErrConflict
+	}
+	snapshot := copyEntry(e, s.db, s.db)
+	snapshot.Histories = nil
+	versions := []gokeepasslib.Entry{}
+	for _, h := range e.Histories {
+		versions = append(versions, h.Entries...)
+	}
+	e.Histories = []gokeepasslib.History{{Entries: trimHistory(s.db, append(versions, snapshot))}}
+	item.Revision++
+	applyItem(e, before, item)
+	e.Times.LastModificationTime = &now
 	return item, nil
 }
 
@@ -367,14 +361,32 @@ func (s *Store) saveItem(ctx context.Context, db executor, item Item) (Item, err
 func (s *Store) Delete(ctx context.Context, id string, revision int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result, err := s.db.ExecContext(ctx, `DELETE FROM vault_items WHERE id=? AND revision=?`, id, revision)
-	if err != nil {
-		return err
-	}
-	if n, err := result.RowsAffected(); err != nil || n != 1 {
-		return ErrConflict
-	}
-	return nil
+	return s.mutate(ctx, func() error {
+		e := s.find(id)
+		if e == nil || entryItem(e).Revision != revision {
+			return ErrConflict
+		}
+		uuid := e.UUID
+		var remove func(*gokeepasslib.Group) bool
+		remove = func(group *gokeepasslib.Group) bool {
+			for i := range group.Entries {
+				if group.Entries[i].UUID == uuid {
+					group.Entries = slices.Delete(group.Entries, i, i+1)
+					return true
+				}
+			}
+			for i := range group.Groups {
+				if remove(&group.Groups[i]) {
+					return true
+				}
+			}
+			return false
+		}
+		remove(s.root())
+		at := w.TimeWrapper{Time: s.now().UTC()}
+		s.db.Content.Root.DeletedObjects = append(s.db.Content.Root.DeletedObjects, gokeepasslib.DeletedObjectData{UUID: uuid, DeletionTime: &at})
+		return nil
+	}, nil)
 }
 
 // Values resolves fields only inside a trusted adapter; a recovery code is reserved before dispatch.
@@ -462,24 +474,14 @@ func (s *Store) File(ctx context.Context, id, field string) (string, error) {
 	return value, nil
 }
 
-// Browser reads the encrypted Chromium endpoint configuration for a trusted adapter.
+// Browser reads this host's Chromium endpoint configuration for a trusted adapter.
 func (s *Store) Browser(ctx context.Context) (Browser, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.loadKey(ctx); err != nil {
+	if err := s.load(ctx); err != nil {
 		return Browser{}, err
 	}
-	var data []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT browser FROM vault_meta WHERE id=1`).Scan(&data); err != nil {
-		return Browser{}, err
-	}
-	plain, err := open(s.key, "browser", data)
-	if err != nil {
-		return Browser{}, ErrUnavailable
-	}
-	var browser Browser
-	err = json.Unmarshal(plain, &browser)
-	return browser, err
+	return s.config.Browser, nil
 }
 
 // SetBrowser accepts only an explicit loopback Chromium debugging endpoint, or an empty endpoint.
@@ -491,46 +493,61 @@ func (s *Store) SetBrowser(ctx context.Context, browser Browser) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.loadKey(ctx); err != nil {
+	if err := s.load(ctx); err != nil {
 		return err
 	}
-	plain, _ := json.Marshal(browser)
-	data, err := seal(s.key, "browser", plain)
+	next := s.config
+	next.Browser = browser
+	return s.saveConfig(next)
+}
+
+// saveConfig keeps per-host settings beside the vault; they are not synced.
+func (s *Store) saveConfig(next config) error {
+	data, err := json.Marshal(next)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE vault_meta SET browser=? WHERE id=1`, data)
-	return err
+	if err := writeAtomic(filepath.Join(s.dir, "config.json"), data); err != nil {
+		return err
+	}
+	s.config = next
+	return nil
 }
 
-func random(n int) []byte {
-	data := make([]byte, n)
-	_, _ = rand.Read(data)
-	return data
+// MergeFile merges another vault file into this one the way a sync does, newer edits winning,
+// without syncing with that file afterwards.
+func (s *Store) MergeFile(ctx context.Context, path, password string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	other, err := readDatabase(path, password)
+	if err != nil {
+		return err
+	}
+	return s.mutate(ctx, func() error { mergeInto(s.db, other); return nil }, nil)
 }
 
-func seal(key []byte, aad string, plain []byte) ([]byte, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
+// importKey keys import fingerprints; it lives in the vault so every device dedupes alike.
+func (s *Store) importKey() []byte {
+	meta := s.db.Content.Meta
+	for _, item := range meta.CustomData {
+		if item.Key == "polymux.import" {
+			if key, err := hex.DecodeString(item.Value); err == nil && len(key) == 32 {
+				return key
+			}
+		}
 	}
-	aead, err := cipher.NewGCMWithRandomNonce(block)
-	if err != nil {
-		return nil, err
-	}
-	return aead.Seal(nil, nil, plain, []byte("polymux:vault:1:"+aad)), nil
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	meta.CustomData = append(meta.CustomData, gokeepasslib.CustomData{Key: "polymux.import", Value: hex.EncodeToString(key)})
+	return key
 }
 
-func open(key []byte, aad string, data []byte) ([]byte, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	aead, err := cipher.NewGCMWithRandomNonce(block)
-	if err != nil {
-		return nil, err
-	}
-	return aead.Open(nil, nil, data, []byte("polymux:vault:1:"+aad))
+func (s *Store) fingerprint(item Item) string {
+	item.ID, item.Revision = "import", 0
+	plain, _ := json.Marshal(item)
+	digest := hmac.New(sha256.New, s.importKey())
+	digest.Write([]byte("polymux-vault-import-v1"))
+	digest.Write(plain)
+	clear(plain)
+	return "import_" + hex.EncodeToString(digest.Sum(nil))
 }
-
-func itemAAD(id string, revision int64) string { return fmt.Sprintf("item:%s:%d", id, revision) }

@@ -1,97 +1,96 @@
-package vault_test
+package vault
 
 import (
-	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"database/sql"
-	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/CarlvinceTan/polymux/packages/vault"
+	"github.com/tobischo/gokeepasslib/v3"
+	w "github.com/tobischo/gokeepasslib/v3/wrappers"
 )
 
+// The embedded vault is a plain KeePass file: other KeePass apps read the standard keys,
+// and values polymux doesn't know survive its edits.
 func TestStoredFormat(t *testing.T) {
+	s, dir, keys := testStore(t)
 	ctx := t.Context()
-	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "existing.db"))
+	login := testItem()
+	login.Fields["totp"] = "otpauth://totp/Example?secret=JBSWY3DPEHPK3PXP"
+	login.Codes = []Code{{ID: "first", Value: "first-code"}}
+	login, err := s.Save(ctx, login)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	// Build the pre-extraction schema and ciphertext without using vault's writers.
-	_, err = db.ExecContext(ctx, `
-CREATE TABLE vault_meta (id INTEGER PRIMARY KEY CHECK(id=1), salt BLOB NOT NULL,
- wrapped BLOB NOT NULL, proof BLOB NOT NULL, browser BLOB NOT NULL);
-CREATE TABLE vault_items (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data BLOB NOT NULL);`)
+	card := Item{ID: "card", Kind: "card", Title: "Card", Fields: map[string]string{"holder": "A Person", "number": "4111111111111111", "expiry": "12/30", "cvc": "123"}, Codes: []Code{}}
+	if _, err := s.Save(ctx, card); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, FileName)
+	db, err := readDatabase(path, string(keys.key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := bytes.Repeat([]byte{7}, 32)
-	block, err := aes.NewCipher(key)
+	byTitle := map[string]*gokeepasslib.Entry{}
+	walkEntries(&db.Content.Root.Groups[0], func(_ *gokeepasslib.Group, e *gokeepasslib.Entry) { byTitle[e.GetTitle()] = e })
+	entry := byTitle[login.Title]
+	for key, want := range map[string]string{
+		"UserName": "hidden-user-name", "Password": "hidden-value-7ce2", "URL": login.URL, "Notes": "hidden-note-1299",
+		"otp": login.Fields["totp"], "recovery.codes": "first-code",
+	} {
+		if got := value(entry, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+	if value(byTitle["Card"], "cardholder") != "A Person" || value(byTitle["Card"], "number") != "4111111111111111" {
+		t.Fatal("card fields are not under the vault CLI's names")
+	}
+	if !entry.Values[indexOf(entry, "Password")].Value.Protected.Bool {
+		t.Fatal("password is not protected")
+	}
+
+	// Another app adds a field polymux doesn't know and edits the password.
+	entry.Values = append(entry.Values, gokeepasslib.ValueData{Key: "Security question", Value: gokeepasslib.V{Content: "kept"}})
+	entry.Values[indexOf(entry, "Password")].Value.Content = "changed-elsewhere"
+	later := w.TimeWrapper{Time: modified(entry).Add(5e9)}
+	entry.Times.LastModificationTime = &later
+	data, err := encodeDatabase(db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gcm, err := cipher.NewGCM(block)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, login.ID)
+	if err != nil || got.Fields["password"] != "changed-elsewhere" {
+		t.Fatal("outside edit not seen", err)
+	}
+	got.Title = "Renamed"
+	if _, err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	db, err = readDatabase(path, string(keys.key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	seal := func(aad, plain string) []byte {
-		nonce := make([]byte, gcm.NonceSize())
-		_, _ = rand.Read(nonce)
-		return gcm.Seal(nonce, nonce, []byte(plain), []byte("polymux:vault:1:"+aad))
+	walkEntries(&db.Content.Root.Groups[0], func(_ *gokeepasslib.Group, e *gokeepasslib.Entry) { byTitle[e.GetTitle()] = e })
+	entry = byTitle["Renamed"]
+	if entry == nil || value(entry, "Security question") != "kept" || len(entry.Histories) == 0 {
+		t.Fatal("an edit lost a field polymux doesn't know, or kept no history")
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO vault_meta VALUES(1,?,?,?,?)`, []byte{}, []byte{},
-		seal("proof", "polymux-vault-v1"), seal("browser", `{"endpoint":""}`))
-	if err != nil {
-		t.Fatal(err)
+
+	// Entries other apps made appear with a kind inferred from their fields.
+	items, err := ParseKDBX(data, string(keys.key), nil)
+	if err != nil || len(items) != 2 {
+		t.Fatal("the importer can't read the stored vault", err)
 	}
-	plain := `{"id":"existing","kind":"login","title":"Existing entry","url":"https://example.com","fields":{"password":"synthetic-existing-password"},"codes":[{"id":"r1","value":"synthetic-recovery","used":false}],"revision":9}`
-	_, err = db.ExecContext(ctx, `INSERT INTO vault_items VALUES('existing',9,?)`, seal("item:existing:9", plain))
-	if err != nil {
-		t.Fatal(err)
+}
+
+func indexOf(entry *gokeepasslib.Entry, key string) int {
+	for i, v := range entry.Values {
+		if v.Key == key {
+			return i
+		}
 	}
-	keys := &memoryKeys{}
-	store, err := vault.Open(ctx, db, keys)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	if _, err := store.Get(ctx, "existing"); !errors.Is(err, vault.ErrUnavailable) {
-		t.Fatal("missing key did not fail closed", err)
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('vault_meta') WHERE name='salt'`).Scan(&count); err != nil || count != 1 {
-		t.Fatal("unavailable vault was migrated", err)
-	}
-	keys.key = key
-	item, err := store.Get(ctx, "existing")
-	if err != nil || item.Revision != 9 || item.Fields["password"] != "synthetic-existing-password" || len(item.Codes) != 1 {
-		t.Fatalf("existing record unreadable: revision=%d err=%v", item.Revision, err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('vault_meta') WHERE name IN ('salt','wrapped')`).Scan(&count); err != nil || count != 0 {
-		t.Fatal("retired password wrapper remains", err)
-	}
-	item.Title = "Edited entry"
-	saved, err := store.Save(ctx, item)
-	if err != nil || saved.Revision != 10 {
-		t.Fatalf("existing record cannot be updated: revision=%d err=%v", saved.Revision, err)
-	}
-	var data []byte
-	if err := db.QueryRowContext(ctx, `SELECT data FROM vault_items WHERE id='existing'`).Scan(&data); err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(data, []byte("synthetic-existing-password")) {
-		t.Fatal("updated record is not encrypted")
-	}
-	nonce := data[:gcm.NonceSize()]
-	if _, err := gcm.Open(nil, nonce, data[gcm.NonceSize():], []byte("polymux:vault:1:item:existing:10")); err != nil {
-		t.Fatal("updated record no longer uses the existing envelope", err)
-	}
-	store.Close()
-	if err := db.PingContext(ctx); err != nil {
-		t.Fatal("closing the vault closed its caller-owned database", err)
-	}
+	return -1
 }

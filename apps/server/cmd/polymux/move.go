@@ -267,7 +267,7 @@ func collectKeys(dir string) ([]network.MovedKey, error) {
 	if runtime.GOOS != "darwin" {
 		return nil, nil
 	}
-	wanted := []network.MovedKey{{Service: "com.polymux.vault", Folder: "vault"}}
+	wanted := []network.MovedKey{{Service: "com.polymux.vault", Folder: "vault", Suffix: "/password"}}
 	store, err := settings.Open(filepath.Join(dir, "settings.json"))
 	if err != nil {
 		return nil, err
@@ -468,7 +468,7 @@ func forgetKeys(dir, old string) {
 	if runtime.GOOS != "darwin" {
 		return
 	}
-	wanted := []network.MovedKey{{Service: "com.polymux.vault", Folder: "vault"}}
+	wanted := []network.MovedKey{{Service: "com.polymux.vault", Folder: "vault", Suffix: "/password"}}
 	if store, err := settings.Open(filepath.Join(old, "settings.json")); err == nil {
 		for _, provider := range store.Providers() {
 			wanted = append(wanted, network.MovedKey{Service: "com.polymux.provider", Folder: "provider-keys", Suffix: "/" + provider.ID})

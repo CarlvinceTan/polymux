@@ -16,6 +16,8 @@ import (
 	"github.com/CarlvinceTan/polymux/packages/vault"
 )
 
+// The vault password is under its own account (the folder's digest plus /password), apart from
+// the data key earlier releases kept for their SQLite vault.
 const vaultService = "com.polymux.vault"
 
 type hostKeys struct{ Dir string }
@@ -29,12 +31,12 @@ func (k hostKeys) Protection() string {
 
 func (k hostKeys) account() string {
 	dir, _ := filepath.Abs(k.Dir)
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(dir)))
+	return fmt.Sprintf("%x/password", sha256.Sum256([]byte(dir)))
 }
 
 func (k hostKeys) Load() ([]byte, error) {
 	if runtime.GOOS != "darwin" {
-		path := filepath.Join(k.Dir, "key")
+		path := filepath.Join(k.Dir, "password")
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 			return nil, vault.ErrUnavailable
@@ -49,7 +51,7 @@ func (k hostKeys) Load() ([]byte, error) {
 }
 
 func (k hostKeys) Save(key []byte) error {
-	if len(key) != 32 {
+	if len(key) == 0 || len(key) > 1024 {
 		return vault.ErrUnavailable
 	}
 	if runtime.GOOS == "darwin" {
@@ -64,7 +66,7 @@ func (k hostKeys) Save(key []byte) error {
 	if err := os.Chmod(k.Dir, 0700); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(k.Dir, ".key-")
+	file, err := os.CreateTemp(k.Dir, ".password-")
 	if err != nil {
 		return err
 	}
@@ -74,7 +76,7 @@ func (k hostKeys) Save(key []byte) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(file.Name(), filepath.Join(k.Dir, "key"))
+	return os.Rename(file.Name(), filepath.Join(k.Dir, "password"))
 }
 
 func keychain(input string, args ...string) ([]byte, error) {

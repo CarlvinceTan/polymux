@@ -109,6 +109,36 @@ func (s *Server) vaultRoutes() {
 		}
 		write(w, 200, browser)
 	})
+	mount("GET /vault/sync", func(w http.ResponseWriter, r *http.Request) {
+		status, err := s.vault.Sync(r.Context())
+		if vaultError(w, err) {
+			return
+		}
+		write(w, 200, contract.VaultSync(status))
+	})
+	mount("PUT /vault/sync", func(w http.ResponseWriter, r *http.Request) {
+		var change contract.VaultSyncChange
+		if !decode(w, r, &change) {
+			return
+		}
+		password := ""
+		if change.Password != nil {
+			password = *change.Password
+		}
+		status, err := s.vault.SetSync(r.Context(), change.Location, password)
+		switch {
+		case errors.Is(err, vault.ErrKDBX):
+			fail(w, 400, "vault_sync_password", "That password doesn’t open the vault file there.")
+		case errors.Is(err, vault.ErrWeakPassword):
+			fail(w, 400, "vault_sync_password", "Choose a password of at least 8 characters for the synced vault.")
+		case errors.Is(err, vault.ErrInvalid):
+			fail(w, 400, "vault_sync_location", "Enter the full path of a folder or a .kdbx file.")
+		case errors.Is(err, vault.ErrSyncUnavailable):
+			fail(w, 409, "vault_sync_unavailable", "Couldn’t reach that folder. Check that it exists on the server.")
+		case !vaultError(w, err):
+			write(w, 200, contract.VaultSync(status))
+		}
+	})
 }
 
 func vaultError(w http.ResponseWriter, err error) bool {

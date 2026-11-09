@@ -281,7 +281,7 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 	if c.VaultKeys == nil {
 		c.VaultKeys = hostKeys{Dir: filepath.Join(c.DataDir, "vault")}
 	}
-	v.vault, err = vaultstore.Open(ctx, s.DB, c.VaultKeys)
+	v.vault, err = vaultstore.Open(ctx, filepath.Join(c.DataDir, "vault"), c.VaultKeys)
 	if err != nil {
 		cancel()
 		return nil, errors.Join(err, v.memory.Close())
