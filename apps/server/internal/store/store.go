@@ -396,13 +396,10 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	if err != nil {
 		return a, err
 	}
-	acp, err := json.Marshal(a.ACP)
-	if err != nil {
-		return a, err
-	}
+	// json_remove drops the external agent bots could once be attached to.
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?,'$.fallback',json(?),'$.acp',json(?)) WHERE id=?`,
-		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, string(fallback), string(acp), a.ID,
+		`UPDATE agents SET data=json_remove(json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?,'$.fallback',json(?)),'$.acp') WHERE id=?`,
+		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, string(fallback), a.ID,
 	); err != nil {
 		return a, err
 	}
@@ -1007,9 +1004,18 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 	return m, true, tx.Commit()
 }
 
+// Job claims the thread's next queued turn. Child tasks are claimed separately by ChildJob,
+// so they run alongside the turn that spawned them instead of waiting behind it.
 func (s *Store) Job(ctx context.Context, thread string) (string, error) {
 	var id string
-	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' ORDER BY rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
+	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger') IS NOT 'child' ORDER BY rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
+	return id, err
+}
+
+// ChildJob claims the thread's next queued child task.
+func (s *Store) ChildJob(ctx context.Context, thread string) (string, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger')='child' ORDER BY rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
 	return id, err
 }
 

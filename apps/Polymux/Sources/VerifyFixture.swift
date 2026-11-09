@@ -239,10 +239,14 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
         let runs = (0...6).map { index in
             let date = WireDate.string(Date(timeIntervalSince1970: 1_790_000_000 + Double(index) * 60))
             let active = index == 0
-            let run = Run(id: "profile-\(index)", conversationID: "t-chief", trigger: index == 6 ? RunTrigger.message : RunTrigger.child,
+            let run = Run(id: "profile-\(index)", conversationID: "t-chief", trigger: RunTrigger.child,
                           seq: Int64(index + 1), createdAt: date, updatedAt: date,
                           activity: active ? "Reviewing calendar" : "", agentID: "t-chief",
-                          status: active ? RunStatus.running : RunStatus.completed, summary: index == 6 ? "Ordinary chat reply" : "Finished task \(index)")
+                          status: active ? RunStatus.running : RunStatus.completed, summary: "Finished task \(index)",
+                          external: index == 5 ? ExternalAgent(agent: "claude-acp", name: "Claude Agent")
+                              : index == 6 ? ExternalAgent(agent: "github-copilot-cli", name: "GitHub Copilot")
+                              : index == 4 ? ExternalAgent(name: "local-agent", command: "/usr/local/bin/local-agent")
+                              : index == 3 ? ExternalAgent(agent: "opencode", name: "OpenCode") : nil)
             return Event(seq: run.seq, conversationID: "t-chief", type: active ? EventType.runUpdate : EventType.runDone,
                          createdAt: date, run: run)
         }

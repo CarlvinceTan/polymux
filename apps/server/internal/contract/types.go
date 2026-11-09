@@ -172,11 +172,6 @@ const (
 	FallbackModelReasoningMax     = "max"
 )
 
-type AgentACP struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-}
-
 type Agent struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
@@ -187,7 +182,6 @@ type Agent struct {
 	Provider  string         `json:"provider,omitempty"`
 	Reasoning string         `json:"reasoning,omitempty"`
 	Fallback  *AgentFallback `json:"fallback,omitempty"`
-	ACP       *AgentACP      `json:"acp,omitempty"`
 	CreatedBy string         `json:"createdBy,omitempty"`
 }
 
@@ -477,6 +471,13 @@ type Proactivity struct {
 	NextAt          *string `json:"nextAt,omitempty"`
 }
 
+type ExternalAgent struct {
+	Agent   string   `json:"agent,omitempty"`
+	Name    string   `json:"name"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+}
+
 type Run struct {
 	JobID           string         `json:"jobID"`
 	ID              string         `json:"id"`
@@ -503,6 +504,7 @@ type Run struct {
 	Summary         string         `json:"summary"`
 	StatusText      *string        `json:"statusText,omitempty"`
 	Notice          *string        `json:"notice,omitempty"`
+	External        *ExternalAgent `json:"external,omitempty"`
 }
 
 const (
@@ -592,7 +594,6 @@ type CreateAgentRequest struct {
 	Provider    *string       `json:"provider,omitempty"`
 	Avatar      *AvatarDesign `json:"avatar,omitempty"`
 	SectionID   *string       `json:"sectionID,omitempty"`
-	ACP         *AgentACP     `json:"acp,omitempty"`
 }
 
 type AgentProfile struct {
@@ -608,7 +609,6 @@ type UpdateAgentRequest struct {
 	Model     *string        `json:"model,omitempty"`
 	Reasoning *string        `json:"reasoning,omitempty"`
 	Fallback  *AgentFallback `json:"fallback,omitempty"`
-	ACP       *AgentACP      `json:"acp,omitempty"`
 }
 
 const (
@@ -1010,6 +1010,25 @@ type VaultSummary struct {
 
 type VaultBrowser struct {
 	Endpoint string `json:"endpoint"`
+}
+
+type VaultSync struct {
+	Location string `json:"location"`
+	State    string `json:"state"`
+	SyncedAt int64  `json:"syncedAt"`
+}
+
+const (
+	VaultSyncStateOff         = "off"
+	VaultSyncStateSynced      = "synced"
+	VaultSyncStatePending     = "pending"
+	VaultSyncStateUnavailable = "unavailable"
+	VaultSyncStateLocked      = "locked"
+)
+
+type VaultSyncChange struct {
+	Location string  `json:"location"`
+	Password *string `json:"password,omitempty"`
 }
 
 type RoutineWatch struct {

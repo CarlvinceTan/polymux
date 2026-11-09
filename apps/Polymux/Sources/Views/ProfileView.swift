@@ -34,8 +34,6 @@ struct ProfileView: View {
     @State private var fallback: AgentFallback
     @State private var editingFallbacks = false
     /// The external agent this bot runs on, if it is attached to one.
-    @State private var acp: AgentACP?
-    @State private var editingACP = false
     @State private var modelSaving = false
     @State private var modelIssue: String?
     @State private var saved: ProfileValues
@@ -73,7 +71,6 @@ struct ProfileView: View {
         _provider = State(initialValue: agent.provider ?? "")
         _reasoning = State(initialValue: agent.reasoning ?? "off")
         _fallback = State(initialValue: agent.fallbacks)
-        _acp = State(initialValue: agent.acp)
         _role = State(initialValue: agent.role)
         let store = session.profile(agent.id)
         _store = State(initialValue: store)
@@ -322,49 +319,46 @@ struct ProfileView: View {
 
     private var work: some View { workSection }
 
-    /// What shapes how the bot works: its model or external agent, instructions, skills and MCP connections.
+    /// What shapes how the bot works: its model, instructions, skills and MCP connections.
     private var capabilities: some View {
         VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
-            if acp == nil {
-                PanelSection("Model", accessory: loaded ? fallbackAccessory : nil) {
-                    Button { choosingModel = true } label: {
-                        HStack {
-                            Label {
-                                ModelLabel(name: modelName)
-                            } icon: {
-                                Image(systemName: "cpu")
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.up.chevron.down")
+            PanelSection("Model", accessory: loaded ? fallbackAccessory : nil) {
+                Button { choosingModel = true } label: {
+                    HStack {
+                        Label {
+                            ModelLabel(name: modelName)
+                        } icon: {
+                            Image(systemName: "cpu")
                         }
-                        .contentShape(Rectangle())
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
                     }
-                    .buttonStyle(.plain)
-                    .sectionRow()
-                    .accessibilityLabel("Model")
-                    .accessibilityValue(modelName.title)
-                    .disabled(!loaded || modelSaving)
-                    .dropdown(isPresented: $choosingModel) {
-                        ModelPicker(providers: providers, provider: provider, model: model, choose: remap)
-                    }
-                    Divider().padding(.horizontal, PanelStyle.rowInset)
-                    ReasoningPicker(selection: Binding(get: { reasoning }, set: {
-                        saveModel(UpdateAgentRequest(reasoning: $0))
-                    }), inset: true, levels: providers.levels(provider: provider, model: model))
-                    .disabled(!loaded || modelSaving)
-                    if let modelIssue {
-                        Text(modelIssue).font(.footnote).foregroundStyle(.muted)
-                    } else if providersLoaded, !provider.isEmpty, !providers.contains(where: { $0.id == provider && $0.enabled }) {
-                        Text("Provider unavailable. Choose another model.").font(.footnote).foregroundStyle(.muted)
-                    }
+                    .contentShape(Rectangle())
                 }
-                .panel(isPresented: $editingFallbacks) {
-                    FallbackPanel(fallback: fallback, reasoning: reasoning, providers: providers, saving: modelSaving, issue: modelIssue) {
-                        saveModel(UpdateAgentRequest(fallback: $0))
-                    }
+                .buttonStyle(.plain)
+                .sectionRow()
+                .accessibilityLabel("Model")
+                .accessibilityValue(modelName.title)
+                .disabled(!loaded || modelSaving)
+                .dropdown(isPresented: $choosingModel) {
+                    ModelPicker(providers: providers, provider: provider, model: model, choose: remap)
+                }
+                Divider().padding(.horizontal, PanelStyle.rowInset)
+                ReasoningPicker(selection: Binding(get: { reasoning }, set: {
+                    saveModel(UpdateAgentRequest(reasoning: $0))
+                }), inset: true, levels: providers.levels(provider: provider, model: model))
+                .disabled(!loaded || modelSaving)
+                if let modelIssue {
+                    Text(modelIssue).font(.footnote).foregroundStyle(.muted)
+                } else if providersLoaded, !provider.isEmpty, !providers.contains(where: { $0.id == provider && $0.enabled }) {
+                    Text("Provider unavailable. Choose another model.").font(.footnote).foregroundStyle(.muted)
                 }
             }
-            externalAgent
+            .panel(isPresented: $editingFallbacks) {
+                FallbackPanel(fallback: fallback, reasoning: reasoning, providers: providers, saving: modelSaving, issue: modelIssue) {
+                    saveModel(UpdateAgentRequest(fallback: $0))
+                }
+            }
             VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
                 instructions
                 sectionCard("Skills", count: configuration == nil ? nil : skillNames.count, empty: skillNames.isEmpty) {
@@ -398,45 +392,6 @@ struct ProfileView: View {
 
     private var fallbackAccessory: PanelAccessory {
         PanelAccessory(symbol: "gearshape", label: "Fallback settings") { editingFallbacks = true }
-    }
-
-    /// Attaches the bot to an external Agent Client Protocol process, which then runs its turns.
-    private var externalAgent: some View {
-        PanelSection("External agent") {
-            if let acp {
-                HStack(spacing: PanelStyle.rowInset) {
-                    Label {
-                        Text(([acp.command] + (acp.args ?? [])).joined(separator: " ")).lineLimit(1)
-                    } icon: {
-                        Image(systemName: "bolt.horizontal")
-                    }
-                    Spacer(minLength: 8)
-                    Button("Detach") { saveACP(nil) }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.muted)
-                        .disabled(!loaded || modelSaving)
-                        .accessibilityLabel("Detach external agent")
-                }
-                .sectionRow()
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("External agent")
-                if let modelIssue {
-                    Text(modelIssue).font(.footnote).foregroundStyle(.muted).sectionRow()
-                }
-            } else {
-                Button { editingACP = true } label: {
-                    Label("Attach", systemImage: "plus")
-                }
-                .buttonStyle(SectionButton())
-                .disabled(!loaded || modelSaving)
-                .accessibilityLabel("Attach external agent")
-            }
-        }
-        .panel(isPresented: $editingACP) {
-            ACPPanel(attached: acp, saving: modelSaving) { command, arguments in
-                saveACP(AgentACP(command: command, args: arguments))
-            }
-        }
     }
 
     private var expandAccessory: PanelAccessory {
@@ -674,32 +629,6 @@ struct ProfileView: View {
             }
         }
     }
-
-    private func saveACP(_ next: AgentACP?) {
-        guard !modelSaving else { return }
-        let previous = acp
-        acp = next
-        modelSaving = true
-        modelIssue = nil
-        Task {
-            defer { modelSaving = false }
-            do {
-                let profile = try await session.client.updateAgent(id: agent.id,
-                    request: UpdateAgentRequest(acp: next ?? AgentACP()))
-                acp = profile.agent.acp
-                provider = profile.agent.provider ?? ""
-                model = profile.agent.model
-                reasoning = profile.agent.reasoning ?? "off"
-                fallback = profile.agent.fallbacks
-                editingACP = false
-                await store.accept(profile)
-                await session.sidebar.accept(profile.agent)
-            } catch {
-                acp = previous
-                modelIssue = error.isOffline ? "Not saved. Connect before changing the external agent." : error.reason(or: "Couldn’t save the external agent.")
-            }
-        }
-    }
 }
 
 private struct BarState: Hashable {
@@ -861,48 +790,6 @@ private struct PromptPanel: View {
     }
 }
 
-/// Attaches a bot to an external Agent Client Protocol process, or edits its launch command.
-private struct ACPPanel: View {
-    let attached: AgentACP?
-    let saving: Bool
-    let save: (String, [String]) -> Void
-    @Environment(\.panelClose) private var dismiss
-    @State private var command: String
-    @State private var arguments: String
-
-    init(attached: AgentACP?, saving: Bool, save: @escaping (String, [String]) -> Void) {
-        self.attached = attached
-        self.saving = saving
-        self.save = save
-        _command = State(initialValue: attached?.command ?? "")
-        _arguments = State(initialValue: (attached?.args ?? []).joined(separator: " "))
-    }
-
-    private var clean: String { command.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    var body: some View {
-        PanelView("External agent", enabled: !saving, onClose: { dismiss() }) {
-            Form {
-                Section {
-                    SettingsField(title: "Command", text: $command, prompt: "Agent executable")
-                    SettingsField(title: "Arguments", text: $arguments, prompt: "Separated by spaces")
-                }
-                .panelRow()
-            }
-            .formStyle(.grouped)
-            .disabled(saving)
-        } actions: {
-            Button { save(clean, arguments.split(whereSeparator: \.isWhitespace).map(String.init)) } label: {
-                if saving { ProgressView().controlSize(.small) } else { Text(attached == nil ? "Attach" : "Save") }
-            }
-            .disabled(clean.isEmpty || saving)
-            .keyboardShortcut(.defaultAction)
-        }
-        .interactiveDismissDisabled(saving)
-        .panelDismiss(enabled: !saving, onClose: { dismiss() })
-    }
-}
-
 /// Hovering with a pointer, or pressing on touch, darkens the face and centres a pencil on it.
 private struct AvatarEditStyle: ButtonStyle {
     @Binding var hovered: Bool
@@ -922,12 +809,13 @@ private struct AvatarEditStyle: ButtonStyle {
 }
 
 
-/// A bot's task or delegated work, shown with its state only.
+/// A bot's task or delegated work, shown with its state and, for work on an external agent, its logo.
 private struct TaskRow: View {
     enum Phase { case working, open, done, stopped }
 
     let title: String
     let phase: Phase
+    var external: ExternalAgent?
 
     init(thread: PolymuxKit.Thread) {
         title = thread.title
@@ -937,12 +825,20 @@ private struct TaskRow: View {
     init(run: Run) {
         let active = Self.active(run)
         title = active && !run.activity.isEmpty ? run.activity : run.summary
+        external = run.external
         switch run.status {
         case _ where active: phase = .working
         case RunStatus.completed: phase = .done
         case RunStatus.failed, RunStatus.cancelled, RunStatus.interrupted: phase = .stopped
         default: phase = .open
         }
+    }
+
+    /// The brand's own short name: Claude Agent and Claude Code both read as Claude.
+    static func shortName(_ name: String) -> String {
+        let brand = ["Claude", "Copilot", "Codex", "Gemini", "Mistral", "Qoder", "Qwen", "OpenCode", "Kimi", "Devin", "Amp"]
+            .first { name.contains($0) }
+        return brand ?? name
     }
 
     static func active(_ run: Run) -> Bool {
@@ -974,7 +870,60 @@ private struct TaskRow: View {
             Text(title)
                 .lineLimit(2)
                 .foregroundStyle(phase == .working || phase == .open ? AnyShapeStyle(.primary) : AnyShapeStyle(.muted))
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            if let external {
+                HStack(spacing: 4) {
+                    AgentLogo(agent: external)
+                    Text(verbatim: Self.shortName(external.name)).lineLimit(1)
+                }
+                .font(.caption)
+                .foregroundStyle(.muted)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Handled by \(external.name)")
+            }
+        }
+    }
+}
+
+/// An external agent's logo, coloured where its brand has one, or a bot for agents the registry doesn't list.
+private struct AgentLogo: View {
+    let agent: ExternalAgent
+
+    private var asset: String? {
+        guard let id = agent.agent, !id.isEmpty else { return nil }
+        let name = "agent-" + id
+        #if os(macOS)
+        return NSImage(named: name) == nil ? nil : name
+        #else
+        return UIImage(named: name) == nil ? nil : name
+        #endif
+    }
+
+    var body: some View {
+        Group {
+            if let asset { Image(asset).resizable().scaledToFit() } else { BotGlyph() }
+        }
+        .frame(width: 12, height: 12)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A small robot, for an external agent without a logo of its own.
+private struct BotGlyph: View {
+    var body: some View {
+        Canvas { context, size in
+            let unit = size.width / 12
+            let line = 1.1 * unit
+            let head = Path(roundedRect: CGRect(x: unit, y: 4 * unit, width: 10 * unit, height: 7.5 * unit), cornerRadius: 2 * unit)
+            context.stroke(head, with: .foreground, lineWidth: line)
+            var antenna = Path()
+            antenna.move(to: CGPoint(x: 6 * unit, y: 4 * unit))
+            antenna.addLine(to: CGPoint(x: 6 * unit, y: 2 * unit))
+            context.stroke(antenna, with: .foreground, lineWidth: line)
+            context.fill(Path(ellipseIn: CGRect(x: 5 * unit, y: unit, width: 2 * unit, height: 2 * unit)), with: .foreground)
+            for x in [4.1, 6.9] {
+                context.fill(Path(ellipseIn: CGRect(x: x * unit, y: 6.9 * unit, width: 1.7 * unit, height: 1.7 * unit)), with: .foreground)
+            }
         }
     }
 }

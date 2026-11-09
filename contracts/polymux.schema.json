@@ -502,25 +502,6 @@
         "reasoning"
       ]
     },
-    "AgentACP": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "command": {
-          "type": "string",
-          "description": "Executable that speaks the Agent Client Protocol over stdio."
-        },
-        "args": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "command"
-      ]
-    },
     "Agent": {
       "type": "object",
       "additionalProperties": false,
@@ -563,10 +544,6 @@
         },
         "fallback": {
           "$ref": "#/$defs/AgentFallback"
-        },
-        "acp": {
-          "$ref": "#/$defs/AgentACP",
-          "description": "When set, the bot runs on this external Agent Client Protocol process instead of a model."
         },
         "createdBy": {
           "type": "string",
@@ -1364,6 +1341,36 @@
         "intervalSeconds"
       ]
     },
+    "ExternalAgent": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "An Agent Client Protocol process a delegated task runs on instead of the bot's model.",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "ACP registry ID, such as claude-acp. Empty when a command was given.",
+          "x-go-value": true
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name: the registry name, or the command's file name."
+        },
+        "command": {
+          "type": "string",
+          "description": "Executable to launch when no registry agent was named.",
+          "x-go-value": true
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
     "Run": {
       "type": "object",
       "additionalProperties": false,
@@ -1485,6 +1492,10 @@
         "notice": {
           "type": "string",
           "description": "A warning for the user about this run, such as another model replying."
+        },
+        "external": {
+          "$ref": "#/$defs/ExternalAgent",
+          "description": "Set when the task runs on an external agent."
         }
       },
       "required": [
@@ -1653,9 +1664,6 @@
         },
         "sectionID": {
           "type": "string"
-        },
-        "acp": {
-          "$ref": "#/$defs/AgentACP"
         }
       },
       "required": [
@@ -1721,10 +1729,6 @@
         },
         "fallback": {
           "$ref": "#/$defs/AgentFallback"
-        },
-        "acp": {
-          "$ref": "#/$defs/AgentACP",
-          "description": "Attach the bot to an external ACP process. An empty command detaches it back to a model."
         }
       },
       "required": []
@@ -2658,6 +2662,51 @@
       },
       "required": [
         "endpoint"
+      ]
+    },
+    "VaultSync": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "off",
+            "synced",
+            "pending",
+            "unavailable",
+            "locked"
+          ]
+        },
+        "syncedAt": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "location",
+        "state",
+        "syncedAt"
+      ]
+    },
+    "VaultSyncChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "password": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "location"
       ]
     },
     "RoutineWatch": {

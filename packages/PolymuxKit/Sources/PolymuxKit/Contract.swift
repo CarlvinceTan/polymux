@@ -378,19 +378,6 @@ public enum FallbackModelReasoning {
     public static let max = "max"
 }
 
-public struct AgentACP: Codable, Hashable, Sendable {
-    public var command: String
-    public var args: [String]?
-
-    public init(
-        command: String = "",
-        args: [String]? = nil
-    ) {
-        self.command = command
-        self.args = args
-    }
-}
-
 public struct Agent: Codable, Hashable, Sendable {
     public var id: String
     public var name: String
@@ -401,7 +388,6 @@ public struct Agent: Codable, Hashable, Sendable {
     public var provider: String?
     public var reasoning: String?
     public var fallback: AgentFallback?
-    public var acp: AgentACP?
     public var createdBy: String?
 
     public init(
@@ -414,7 +400,6 @@ public struct Agent: Codable, Hashable, Sendable {
         provider: String? = nil,
         reasoning: String? = nil,
         fallback: AgentFallback? = nil,
-        acp: AgentACP? = nil,
         createdBy: String? = nil
     ) {
         self.id = id
@@ -426,7 +411,6 @@ public struct Agent: Codable, Hashable, Sendable {
         self.provider = provider
         self.reasoning = reasoning
         self.fallback = fallback
-        self.acp = acp
         self.createdBy = createdBy
     }
 }
@@ -1062,6 +1046,25 @@ public struct Proactivity: Codable, Hashable, Sendable {
     }
 }
 
+public struct ExternalAgent: Codable, Hashable, Sendable {
+    public var agent: String?
+    public var name: String
+    public var command: String?
+    public var args: [String]?
+
+    public init(
+        agent: String? = nil,
+        name: String = "",
+        command: String? = nil,
+        args: [String]? = nil
+    ) {
+        self.agent = agent
+        self.name = name
+        self.command = command
+        self.args = args
+    }
+}
+
 public struct Run: Codable, Hashable, Sendable {
     public var jobID: String
     public var id: String
@@ -1088,6 +1091,7 @@ public struct Run: Codable, Hashable, Sendable {
     public var summary: String
     public var statusText: String?
     public var notice: String?
+    public var external: ExternalAgent?
 
     public init(
         jobID: String = "",
@@ -1114,7 +1118,8 @@ public struct Run: Codable, Hashable, Sendable {
         startedAt: String? = nil,
         summary: String = "",
         statusText: String? = nil,
-        notice: String? = nil
+        notice: String? = nil,
+        external: ExternalAgent? = nil
     ) {
         self.jobID = jobID
         self.id = id
@@ -1141,6 +1146,7 @@ public struct Run: Codable, Hashable, Sendable {
         self.summary = summary
         self.statusText = statusText
         self.notice = notice
+        self.external = external
     }
 }
 
@@ -1288,7 +1294,6 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
     public var provider: String?
     public var avatar: AvatarDesign?
     public var sectionID: String?
-    public var acp: AgentACP?
 
     public init(
         initialTask: String? = nil,
@@ -1298,8 +1303,7 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         model: String? = nil,
         provider: String? = nil,
         avatar: AvatarDesign? = nil,
-        sectionID: String? = nil,
-        acp: AgentACP? = nil
+        sectionID: String? = nil
     ) {
         self.initialTask = initialTask
         self.name = name
@@ -1309,7 +1313,6 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         self.provider = provider
         self.avatar = avatar
         self.sectionID = sectionID
-        self.acp = acp
     }
 }
 
@@ -1334,7 +1337,6 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
     public var model: String?
     public var reasoning: String?
     public var fallback: AgentFallback?
-    public var acp: AgentACP?
 
     public init(
         name: String? = nil,
@@ -1343,8 +1345,7 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
         provider: String? = nil,
         model: String? = nil,
         reasoning: String? = nil,
-        fallback: AgentFallback? = nil,
-        acp: AgentACP? = nil
+        fallback: AgentFallback? = nil
     ) {
         self.name = name
         self.role = role
@@ -1353,7 +1354,6 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
         self.model = model
         self.reasoning = reasoning
         self.fallback = fallback
-        self.acp = acp
     }
 }
 
@@ -2101,6 +2101,43 @@ public struct VaultBrowser: Codable, Hashable, Sendable {
         endpoint: String = ""
     ) {
         self.endpoint = endpoint
+    }
+}
+
+public struct VaultSync: Codable, Hashable, Sendable {
+    public var location: String
+    public var state: String
+    public var syncedAt: Int64
+
+    public init(
+        location: String = "",
+        state: String = "",
+        syncedAt: Int64 = 0
+    ) {
+        self.location = location
+        self.state = state
+        self.syncedAt = syncedAt
+    }
+}
+
+public enum VaultSyncState {
+    public static let off = "off"
+    public static let synced = "synced"
+    public static let pending = "pending"
+    public static let unavailable = "unavailable"
+    public static let locked = "locked"
+}
+
+public struct VaultSyncChange: Codable, Hashable, Sendable {
+    public var location: String
+    public var password: String?
+
+    public init(
+        location: String = "",
+        password: String? = nil
+    ) {
+        self.location = location
+        self.password = password
     }
 }
 

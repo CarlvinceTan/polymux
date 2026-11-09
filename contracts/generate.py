@@ -96,8 +96,6 @@ def generate():
                 gname = 'ID'
             if key == 'url':
                 gname = 'URL'
-            if key == 'acp':
-                gname = 'ACP'
             go.append(f'\t{gname} {gt} `json:"{key}' + (',omitempty' if optional else '') + '"`')
         swift.extend(['', '    public init(', '        ' + ',\n        '.join(params), '    ) {'])
         swift.extend(f'        self.{key} = {key}' for key in fields)

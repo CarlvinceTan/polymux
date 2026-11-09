@@ -34,6 +34,8 @@ type Work struct {
 	FromAgentID string           `json:"fromAgentID,omitempty"`
 	// DeviceID is the paired device the user sent the message from.
 	DeviceID string `json:"deviceID,omitempty"`
+	// External is the agent a child task runs on instead of its bot's model.
+	External *contract.ExternalAgent `json:"external,omitempty"`
 }
 
 type SendInput struct {
@@ -100,6 +102,7 @@ func (s *Store) queueTx(ctx context.Context, tx *sql.Tx, work Work, target strin
 	}
 	run.ParentRunID = work.ParentRunID
 	run.RoutineID = work.RoutineID
+	run.External = work.External
 	if work.TaskID != "" {
 		run.TaskID = &work.TaskID
 	}

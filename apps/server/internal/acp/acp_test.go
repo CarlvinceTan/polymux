@@ -1,8 +1,12 @@
 package acp
 
 import (
+	"context"
+	"errors"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/acptest"
 	core "github.com/CarlvinceTan/polymux/packages/runtime"
@@ -46,7 +50,8 @@ func TestSendStreamsTextAndTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Text != "Hello from ACP [allow-once]" {
+	// Text after a tool call starts a new paragraph instead of running on.
+	if result.Text != "Reading the notes.\n\nHello from ACP [allow-once]" {
 		t.Fatalf("reply = %q", result.Text)
 	}
 	var tool, done bool
@@ -93,3 +98,60 @@ func TestSendRejectsAnEmptyPrompt(t *testing.T) {
 }
 
 func pointer(text string) *string { return &text }
+
+func TestAbortCancelsTheTurn(t *testing.T) {
+	session := open(t, "")
+	started := make(chan struct{})
+	var once sync.Once
+	done := make(chan error, 1)
+	var result core.Result
+	go func() {
+		var err error
+		result, err = session.Send(t.Context(), core.Message{Parts: []core.Part{{Kind: "text", Text: pointer(acptest.Wait)}}},
+			func(core.Delta) error {
+				once.Do(func() { close(started) })
+				return nil
+			})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent never streamed")
+	}
+	if err := session.Abort(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || result.Text != "Working" {
+			t.Fatalf("send = %q, %v", result.Text, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("abort did not end the turn")
+	}
+	if !session.Reusable() {
+		t.Fatal("a cancelled turn closed the session")
+	}
+}
+
+func TestCrashFailsTheTurn(t *testing.T) {
+	session := open(t, "")
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.Send(t.Context(), core.Message{Parts: []core.Part{{Kind: "text", Text: pointer(acptest.Crash)}}},
+			func(core.Delta) error { return nil })
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a crashed agent reported success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a crashed agent left the turn hanging")
+	}
+	if session.Reusable() {
+		t.Fatal("a crashed agent's session is reusable")
+	}
+}

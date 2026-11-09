@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,14 +24,14 @@ func TestSpawn(t *testing.T) {
 	if err := s.RunEvent(t.Context(), "run.start", &parent, nil); err != nil {
 		t.Fatal(err)
 	}
-	child, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task")
+	child, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if child.Status != "queued" || child.Trigger != "child" || child.ParentRunID == nil || *child.ParentRunID != parent.ID || child.AgentID != "b" || child.JobID == parent.JobID {
 		t.Fatalf("unexpected child: %+v", child)
 	}
-	replay, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task")
+	replay, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task", nil)
 	if err != nil || replay.ID != child.ID || replay.Seq != child.Seq {
 		t.Fatalf("spawn replay: %+v %v", replay, err)
 	}
@@ -38,7 +39,7 @@ func TestSpawn(t *testing.T) {
 		{"task", "b", "Changed task"}, {"target", "a", "Bounded task"},
 	} {
 		t.Run(change.name, func(t *testing.T) {
-			if _, err := s.Spawn(t.Context(), parent.ID, "call", change.target, change.task); !errors.Is(err, ErrConflict) {
+			if _, err := s.Spawn(t.Context(), parent.ID, "call", change.target, change.task, nil); !errors.Is(err, ErrConflict) {
 				t.Fatalf("changed replay: %v", err)
 			}
 		})
@@ -47,17 +48,17 @@ func TestSpawn(t *testing.T) {
 		{"unknown target", "missing", "Task"}, {"empty task", "b", " "}, {"oversize task", "b", strings.Repeat("x", 8193)},
 	} {
 		t.Run(invalid.name, func(t *testing.T) {
-			if _, err := s.Spawn(t.Context(), parent.ID, invalid.name, invalid.target, invalid.task); err == nil {
+			if _, err := s.Spawn(t.Context(), parent.ID, invalid.name, invalid.target, invalid.task, nil); err == nil {
 				t.Fatal("invalid spawn accepted")
 			}
 		})
 	}
 	for i := 1; i < 8; i++ {
-		if _, err := s.Spawn(t.Context(), parent.ID, fmt.Sprint(i), "b", "Task"); err != nil {
+		if _, err := s.Spawn(t.Context(), parent.ID, fmt.Sprint(i), "b", "Task", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Spawn(t.Context(), parent.ID, "overflow", "b", "Task"); err == nil {
+	if _, err := s.Spawn(t.Context(), parent.ID, "overflow", "b", "Task", nil); err == nil {
 		t.Fatal("child limit not enforced")
 	}
 	parent.Status = "completed"
@@ -75,10 +76,13 @@ func TestSpawn(t *testing.T) {
 	if err != nil || stored.Status != "queued" {
 		t.Fatalf("finishing parent affected child: %+v %v", stored, err)
 	}
-	if _, err := s.Spawn(t.Context(), parent.ID, "late", "b", "Task"); err == nil {
+	if _, err := s.Spawn(t.Context(), parent.ID, "late", "b", "Task", nil); err == nil {
 		t.Fatal("finished parent spawned a child")
 	}
-	job, err := s.Job(t.Context(), "b")
+	if job, err := s.Job(t.Context(), "b"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("the turn queue claimed a child task: %s %v", job, err)
+	}
+	job, err := s.ChildJob(t.Context(), "b")
 	if err != nil || job != child.JobID {
 		t.Fatalf("child job not claimable: %s %v", job, err)
 	}
@@ -97,7 +101,7 @@ func TestSpawnTriggers(t *testing.T) {
 			if err := s.RunEvent(t.Context(), "run.start", &parent, nil); err != nil {
 				t.Fatal(err)
 			}
-			_, err := s.Spawn(t.Context(), parent.ID, "spawn", "b", "Complete a subtask")
+			_, err := s.Spawn(t.Context(), parent.ID, "spawn", "b", "Complete a subtask", nil)
 			allowed := trigger != "created" && trigger != "child"
 			if (err == nil) != allowed {
 				t.Fatalf("spawn allowed=%t: %v", allowed, err)
@@ -120,7 +124,7 @@ func TestStopChild(t *testing.T) {
 	if err := s.RunEvent(t.Context(), "run.start", &parent, nil); err != nil {
 		t.Fatal(err)
 	}
-	child, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task")
+	child, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +145,7 @@ func TestStopChild(t *testing.T) {
 	if err != nil || run.Status != "cancelled" {
 		t.Fatal("queued child not withdrawn", run.Status, err)
 	}
-	if _, err := s.Job(t.Context(), "b"); err == nil {
+	if _, err := s.ChildJob(t.Context(), "b"); err == nil {
 		t.Fatal("withdrawn child still runnable")
 	}
 }
