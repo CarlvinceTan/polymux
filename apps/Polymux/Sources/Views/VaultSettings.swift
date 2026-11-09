@@ -26,10 +26,16 @@ private struct VaultBrowser: View {
             } else if let draft = store.draft { editor(draft) }
             else {
                 toolbar
-                Text(summary).font(.subheadline).foregroundStyle(.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel("Vault item count").accessibilityValue(summary)
                 entries
+                    // The count floats at the pane's foot, clear of the scrolling rows.
+                    .overlay(alignment: .bottomTrailing) {
+                        if !results.isEmpty {
+                            Text(summary).font(.subheadline).foregroundStyle(.muted)
+                                .padding(.horizontal, PanelStyle.headingInset)
+                                .padding(.bottom, PanelStyle.rowInset)
+                                .accessibilityLabel("Vault item count").accessibilityValue(summary)
+                        }
+                    }
             }
             if let imported = store.imported {
                 Text("\(imported.added) imported · \(imported.skipped) already present")
