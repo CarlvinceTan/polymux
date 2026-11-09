@@ -93,7 +93,7 @@ The iOS build uses automatic signing: with the API key, Xcode creates and manage
    ```
 
 5. Wait for processing. The owner must resolve encryption compliance based on the app's actual cryptography; no exemption is assumed. Audit privacy-manifest requirements before treating the build as upload-ready.
-6. Install **from TestFlight**, enable Automatic Updates, pair with the server, and verify a real request/reply and relaunch. A USB development install is not proof of the TestFlight path.
+6. Install **from TestFlight**, enable Automatic Updates, pair with the server, and verify a real request/reply and relaunch. A USB development install is not proof of the TestFlight path. iOS applies TestFlight updates opportunistically, so a new build can wait hours on a phone nobody is using; opening TestFlight picks it up at once.
 
 ## First Mac installation
 
