@@ -18,7 +18,7 @@ struct MediaSettings: View {
 
     var body: some View {
         if let settings = store.value {
-            Section("Generation") {
+            Section {
                 ForEach([MediaKind.image, .video], id: \.self) { kind in
                     let order = kind == .image ? settings.imageOrder : settings.videoOrder
                     Button { open(kind) } label: {
@@ -34,6 +34,8 @@ struct MediaSettings: View {
                     .accessibilityLabel("\(kind.title) models")
                     .accessibilityValue(order.mode == MediaOrderMode.custom ? "Custom" : "Auto")
                 }
+            } header: {
+                SectionHeader("Generation", symbol: "photo.fill")
             }
             .panelRow()
         }

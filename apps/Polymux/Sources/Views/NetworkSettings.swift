@@ -74,13 +74,11 @@ struct NetworkSettings: View {
                     NetworkRow(server: server, store: pool.sessions[server.address]?.network) { open(server.address) }
                 }
             } header: {
-                HStack {
-                    Text("Networks").foregroundStyle(Color.primary)
-                    Spacer()
+                SectionHeader("Networks", symbol: "network") {
                     Button("Join network", systemImage: "plus", action: join)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
             } footer: {
                 if let joinIssue { Text(joinIssue).font(.footnote).foregroundStyle(.primary) }
             }
@@ -112,7 +110,7 @@ struct NetworkSettings: View {
                 }
             }
         } header: {
-            Text("This Mac").foregroundStyle(Color.primary)
+            SectionHeader("This Mac", symbol: "laptopcomputer")
         } footer: {
             if let issue = ServerHost.shared.issue { Text(issue).font(.footnote).foregroundStyle(.muted) }
         }

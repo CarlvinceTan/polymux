@@ -81,7 +81,7 @@ struct ProviderSettings: View {
                             levels: providers.levels(provider: settings?.value?.defaultProvider ?? "",
                                                      model: settings?.value?.defaultModel ?? ""))
         } header: {
-            Text("Default model").foregroundStyle(.primary)
+            SectionHeader("Default model", symbol: "cpu.fill")
         }
         .disabled(settings?.value == nil)
         .panelRow()
@@ -131,34 +131,34 @@ struct ProviderSettings: View {
             }
             if let issue = issue ?? store?.issue { Text(issue).font(.footnote).foregroundStyle(.muted) }
         } header: {
-            HStack {
-                Text("Providers").foregroundStyle(.primary)
-                Spacer()
-                if reordering {
-                    Button("Save order", systemImage: "checkmark") { saveOrder() }
-                        .accessibilityLabel("Save provider order")
-                        .help("Save order")
-                        .disabled(moving || !loaded)
-                    Button("Cancel", systemImage: "xmark") { cancelOrder() }
-                        .accessibilityLabel("Cancel reordering")
-                        .help("Cancel reordering")
-                        .disabled(moving)
-                } else {
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
-                        .accessibilityLabel("Refresh providers")
-                        .help("Refresh providers")
-                        .symbolEffect(.rotate, isActive: refreshing)
-                        .disabled(client == nil || moving || refreshing)
-                    Button("Reorder", systemImage: "arrow.up.arrow.down") { startReordering() }
-                        .accessibilityLabel("Reorder providers")
-                        .help("Reorder providers")
-                        .disabled(groups.count < 2 || moving || refreshing)
-                    Button("Add provider", systemImage: "plus") { edit(nil) }
-                        .disabled(client == nil)
+            SectionHeader("Providers", symbol: "cloud.fill") {
+                Group {
+                    if reordering {
+                        Button("Save order", systemImage: "checkmark") { saveOrder() }
+                            .accessibilityLabel("Save provider order")
+                            .help("Save order")
+                            .disabled(moving || !loaded)
+                        Button("Cancel", systemImage: "xmark") { cancelOrder() }
+                            .accessibilityLabel("Cancel reordering")
+                            .help("Cancel reordering")
+                            .disabled(moving)
+                    } else {
+                        Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
+                            .accessibilityLabel("Refresh providers")
+                            .help("Refresh providers")
+                            .symbolEffect(.rotate, isActive: refreshing)
+                            .disabled(client == nil || moving || refreshing)
+                        Button("Reorder", systemImage: "arrow.up.arrow.down") { startReordering() }
+                            .accessibilityLabel("Reorder providers")
+                            .help("Reorder providers")
+                            .disabled(groups.count < 2 || moving || refreshing)
+                        Button("Add provider", systemImage: "plus") { edit(nil) }
+                            .disabled(client == nil)
+                    }
                 }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
         }
         .panelRow()
         .task(id: client?.id) { await store?.refreshProviders() }

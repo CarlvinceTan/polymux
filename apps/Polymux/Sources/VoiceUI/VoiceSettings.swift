@@ -9,7 +9,7 @@ struct VoiceSettings: View {
 
     var body: some View {
         if let settings = store.value {
-            Section("Voice") {
+            Section {
                 // Each provider starts from its own model and voice.
                 SettingsPicker("Provider", selection: binding(\.liveProvider) { provider in
                     SettingsPatch(liveProvider: provider, liveModel: provider == "openai" ? "gpt-realtime" : "gemini-3.8-live",
@@ -38,6 +38,8 @@ struct VoiceSettings: View {
                     Text("No \(settings.liveProvider == "openai" ? "OpenAI" : "Gemini") provider yet.")
                         .font(.footnote).foregroundStyle(.muted)
                 }
+            } header: {
+                SectionHeader("Voice", symbol: "waveform")
             }
             .panelRow()
         }

@@ -15,7 +15,7 @@ struct UpdatesSettings: View {
             Toggle("Check automatically", isOn: Binding(get: { Updates.shared.automaticallyChecks },
                 set: { Updates.shared.automaticallyChecks = $0 }))
         } header: {
-            Text("Updates").foregroundStyle(.primary)
+            SectionHeader("Updates", symbol: "arrow.down.circle.fill")
         }
         .panelRow()
         #endif
@@ -54,17 +54,15 @@ struct UpdatesSettings: View {
             #endif
         } header: {
             #if os(macOS)
-            HStack {
-                Text("Version").foregroundStyle(.primary)
-                Spacer()
+            SectionHeader("Version", symbol: "info.circle.fill") {
                 Button("Check for updates", systemImage: "arrow.clockwise") { Updates.shared.check() }
                     .accessibilityLabel("Check for updates")
                     .help("Check for updates")
                     .symbolEffect(.rotate, isActive: Updates.shared.checking)
                     .disabled(Updates.shared.checking)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
             #else
             Text("Version").foregroundStyle(.primary)
             #endif

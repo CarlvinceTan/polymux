@@ -108,6 +108,48 @@ struct TabIcon: View {
     }
 }
 
+/// A pane section's glyph on a grey tile, like System Settings' page rows.
+struct SectionTile: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol)
+            .resizable().scaledToFit()
+            .fontWeight(.medium)
+            .frame(width: 14, height: 14)
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(Color.gray.gradient, in: .rect(cornerRadius: 6, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// A pane section's title with its tile; the trailing view holds the section's button.
+struct SectionHeader<Trailing: View>: View {
+    let title: String
+    let symbol: String
+    var trailing: Trailing
+
+    init(_ title: String, symbol: String, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.symbol = symbol
+        self.trailing = trailing()
+    }
+
+    init(_ title: String, symbol: String) where Trailing == EmptyView {
+        self.init(title, symbol: symbol) { EmptyView() }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SectionTile(symbol: symbol)
+            Text(title).foregroundStyle(Color.primary)
+            Spacer(minLength: 8)
+            trailing
+        }
+    }
+}
+
 /// A tab or one of its sections, found by its title or the rows inside it.
 struct SettingsEntry: Identifiable {
     let tab: SettingsTab

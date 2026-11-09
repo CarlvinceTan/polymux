@@ -521,7 +521,7 @@ struct ConnectionView: View {
     }
 
     @ViewBuilder private var generalSections: some View {
-        Section("Appearance") {
+        Section {
             SettingsPicker("Theme", selection: Binding(get: { settings?.value?.appearance ?? "system" },
                                                       set: { settings?.edit(SettingsPatch(appearance: $0)) }),
                            options: [("Light", "light"), ("Dark", "dark"), ("System", "system")])
@@ -532,23 +532,27 @@ struct ConnectionView: View {
                     .accessibilityLabel("Switcher badges")
                     .disabled(settings?.value == nil)
             }
+        } header: {
+            SectionHeader("Appearance", symbol: "circle.lefthalf.filled")
         }
         .panelRow()
         if let issue = settings?.error {
             Section { Text(issue).font(.footnote).foregroundStyle(.muted) }
                 .panelRow()
         }
-        Section("Notifications") {
+        Section {
             Toggle("Allow notifications", isOn: Binding(get: { Notifications.shared.enabled },
                 set: { enabled in Task { await Notifications.shared.allow(enabled) } }))
                 .accessibilityLabel("Allow notifications")
             if let issue = Notifications.shared.issue {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
             }
+        } header: {
+            SectionHeader("Notifications", symbol: "bell.fill")
         }
         .panelRow()
         #if os(macOS)
-        Section("Permissions") {
+        Section {
             LabeledContent("System permissions") {
                 HStack {
                     Text(Permissions.shared.summary).foregroundStyle(.muted)
@@ -557,6 +561,8 @@ struct ConnectionView: View {
                 }
             }
             .task { await Permissions.shared.refresh() }
+        } header: {
+            SectionHeader("Permissions", symbol: "hand.raised.fill")
         }
         .panelRow()
         #endif
@@ -570,7 +576,7 @@ struct ConnectionView: View {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
             }
         } header: {
-            Text("Connections").foregroundStyle(Color.primary)
+            SectionHeader("Connections", symbol: "link")
         }
         .panelRow()
     }
