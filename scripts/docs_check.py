@@ -7,6 +7,7 @@ Usage: scripts/docs_check.py
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -17,6 +18,11 @@ TICK = re.compile(r"`([^`\n]+)`")
 # Built, per-machine or per-run locations are not in the checkout.
 GENERATED = (".build/", "dist/", "node_modules/", "~/", "/tmp", "AGENTS.local.md", "scripts/local/", "ISSUE.md")
 TOP = {path.name for path in ROOT.iterdir() if not path.name.startswith(".git")} | {".github", ".agents", ".githooks"}
+
+
+def ignored(path):
+    """Built or per-machine output that .gitignore covers is not expected in a checkout."""
+    return subprocess.run(["git", "check-ignore", "-q", path], cwd=ROOT).returncode == 0
 
 
 def candidates(text):
@@ -44,11 +50,11 @@ def main():
             except ValueError:
                 problems.append("%s: link leaves the repository: %s" % (doc, target))
                 continue
-            if not resolved.exists():
+            if not resolved.exists() and not ignored(str(resolved.relative_to(ROOT)) + "/"):
                 problems.append("%s: broken link: %s" % (doc, target))
         # Experiments name paths that live on other branches.
         for token in [] if doc == "docs/experiments.md" else dict.fromkeys(candidates(text)):
-            if not (ROOT / token).exists():
+            if not (ROOT / token).exists() and not ignored(token):
                 problems.append("%s: missing path: %s" % (doc, token))
     index = (ROOT / "docs/README.md").read_text()
     for doc in DOCS:
