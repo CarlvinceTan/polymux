@@ -1,14 +1,11 @@
 {
-  "fill": {
-    "solid": "srgb:0.11765,0.11765,0.11765,1.00000"
-  },
   "groups": [
     {
       "layers": [
         {
           "glass": true,
-          "image-name": "Snow.png",
-          "name": "Snow"
+          "image-name": "Figure.png",
+          "name": "Figure"
         }
       ],
       "shadow": {
@@ -23,18 +20,18 @@
     {
       "layers": [
         {
-          "glass": true,
-          "image-name": "Head.png",
-          "name": "Head"
+          "glass": false,
+          "image-name": "Art.png",
+          "name": "Art"
         }
       ],
       "shadow": {
-        "kind": "neutral",
-        "opacity": 0.5
+        "kind": "none",
+        "opacity": 0
       },
       "translucency": {
-        "enabled": true,
-        "value": 0.5
+        "enabled": false,
+        "value": 0
       }
     }
   ],

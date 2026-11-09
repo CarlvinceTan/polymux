@@ -1,4 +1,4 @@
-Approved Polymux logo: a frosted glass sable poking its head out of a snow drift. Generated with Gemini 3.1 Pro (Create image) on 2026-11-07, then traced into two layer masks.
+Approved Polymux logo: a frosted glass sable poking its head out of a snow drift. Generated with Gemini 3.1 Pro (Create image) on 2026-11-07 and used as-is.
 
 Starting art, with the old P logo attached for its shape:
 
@@ -12,8 +12,4 @@ Snow drift:
 
 The head currently ends in a rounded throat blob that looks odd and unfinished. Sables live in the snowy Siberian forest, so have the sable poking its head up out of a soft, rounded snow drift. A smooth, simple mound of frosted white-blue glass snow fills the bottom of the icon and hides the neck, with the head emerging from it. Keep the snow minimal: one or two soft rounded bumps, no flakes or texture.
 
-Refinement:
-
-Make the snow drift smaller and lower. Remove the stray snow bump behind the neck; the neck sinks cleanly into the snow, with a soft little rim of snow hugging it. The snow is a cooler, pale icy-blue glass, while the head stays bright white, so the two never merge. Replace the gradient with a deep charcoal night background (around #1e1e1e).
-
-Head.png and Snow.png are white-on-black 1024×1024 masks traced from that art: the eye and smile are cut out of the head, the cheek ruff is redrawn as three tufts, the neck runs under the snow, and the snow's top edge is a drawn curve. Run uv run --no-project scripts/icon.py to export the glass layers for AppIcon.icon (dark fill), plus the README icon, connecting logo, website logo and favicon. There is one app logo, with no Light variant. Snow is the front group and opaque, so the neck doesn't show through; Xcode generates platform sizes.
+AppIcon.png is the art from the snow drift step, 1024×1024. Figure.png is a white-on-black mask of the sable and snow, cut from the art by its low saturation against the gradient. Run uv run --no-project scripts/icon.py to export AppIcon.icon's layers: the art as a flat back layer, and the sable and snow cut from it as the glass front layer, so the glass adds only highlights and shadow. It also exports the connecting logo, website logo and favicon. There is one app logo, with no Light variant; Xcode generates platform sizes.

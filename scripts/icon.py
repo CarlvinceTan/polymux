@@ -2,7 +2,7 @@
 # /// script
 # dependencies = ["pillow"]
 # ///
-"""Export app and website icons from the approved Assets/Head.png and Assets/Snow.png masks."""
+"""Export app and website icons from the approved Assets/AppIcon.png art and its Assets/Figure.png mask."""
 
 import hashlib
 from pathlib import Path
@@ -16,10 +16,6 @@ ASSETS = ROOT / "apps/Polymux/Assets"
 SOURCES = ROOT / "apps/Polymux/Sources"
 CATALOG = SOURCES / "Assets.xcassets"
 SITE = ROOT / "apps/site"
-# Matches the app's connecting screen background in dark mode.
-APP_BG = (30, 30, 30)
-# Layer colours on AppIcon.icon's dark fill.
-COLOURS = {"Head": (255, 255, 255), "Snow": (200, 222, 242)}
 
 
 def rounded(image):
@@ -33,34 +29,23 @@ def rounded(image):
     return result
 
 
-def layer(mask, colour):
-    image = Image.new("RGBA", mask.size, colour + (255,))
-    image.putalpha(mask)
-    return image
-
-
 def main():
-    masks = {name: Image.open(ASSETS / f"{name}.png").convert("L") for name in COLOURS}
-    if any(mask.size != (1024, 1024) for mask in masks.values()):
-        raise ValueError("Head.png and Snow.png must be 1024×1024")
-    layers = {name: layer(mask, COLOURS[name]) for name, mask in masks.items()}
-    for name, image in layers.items():
-        image.save(SOURCES / f"AppIcon.icon/Assets/{name}.png")
+    art = Image.open(ASSETS / "AppIcon.png").convert("RGB")
+    mask = Image.open(ASSETS / "Figure.png").convert("L")
+    if art.size != (1024, 1024) or mask.size != art.size:
+        raise ValueError("AppIcon.png and Figure.png must be 1024×1024")
 
-    # Flat stand-ins for the README, website and connecting logo; the snow sits in front.
-    mark = Image.new("RGBA", (1024, 1024))
-    for name in ("Head", "Snow"):
-        mark.alpha_composite(layers[name])
-    app = Image.new("RGBA", mark.size, APP_BG + (255,))
-    app.alpha_composite(mark)
-    app = app.convert("RGB")
-    app.save(ASSETS / "AppIcon.png")
+    # AppIcon.icon: the art is the flat back layer; the sable and snow cut from it are the glass front layer.
+    art.save(SOURCES / "AppIcon.icon/Assets/Art.png")
+    figure = art.convert("RGBA")
+    figure.putalpha(mask)
+    figure.save(SOURCES / "AppIcon.icon/Assets/Figure.png")
 
-    logo = mark.crop(mark.getchannel("A").getbbox())
+    logo = figure.crop(mask.getbbox())
     logo.thumbnail((288, 288), Image.Resampling.LANCZOS)
     logo.save(CATALOG / "Logo.imageset/Logo.png")
-    rounded(app).resize((32, 32), Image.Resampling.LANCZOS).save(SITE / "public/favicon-32.png")
-    app.resize((256, 256), Image.Resampling.LANCZOS).save(
+    rounded(art).resize((32, 32), Image.Resampling.LANCZOS).save(SITE / "public/favicon-32.png")
+    art.resize((256, 256), Image.Resampling.LANCZOS).save(
         SITE / "src/assets/app-icon.webp", lossless=True,
     )
     version = hashlib.sha256((SITE / "public/favicon-32.png").read_bytes()).hexdigest()[:10]
