@@ -70,8 +70,13 @@ rollback() {
   DRAIN_ID=$(cat "$HOME/.polymux/data/maintenance" 2>/dev/null) || return 1
   DRAIN_URL="http://127.0.0.1:7337"
   DRAIN_BINARY="$STATE/polymux.prev"
-  "$DRAIN_BINARY" drain --url "$DRAIN_URL" --id "$DRAIN_ID" || return 1
-  launchctl bootout "$DOMAIN/$SERVER" || return 1
+  # A server that already stopped can't take new work, so only a reachable one needs sealing first.
+  if curl -s -o /dev/null --max-time 2 "$DRAIN_URL/health"; then
+    "$DRAIN_BINARY" drain --url "$DRAIN_URL" --id "$DRAIN_ID" || return 1
+    launchctl bootout "$DOMAIN/$SERVER" || return 1
+  else
+    launchctl bootout "$DOMAIN/$SERVER" 2>/dev/null || true
+  fi
   install -m 0755 "$STATE/polymux.prev" "$BIN/polymux" || return 1
   launchctl bootstrap "$DOMAIN" "$PLIST" || return 1
   verify_server && resume_drain
