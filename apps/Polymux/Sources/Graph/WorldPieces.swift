@@ -466,23 +466,26 @@ struct WorldToken: View {
             ZStack {
                 shape.fill(tint.mix(with: .black, by: 0.3)).offset(x: side * 0.05, y: side * 0.08)
                 if crab {
+                    // Claude Code's mascot is a blocky pixel crab: drawn from its grid, so it stays crisp at any size.
                     Canvas { context, size in
-                        let w = size.width, h = size.height
-                        let red = Color(red: 0.87, green: 0.42, blue: 0.28)
-                        // Body, then two claws and two eyes: enough to read as a crab at any size.
-                        context.fill(Path(ellipseIn: CGRect(x: w * 0.18, y: h * 0.32, width: w * 0.64, height: h * 0.5)), with: .color(red))
-                        for side in [-1.0, 1.0] {
-                            let x = w * (0.5 + side * 0.36)
-                            context.fill(Path(ellipseIn: CGRect(x: x - w * 0.14, y: h * 0.2, width: w * 0.28, height: h * 0.26)), with: .color(red.mix(with: .white, by: 0.12)))
-                            context.fill(Path(ellipseIn: CGRect(x: x - w * 0.07, y: h * 0.26, width: w * 0.14, height: h * 0.14)), with: .color(.white))
+                        let grid = ["..########..", ".##########.", ".##########.", "############", "############",
+                                    "..########..", "..#.##.##.#.", "..#.##.##.#."]
+                        let unit = min(size.width, size.height) / 12.5
+                        let origin = CGPoint(x: (size.width - unit * 12) / 2, y: (size.height - unit * 8) / 2)
+                        let shell = Color(red: 0.78, green: 0.37, blue: 0.23)
+                        for (row, line) in grid.enumerated() {
+                            for (column, cell) in line.enumerated() where cell == "#" {
+                                context.fill(Path(CGRect(x: origin.x + Double(column) * unit, y: origin.y + Double(row) * unit,
+                                                         width: unit + 0.5, height: unit + 0.5)), with: .color(shell))
+                            }
                         }
-                        for side in [-1.0, 1.0] {
-                            context.fill(Path(ellipseIn: CGRect(x: w * (0.5 + side * 0.13) - w * 0.04, y: h * 0.26, width: w * 0.08, height: h * 0.1)), with: .color(.white))
-                            context.fill(Path(ellipseIn: CGRect(x: w * (0.5 + side * 0.13) - w * 0.02, y: h * 0.28, width: w * 0.04, height: h * 0.05)), with: .color(.black))
+                        for column in [3, 7] {
+                            context.fill(Path(CGRect(x: origin.x + Double(column) * unit, y: origin.y + unit * 1.5,
+                                                     width: unit, height: unit * 1.4)), with: .color(Color(red: 0.16, green: 0.1, blue: 0.09)))
                         }
                     }
-                    .padding(side * 0.02)
-                    .background(Color(red: 0.98, green: 0.93, blue: 0.87), in: shape)
+                    .padding(side * 0.12)
+                    .background(Color(red: 0.98, green: 0.94, blue: 0.88), in: shape)
                 } else if let logo {
                     logo.resizable().interpolation(.high).scaledToFit()
                         .padding(side * 0.06)
