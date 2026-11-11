@@ -587,11 +587,20 @@ struct WorldGround: View {
         let order = all.sorted { ($0.i + $0.j, $0.i) < ($1.i + $1.j, $1.i) }
 
         // The shelf each islet sits on, seen through the water around it.
-        // The shelf is the land itself sunk to the sea floor; it must stay under the tallest cliff,
-        // so it sinks with the highest terrace rather than with each tile's own ledge.
-        var shelf = Path()
-        for cell in land.keys { shelf.addPath(tile(cell, grown: 2.3).top) }
-        context.fill(shelf.offsetBy(dx: 0, dy: depth + Double(max(0, terraces.maxRise - 1)) * step), with: .color(.worldShallows))
+        // The shallow water hugging each coast, drawn before the land so it reads as the same shore sunk a little.
+        var coast = Path()
+        for cell in land.keys where rise(cell) == 0 {
+            let (centre, top) = tile(cell)
+            let far = CGPoint(x: centre.x, y: centre.y - half / 2)
+            for (a, b, di, dj) in [(CGPoint(x: centre.x - half, y: centre.y), far, 0, -1), (far, CGPoint(x: centre.x + half, y: centre.y), 1, 0),
+                                   (CGPoint(x: centre.x + half, y: centre.y), CGPoint(x: centre.x, y: centre.y + half / 2), 0, 1),
+                                   (CGPoint(x: centre.x, y: centre.y + half / 2), CGPoint(x: centre.x - half, y: centre.y), -1, 0)] {
+                if land[WorldCell(i: cell.i + di, j: cell.j + dj)] != nil { continue }
+                coast.move(to: a)
+                coast.addLine(to: b)
+            }
+        }
+        context.stroke(coast, with: .color(.worldShallows), style: StrokeStyle(lineWidth: 44 * scale, lineCap: .round, lineJoin: .round))
 
         for cell in order {
             let (centre, plankTop) = tile(cell)
