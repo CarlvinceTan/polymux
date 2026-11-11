@@ -665,7 +665,7 @@ struct WorldTrails: View {
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
     @Environment(\.scenePhase) private var scenePhase
 
-    private static let trip = 2.8
+    private static let trip = 4.2
     private static let flight = 1.2
 
     private var moving: Bool {
@@ -687,8 +687,8 @@ struct WorldTrails: View {
         guard trail.active else { return false }
         switch trail.kind {
         case .handoff: return world.actor(trail.from)?.node.kind != WorkKind.person
-        // Reaching for a tool from somewhere else, such as a pipeline's step.
-        case .visit: return world.actor(trail.from)?.station != trail.to
+        // Reaching for a tool from somewhere else shows once it's picked, so the water stays calm.
+        case .visit: return world.actor(trail.from)?.station != trail.to && lit
         case .road: return false
         }
     }
@@ -699,32 +699,109 @@ struct WorldTrails: View {
             guard let from = points[trail.from], let to = points[trail.to] else { continue }
             let lit = picked.map { trail.from == $0 || trail.to == $0 || "trail:" + trail.id == $0 } ?? false
             var layer = context
-            layer.opacity = picked != nil && !lit ? 0.18 : 1
-            let path = WorldMetrics.arc(from, to).path
+            layer.opacity = picked != nil && !lit ? 0.16 : 1
             let flying = trail.active && trail.kind != .road
-            let color = flying ? GraphTint.cargo(trail.wire.carries) : Color.primary.opacity(0.45)
-            // White under the colour, so a line holds up over any ground.
-            layer.stroke(path, with: .color(Color.graphCard.opacity(0.8)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-            layer.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [3, 6]))
-            guard flying else { continue }
-            let back = trail.wire.direction == WorkWireDirection.back
-            let phase = reducedMotion ? 0.82 : (seconds / Self.trip + Double(index) * 0.37).truncatingRemainder(dividingBy: 1)
-            // A bead runs the way the work went, so the line has a direction without an arrowhead.
-            let bead = point(path, at: back ? 1 - phase : phase)
-            layer.fill(Path(ellipseIn: CGRect(x: bead.x - 6, y: bead.y - 6, width: 12, height: 12)), with: .color(.graphCard))
-            layer.fill(Path(ellipseIn: CGRect(x: bead.x - 4, y: bead.y - 4, width: 8, height: 8)), with: .color(color))
+            let color = flying ? GraphTint.cargo(trail.wire.carries) : Color.primary.opacity(0.4)
+            let crossing = crossing(trail, from: from, to: to)
+            if let crossing {
+                // A lane of disturbed water, from one shore to the other.
+                layer.stroke(crossing.path, with: .color(.white.opacity(0.18)), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [1, 12]))
+                guard flying else { continue }
+                let phase = reducedMotion ? 0.6 : (seconds / Self.trip + Double(index) * 0.37).truncatingRemainder(dividingBy: 1)
+                let at = point(crossing.path, at: trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase)
+                boat(&layer, at: at, heading: crossing.heading, color: color, zoom: crossing.zoom)
+                // A short wake behind it, rather than a line all the way across.
+                let tail = point(crossing.path, at: max(0, (trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase) - 0.06))
+                var wake = Path()
+                wake.move(to: tail)
+                wake.addLine(to: at)
+                layer.stroke(wake, with: .color(.white.opacity(0.8)), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [2, 4]))
+            } else {
+                // Whatever else, nothing runs in a straight line: a curve keeps the map from reading as wire.
+                let path = WorldMetrics.arc(from, to).path
+                layer.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: flying ? 2 : 1.5, lineCap: .round, dash: [3, 6]))
+                guard flying else { continue }
+                let phase = reducedMotion ? 0.6 : (seconds / Self.trip + Double(index) * 0.37).truncatingRemainder(dividingBy: 1)
+                let at = point(path, at: trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase)
+                layer.fill(Path(ellipseIn: CGRect(x: at.x - 5, y: at.y - 5, width: 10, height: 10)), with: .color(.graphCard))
+                layer.fill(Path(ellipseIn: CGRect(x: at.x - 3.5, y: at.y - 3.5, width: 7, height: 7)), with: .color(color))
+            }
         }
         for handoff in handoffs {
             guard let from = points[WorkGraphBuilder.agentNode(handoff.source)], let to = points[WorkGraphBuilder.agentNode(handoff.target)] else { continue }
             let progress = now.timeIntervalSince(handoff.at) / Self.flight
             guard (0...1).contains(progress) else { continue }
             let kind = handoff.result ? WorkKind.result : WorkKind.task
-            let at = point(WorldMetrics.arc(from, to).path, at: progress)
-            context.fill(Path(ellipseIn: CGRect(x: at.x - 13, y: at.y - 13, width: 26, height: 26)), with: .color(.graphCard))
-            context.fill(Path(ellipseIn: CGRect(x: at.x - 11, y: at.y - 11, width: 22, height: 22)), with: .color(GraphTint.cargo(kind)))
-            let symbol = Text(Image(systemName: GraphLook.cargo(kind))).font(.system(size: 10, weight: .bold))
-            context.draw(context.resolve(symbol.foregroundStyle(Color.white)), at: at)
+            let path = WorldMetrics.arc(from, to).path
+            let at = point(path, at: progress)
+            // Something just handed over sails across rather than flying.
+            let heading = atan2(to.y - from.y, to.x - from.x)
+            boat(&context, at: at, heading: heading, color: GraphTint.cargo(kind), zoom: 1.4)
         }
+    }
+
+    /// A boat's course between two islets, with the heading it holds.
+    private struct Crossing {
+        var path: Path
+        var heading: Double
+        var zoom: CGFloat
+    }
+
+    /// The water between the two things' islets, or nil when they share one.
+    private func crossing(_ trail: WorldTrail, from: CGPoint, to: CGPoint) -> Crossing? {
+        let groups = (world.group(of: trail.from), world.group(of: trail.to))
+        guard let start = groups.0, let end = groups.1, start.id != end.id else { return nil }
+        let a = shore(start)
+        let b = shore(end)
+        // The two shores closest to each other, so a boat takes the short way across.
+        var best: (CGFloat, CGPoint, CGPoint) = (.infinity, a[0], b[0])
+        for one in a { for other in b {
+            let away = hypot(one.x - other.x, one.y - other.y)
+            if away < best.0 { best = (away, one, other) }
+        } }
+        let lift = hypot(best.1.x - best.2.x, best.1.y - best.2.y) * 0.12
+        let control = CGPoint(x: (best.1.x + best.2.x) / 2 - (best.2.y - best.1.y) / max(1, lift * 8),
+                              y: (best.1.y + best.2.y) / 2 + (best.2.x - best.1.x) / max(1, lift * 8))
+        var path = Path()
+        path.move(to: best.1)
+        path.addQuadCurve(to: best.2, control: control)
+        return Crossing(path: path, heading: atan2(best.2.y - best.1.y, best.2.x - best.1.x), zoom: 1.9)
+    }
+
+    /// Points around an islet's edge, in map coordinates, where a boat can wait.
+    private func shore(_ group: WorldGroup) -> [CGPoint] {
+        let near = WorldMetrics.screen(Double(group.minI) - 4, Double(group.minJ) - 4)
+        let far = WorldMetrics.screen(Double(group.maxI) + 4, Double(group.maxJ) + 4)
+        let across = WorldMetrics.screen(Double(group.minI) - 4, Double(group.maxJ) + 4)
+        let other = WorldMetrics.screen(Double(group.maxI) + 4, Double(group.minJ) - 4)
+        let left = min(near.x, far.x, across.x, other.x)
+        let right = max(near.x, far.x, across.x, other.x)
+        let top = min(near.y, far.y, across.y, other.y)
+        let bottom = max(near.y, far.y, across.y, other.y)
+        let middle = CGPoint(x: (left + right) / 2, y: (top + bottom) / 2)
+        return [CGPoint(x: middle.x, y: top), CGPoint(x: right, y: middle.y), CGPoint(x: middle.x, y: bottom), CGPoint(x: left, y: middle.y)]
+    }
+
+    /// A small boat: a hull, a sail in the colour of what it carries, and a curl of wake behind it.
+    private func boat(_ context: inout GraphicsContext, at point: CGPoint, heading: Double, color: Color, zoom: CGFloat) {
+        var layer = context
+        layer.translateBy(x: point.x, y: point.y)
+        layer.rotate(by: .radians(heading))
+        let unit = 13 * zoom
+        var hull = Path()
+        hull.move(to: CGPoint(x: -unit, y: 0))
+        hull.addLine(to: CGPoint(x: unit, y: 0))
+        hull.addLine(to: CGPoint(x: unit * 0.62, y: unit * 0.42))
+        hull.addLine(to: CGPoint(x: -unit * 0.62, y: unit * 0.42))
+        hull.closeSubpath()
+        layer.fill(hull, with: .color(Color.brown.mix(with: .black, by: 0.25)))
+        var sail = Path()
+        sail.move(to: CGPoint(x: -unit * 0.1, y: -unit * 0.05))
+        sail.addLine(to: CGPoint(x: -unit * 0.1, y: -unit * 1.1))
+        sail.addLine(to: CGPoint(x: unit * 0.8, y: -unit * 0.05))
+        sail.closeSubpath()
+        layer.fill(sail, with: .color(color))
+        layer.stroke(sail, with: .color(.white.opacity(0.7)), lineWidth: 1)
     }
 
     private func point(_ path: Path, at progress: Double) -> CGPoint {

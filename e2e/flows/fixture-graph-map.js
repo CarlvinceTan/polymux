@@ -5,9 +5,9 @@ const app = await cua.getApp(APP);
 await app.waitFor({ role: "button", name: "Graph Visualiser" });
 await app.click({ role: "button", name: "Graph Visualiser" });
 await app.waitFor({ role: "button", name: "Show diagram" });
-await app.waitFor({ role: "button", name: "Characters, Step, Working, 1 here, 2 items" });
+await app.waitFor({ role: "button", name: "Characters, Step" });
 await app.waitFor({ role: "button", name: "Milo, Drawing Robo" });
-await app.waitFor({ role: "button", name: "Storyboard, Step, Done, 3 items" });
+await app.waitFor({ role: "button", name: "Storyboard, Step" });
 
 // A step opens on what it made, and each of those opens on its own and goes back.
 await app.click({ role: "button", name: "Characters, Step" });

@@ -22,6 +22,8 @@ public struct WorldStation: Identifiable, Hashable, Sendable {
     public var preview: String?
     /// Which step of its pipeline it is, counting from one.
     public var step: Int?
+    /// Whose work it holds, when it belongs to one bot.
+    public var owner: String?
 }
 
 /// The ground a district stands on. Each kind of district has its own, so it's known from across the map without reading.
@@ -109,8 +111,6 @@ public struct WorkWorld: Hashable, Sendable {
     public static let homeReach = 4
     /// Cells of open water between islets.
     private static let gap = 2
-    /// Past this many stations, a district of mixed kinds splits into one per kind.
-    private static let crowd = 6
 
     public init() {}
 
@@ -144,8 +144,11 @@ public struct WorkWorld: Hashable, Sendable {
                 order.append(id)
                 let frame = parent(node).flatMap { isFrame($0) ? $0 : nil }
                 if let frame { frames[frame.id] = frame }
+                // The owner is a bot, known by its node, so a district can carry its name.
+                if let sole = parent(node), isActor(sole) { frames["bot:" + sole.id] = sole }
+                let sole = parent(node).flatMap { isActor($0) ? $0.id : nil }
                 drafts[id] = WorldStation(id: id, node: node, members: [], items: [], state: WorkNodeState.idle, i: 0, j: 0, group: "", zone: frame?.id,
-                                          small: WorkKind.look(of: node).shape != .place, preview: node.preview?.isEmpty == false ? node.id : nil)
+                                          small: WorkKind.look(of: node).shape != .place, preview: node.preview?.isEmpty == false ? node.id : nil, owner: sole)
             }
             drafts[id]?.members.append(node.id)
             // A shared station is as busy as its busiest member; one of its own keeps what it says.
@@ -229,25 +232,25 @@ public struct WorkWorld: Hashable, Sendable {
         }
     }
 
-    /// What explicitly holds a station decides its district: a machine and what's on it, a pipeline and its steps.
-    /// Anything else goes by what it is, coarsely while there's little of it and by kind once there's a lot.
-    private static func district(_ station: WorldStation, frames: [String: WorkNode], fine: Bool) -> District {
+    /// Districts go by what the work is for, not by what each thing is: a machine and everything done on it, a pipeline
+    /// and its steps, or one bot's work. So the map answers "what's being done" before "what kind of thing is this".
+    private static func district(_ station: WorldStation, frames: [String: WorkNode]) -> District {
         if let zone = station.zone, let frame = frames[zone] {
             let look = WorkKind.look(of: frame)
             let pipeline = frame.kind == WorkKind.pipeline
             return District(id: "zone:" + zone, title: frame.title, symbol: look.symbol, family: look.family,
                             biome: pipeline ? .savanna : look.family == .devices ? .slate : biome(look.family), ordered: pipeline)
         }
-        let family = WorkKind.look(of: station.node).family
-        switch family {
-        case .code: return District(id: "code", title: "Code", symbol: WorkFamily.code.symbol, family: .code, biome: .crystal)
-        case .data: return District(id: "data", title: "Data", symbol: WorkFamily.data.symbol, family: .data, biome: .ice)
-        case .devices: return District(id: "devices", title: "Devices", symbol: WorkFamily.devices.symbol, family: .devices, biome: .slate)
-        case .tasks: return District(id: "tasks", title: "Tasks", symbol: WorkFamily.tasks.symbol, family: .tasks, biome: .savanna)
-        case .media where fine: return District(id: "studio", title: "Studio", symbol: "paintpalette", family: .media, biome: .blossom)
-        case .files where fine: return District(id: "files", title: "Files", symbol: "folder", family: .files, biome: .desert)
-        default: return District(id: "tools", title: fine ? "Apps" : "Tools", symbol: "wrench.and.screwdriver", family: .apps, biome: .meadow)
+        if let zone = station.zone, let owner = frames["bot:" + zone] {
+            return District(id: "zone:" + zone, title: owner.title, symbol: "person.crop.square", family: .bots, biome: .meadow)
         }
+        // A place on its own belongs to whoever uses it, so their work sits together.
+        if let owner = station.owner, let bot = frames["bot:" + owner] {
+            return District(id: "bot:" + owner, title: bot.title, symbol: "person.crop.square", family: .bots, biome: .meadow)
+        }
+        let family = WorkKind.look(of: station.node).family
+        if family == .code { return District(id: "code", title: "Shared code", symbol: WorkFamily.code.symbol, family: .code, biome: .crystal) }
+        return District(id: "shared", title: "Shared", symbol: "square.stack.3d.up", family: .apps, biome: .meadow)
     }
 
     /// A pipeline's steps in the order its roads run, and anything else by kind and then name.
@@ -281,12 +284,10 @@ public struct WorkWorld: Hashable, Sendable {
     // MARK: Layout
 
     private mutating func arrange(_ drafts: [WorldStation], frames: [String: WorkNode], follows: [String: [String]], tall: Bool) {
-        let loose = drafts.filter { $0.zone == nil && [.apps, .files, .media].contains(WorkKind.look(of: $0.node).family) }
-        let fine = loose.count > Self.crowd
         var members: [String: [WorldStation]] = [:]
         var found: [District] = []
         for station in drafts {
-            let district = Self.district(station, frames: frames, fine: fine)
+            let district = Self.district(station, frames: frames)
             if members[district.id] == nil { found.append(district) }
             members[district.id, default: []].append(station)
         }
@@ -338,7 +339,6 @@ public struct WorkWorld: Hashable, Sendable {
             placed.group = district.id
             out.append(placed)
         }
-        plank(from: edges[arm], to: start - 3, along: along, across: across, at: (0, 0))
         edges[arm] = start + (rows - 1) * Self.pitch + 3
         return out
     }
@@ -359,7 +359,7 @@ public struct WorkWorld: Hashable, Sendable {
             let along = turn % 2 == 0 ? (1, 0) : (0, 1)
             let across = turn % 2 == 0 ? (0, 1) : (1, 0)
             let water = fresh ? Self.gap : 0
-            if fresh { plank(from: reach, to: reach + water, along: along, across: across, at: (cursorI, cursorJ)) }
+            _ = fresh
             let start = reach + water + 3
             for (index, station) in run.enumerated() {
                 var placed = station
@@ -379,18 +379,14 @@ public struct WorkWorld: Hashable, Sendable {
         return out
     }
 
-    /// Two planks wide, from `from` cells out to `to`.
-    private mutating func plank(from: Int, to: Int, along: (Int, Int), across: (Int, Int), at origin: (Int, Int)) {
-        for step in from..<max(from, to) {
-            for offset in [-0.5, 0.5] {
-                let far = Double(step) + 0.5
-                bridges.append(WorldCell(i: origin.0 + Int((Double(along.0) * far + Double(across.0) * offset).rounded(.down)),
-                                         j: origin.1 + Int((Double(along.1) * far + Double(across.1) * offset).rounded(.down))))
-            }
-        }
-    }
-
     // MARK: Looking things up
+
+    /// The district a station or an actor stands in.
+    public func group(of id: String?) -> WorldGroup? {
+        if let station = station(id) { return groups.first { $0.id == station.group } }
+        if let actor = actor(id), let at = actor.station, let placed = station(at) { return groups.first { $0.id == placed.group } }
+        return group(id)
+    }
 
     public func station(_ id: String?) -> WorldStation? { id.flatMap { id in stations.first { $0.id == id } } }
     public func actor(_ id: String?) -> WorldActor? { id.flatMap { id in actors.first { $0.id == id } } }

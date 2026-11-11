@@ -347,7 +347,8 @@ struct WorldView: View {
             let width = min(190, Double(tag.text.count) * 6.4 + 40)
             taken.append(CGRect(x: feet.x - width / 2, y: feet.y - WorldMetrics.avatar * unit - 29, width: width, height: 24))
         }
-        let shown = world.trails.filter { $0.kind == .handoff && $0.active && WorldTrails.shows($0, in: world, picked: picked) }
+        // Two at a time in the air; the rest are there to pick.
+        let shown = world.trails.filter { $0.kind == .handoff && $0.active && WorldTrails.shows($0, in: world, picked: picked) }.prefix(2)
         let spots = shown.compactMap { trail -> (WorldTrail, CGPoint)? in
             guard let from = heads[trail.from], let to = heads[trail.to] else { return nil }
             return (trail, WorldMetrics.arc(from, to).middle)
@@ -423,28 +424,71 @@ private struct Camera {
     }
 }
 
-/// Who's busy, along the top: whoever's waiting on you first. Clicking one goes to them, wherever the map is looking.
+/// Who's busy, along the top, gathered by what the work belongs to: a district, a pipeline, a bot's own work.
+/// Whoever's waiting on you comes first. Clicking one goes to them, wherever the map is looking.
 struct WorldRoster: View {
     let world: WorkWorld
     let activity: ActivityStore
     let picked: String?
     let pick: (String) -> Void
 
-    private var busy: [WorldActor] {
+    private struct Section: Identifiable {
+        var id: String
+        var title: String
+        var symbol: String
+        var tint: Color
+        var actors: [WorldActor]
+    }
+
+    private var sections: [Section] {
         let rank = [WorkNodeState.waiting: 0, WorkNodeState.failed: 1, WorkNodeState.working: 2]
-        return world.actors.filter { rank[$0.node.state ?? ""] != nil && $0.node.kind != WorkKind.person }
-            .sorted { (rank[$0.node.state ?? ""] ?? 9, $0.node.title) < (rank[$1.node.state ?? ""] ?? 9, $1.node.title) }
+        let busy = world.actors.filter { rank[$0.node.state ?? ""] != nil && $0.node.kind != WorkKind.person }
+        var order: [String] = []
+        var members: [String: [WorldActor]] = [:]
+        for actor in busy {
+            let group = world.group(of: actor.id)
+            let id = group?.id ?? "loose"
+            if members[id] == nil { order.append(id) }
+            members[id, default: []].append(actor)
+        }
+        let made = order.map { id -> Section in
+            let list = (members[id] ?? []).sorted { (rank[$0.node.state ?? ""] ?? 9, $0.node.title) < (rank[$1.node.state ?? ""] ?? 9, $1.node.title) }
+            let group = world.groups.first { $0.id == id }
+            return Section(id: id, title: group?.title ?? "Elsewhere", symbol: group?.symbol ?? "person.2", tint: group.map { GraphTint.color($0.family) } ?? .secondary,
+                           actors: list)
+        }
+        // Whatever needs you first, then the rest in the map's own order.
+        return made.sorted { a, b in
+            let first = a.actors.contains { $0.node.state == WorkNodeState.waiting || $0.node.state == WorkNodeState.failed } ? 0 : 1
+            let second = b.actors.contains { $0.node.state == WorkNodeState.waiting || $0.node.state == WorkNodeState.failed } ? 0 : 1
+            return first != second ? first < second : a.title < b.title
+        }
     }
 
     var body: some View {
-        let list = busy
+        let list = sections
         if !list.isEmpty {
             ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(list) { actor in
-                        Button { pick(actor.id) } label: { chip(actor) }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("\(actor.node.title), \(WorldActorView.tag(actor)?.text ?? "")")
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(list) { section in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: section.symbol).font(.system(size: 9, weight: .semibold)).foregroundStyle(section.tint)
+                                Text(section.title).font(.caption2.weight(.semibold)).foregroundStyle(.muted).lineLimit(1)
+                            }
+                            HStack(spacing: 6) {
+                                ForEach(section.actors.prefix(3)) { actor in
+                                    Button { pick(actor.id) } label: { chip(actor) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("\(actor.node.title), \(WorldActorView.tag(actor)?.text ?? "")")
+                                }
+                                if section.actors.count > 3 {
+                                    Text("+\(section.actors.count - 3)").font(.caption2.weight(.semibold)).foregroundStyle(.muted)
+                                        .padding(.horizontal, 6).frame(height: 34)
+                                        .background(.white.opacity(0.35), in: Capsule())
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 2).padding(.vertical, 2)
@@ -455,9 +499,15 @@ struct WorldRoster: View {
         }
     }
 
+    /// The bot itself, ringed in how it's doing, over what it's doing. No dot, no clutter.
     private func chip(_ actor: WorldActor) -> some View {
         let tag = WorldActorView.tag(actor)
-        return HStack(spacing: 6) {
+        let ring: Color = switch actor.node.state {
+        case WorkNodeState.waiting: .orange
+        case WorkNodeState.failed: .red
+        default: .green
+        }
+        return HStack(spacing: 7) {
             Group {
                 if let agent = actor.node.agentID, !agent.isEmpty {
                     AgentAvatar(agentID: agent, activity: activity, showsMarker: false)
@@ -465,12 +515,16 @@ struct WorldRoster: View {
                     WorldToken(symbol: GraphLook.look(actor.node).symbol, tint: GraphTint.color(actor.node))
                 }
             }
-            .frame(width: 24, height: 24)
-            Circle().fill(GraphTint.dot(actor.node.state) == .accentColor ? Color.green : GraphTint.dot(actor.node.state) ?? .gray).frame(width: 7, height: 7)
-            Text(tag?.text ?? actor.node.title).font(.caption.weight(.medium)).lineLimit(1).truncationMode(.middle)
-                .frame(maxWidth: 150)
+            .frame(width: 26, height: 26)
+            .padding(2)
+            .overlay { Circle().strokeBorder(ring, lineWidth: 1.8) }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(actor.node.title).font(.caption.weight(.semibold)).lineLimit(1)
+                Text(tag?.text ?? "").font(.caption2).foregroundStyle(.muted).lineLimit(1)
+                    .frame(maxWidth: 132, alignment: .leading)
+            }
         }
-        .padding(.leading, 5).padding(.trailing, 10).frame(height: 32)
+        .padding(.leading, 4).padding(.trailing, 10).frame(height: 40)
         #if os(iOS)
         .frame(minHeight: 44)
         #endif

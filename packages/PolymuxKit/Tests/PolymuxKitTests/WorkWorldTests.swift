@@ -71,11 +71,14 @@ struct WorkWorldTests {
         }
     }
 
-    @Test func toolsSplitByKindOnlyOnceThereAreMany() {
-        let few = [app("a", "A"), app("f", "Files", kind: WorkKind.files), app("m", "Media", kind: WorkKind.studio)]
-        #expect(Set(WorkWorld(WorkGraph(revision: 0, nodes: few, wires: [])).groups.map(\.id)) == ["tools"])
-        let many = few + (0..<6).map { app("app\($0)", "App \($0)") }
-        #expect(Set(WorkWorld(WorkGraph(revision: 0, nodes: many, wires: [])).groups.map(\.id)) == ["tools", "files", "studio"])
+    @Test func aBotsWorkSharesOneDistrict() {
+        let nodes = [bot("a"), bot("b"), app("a:mail", "Mail", of: "a", kind: WorkKind.app), app("a:files", "Files", of: "a", kind: WorkKind.files),
+                     app("b:studio", "Media", of: "b", kind: WorkKind.studio), app("shared", "Safari")]
+        let world = WorkWorld(WorkGraph(revision: 0, nodes: nodes, wires: []))
+        #expect(world.groups.count == 3)
+        #expect(world.groups.first { $0.title == "a" }?.biome == .meadow)
+        #expect(world.station("shared")?.group == "shared")
+        #expect(world.station("a:mail")?.group == world.station("a:files")?.group)
     }
 
     @Test func aMachineHoldsWhatIsOnIt() throws {
@@ -84,6 +87,6 @@ struct WorkWorldTests {
         let world = WorkWorld(WorkGraph(revision: 0, nodes: nodes, wires: []))
         let group = try #require(world.groups.first { $0.title == "Studio Mac" })
         #expect(world.station("repo")?.group == group.id && group.biome == .slate)
-        #expect(world.station("safari")?.group == "tools")
+        #expect(world.station("safari")?.group == "shared")
     }
 }
