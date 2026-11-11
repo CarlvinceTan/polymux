@@ -110,7 +110,7 @@ public struct WorkWorld: Hashable, Sendable {
     /// Cells from the middle of home to its edge.
     public static let homeReach = 4
     /// Cells of open water between islets.
-    private static let gap = 2
+    private static let gap = 5
 
     public init() {}
 

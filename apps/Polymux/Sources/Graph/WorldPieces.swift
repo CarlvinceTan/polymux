@@ -787,7 +787,7 @@ struct WorldTrails: View {
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas boat \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
-                boat(&layer, at: at, heading: crossing.heading, color: color, zoom: crossing.zoom)
+                parcel(&layer, at: at, colour: color)
                 // A short wake behind it, rather than a line all the way across.
                 let tail = point(crossing.path, at: max(0, (trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase) - 0.06))
                 var wake = Path()
@@ -811,7 +811,7 @@ struct WorldTrails: View {
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas cart \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
-                cart(&layer, at: at, colour: color)
+                parcel(&layer, at: at, colour: color)
             }
         }
         for handoff in handoffs {
@@ -898,6 +898,13 @@ struct WorldTrails: View {
         let cell = WorldMetrics.cell(station)
         let foot = place(WorldMetrics.screen(cell.i, cell.j))
         return CGPoint(x: foot.x, y: foot.y - 14)
+    }
+
+    /// What's being carried, as a small isometric crate: the same object on water and on land.
+    private func parcel(_ context: inout GraphicsContext, at point: CGPoint, colour: Color) {
+        var iso = Iso(context: context, origin: CGPoint(x: point.x, y: point.y + 5))
+        iso.shadow(i: 0, j: 0, radius: 5)
+        iso.box(i: 0, j: 0, a: 11, b: 11, z: 2, h: 9, color: colour)
     }
 
     /// A two-wheeled cart on the ground, drawn in the same isometric light as the buildings.

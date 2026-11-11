@@ -73,6 +73,15 @@ struct Iso {
     }
 
     /// A rounded panel standing upright and facing down and right, such as a screen: `b` wide, `h` tall and `depth` thick.
+    /// Gives an icon real thickness by drawing its silhouette again and again back along the ground, then its face.
+    mutating func extrudeIcon(_ render: (inout GraphicsContext, CGRect, Color) -> Void, at point: CGPoint, size: CGSize,
+                              depth: Double, side: Color) {
+        for step in stride(from: depth, to: 0, by: -0.75) {
+            render(&context, CGRect(x: point.x - size.width / 2 - step, y: point.y - size.height + step * 0.5, width: size.width, height: size.height), side)
+        }
+        render(&context, CGRect(x: point.x - size.width / 2, y: point.y - size.height, width: size.width, height: size.height), .clear)
+    }
+
     mutating func panel(i: Double, j: Double, b: Double, z: Double = 0, h: Double, depth: Double = 4, radius: Double = 5,
                         edge: Color, face: Color, _ draw: (inout GraphicsContext, CGSize) -> Void = { _, _ in }) {
         let shape = Path(roundedRect: CGRect(x: 0, y: 0, width: b, height: h), cornerRadius: radius, style: .continuous)
@@ -340,31 +349,24 @@ struct Iso {
         }
     }
 
-    /// An app, standing up as its icon with real thickness: the real icon when this Mac has the app, or its symbol on its colour.
+    /// An app, extruded from its own icon: the mark itself has depth, rather than sitting on a card.
     private static func tile(_ iso: inout Iso, _ c: Double, tint: Color, symbol: String, icon: Image?) {
         iso.shadow(i: c, j: c, radius: 24)
-        iso.box(i: c - 4, j: c, a: 16, b: 40, h: 3, color: Color(white: 0.86))
-        let side = 54.0
+        let foot = iso.point(c, c)
+        let side = 52.0
+        let spot = CGPoint(x: foot.x, y: foot.y - 4)
         if let icon {
-            iso.extrude(i: c, j: c, b: side, z: 2, h: side, depth: 9) { layer, size, front in
-                // The body takes the icon's own outline, darkened, so the thickness follows its shape.
-                if !front { layer.addFilter(.colorMultiply(Color(white: 0.55))) }
-                // Mac icons carry their own margin, so they're drawn a little past the edge.
-                layer.draw(icon, in: CGRect(origin: .zero, size: size).insetBy(dx: -5, dy: -5))
-            }
-            return
-        }
-        let shape = Path(roundedRect: CGRect(x: 2, y: 2, width: side - 4, height: side - 4), cornerRadius: 12, style: .continuous)
-        iso.extrude(i: c, j: c, b: side, z: 2, h: side, depth: 9) { layer, size, front in
-            guard front else {
-                layer.fill(shape, with: .color(tint.mix(with: .black, by: 0.3)))
-                return
-            }
-            layer.fill(shape, with: .linearGradient(Gradient(colors: [tint.mix(with: .white, by: 0.3), tint]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
-            let box = CGRect(origin: .zero, size: size).insetBy(dx: 12, dy: 12)
-            // Pressed in a little, so the mark reads as part of the object.
-            Iso.symbol(symbol, in: &layer, box: box.offsetBy(dx: 0.8, dy: 1.2), color: .black.opacity(0.25), weight: .bold)
-            Iso.symbol(symbol, in: &layer, box: box, color: .white, weight: .bold)
+            iso.extrudeIcon({ layer, box, colour in
+                if colour != .clear { layer.addFilter(.colorMultiply(colour)) }
+                layer.draw(icon, in: box.insetBy(dx: -3, dy: -3))
+            }, at: spot, size: CGSize(width: side, height: side), depth: 8, side: Color(white: 0.55))
+        } else {
+            iso.extrudeIcon({ layer, box, colour in
+                layer.fill(Path(roundedRect: box, cornerRadius: 12), with: .color(colour == .clear ? tint : colour))
+                guard colour == .clear else { return }
+                let mark = Text(Image(systemName: symbol)).font(.system(size: box.width * 0.52, weight: .bold)).foregroundStyle(.white)
+                layer.draw(layer.resolve(mark), at: CGPoint(x: box.midX, y: box.midY))
+            }, at: spot, size: CGSize(width: side, height: side), depth: 8, side: tint.mix(with: .black, by: 0.45))
         }
     }
 
