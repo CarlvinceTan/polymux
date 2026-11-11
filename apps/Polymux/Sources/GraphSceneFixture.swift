@@ -46,6 +46,8 @@ enum GraphSceneFixture {
             delivery("v3", "milo", "nova", PeerDeliveryIntent.handoff),
             delivery("v4", "nova", "milo", PeerDeliveryIntent.question, PeerDeliveryStatus.queued),
             delivery("v5", "aria", "chief", PeerDeliveryIntent.result, PeerDeliveryStatus.completed),
+            // A crossing between two islands, so a boat is in the water on the map.
+            delivery("v6", "aria", "milo", PeerDeliveryIntent.request, PeerDeliveryStatus.delivered),
         ])
     }
 

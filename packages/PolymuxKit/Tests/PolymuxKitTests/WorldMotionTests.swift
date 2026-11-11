@@ -26,6 +26,24 @@ struct WorldMotionTests {
         }
     }
 
+    /// A busy frame's worth of traffic is cheap enough to stay inside a phone's frame budget.
+    @Test func aFrameOfTrafficIsCheap() {
+        let routes = (0..<60).map { index in
+            WorldRoute(from: CGPoint(x: Double(index) * 12, y: 0), control: CGPoint(x: Double(index) * 12 + 40, y: -90),
+                       to: CGPoint(x: Double(index) * 12 + 90, y: 0))
+        }
+        let clock = ContinuousClock()
+        let took = clock.measure {
+            for frame in 0..<60 {
+                for (index, route) in routes.enumerated() {
+                    _ = WorldMotion.position(route, seconds: Double(frame) / 60, index: index)
+                }
+            }
+        }
+        // 60 vessels over 60 frames, which is a second of a very busy map.
+        #expect(took < .milliseconds(120), "a second of traffic took \(took)")
+    }
+
     @Test func travellersAreOffsetAndReversalMirrors() {
         let first = WorldMotion.position(route, seconds: 1, index: 0)
         let second = WorldMotion.position(route, seconds: 1, index: 1)
