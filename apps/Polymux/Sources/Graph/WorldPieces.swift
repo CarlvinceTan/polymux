@@ -574,7 +574,14 @@ struct WorldGround: View {
         let paved = terraces.paved
         let all = Set(land.keys).union(terraces.ocean)
         let biomes = Dictionary(world.groups.map { ($0.id, $0.biome) }, uniquingKeysWith: { first, _ in first })
-        func group(of cell: WorldCell) -> WorldGroup? { world.groups.first { $0.biome == land[cell] } }
+        // Which district owns each cell: the island its plot was laid on. Home's paving claims first.
+        var owner: [WorldCell: WorldGroup] = [:]
+        for station in world.stations {
+            guard let district = world.groups.first(where: { $0.id == station.group }) else { continue }
+            for i in station.i - 4...station.i + 3 {
+                for j in station.j - 4...station.j + 3 where owner[WorldCell(i: i, j: j)] == nil { owner[WorldCell(i: i, j: j)] = district }
+            }
+        }
         let half = WorldMetrics.half * scale
         let step = WorldTerraces.terrace * scale
         let depth = 22 * scale
@@ -644,7 +651,7 @@ struct WorldGround: View {
             let face = atSand && !paved.contains(cell) ? terrain.sand : terrain.top
             context.fill(topShape(cell, level: level), with: .color((cell.i + cell.j) % 2 == 0 ? face : face.mix(with: .black, by: 0.035)))
             // The district's own line along its shore, the way a border is drawn on a tiled map.
-            let fence: Color? = biome == .plaza ? Color(red: 0.55, green: 0.45, blue: 0.33).mix(with: .graphCard, by: 0.2) : group(of: cell).map { GraphTint.color($0.family) }
+            let fence: Color? = biome == .plaza ? Color(red: 0.55, green: 0.45, blue: 0.33).mix(with: .graphCard, by: 0.2) : owner[cell].map { GraphTint.color($0.family) }
             if coastal, let tint = fence {
                 var edge = Path()
                 for (a, b, di, dj) in [(left, bottom, 0, 1), (bottom, right, 1, 0), (right, farCorner(cell, level: level), 0, -1), (farCorner(cell, level: level), left, -1, 0)] {
