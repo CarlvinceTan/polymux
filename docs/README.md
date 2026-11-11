@@ -31,7 +31,7 @@ Generated output is separate from source: `.build/` holds caches and local build
 
 | Document | Read it for |
 | --- | --- |
-| [Architecture](architecture.md) | Server/client responsibilities, ownership, privacy, and dependency rules. |
+| [Architecture](architecture.md) | Server/client responsibilities, ownership, privacy, dependency rules, and the prompt-layer hierarchy. |
 | [Backend packages](packages.md) | Reusable Go backend modules, import examples and product adapters. |
 | [Project skills](skills.md) | Available coding-agent skills, what they do, and when to use them. |
 | [Development delivery](development.md) | Development-channel builds, deployment, TestFlight, and delivery status—not general local setup. |

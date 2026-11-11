@@ -25,23 +25,33 @@ Code: `internal/network`, `internal/device/network.go`, `internal/server/peers.g
 
 ## Bot prompts
 
-A bot's prompt is built in layers, in this order. A layer only adds to the ones before it.
+A bot's prompt is built in layers. The layer decides where a rule belongs, not who wrote it. A layer only adds to the ones before it.
 
-| Layer | Holds | Where | Editable |
-| --- | --- | --- | --- |
-| Core | Identity and how to treat data, for any host of the library | `CorePrompt` in `packages/runtime` | No |
-| System | Polymux policy and required features, such as HTML cards. Tools add their own rules, so a rule only appears when its tool does | `buildPrompt` in `internal/agentruntime` | No |
-| Everything else | Skills, and notes for the current turn | `skillPrompt`, and the turn input | By adding skills |
-| Instructions | How the bot talks and any custom behaviour | The Instructions field, or `DefaultPrompt` when blank | Yes, by the user or a bot |
+| Layer | Scope | Holds | Where | Editable |
+| --- | --- | --- | --- | --- |
+| Core | Package | Identity, handling of quoted and external data, the tool contract, and verification. No Polymux product features. Reusable by any host. | `CorePrompt` in `packages/runtime` | No |
+| System | App | Polymux policy and features: autonomy, tasks, HTML cards, credentials, workspace, routing, tool rules, and the default voice and decision behaviour. | `buildPrompt` in `internal/agentruntime` | No |
+| Global | Network | Additions or overrides for every bot on a network. Different networks may differ. | Network/settings prompt (target; not yet separate) | By the network owner |
+| Instructions | Bot | The bot's role and its own behaviour. Not the default voice and not app or network policy. | Instructions field | Yes, by the user or a bot |
+| Skills | Bot, on demand | Extra procedures, listed by name and loaded only when a task needs them. | `skillPrompt` | By adding skills |
+| Turn context | One turn | Group, peer, task, review and voice notes for the current turn. | Turn assembly | Situational |
 
-- Instructions go last so they have the final say.
-- Skills load on demand: the prompt lists each by name and description, and a bot reads one from its file, or with `read_skill` when it has no file access, only when a task needs it. The card reference is the exception for bots without file access: cards are frequent, and a cached prompt costs less than a load per card.
+Order: Core → System → Global → Instructions → Skills → turn context. The voice is applied last, after instructions, so a bot's role cannot accidentally replace how Polymux speaks.
+
+- **Core stays host-neutral.** Do not put Polymux names, cards, tasks, credentials or product policy there. It is the part another host can reuse.
+- **System is the app-wide Polymux layer.** A rule that applies to every Polymux bot belongs here, not in a bot's instructions.
+- **Global is for network-wide differences.** Use it when every bot on a network should follow the same addition; do not use it for per-bot roles.
+- **Instructions are per bot.** Do not put the default voice, app policy or network policy there.
+- **Skills are extra procedures**, not a policy layer. They load on demand: the prompt lists each by name and description, and a bot reads one from its file, or with `read_skill` when it has no file access, only when a task needs it. The card reference is the exception for bots without file access: cards are frequent, and a cached prompt costs less than a load per card.
+- **Turn context is one turn only.** Group, peer, task, review and voice notes must not become a second system prompt.
+
+The current tree has Core and System in place. `DefaultVoice` and `DefaultBehavior` still live in `DefaultPrompt`, which is the Instructions default, and there is no separate Global prompt yet. Moving those into System/Global is the next prompt refactor; until then, a custom Instructions value replaces the default voice and decision rule.
 - In a direct chat `send_to_user` is the bot's voice, and each message is one bubble. A reminder goes with every model request. Text written after the last message stays private, so a bot ends with `NO_RESPONSE`. A bot that skips the tool, or does more work and ends in plain text, still reaches the user: its text is delivered with one bubble per paragraph, including what it wrote beside its tool calls, such as a quick answer given mid-run.
 - A message sent while a bot is working steers its run: it joins the bot's next model request with a note to answer and carry on, and the run keeps its place. A message from another bot stays its own queued turn, because its answer returns as a receipt. Queued turns keep their arrival order, and steered messages are answered at the current run's next step rather than waiting behind the queue.
 - In a group chat, a message addressed to nobody first goes to a router: one short model call that picks the member whose role fits it, so the others skip a turn. When the router can't tell, every member takes a turn and speaks only if its role fits best. Either way one bot answers each request, not every bot that could.
 - A bot takes one turn at a time in each conversation. Its task threads, delegated tasks and voice consultations have sessions of their own, so they run alongside its main chat. A delegated task starts as soon as it's queued, even while the turn that started it is still waiting for it, and each bot runs up to four at once. When a model provider says it's busy or rate-limited, calls to it wait as long as it asks, back off and run fewer at a time, then speed up again as calls succeed, so work slows down rather than fails. When every model a bot can use is out of allowance or down, its turn waits and carries on as soon as one is back: at the provider's reset time, on a retry at most two minutes apart, or straight away when the user sends something, in case they've just topped up. Models are tracked one at a time, since a limit can apply to one model and not another on the same account. Switching costs the next model an uncached request, so a bot only switches when it must: it waits out a blip of up to 5 seconds on its own model, and a turn that switched stays on that model, going back to the bot's own model on its next turn.
 - A long command or codemode script steps aside when a message is waiting: it keeps running in the background and its result arrives as a new message. A script that has run a few seconds also stops at its next tool call, handing back what finished, so a change of mind lands before more tools run.
-- A blank field follows `DefaultPrompt`, and clients are shown that text. Saving it unchanged keeps the field blank, so a bot only stops following the default once its instructions are edited.
+- Until the prompt refactor above, a blank Instructions field follows `DefaultPrompt`, and clients are shown that text. Saving it unchanged keeps the field blank, so a bot only stops following the default once its instructions are edited.
 
 ## External agents
 

@@ -34,7 +34,7 @@ PiG supplies codemode execution, nested-call validation, the native SQLite adapt
 
 Start with [`ExampleNewDurable`](../packages/runtime/example_test.go). Open storage with `NewDurableStorage`, construct the runtime, and call `Open` and `Send`. Retain `Session.Path()` to reopen a conversation. Close sessions and the runtime before closing storage. The example uses a local model endpoint and runs without paid credentials or a Polymux server.
 
-Hosts supply credentials through provider configuration and may add PiG tools through `Definition.ExtraTools`. `Client.BuildPrompt` supplies host policy; `Client.InstallSkills` supplies bundled skill files. The default prompt and skill loader do not install Polymux's product guides. Hosts authorize tools, MCP connections, attachment paths and shell access; the runtime is not an execution sandbox.
+Hosts supply credentials through provider configuration and may add PiG tools through `Definition.ExtraTools`. `CorePrompt` is the package-level core: identity, handling of quoted and external data, and the tool contract, with no Polymux product policy. `Client.BuildPrompt` supplies host policy above it; `Client.InstallSkills` supplies bundled skill files. The default prompt and skill loader do not install Polymux's product guides. Hosts authorize tools, MCP connections, attachment paths and shell access; the runtime is not an execution sandbox.
 
 Polymux's [`internal/agentruntime`](../apps/server/internal/agentruntime/) adapts its saved agent definitions, messages and usage to the library and supplies its policy and bundled skills. Existing conversation identifiers, `durable.db` records and provider namespaces retain their format.
 
