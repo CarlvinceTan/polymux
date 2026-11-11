@@ -10,6 +10,7 @@ import Testing
 @Test func spokenSymbolsAreOnByDefault() {
     let options = DictationOptions(fillerWords: false)
     #expect(DictationText.clean("Use at sign here", options: options) == "Use @ here")
+    #expect(DictationText.clean("Use hashtag here", options: options) == "Use # here")
     #expect(DictationText.clean("Hello comma world period", options: options) == "Hello comma world period")
 }
 

@@ -60,6 +60,7 @@ public enum DictationText {
         ("dollar sign", "$"),
         ("hash sign", "#"),
         ("number sign", "#"),
+        ("hashtag", "#"),
         ("asterisk", "*"),
         ("ampersand", "&"),
     ]

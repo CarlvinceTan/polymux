@@ -22,19 +22,18 @@ struct VoicePane: View {
                                                           set: { dictation.language = DictationLanguage(rawValue: $0) ?? .multilingual }),
                            options: DictationLanguage.allCases.map { ($0 == .english ? "English only" : $0.title, $0.rawValue) })
                 .accessibilityLabel("Dictation language")
-            Toggle("Filler words", isOn: $dictation.fillerWords)
-                .accessibilityLabel("Filler words")
-            Toggle("Smart spacing", isOn: $dictation.smartSpacing)
-                .accessibilityLabel("Smart spacing")
-            Toggle("Spoken symbols", isOn: $dictation.spokenSymbols)
-                .accessibilityLabel("Spoken symbols")
-            Toggle("Spoken formatting", isOn: $dictation.spokenFormatting)
-                .accessibilityLabel("Spoken formatting")
-            Toggle("Output fixes", isOn: $dictation.outputFixes)
-                .accessibilityLabel("Output fixes")
-            Toggle("On-device polish", isOn: $dictation.polish)
-                .accessibilityLabel("On-device polish")
-                .disabled(!DictationPolish.isAvailable)
+            settingToggle("Filler words", "Removes “um”, “uh” and similar fillers.",
+                          isOn: $dictation.fillerWords)
+            settingToggle("Smart spacing", "Adds missing spaces around dictation.",
+                          isOn: $dictation.smartSpacing)
+            settingToggle("Spoken symbols", "Turns “at sign” and “hashtag” into symbols.",
+                          isOn: $dictation.spokenSymbols)
+            settingToggle("Spoken formatting", "Adds punctuation and line breaks by voice.",
+                          isOn: $dictation.spokenFormatting)
+            settingToggle("Output fixes", "Fixes capitals, spacing and punctuation.",
+                          isOn: $dictation.outputFixes)
+            settingToggle("On-device polish", "Fixes text with Apple Intelligence.",
+                          isOn: $dictation.polish, enabled: DictationPolish.isAvailable)
             if !DictationPolish.isAvailable {
                 Text("Polish isn’t available on this device.")
                     .font(.footnote).foregroundStyle(.muted)
@@ -59,6 +58,9 @@ struct VoicePane: View {
             }
         } header: {
             SectionHeader("Dictionary", symbol: "character.book.closed.fill")
+        } footer: {
+            Text("Words the recogniser should hear correctly, with the phrases it often mishears.")
+                .font(.footnote).foregroundStyle(.muted)
         }
         .panelRow()
     }
@@ -67,6 +69,9 @@ struct VoicePane: View {
         Section {
             LabeledContent("Engine", value: "Apple Speech")
             LabeledContent("Listening for", value: DictationDevice.languageNames(for: dictation.deviceLanguage))
+        } header: {
+            SectionHeader("Recognition", symbol: "cpu.fill", tint: .purple)
+        } footer: {
             if dictation.fallsBack {
                 Text("Multilingual falls back to English on this device.")
                     .font(.footnote).foregroundStyle(.muted)
@@ -74,8 +79,6 @@ struct VoicePane: View {
                 Text("Multilingual listens for English and this device’s languages.")
                     .font(.footnote).foregroundStyle(.muted)
             }
-        } header: {
-            SectionHeader("Recognition", symbol: "cpu.fill", tint: .purple)
         }
         .panelRow()
     }
@@ -121,5 +124,26 @@ struct VoicePane: View {
                 $0.trimmingCharacters(in: .whitespaces)
             }.filter { !$0.isEmpty }
         })
+    }
+
+    private func settingToggle(_ title: String, _ detail: String, isOn: Binding<Bool>,
+                               enabled: Bool = true) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 12) {
+            GridRow(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityHidden(true)
+                Toggle("", isOn: isOn)
+                    .labelsHidden()
+                    .disabled(!enabled)
+                    .accessibilityLabel(title)
+                    .accessibilityHint(detail)
+            }
+        }
     }
 }
