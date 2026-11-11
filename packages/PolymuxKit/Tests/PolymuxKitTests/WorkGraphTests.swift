@@ -118,6 +118,43 @@ struct WorkGraphTests {
         let reported = WorkGraph(revision: 1, nodes: [], wires: [WorkWire(id: "w", from: "agent:gone", to: "you")])
         #expect(WorkGraphBuilder(agents: agents, threads: [], reported: reported).build().wires.isEmpty)
     }
+
+    private func inbox(_ id: String, platform: String, _ name: String, unread: Int64, group: Bool = false, space: Bool = false) -> HubChat {
+        HubChat(id: id, platform: platform, name: name, group: group, space: space, unread: unread)
+    }
+
+    /// Hub sits outside Polymux's activity, so whoever's waiting arrives as chats.
+    @Test func aWaitingChatStandsAtMessages() throws {
+        let graph = WorkGraphBuilder(agents: agents, threads: [], inbox: [
+            inbox("c1", platform: "whatsapp", "Ana", unread: 2),
+            inbox("c2", platform: "whatsapp", "Crew", unread: 1, group: true),
+            inbox("c3", platform: "telegram", "Caught up", unread: 0),
+            inbox("c4", platform: "whatsapp", "Work space", unread: 4, space: true),
+        ], platformNames: ["whatsapp": "WhatsApp"]).build()
+        let ana = try #require(node(graph, "hub:c1"))
+        #expect(ana.kind == WorkKind.person && ana.state == WorkNodeState.waiting && ana.subtitle == "WhatsApp · 2 unread")
+        #expect(node(graph, "hub:c2")?.subtitle == "WhatsApp group · 1 unread")
+        #expect(node(graph, "hub:c3") == nil && node(graph, "hub:c4") == nil)
+        let wire = try #require(graph.wires.first { $0.id == "hub:c1>\(WorkGraphBuilder.messages)" })
+        #expect(wire.state == WorkWireState.active && wire.carries == WorkKind.message)
+        #expect(node(graph, WorkGraphBuilder.messages)?.title == "Messages")
+    }
+
+    /// A bot reading messages joins the one station rather than keeping its own, and a chat shows only its own waiting.
+    @Test func messagesAreOneStationWhoeverReadsThem() throws {
+        let activity = WorkActivity(build: "b", runs: [
+            run("r1", agent: "linus", chat: "linus", tools: [tool("t1", "hub__send", summary: "hub__send")]),
+            run("r2", agent: "claude", chat: "claude", tools: [tool("t2", "hub__read", summary: "hub__read")]),
+        ], deliveries: [])
+        let waiting = [inbox("c1", platform: "whatsapp", "Ana", unread: 2)]
+        let graph = WorkGraphBuilder(agents: agents, threads: [], activity: activity, inbox: waiting).build()
+        #expect(graph.nodes.filter { $0.id == WorkGraphBuilder.messages }.count == 1)
+        #expect(graph.wires.contains { $0.from == "agent:linus" && $0.to == WorkGraphBuilder.messages })
+        #expect(graph.wires.contains { $0.from == "agent:claude" && $0.to == WorkGraphBuilder.messages })
+        #expect(!graph.nodes.contains { $0.id == "app:linus:hub" })
+        let one = WorkGraphBuilder(agents: agents, threads: [], chat: "linus", inbox: waiting).build()
+        #expect(node(one, "hub:c1") == nil)
+    }
 }
 
 extension NetworkInfo {

@@ -5,6 +5,10 @@ const app = await cua.getApp(APP);
 await app.waitFor({ role: "button", name: "Atlas" });
 await app.click({ role: "button", name: "Atlas" });
 await app.waitFor({ role: "button", name: "Show diagram" });
+// Hub sits on the map too: whoever has something waiting stands at Messages with it.
+await app.click({ role: "button", name: "Fit to view" });
+await app.waitFor({ role: "button", name: "Messages, App" });
+await app.waitFor({ role: "button", name: "Priya Raman, 3 unread, Waiting" });
 await app.waitFor({ role: "button", name: "Characters, Step" });
 await app.waitFor({ role: "button", name: "Milo, Drawing Robo" });
 await app.waitFor({ role: "button", name: "Storyboard, Step" });

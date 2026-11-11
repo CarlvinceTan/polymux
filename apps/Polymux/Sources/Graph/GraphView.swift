@@ -53,6 +53,7 @@ struct GraphView: View {
         .onChange(of: session.work.settled) { show() }
         .onChange(of: session.sidebar.agents) { show() }
         .onChange(of: session.sidebar.threads) { show() }
+        .onChange(of: session.hub.chats) { show() }
     }
 
     private var canvas: some View {
@@ -121,8 +122,10 @@ struct GraphView: View {
     }
 
     private func show() {
+        let platforms = Dictionary((session.hub.status?.platforms ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         let builder = WorkGraphBuilder(agents: session.sidebar.agents, threads: session.sidebar.threads, activity: session.work.activity,
-                                       reported: session.work.reported, network: session.network.value, chat: chat)
+                                       reported: session.work.reported, network: session.network.value, chat: chat,
+                                       inbox: session.hub.chats, platformNames: platforms)
         model.show(builder.build(), settled: session.work.settled)
     }
 

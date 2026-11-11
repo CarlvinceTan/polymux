@@ -9,21 +9,33 @@ public struct WorkGraphBuilder {
     public var network: NetworkInfo?
     /// The chat to show, or nil for everything.
     public var chat: String?
+    /// Hub chats, whoever's waiting answered from.
+    public var inbox: [HubChat] = []
+    /// What each Hub platform is called, to say where a message came from.
+    public var platformNames: [String: String] = [:]
 
     public static let you = "you"
     public static let serverDevice = "device:server"
     public static let server = "server:this"
+    /// Where messages come and go: one station, whoever it is reading them.
+    public static let messages = "hub:messages"
     private static let callLimit = 6
+    /// How many chats wait on the map at once.
+    private static let inboxLimit = 6
 
     public init(agents: [Agent], threads: [Thread], activity: WorkActivity? = nil, reported: WorkGraph? = nil,
-                network: NetworkInfo? = nil, chat: String? = nil) {
+                network: NetworkInfo? = nil, chat: String? = nil, inbox: [HubChat] = [], platformNames: [String: String] = [:]) {
         self.agents = agents
         self.threads = threads
         self.activity = activity
         self.reported = reported
         self.network = network
         self.chat = chat
+        self.inbox = inbox
+        self.platformNames = platformNames
     }
+
+    static var messagesStation: WorkNode { WorkNode(id: messages, title: "Messages", kind: WorkKind.app) }
 
     public static func agentNode(_ id: String) -> String { "agent:" + id }
 
@@ -35,6 +47,7 @@ public struct WorkGraphBuilder {
         addHandoffs(&graph, deliveries: deliveries)
         addDelegation(&graph, runs: runs)
         addTools(&graph, runs: runs)
+        addInbox(&graph)
         var environment = Draft()
         addDevices(&environment)
         for node in reported?.nodes ?? [] { environment.add(node) }
@@ -318,11 +331,13 @@ public struct WorkGraphBuilder {
                                        label: "Task", carries: WorkKind.task))
                     continue
                 }
-                let node = "app:\(run.agentID):\(app.key)"
+                // Messages is one place whoever reads them, so it isn't repeated for every bot.
+                let shared = app.key == "hub"
+                let node = shared ? Self.messages : "app:\(run.agentID):\(app.key)"
                 let wire = "use:\(run.agentID):\(app.key)"
                 let item = Self.item(tool)
                 // A bot and its app trade things both ways, so the line has no arrow and its parcel shows what.
-                graph.add(WorkNode(id: node, title: app.title, parent: owner, kind: app.kind))
+                graph.add(shared ? Self.messagesStation : WorkNode(id: node, title: app.title, parent: owner, kind: app.kind))
                 graph.add(WorkWire(id: wire, from: owner, to: node, direction: WorkWireDirection.none, carries: item.kind))
                 if open {
                     Self.mark(&graph, node: node, wire: wire, carries: item.kind, doing: Self.doing(tool, item.title))
@@ -332,6 +347,25 @@ public struct WorkGraphBuilder {
                 graph.add(WorkNode(id: "tool:\(tool.id)", title: item.title, parent: node, kind: item.kind, subtitle: item.subtitle, state: state,
                                    details: [WorkDetail(label: "Tool", value: tool.name), WorkDetail(label: item.subtitle, value: tool.summary ?? tool.name)]))
             }
+        }
+    }
+
+    // MARK: Messages
+
+    /// Whoever has something waiting in Hub stands at Messages with it.
+    private func addInbox(_ graph: inout Draft) {
+        guard chat == nil else { return }
+        let waiting = inbox.filter { !$0.space && $0.unread > 0 }.sorted { $0.at > $1.at }.prefix(Self.inboxLimit)
+        guard !waiting.isEmpty else { return }
+        graph.add(Self.messagesStation)
+        for chat in waiting {
+            let here = "hub:" + chat.id
+            var from = platformNames[chat.platform] ?? chat.platform
+            if chat.group { from += " group" }
+            graph.add(WorkNode(id: here, title: chat.name, kind: WorkKind.person, subtitle: "\(from) · \(chat.unread) unread",
+                               state: WorkNodeState.waiting))
+            graph.add(WorkWire(id: "\(here)>\(Self.messages)", from: here, to: Self.messages, state: WorkWireState.active,
+                               label: "\(chat.unread) unread", carries: WorkKind.message))
         }
     }
 

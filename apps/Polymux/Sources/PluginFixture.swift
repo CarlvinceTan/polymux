@@ -38,6 +38,7 @@ final class PluginFixture: @unchecked Sendable {
         Plugin(name: "atlas", title: "Atlas", description: "See how your bots, people, devices and repositories work together.",
                symbol: "map", selectedSymbol: "map.fill", version: "0.1.0",
                kind: PluginKind.both, surface: "atlas", state: PluginState.ready, source: "example/graph", chats: ["t-chief"]),
+        PluginFixture.hub(state: PluginState.ready),
     ] : PluginFixture.permissions ? [
         Plugin(name: "permissions", title: "Permissions", description: "Set rules a chat's bots can't break.",
                symbol: "lock.shield", selectedSymbol: "lock.shield.fill", version: "0.1.0", kind: PluginKind.scoped,
