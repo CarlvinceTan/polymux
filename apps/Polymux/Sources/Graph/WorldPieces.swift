@@ -227,16 +227,6 @@ struct WorldStationView: View {
         }
         WorldModel.draw(station, in: &context, at: Self.anchor, tint: tint, symbol: look.symbol)
         crates(&context)
-        // A step wears its number at the corner of its plot, so a pipeline reads in order at a glance.
-        if let step = station.step {
-            let at = CGPoint(x: Self.anchor.x + 84, y: Self.anchor.y)
-            let plate = CGRect(x: at.x - 11, y: at.y - 11, width: 22, height: 22)
-            let done = station.state == WorkNodeState.done
-            context.fill(Path(ellipseIn: plate), with: .color(done ? Color.green : Color.graphCard))
-            context.stroke(Path(ellipseIn: plate), with: .color(done ? Color.green : Color.primary.opacity(0.3)), lineWidth: 1.5)
-            let number = Text("\(step)").font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(done ? Color.white : Color.primary)
-            context.draw(context.resolve(number), at: at)
-        }
     }
 
     /// Up to four of what the station holds, stacked at its left, each in its own kind's colour.
@@ -338,9 +328,9 @@ struct WorldActorView: View {
         switch actor.node.state {
         case WorkNodeState.working:
             let said = actor.doing?.isEmpty == false ? actor.doing : actor.node.subtitle?.isEmpty == false ? actor.node.subtitle : GraphLook.cargoTitle(actor.cargo)
-            let color = actor.cargo.map { GraphTint.color(WorkKind.look($0).family) } ?? Color.green
+            let color = GraphTint.cargo(actor.cargo)
             return (actor.cargo.map { GraphLook.cargo($0) } ?? "ellipsis", said ?? "Working", color)
-        case WorkNodeState.waiting: return ("questionmark", "Waiting for you", .orange)
+        case WorkNodeState.waiting: return ("questionmark", actor.doing?.isEmpty == false ? actor.doing ?? "" : "Waiting for you", .orange)
         case WorkNodeState.failed: return ("exclamationmark", "Failed", .red)
         default: return nil
         }
@@ -759,8 +749,12 @@ struct WorldTrails: View {
 
     private func draw(_ context: inout GraphicsContext, now: Date) {
         let seconds = now.timeIntervalSinceReferenceDate
+        var drawn = Set<String>()
         for (index, trail) in world.trails.enumerated() where Self.shows(trail, in: world, picked: picked) {
             guard let from = points[trail.from], let to = points[trail.to] else { continue }
+            // One boat per pair and direction, so two kinds of traffic never sit on top of each other.
+            let key = trail.wire.direction == WorkWireDirection.back ? trail.to + ">" + trail.from : trail.from + ">" + trail.to
+            guard drawn.insert(key).inserted else { continue }
             let lit = picked.map { trail.from == $0 || trail.to == $0 || "trail:" + trail.id == $0 } ?? false
             var layer = context
             layer.opacity = picked != nil && !lit ? 0.16 : 1
