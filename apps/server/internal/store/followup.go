@@ -159,7 +159,7 @@ func (s *Store) DrainSteers(ctx context.Context, run string, persist func([]cont
 }
 
 func pendingSteers(ctx context.Context, tx *sql.Tx, run string) ([]Work, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT input FROM jobs WHERE state='steer' AND json_extract(input,'$.parentRunID')=? ORDER BY rowid`, run)
+	rows, err := tx.QueryContext(ctx, `SELECT input FROM jobs WHERE state='steer' AND json_extract(input,'$.parentRunID')=? ORDER BY enqueued_seq,rowid`, run)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +190,7 @@ func (s *Store) releaseSteers(ctx context.Context, tx *sql.Tx, parent string) er
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='queued',input=? WHERE id=?`, string(data), w.Message.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='queued',delivery='queue',input=? WHERE id=?`, string(data), w.Message.ID); err != nil {
 			return err
 		}
 		s.jobs.wake(w.Message.ThreadID)

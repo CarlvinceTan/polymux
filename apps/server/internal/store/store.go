@@ -86,6 +86,9 @@ PRAGMA user_version=2;`)
 	if err := s.migrateRuns(ctx); err != nil {
 		return err
 	}
+	if err := s.migrateInbox(ctx); err != nil {
+		return err
+	}
 	if err := s.migrateProactivity(ctx); err != nil {
 		return err
 	}
@@ -974,11 +977,12 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 			return m, false, err
 		}
 	}
-	work, err := json.Marshal(Work{Trigger: contract.RunTriggerMessage, Message: m, Targets: targets, Routing: input.Routing, ParentRunID: parent, DeviceID: input.DeviceID})
-	if err != nil {
-		return m, false, err
+	work := Work{Trigger: contract.RunTriggerMessage, Message: m, Targets: targets, Routing: input.Routing, ParentRunID: parent, DeviceID: input.DeviceID}
+	state, delivery := "queued", deliveryQueue
+	if parent != nil {
+		state, delivery = "steer", deliverySteer
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,thread_id,request,input) VALUES(?,?,?,?)`, request.ID, thread, string(encoded), string(work)); err != nil {
+	if err := s.insertJobTx(ctx, tx, request.ID, thread, string(encoded), work, state, delivery); err != nil {
 		return m, false, err
 	}
 	s.jobs.wake(thread)
@@ -989,9 +993,6 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 		}
 	}
 	if parent != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='steer' WHERE id=?`, request.ID); err != nil {
-			return m, false, err
-		}
 		return m, true, tx.Commit()
 	}
 	for _, target := range targets {
@@ -1008,14 +1009,14 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 // so they run alongside the turn that spawned them instead of waiting behind it.
 func (s *Store) Job(ctx context.Context, thread string) (string, error) {
 	var id string
-	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger') IS NOT 'child' ORDER BY rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
+	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger') IS NOT 'child' ORDER BY enqueued_seq,rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
 	return id, err
 }
 
 // ChildJob claims the thread's next queued child task.
 func (s *Store) ChildJob(ctx context.Context, thread string) (string, error) {
 	var id string
-	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger')='child' ORDER BY rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
+	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger')='child' ORDER BY enqueued_seq,rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
 	return id, err
 }
 
