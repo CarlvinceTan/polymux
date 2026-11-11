@@ -36,12 +36,10 @@ struct DeviceView<Actions: View>: View {
                             .onSubmit(done)
                     }
                     LabeledContent("Hostname", value: device.name)
-                    if let state = status.title {
-                        LabeledContent("Status") {
-                            HStack(spacing: 8) {
-                                StatusDot(state: status).accessibilityHidden(true)
-                                Text(state)
-                            }
+                    LabeledContent("Status") {
+                        HStack(spacing: 8) {
+                            StatusDot(state: status).accessibilityHidden(true)
+                            Text(status.title)
                         }
                     }
                     LabeledContent("Type", value: server ? "Server" : "Client")
