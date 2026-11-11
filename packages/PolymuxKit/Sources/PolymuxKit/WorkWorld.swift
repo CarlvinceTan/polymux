@@ -96,6 +96,72 @@ public struct WorldTrail: Identifiable, Hashable, Sendable {
     public var active: Bool { wire.state == WorkWireState.active }
 }
 
+/// The ground under the map, as tiles: which cells are land, which are paved, and how high each stands.
+/// An island rises in terraces away from the water — sand at the coast, grass one step up, a core where an
+/// islet is big enough — the way a tiled map does, so height is something you can see rather than imply.
+public struct WorldTerraces: Hashable, Sendable {
+    /// Points a terrace climbs, at full map scale.
+    public static let terrace = 15.0
+
+    /// Which biome each land cell wears.
+    public private(set) var land: [WorldCell: WorldBiome] = [:]
+    /// Cells someone has laid — paving at home, plots under stations.
+    public private(set) var paved: Set<WorldCell> = []
+    /// Open water, including the gaps a plank crosses.
+    public private(set) var ocean: Set<WorldCell> = []
+    /// How many terraces above the sand each land cell stands.
+    public private(set) var rise: [WorldCell: Int] = [:]
+
+    /// The tallest terrace on the map, which is all a painter needs to scale its cliffs.
+    public var maxRise: Int { rise.values.max() ?? 0 }
+
+    /// How far a point on the ground sits above the sand, in points at `scale`.
+    public func lift(_ i: Double, _ j: Double, scale: Double = 1) -> Double {
+        Double(rise[WorldCell(i: Int(i.rounded(.down)), j: Int(j.rounded(.down)))] ?? 0) * Self.terrace * scale
+    }
+
+    public init(_ world: WorkWorld) {
+        for i in -WorkWorld.homeReach..<WorkWorld.homeReach {
+            for j in -WorkWorld.homeReach..<WorkWorld.homeReach {
+                land[WorldCell(i: i, j: j)] = .plaza
+                paved.insert(WorldCell(i: i, j: j))
+            }
+        }
+        let biomes = Dictionary(world.groups.map { ($0.id, $0.biome) }, uniquingKeysWith: { first, _ in first })
+        for station in world.stations {
+            // A plot's four cells, a lane it shares with its neighbours, and an island wide enough
+            // to show its coast: eight cells across, so terraces have room between sand and paving.
+            for i in -4...3 {
+                for j in -4...3 {
+                    let cell = WorldCell(i: station.i + i, j: station.j + j)
+                    if land[cell] == nil { land[cell] = biomes[station.group] ?? .meadow }
+                }
+            }
+            for i in -2...1 {
+                for j in -2...1 { paved.insert(WorldCell(i: station.i + i, j: station.j + j)) }
+            }
+        }
+        let planks = Set(world.bridges).subtracting(land.keys)
+        ocean = planks
+        // Walk in from the water: the coast is sand, the next ring stands one terrace up, and so on inwards.
+        let ground = Set(land.keys)
+        let steps = [WorldCell(i: 1, j: 0), WorldCell(i: -1, j: 0), WorldCell(i: 0, j: 1), WorldCell(i: 0, j: -1)]
+        func neighbours(_ cell: WorldCell) -> [WorldCell] { steps.map { WorldCell(i: cell.i + $0.i, j: cell.j + $0.j) } }
+        var frontier = Set<WorldCell>()
+        for cell in ground where neighbours(cell).contains(where: { !ground.contains($0) }) { frontier.insert(cell) }
+        var done = Set<WorldCell>()
+        var depth = 0
+        while !frontier.isEmpty && depth < 4 {
+            for cell in frontier { rise[cell] = depth }
+            done.formUnion(frontier)
+            var next = Set<WorldCell>()
+            for cell in ground.subtracting(done) where neighbours(cell).contains(where: { frontier.contains($0) }) { next.insert(cell) }
+            frontier = next
+            depth += 1
+        }
+    }
+}
+
 /// The work graph as a map: districts around a home, actors standing where they work, and what passes between them.
 public struct WorkWorld: Hashable, Sendable {
     public var stations: [WorldStation] = []

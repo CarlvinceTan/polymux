@@ -76,6 +76,8 @@ struct WorldTerrain {
     let top: Color
     let cliff: Color
     let pad: Color
+    /// The beach each islet wears where the water reaches.
+    let sand: Color
 
     static func of(_ biome: WorldBiome) -> WorldTerrain {
         let top: Color = switch biome {
@@ -88,7 +90,8 @@ struct WorldTerrain {
         case .slate: Color.gray.mix(with: .graphCard, by: 0.42)
         case .savanna: Color.orange.mix(with: .graphCard, by: 0.52)
         }
-        return WorldTerrain(top: top, cliff: top.mix(with: .brown, by: 0.5).mix(with: .black, by: 0.14), pad: top.mix(with: .graphCard, by: 0.62))
+        return WorldTerrain(top: top, cliff: top.mix(with: .brown, by: 0.5).mix(with: .black, by: 0.14), pad: top.mix(with: .graphCard, by: 0.62),
+                            sand: Color(red: 0.90, green: 0.82, blue: 0.62).mix(with: .graphCard, by: 0.18))
     }
 }
 
@@ -498,9 +501,13 @@ struct WorldToken: View {
 /// The ground: sea, an islet for home and one per district on its own kind of land, planks and roads between them.
 struct WorldGround: View {
     let world: WorkWorld
+    let terraces: WorldTerraces
     /// Turns a point on the map into a point on screen.
     let place: (CGPoint) -> CGPoint
     let scale: Double
+
+    /// How far a ground point stands above the sand, on screen.
+    private func lift(_ i: Double, _ j: Double) -> Double { terraces.lift(i, j, scale: scale) }
 
     var body: some View {
         Canvas { context, size in draw(&context, size: size) }
@@ -526,6 +533,20 @@ struct WorldGround: View {
         return (centre, top)
     }
 
+    /// A tile's top face, stood on its terrace.
+    private func topShape(_ cell: WorldCell, level: Double) -> Path {
+        let (centre, top) = tile(cell)
+        return top.offsetBy(dx: 0, dy: -level)
+    }
+
+    /// The far corner of a tile's top face, stood on its terrace.
+    private func farCorner(_ cell: WorldCell, level: Double) -> CGPoint {
+        let (centre, _) = tile(cell)
+        return CGPoint(x: centre.x, y: centre.y - half2 / 2 - level)
+    }
+
+    private var half2: Double { WorldMetrics.half * scale }
+
     /// A band of the wall under one edge of a tile, from `from` to `to` below the surface.
     private func wall(_ a: CGPoint, _ b: CGPoint, from: Double, to: Double) -> Path {
         var path = Path()
@@ -549,89 +570,99 @@ struct WorldGround: View {
                 context.stroke(wave, with: .color(.white.opacity(0.34)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             }
         }
-        var land: [WorldCell: WorldBiome] = [:]
-        var paved = Set<WorldCell>()
-        for i in -WorkWorld.homeReach..<WorkWorld.homeReach {
-            for j in -WorkWorld.homeReach..<WorkWorld.homeReach {
-                land[WorldCell(i: i, j: j)] = .plaza
-                paved.insert(WorldCell(i: i, j: j))
-            }
-        }
+        let land = terraces.land
+        let paved = terraces.paved
+        let all = Set(land.keys).union(terraces.ocean)
         let biomes = Dictionary(world.groups.map { ($0.id, $0.biome) }, uniquingKeysWith: { first, _ in first })
-        for station in world.stations {
-            // A plot's four cells, and the lane around them that it shares with its neighbours.
-            for i in -3...2 {
-                for j in -3...2 {
-                    let cell = WorldCell(i: station.i + i, j: station.j + j)
-                    if land[cell] == nil { land[cell] = biomes[station.group] ?? .meadow }
-                    if (-2...1).contains(i), (-2...1).contains(j) { paved.insert(cell) }
-                }
-            }
-        }
-        let planks = Set(world.bridges).subtracting(land.keys)
-        let all = Set(land.keys).union(planks)
+        func group(of cell: WorldCell) -> WorldGroup? { world.groups.first { $0.biome == land[cell] } }
         let half = WorldMetrics.half * scale
-        let lip = 5 * scale
+        let step = WorldTerraces.terrace * scale
         let depth = 22 * scale
+        func rise(_ cell: WorldCell) -> Int { terraces.rise[cell] ?? 0 }
+        func shoulder(_ cell: WorldCell, _ di: Int, _ dj: Int) -> Double {
+            let at = WorldCell(i: cell.i + di, j: cell.j + dj)
+            return land[at] == nil ? -depth : Double(rise(at)) * step
+        }
         // Back to front, so a wall never paints over the tile in front of it.
         let order = all.sorted { ($0.i + $0.j, $0.i) < ($1.i + $1.j, $1.i) }
 
         // The shelf each islet sits on, seen through the water around it.
         var shelf = Path()
-        for cell in land.keys { shelf.addPath(tile(cell, grown: 2.3).top) }
+        for cell in land.keys { shelf.addPath(tile(cell, grown: 2.3).top.offsetBy(dx: 0, dy: -Double(terraces.rise[cell] ?? 0) * step)) }
         context.fill(shelf.offsetBy(dx: 0, dy: depth), with: .color(.worldShallows))
 
         for cell in order {
-            let (centre, top) = tile(cell)
+            let (centre, plankTop) = tile(cell)
             let left = CGPoint(x: centre.x - half, y: centre.y)
             let right = CGPoint(x: centre.x + half, y: centre.y)
             let bottom = CGPoint(x: centre.x, y: centre.y + half / 2)
             guard let biome = land[cell] else {
                 if !all.contains(WorldCell(i: cell.i, j: cell.j + 1)) { context.fill(wall(left, bottom, from: 0, to: 5 * scale), with: .color(Color.worldWood.mix(with: .black, by: 0.12))) }
                 if !all.contains(WorldCell(i: cell.i + 1, j: cell.j)) { context.fill(wall(bottom, right, from: 0, to: 5 * scale), with: .color(Color.worldWood.mix(with: .black, by: 0.26))) }
-                context.fill(top, with: .color(.worldWood))
-                context.stroke(top, with: .color(Color.worldWood.mix(with: .black, by: 0.2)), lineWidth: 1)
+                context.fill(plankTop, with: .color(.worldWood))
+                context.stroke(plankTop, with: .color(Color.worldWood.mix(with: .black, by: 0.2)), lineWidth: 1)
                 continue
             }
             let terrain = WorldTerrain.of(biome)
-            // A cliff in strata, with surf where it meets the water, so an islet has depth rather than a flat edge.
-            for (a, b, light) in [(left, bottom, 0.16), (bottom, right, 0.0)] {
-                guard !all.contains(WorldCell(i: cell.i + (a == left ? 0 : 1), j: cell.j + (a == left ? 1 : 0))) else { continue }
-                let base = terrain.cliff.mix(with: .white, by: light)
-                for band in 0..<3 {
-                    let top = lip + (depth - lip) * Double(band) / 3
-                    context.fill(wall(a, b, from: top, to: top + (depth - lip) / 3),
-                                 with: .color(base.mix(with: .black, by: Double(band) * 0.09)))
+            let level = Double(rise(cell)) * step
+            let atSand = rise(cell) == 0
+            let coastal = [(1, 0), (-1, 0), (0, 1), (0, -1)].contains { land[WorldCell(i: cell.i + $0.0, j: cell.j + $0.1)] == nil }
+            // Two walls, lower-left and lower-right, from this tile's ledge down to its neighbour's or to the sea.
+            for (a, b, di, dj, light) in [(left, bottom, 0, 1, 0.16), (bottom, right, 1, 0, 0.0)] {
+                let foot = shoulder(cell, di, dj)
+                let span = level - foot
+                guard span > 0.5 else { continue }
+                let beach = foot > -depth / 2
+                let base = (beach ? terrain.sand.mix(with: .brown, by: 0.28) : terrain.cliff).mix(with: .white, by: light)
+                // A cliff in strata, so a terrace reads as piled ground rather than a paper edge.
+                let bands = span > step * 1.4 ? 3 : 2
+                for band in 0..<bands {
+                    let from = level - span * Double(band) / Double(bands)
+                    context.fill(wall(a, b, from: from - span / Double(bands), to: from),
+                                 with: .color(base.mix(with: .black, by: Double(band) * 0.10)))
                 }
-                context.fill(wall(a, b, from: 0, to: lip), with: .color(terrain.top.mix(with: .black, by: light > 0 ? 0.1 : 0.2)))
-                var surf = Path()
-                surf.move(to: CGPoint(x: a.x, y: a.y + depth))
-                surf.addLine(to: CGPoint(x: b.x, y: b.y + depth))
-                context.stroke(surf, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [1, 5]))
+                context.fill(wall(a, b, from: level - 3.5 * scale, to: level), with: .color(terrain.top.mix(with: .black, by: light > 0 ? 0.06 : 0.14)))
+                if foot < -depth / 2 {
+                    var surf = Path()
+                    surf.move(to: CGPoint(x: a.x, y: a.y + foot))
+                    surf.addLine(to: CGPoint(x: b.x, y: b.y + foot))
+                    context.stroke(surf, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [1, 5]))
+                }
             }
-            context.fill(top, with: .color((cell.i + cell.j) % 2 == 0 ? terrain.top : terrain.top.mix(with: .black, by: 0.035)))
+            // Sand where the water reaches, grass on every terrace above it; paving lies inside the sand, never over the coast.
+            let face = atSand && !paved.contains(cell) ? terrain.sand : terrain.top
+            context.fill(topShape(cell, level: level), with: .color((cell.i + cell.j) % 2 == 0 ? face : face.mix(with: .black, by: 0.035)))
+            // The district's own line along its shore, the way a border is drawn on a tiled map.
+            let fence: Color? = biome == .plaza ? Color(red: 0.55, green: 0.45, blue: 0.33).mix(with: .graphCard, by: 0.2) : group(of: cell).map { GraphTint.color($0.family) }
+            if coastal, let tint = fence {
+                var edge = Path()
+                for (a, b, di, dj) in [(left, bottom, 0, 1), (bottom, right, 1, 0), (right, farCorner(cell, level: level), 0, -1), (farCorner(cell, level: level), left, -1, 0)] {
+                    if land[WorldCell(i: cell.i + di, j: cell.j + dj)] != nil { continue }
+                    edge.move(to: CGPoint(x: a.x, y: a.y - level))
+                    edge.addLine(to: CGPoint(x: b.x, y: b.y - level))
+                }
+                context.stroke(edge, with: .color(tint.mix(with: .black, by: 0.15)), style: StrokeStyle(lineWidth: 2.6 * scale, lineCap: .round))
+            }
         }
 
         roads(&context)
-        pad(&context, at: .zero, cells: WorldMetrics.home, color: WorldTerrain.of(.plaza).pad)
-        stamp(&context, at: .zero) { layer in WorldModel.house(in: &layer, at: .zero) }
+        pad(&context, at: .zero, lift: lift(0, 0), cells: WorldMetrics.home, color: WorldTerrain.of(.plaza).pad)
+        stamp(&context, at: .zero, lift: lift(0, 0)) { layer in WorldModel.house(in: &layer, at: .zero) }
         for station in world.stations {
             let cell = WorldMetrics.cell(station)
-            pad(&context, at: WorldMetrics.screen(cell.i, cell.j), cells: WorldMetrics.pad(station), color: WorldTerrain.of(biomes[station.group] ?? .meadow).pad)
+            pad(&context, at: WorldMetrics.screen(cell.i, cell.j), lift: lift(cell.i, cell.j), cells: WorldMetrics.pad(station), color: WorldTerrain.of(biomes[station.group] ?? .meadow).pad)
         }
         // What grows keeps to the shore, where it marks the land without standing between anything.
         let flags = Set(world.groups.map { WorldCell(i: Int($0.flagI.rounded(.down)), j: Int($0.flagJ.rounded(.down))) })
         for cell in order where !paved.contains(cell) && !flags.contains(cell) && chance(cell) > 0.42 {
-            guard let biome = land[cell], biome != .plaza else { continue }
-            let shore = [(1, 0), (-1, 0), (0, 1), (0, -1)].contains { !all.contains(WorldCell(i: cell.i + $0.0, j: cell.j + $0.1)) }
-            guard shore else { continue }
+            guard let biome = land[cell], biome != .plaza, rise(cell) == 1 else { continue }
             let roll = chance(WorldCell(i: cell.j, j: cell.i))
             // Two or three together, the way Polytopia clusters its trees, so a shore reads as a grove.
             let crowd = chance(WorldCell(i: cell.j * 3, j: cell.i * 7))
             for index in 0...Int(crowd * 2.9) {
                 let spread = CGFloat(index) * 7 - 7
                 let at = WorldMetrics.screen(Double(cell.i) + 0.5, Double(cell.j) + 0.5)
-                stamp(&context, at: CGPoint(x: at.x + spread, y: at.y + spread * 0.4)) { layer in
+                stamp(&context, at: CGPoint(x: at.x + spread, y: at.y + spread * 0.4), lift: lift(Double(cell.i), Double(cell.j))) { layer in
                     var iso = Iso(context: layer, origin: .zero)
                     Self.grow(biome, &iso, roll: roll - Double(index) * 0.17)
                 }
@@ -639,28 +670,34 @@ struct WorldGround: View {
         }
         // Each banner's pole. The banner itself is a button, drawn over the map.
         for group in world.groups {
-            stamp(&context, at: WorldMetrics.screen(group.flagI, group.flagJ)) { layer in
+            stamp(&context, at: WorldMetrics.screen(group.flagI, group.flagJ), lift: lift(group.flagI, group.flagJ)) { layer in
                 var iso = Iso(context: layer, origin: .zero)
                 iso.box(i: 0, j: 0, a: 2.5, b: 2.5, h: 34, color: .brown)
             }
         }
     }
 
-    /// Draws something at a place on the map, at the map's size.
-    private func stamp(_ context: inout GraphicsContext, at centre: CGPoint, _ draw: (inout GraphicsContext) -> Void) {
+    /// Draws something at a place on the map, at the map's size, stood on its terrace.
+    private func stamp(_ context: inout GraphicsContext, at centre: CGPoint, lift: Double = 0, _ draw: (inout GraphicsContext) -> Void) {
         var layer = context
         let at = place(centre)
-        layer.translateBy(x: at.x, y: at.y)
+        layer.translateBy(x: at.x, y: at.y - lift)
         layer.scaleBy(x: scale, y: scale)
         draw(&layer)
     }
 
     /// The paving a station stands on: a slab a little proud of the ground around it.
-    private func pad(_ context: inout GraphicsContext, at centre: CGPoint, cells: Double, color: Color) {
-        let at = place(centre)
+    private func pad(_ context: inout GraphicsContext, at centre: CGPoint, lift: Double = 0, cells: Double, color: Color) {
+        let at = CGPoint(x: place(centre).x, y: place(centre).y - lift)
         let shape = WorldMetrics.diamond(at: .zero, cells: cells - 0.3).applying(CGAffineTransform(scaleX: scale, y: scale)).offsetBy(dx: at.x, dy: at.y)
         context.fill(shape.offsetBy(dx: 0, dy: 3 * scale), with: .color(color.mix(with: .black, by: 0.22)))
         context.fill(shape, with: .color(color))
+    }
+
+    /// A ground point on screen, stood on its terrace.
+    private func lifted(_ i: Double, _ j: Double) -> CGPoint {
+        let at = place(WorldMetrics.screen(i, j))
+        return CGPoint(x: at.x, y: at.y - lift(i, j))
     }
 
     /// The road through a pipeline, from each step to the next: green where the work has been, pale where it hasn't yet.
@@ -668,8 +705,8 @@ struct WorldGround: View {
         let ordered = Set(world.groups.filter(\.ordered).map(\.id))
         for trail in world.trails where trail.kind == .road {
             guard let from = world.station(trail.from), let to = world.station(trail.to), from.group == to.group, ordered.contains(from.group) else { continue }
-            let a = place(WorldMetrics.screen(Double(from.i), Double(from.j)))
-            let b = place(WorldMetrics.screen(Double(to.i), Double(to.j)))
+            let a = lifted(Double(from.i), Double(from.j))
+            let b = lifted(Double(to.i), Double(to.j))
             var road = Path()
             road.move(to: a)
             road.addLine(to: b)
@@ -725,6 +762,7 @@ struct WorldGround: View {
 /// Their tags are buttons, drawn over this.
 struct WorldTrails: View {
     let world: WorkWorld
+    let terraces: WorldTerraces
     /// Where each actor's head and each station's top are on screen.
     let points: [String: CGPoint]
     /// What's picked. Its own trails light up; the rest step back.
@@ -732,6 +770,8 @@ struct WorldTrails: View {
     let handoffs: [ActivityStore.Handoff]
     /// Turns a point on the map into a point on screen, so a route drawn here lands where it's meant to.
     let place: (CGPoint) -> CGPoint
+    /// How large the map is drawn, so terraces lift routes by the same amount the ground does.
+    var cameraScale: Double = 1
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -798,7 +838,8 @@ struct WorldTrails: View {
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas boat \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
-                boat(&layer, at: at, heading: crossing.heading, color: color, zoom: crossing.zoom)
+                let bob = reducedMotion ? 0 : sin(seconds * 2.2 + Double(index)) * 1.6
+                boat(&layer, at: CGPoint(x: at.x, y: at.y + bob), heading: crossing.heading, color: color, zoom: crossing.zoom)
                 // A short wake behind it, rather than a line all the way across.
                 let tail = point(crossing.path, at: max(0, (trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase) - 0.06))
                 var wake = Path()
@@ -834,7 +875,8 @@ struct WorldTrails: View {
             let at = point(path, at: progress)
             // Something just handed over sails across rather than flying.
             let heading = atan2(to.y - from.y, to.x - from.x)
-            boat(&context, at: at, heading: heading, color: GraphTint.cargo(kind), zoom: 1.4)
+            let bob = reducedMotion ? 0 : sin(now.timeIntervalSinceReferenceDate * 2.2) * 1.6
+            boat(&context, at: CGPoint(x: at.x, y: at.y + bob), heading: heading, color: GraphTint.cargo(kind), zoom: 1.4)
         }
     }
 
@@ -908,7 +950,9 @@ struct WorldTrails: View {
         guard let actor = world.actor(id), let station = world.station(actor.station) else { return fallback }
         let cell = WorldMetrics.cell(station)
         let foot = place(WorldMetrics.screen(cell.i, cell.j))
-        return CGPoint(x: foot.x, y: foot.y - 14)
+        // Heads already stand on the terrace; a cart's start is lifted the same way, in camera space.
+        let height = Double(terraces.rise[WorldCell(i: Int(cell.i.rounded(.down)), j: Int(cell.j.rounded(.down)))] ?? 0) * WorldTerraces.terrace
+        return CGPoint(x: foot.x, y: foot.y - 14 - height * cameraScale)
     }
 
     /// What's being carried, as a small isometric crate: the same object on water and on land.

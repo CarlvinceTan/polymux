@@ -11,6 +11,7 @@ struct WorldView: View {
     /// Switches to the diagram of the same work.
     let showDiagram: () -> Void
     @State private var world = WorkWorld()
+    @State private var terraces = WorldTerraces(WorkWorld())
     @State private var picked: String?
     @State private var zoom = 1.0
     @State private var shift = CGSize.zero
@@ -80,7 +81,7 @@ struct WorldView: View {
 
     private func rebuild(tall: Bool, room: CGSize) {
         let next = WorkWorld(graph, tall: tall)
-        if next != world { world = next }
+        if next != world { world = next; terraces = WorldTerraces(next) }
         guard tall, !framed, room.width > 0, !world.stations.isEmpty else { return }
         framed = true
         // A long trail doesn't fit a phone at a size worth looking at, so it opens on where the work is.
@@ -98,6 +99,9 @@ struct WorldView: View {
         zoom = target.zoom
         shift = target.shift
     }
+
+    /// Raises a screen point onto the terrace its ground cell stands on.
+    private func lifting(_ at: CGPoint, _ height: Double) -> CGPoint { CGPoint(x: at.x, y: at.y - height) }
 
     /// The same panel the app uses beside a chat, so details read the way a profile does.
     private var details: some View {
@@ -117,9 +121,9 @@ struct WorldView: View {
                 .gesture(SpatialTapGesture(count: 2).onEnded { zoom(by: 1.6, around: $0.location, in: size, animated: true) })
                 .onTapGesture { picked = nil }
                 .accessibilityHidden(true)
-            WorldGround(world: world, place: camera.point, scale: camera.scale)
+            WorldGround(world: world, terraces: terraces, place: camera.point, scale: camera.scale)
             ForEach(world.groups) { group in
-                let foot = camera.point(WorldMetrics.screen(group.flagI, group.flagJ))
+                let foot = lifting(camera.point(WorldMetrics.screen(group.flagI, group.flagJ)), terraces.lift(group.flagI, group.flagJ, scale: camera.scale))
                 WorldBanner(group: group, selected: picked == "group:" + group.id) { pick("group:" + group.id) }
                     .opacity(focus == nil || picked == "group:" + group.id ? 1 : 0.5)
                     .position(x: foot.x, y: foot.y - 34 * camera.scale - 14)
@@ -127,7 +131,7 @@ struct WorldView: View {
             }
             ForEach(world.stations) { station in
                 let cell = WorldMetrics.cell(station)
-                let point = camera.point(WorldMetrics.screen(cell.i, cell.j))
+                let point = lifting(camera.point(WorldMetrics.screen(cell.i, cell.j)), terraces.lift(cell.i, cell.j, scale: camera.scale))
                 WorldStationView(station: station, present: world.present(at: station.id).count, scale: camera.scale,
                                  selected: picked == station.id, named: named || focus?.contains(station.id) == true) { pick(station.id) }
                     .opacity(focus.map { $0.contains(station.id) ? 1 : 0.35 } ?? 1)
@@ -136,7 +140,7 @@ struct WorldView: View {
             }
             ForEach(world.actors) { actor in
                 let cell = WorldMetrics.cell(actor, in: world, spread: spread)
-                let point = camera.point(WorldMetrics.screen(cell.i, cell.j))
+                let point = lifting(camera.point(WorldMetrics.screen(cell.i, cell.j)), terraces.lift(cell.i, cell.j, scale: camera.scale))
                 WorldActorView(actor: actor, tagLift: lifts[actor.id] ?? 0, activity: activity, scale: unit, selected: picked == actor.id) { pick(actor.id) }
                     .opacity(focus.map { $0.contains(actor.id) ? 1 : 0.35 } ?? 1)
                     .position(x: point.x, y: point.y - WorldMetrics.avatar * unit / 2)
@@ -146,7 +150,7 @@ struct WorldView: View {
                     .animation(reducedMotion ? nil : .smooth(duration: 0.9), value: actor.order)
             }
             // Behind everyone and everything standing, so a line through the air never crosses out what someone's doing.
-            WorldTrails(world: world, points: heads, picked: picked, handoffs: activity.handoffs, place: camera.point)
+            WorldTrails(world: world, terraces: terraces, points: heads, picked: picked, handoffs: activity.handoffs, place: camera.point, cameraScale: camera.scale)
                 .zIndex(5_000)
             ForEach(flights(camera, unit: unit, heads: heads), id: \.trail.id) { flight in
                 let id = "trail:" + flight.trail.id
@@ -235,10 +239,10 @@ struct WorldView: View {
             let target = aim(at: area(group), closest: 1.25, in: room)
             fly(zoom: target.zoom, shift: target.shift)
         } else if let station = world.station(id) {
-            reveal(WorldMetrics.screen(Double(station.i), Double(station.j)))
+            reveal(WorldMetrics.screen(Double(station.i), Double(station.j)), lift: WorldTerraces.terrace * Double(terraces.rise[WorldCell(i: station.i, j: station.j)] ?? 0))
         } else if let actor = world.actor(id) {
             let cell = WorldMetrics.cell(actor, in: world)
-            reveal(WorldMetrics.screen(cell.i, cell.j))
+            reveal(WorldMetrics.screen(cell.i, cell.j), lift: WorldTerraces.terrace * Double(terraces.rise[WorldCell(i: Int(cell.i.rounded(.down)), j: Int(cell.j.rounded(.down)))] ?? 0))
         }
     }
 
@@ -262,8 +266,9 @@ struct WorldView: View {
     }
 
     /// Moves the map just far enough that a place on it isn't off screen or under something.
-    private func reveal(_ place: CGPoint) {
-        let at = Camera(world: world, viewport: viewport, zoom: zoom, shift: shift).point(place)
+    private func reveal(_ place: CGPoint, lift: Double = 0) {
+        let camera = Camera(world: world, viewport: viewport, zoom: zoom, shift: shift)
+        let at = lifting(camera.point(place), lift * camera.scale)
         let safe = CGRect(origin: .zero, size: viewport).insetBy(dx: 80, dy: 130)
         guard !safe.contains(at), viewport.width > 0 else { return }
         fly(zoom: zoom, shift: CGSize(width: shift.width + viewport.width / 2 - at.x, height: shift.height + viewport.height / 2 - at.y))
@@ -320,7 +325,7 @@ struct WorldView: View {
         for actor in world.actors.sorted(by: { (rank[$0.node.state ?? ""] ?? 9, $0.node.title) < (rank[$1.node.state ?? ""] ?? 9, $1.node.title) }) {
             guard WorldActorView.tag(actor) != nil else { continue }
             let cell = WorldMetrics.cell(actor, in: world, spread: unit / camera.scale)
-            let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))
+            let feet = lifting(camera.point(WorldMetrics.screen(cell.i, cell.j)), terraces.lift(cell.i, cell.j, scale: camera.scale))
             let width = min(190, Double((WorldActorView.tag(actor)?.text ?? "").count) * 7.4 + 54)
             var lift = 0.0
             var box = CGRect(x: feet.x - width / 2, y: feet.y - WorldMetrics.avatar * unit - 29, width: width, height: 24)
@@ -339,14 +344,15 @@ struct WorldView: View {
         var out: [String: CGPoint] = [:]
         for actor in world.actors {
             let cell = WorldMetrics.cell(actor, in: world, spread: unit / camera.scale)
-            let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))
+            let feet = lifting(camera.point(WorldMetrics.screen(cell.i, cell.j)), terraces.lift(cell.i, cell.j, scale: camera.scale))
             // From over their tag when they wear one, so a line never runs through it.
             out[actor.id] = CGPoint(x: feet.x, y: feet.y - WorldMetrics.avatar * unit - (WorldActorView.tag(actor) == nil ? 4 : 32))
         }
         for station in world.stations {
             let cell = WorldMetrics.cell(station)
             let centre = WorldMetrics.screen(cell.i, cell.j)
-            out[station.id] = camera.point(CGPoint(x: centre.x, y: centre.y + WorldModel.back - WorldModel.height(station)))
+            out[station.id] = lifting(camera.point(CGPoint(x: centre.x, y: centre.y + WorldModel.back - WorldModel.height(station))),
+                                      terraces.lift(cell.i, cell.j, scale: camera.scale))
         }
         return out
     }
@@ -365,13 +371,13 @@ struct WorldView: View {
         // Every station's name and picture, so a tag never lands on one.
         for station in world.stations {
             let cell = WorldMetrics.cell(station)
-            let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))
+            let feet = lifting(camera.point(WorldMetrics.screen(cell.i, cell.j)), terraces.lift(cell.i, cell.j, scale: camera.scale))
             let top = feet.y + WorldModel.back * camera.scale - WorldModel.height(station) * camera.scale
             taken.append(CGRect(x: feet.x - 90, y: top - 74 * camera.scale, width: 180, height: 100 * camera.scale + 24))
         }
         for actor in world.actors {
             let cell = WorldMetrics.cell(actor, in: world, spread: unit / camera.scale)
-            let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))
+            let feet = lifting(camera.point(WorldMetrics.screen(cell.i, cell.j)), terraces.lift(cell.i, cell.j, scale: camera.scale))
             taken.append(CGRect(x: feet.x - 40, y: feet.y + 9 * unit, width: 80, height: 20))
             guard let tag = WorldActorView.tag(actor) else { continue }
             let width = min(190, Double(tag.text.count) * 6.4 + 40)
