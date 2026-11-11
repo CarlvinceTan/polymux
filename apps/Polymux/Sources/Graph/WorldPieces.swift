@@ -774,7 +774,7 @@ struct WorldTrails: View {
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas boat \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
-                boat(&layer, at: at, heading: crossing.heading, color: color, zoom: crossing.zoom * 1.25)
+                boat(&layer, at: at, heading: crossing.heading, color: color, zoom: crossing.zoom)
                 // A short wake behind it, rather than a line all the way across.
                 let tail = point(crossing.path, at: max(0, (trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase) - 0.06))
                 var wake = Path()
@@ -894,7 +894,7 @@ struct WorldTrails: View {
         var layer = context
         layer.translateBy(x: point.x, y: point.y)
         layer.rotate(by: .radians(heading))
-        let unit = 21 * zoom
+        let unit = 17 * zoom
         var hull = Path()
         hull.move(to: CGPoint(x: -unit, y: 0))
         hull.addLine(to: CGPoint(x: unit, y: 0))
