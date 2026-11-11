@@ -781,8 +781,8 @@ struct WorldTrails: View {
                 guard flying else { continue }
                 let phase = reducedMotion ? 0.6 : (seconds / Self.trip + Double(index) * 0.37).truncatingRemainder(dividingBy: 1)
                 let at = point(path, at: trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase)
-                layer.fill(Path(ellipseIn: CGRect(x: at.x - 5, y: at.y - 5, width: 10, height: 10)), with: .color(.graphCard))
-                layer.fill(Path(ellipseIn: CGRect(x: at.x - 3.5, y: at.y - 3.5, width: 7, height: 7)), with: .color(color))
+                // On land the same cargo travels by cart, so work on one island still reads as moving.
+                cart(&layer, at: at, colour: color)
             }
         }
         for handoff in handoffs {
@@ -807,8 +807,10 @@ struct WorldTrails: View {
 
     /// The water between the two things' islets, or nil when they share one.
     private func crossing(_ trail: WorldTrail, from: CGPoint, to: CGPoint) -> Crossing? {
-        let groups = (world.group(of: trail.from), world.group(of: trail.to))
-        guard let start = groups.0, let end = groups.1, start.id != end.id else { return nil }
+        // Home is an islet too, so someone resting there still sends a boat rather than a bare line.
+        let start = islet(world.group(of: trail.from))
+        let end = islet(world.group(of: trail.to))
+        guard start.id != end.id else { return nil }
         let a = shore(start)
         let b = shore(end)
         // The two shores closest to each other, so a boat takes the short way across.
@@ -826,8 +828,22 @@ struct WorldTrails: View {
         return Crossing(path: path, heading: atan2(best.2.y - best.1.y, best.2.x - best.1.x), zoom: 2.6)
     }
 
+    private struct Islet {
+        var id: String
+        var minI: Int
+        var minJ: Int
+        var maxI: Int
+        var maxJ: Int
+    }
+
+    /// The islet a group covers, or home for someone with none.
+    private func islet(_ group: WorldGroup?) -> Islet {
+        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2) }
+        return Islet(id: group.id, minI: group.minI, minJ: group.minJ, maxI: group.maxI, maxJ: group.maxJ)
+    }
+
     /// Points around an islet's edge, in map coordinates, where a boat can wait.
-    private func shore(_ group: WorldGroup) -> [CGPoint] {
+    private func shore(_ group: Islet) -> [CGPoint] {
         let near = WorldMetrics.screen(Double(group.minI) - 4, Double(group.minJ) - 4)
         let far = WorldMetrics.screen(Double(group.maxI) + 4, Double(group.maxJ) + 4)
         let across = WorldMetrics.screen(Double(group.minI) - 4, Double(group.maxJ) + 4)
@@ -838,6 +854,19 @@ struct WorldTrails: View {
         let bottom = max(near.y, far.y, across.y, other.y)
         let middle = CGPoint(x: (left + right) / 2, y: (top + bottom) / 2)
         return [CGPoint(x: middle.x, y: top), CGPoint(x: right, y: middle.y), CGPoint(x: middle.x, y: bottom), CGPoint(x: left, y: middle.y)]
+    }
+
+    /// A two-wheeled cart with a crate aboard.
+    private func cart(_ context: inout GraphicsContext, at point: CGPoint, colour: Color) {
+        var layer = context
+        layer.translateBy(x: point.x, y: point.y)
+        let box = CGRect(x: -9, y: -13, width: 20, height: 11)
+        layer.fill(Path(roundedRect: box, cornerRadius: 2), with: .color(colour))
+        layer.stroke(Path(roundedRect: box, cornerRadius: 2), with: .color(.white.opacity(0.8)), lineWidth: 1)
+        for dx in [-5.0, 5.0] {
+            layer.fill(Path(ellipseIn: CGRect(x: dx - 3.2, y: 0, width: 6.4, height: 6.4)), with: .color(Color(white: 0.28)))
+            layer.stroke(Path(ellipseIn: CGRect(x: dx - 3.2, y: 0, width: 6.4, height: 6.4)), with: .color(.white.opacity(0.7)), lineWidth: 1)
+        }
     }
 
     /// A small boat: a hull, a sail in the colour of what it carries, and a curl of wake behind it.
