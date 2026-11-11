@@ -96,7 +96,7 @@ struct PluginPanel: View {
     }
 }
 
-/// Icons only: the sidebar's foot on macOS and iPad.
+/// The sidebar's foot on macOS and iPad.
 struct PluginSwitcher: View {
     let tabs: [PluginTab]
     @Binding var selection: String
@@ -106,6 +106,15 @@ struct PluginSwitcher: View {
     /// Where a drag across servers will land; moving there rebuilds this view, so it waits for the release.
     @State private var dragTarget: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Tall enough for the icon and its title.
+    static var height: CGFloat {
+        #if os(macOS)
+        48
+        #else
+        54
+        #endif
+    }
 
     private var cell: CGFloat { tabs.isEmpty ? 0 : width / CGFloat(tabs.count) }
     private var index: Int { tabs.firstIndex { $0.id == selection } ?? 0 }
@@ -155,7 +164,7 @@ struct PluginSwitcher: View {
                     dragTarget = nil
                 })
             .padding(2)
-            .frame(height: ComposerMetrics.control)
+            .frame(height: Self.height)
             .glassEffect(.regular, in: Capsule())
             .animation(dragX == nil ? Motion.move.unless(reduceMotion) : Motion.instant, value: lensX)
             .animation(Motion.quick.unless(reduceMotion), value: dragX == nil)
@@ -167,26 +176,46 @@ struct PluginSwitcher: View {
     @ViewBuilder private func entry(_ tab: PluginTab) -> some View {
         let count = unread[tab.id] ?? 0
         if tab.plugin == nil, let name = tab.serverName {
-            HStack(spacing: 4) {
-                Text(name)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                // A dot leaves the name its room; the count stays in the entry's accessibility value.
-                if count > 0 { Circle().fill(Color("Unread")).frame(width: 7, height: 7) }
-            }
-            .padding(.horizontal, 8)
-        } else {
-            Image(systemName: Self.symbol(tab, selected: tab.id == selection))
-                .font(.system(size: 17))
-                .foregroundStyle(Color.primary)
-                .frame(width: 24, height: 20)
-                // Overlaps only the icon's corner, clear of the lens's top edge.
-                .overlay(alignment: .topLeading) {
-                    if count > 0 { UnreadPill(count: count, small: true).offset(x: 19, y: -3) }
+            VStack(spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // A dot leaves the name its room; the count stays in the entry's accessibility value.
+                    if count > 0 { Circle().fill(Color("Unread")).frame(width: 7, height: 7) }
                 }
+                .padding(.horizontal, 8)
+                label(tab)
+            }
+        } else {
+            VStack(spacing: 2) {
+                Image(systemName: Self.symbol(tab, selected: tab.id == selection))
+                    .font(.system(size: 17))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 24, height: 20)
+                    // Overlaps only the icon's corner, clear of the lens's top edge.
+                    .overlay(alignment: .topLeading) {
+                        if count > 0 { UnreadPill(count: count, small: true).offset(x: 19, y: -3) }
+                    }
+                label(tab)
+            }
+            .padding(.horizontal, 4)
         }
+    }
+
+    private func label(_ tab: PluginTab) -> some View {
+        Text(Self.label(tab))
+            .font(.caption)
+            .foregroundStyle(Color.primary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .minimumScaleFactor(0.8)
+    }
+
+    static func label(_ tab: PluginTab) -> String {
+        tab.plugin?.title ?? "Chats"
     }
 
     static func title(_ tab: PluginTab) -> String {
@@ -225,7 +254,7 @@ struct SidebarFade: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let plain: CGFloat = 40
-    static var switcher: CGFloat { ComposerMetrics.control + ComposerMetrics.edge + 40 }
+    static var switcher: CGFloat { PluginSwitcher.height + ComposerMetrics.edge + 40 }
 
     static func surface(_ scheme: ColorScheme) -> Color {
         Color(white: scheme == .dark ? 38.0 / 255 : 242.0 / 255)
