@@ -698,8 +698,9 @@ struct WorldGround: View {
             let crowd = chance(WorldCell(i: cell.j * 3, j: cell.i * 7))
             for index in 0...Int(crowd * 2.9) {
                 let spread = CGFloat(index) * 7 - 7
+                let drift = CGFloat(chance(WorldCell(i: cell.i * 11 + index, j: cell.j * 13 - index)) * 16 - 8)
                 let at = WorldMetrics.screen(Double(cell.i) + 0.5, Double(cell.j) + 0.5)
-                stamp(&context, at: CGPoint(x: at.x + spread, y: at.y + spread * 0.4), lift: lift(Double(cell.i), Double(cell.j))) { layer in
+                stamp(&context, at: CGPoint(x: at.x + spread + drift, y: at.y + spread * 0.4 - drift * 0.35), lift: lift(Double(cell.i), Double(cell.j))) { layer in
                     var iso = Iso(context: layer, origin: .zero)
                     Self.grow(biome, &iso, roll: roll - Double(index) * 0.17)
                 }
@@ -787,8 +788,11 @@ struct WorldGround: View {
             iso.pyramid(i: 0, j: 0, a: 20, h: roll > 0.5 ? 20 : 13, color: Color(white: 0.5))
             if roll > 0.5 { iso.pyramid(i: 0, j: 0, a: 8, z: 12, h: 8, color: Color(white: 0.95)) }
         case .savanna:
-            iso.box(i: 0, j: 0, a: 3, b: 3, h: 13, color: Color.brown.mix(with: .black, by: 0.2))
-            iso.box(i: 0, j: 0, a: 20, b: 20, z: 13, h: 4, color: Color.green.mix(with: .yellow, by: 0.4).mix(with: .black, by: 0.12))
+            // An acacia: a bare trunk and two flat tiers of canopy, which is what a savanna tree looks like from above.
+            let canopy = Color.green.mix(with: .yellow, by: 0.45).mix(with: .black, by: 0.1)
+            iso.box(i: 0, j: 0, a: 3, b: 3, h: 15, color: Color.brown.mix(with: .black, by: 0.2))
+            iso.box(i: 0, j: 0, a: 15, b: 15, z: 15, h: 5, color: canopy)
+            iso.box(i: 0, j: 0, a: 9, b: 9, z: 20, h: 4, color: canopy.mix(with: .white, by: 0.14))
         case .plaza:
             break
         }
