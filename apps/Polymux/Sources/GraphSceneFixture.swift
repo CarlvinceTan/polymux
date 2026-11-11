@@ -43,7 +43,8 @@ enum GraphSceneFixture {
         ], deliveries: [
             delivery("v1", "chief", "milo", PeerDeliveryIntent.request),
             delivery("v2", "chief", "fern", PeerDeliveryIntent.request),
-            delivery("v3", "milo", "nova", PeerDeliveryIntent.handoff),
+            // Still open, so a cart is on its way between the two stages on the same island.
+            delivery("v3", "milo", "nova", PeerDeliveryIntent.handoff, PeerDeliveryStatus.queued),
             delivery("v4", "nova", "milo", PeerDeliveryIntent.question, PeerDeliveryStatus.queued),
             delivery("v5", "aria", "chief", PeerDeliveryIntent.result, PeerDeliveryStatus.completed),
             // A crossing between two islands, so a boat is in the water on the map.
