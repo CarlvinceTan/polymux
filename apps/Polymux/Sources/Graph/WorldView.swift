@@ -339,6 +339,13 @@ struct WorldView: View {
     /// A tag for each handoff in the air, at the top of its arc and clear of every other tag.
     private func flights(_ camera: Camera, unit: Double, heads: [String: CGPoint]) -> [(trail: WorldTrail, box: CGRect, text: String)] {
         var taken: [CGRect] = []
+        // Every station's name and picture, so a tag never lands on one.
+        for station in world.stations {
+            let cell = WorldMetrics.cell(station)
+            let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))
+            let top = feet.y + WorldModel.back * camera.scale - WorldModel.height(station) * camera.scale
+            taken.append(CGRect(x: feet.x - 90, y: top - 74 * camera.scale, width: 180, height: 100 * camera.scale + 24))
+        }
         for actor in world.actors {
             let cell = WorldMetrics.cell(actor, in: world, spread: unit / camera.scale)
             let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))

@@ -436,6 +436,19 @@ struct WorldToken: View {
     let tint: Color
 
     /// An outside agent's own mark, when the app ships one for it.
+    /// Claude Code's mascot is a crab, which says what it is faster than a mark.
+    private var crab: Bool { symbol == "acp:claude-acp" }
+
+    private var hasLogo: Bool {
+        #if canImport(UIKit)
+        UIImage(named: "agent-" + symbol.dropFirst(4)) != nil
+        #elseif canImport(AppKit)
+        NSImage(named: "agent-" + symbol.dropFirst(4)) != nil
+        #else
+        false
+        #endif
+    }
+
     private var logo: Image? {
         guard symbol.hasPrefix("acp:") else { return nil }
         #if canImport(UIKit)
@@ -452,7 +465,25 @@ struct WorldToken: View {
             let shape = RoundedRectangle(cornerRadius: side * 0.28, style: .continuous)
             ZStack {
                 shape.fill(tint.mix(with: .black, by: 0.3)).offset(x: side * 0.05, y: side * 0.08)
-                if let logo {
+                if crab {
+                    Canvas { context, size in
+                        let w = size.width, h = size.height
+                        let red = Color(red: 0.87, green: 0.42, blue: 0.28)
+                        // Body, then two claws and two eyes: enough to read as a crab at any size.
+                        context.fill(Path(ellipseIn: CGRect(x: w * 0.18, y: h * 0.32, width: w * 0.64, height: h * 0.5)), with: .color(red))
+                        for side in [-1.0, 1.0] {
+                            let x = w * (0.5 + side * 0.36)
+                            context.fill(Path(ellipseIn: CGRect(x: x - w * 0.14, y: h * 0.2, width: w * 0.28, height: h * 0.26)), with: .color(red.mix(with: .white, by: 0.12)))
+                            context.fill(Path(ellipseIn: CGRect(x: x - w * 0.07, y: h * 0.26, width: w * 0.14, height: h * 0.14)), with: .color(.white))
+                        }
+                        for side in [-1.0, 1.0] {
+                            context.fill(Path(ellipseIn: CGRect(x: w * (0.5 + side * 0.13) - w * 0.04, y: h * 0.26, width: w * 0.08, height: h * 0.1)), with: .color(.white))
+                            context.fill(Path(ellipseIn: CGRect(x: w * (0.5 + side * 0.13) - w * 0.02, y: h * 0.28, width: w * 0.04, height: h * 0.05)), with: .color(.black))
+                        }
+                    }
+                    .padding(side * 0.02)
+                    .background(Color(red: 0.98, green: 0.93, blue: 0.87), in: shape)
+                } else if let logo {
                     logo.resizable().interpolation(.high).scaledToFit()
                         .padding(side * 0.06)
                         .background(.white, in: shape)
@@ -556,13 +587,20 @@ struct WorldGround: View {
                 continue
             }
             let terrain = WorldTerrain.of(biome)
-            if !all.contains(WorldCell(i: cell.i, j: cell.j + 1)) {
-                context.fill(wall(left, bottom, from: 0, to: depth), with: .color(terrain.cliff.mix(with: .white, by: 0.16)))
-                context.fill(wall(left, bottom, from: 0, to: lip), with: .color(terrain.top.mix(with: .black, by: 0.1)))
-            }
-            if !all.contains(WorldCell(i: cell.i + 1, j: cell.j)) {
-                context.fill(wall(bottom, right, from: 0, to: depth), with: .color(terrain.cliff))
-                context.fill(wall(bottom, right, from: 0, to: lip), with: .color(terrain.top.mix(with: .black, by: 0.2)))
+            // A cliff in strata, with surf where it meets the water, so an islet has depth rather than a flat edge.
+            for (a, b, light) in [(left, bottom, 0.16), (bottom, right, 0.0)] {
+                guard !all.contains(WorldCell(i: cell.i + (a == left ? 0 : 1), j: cell.j + (a == left ? 1 : 0))) else { continue }
+                let base = terrain.cliff.mix(with: .white, by: light)
+                for band in 0..<3 {
+                    let top = lip + (depth - lip) * Double(band) / 3
+                    context.fill(wall(a, b, from: top, to: top + (depth - lip) / 3),
+                                 with: .color(base.mix(with: .black, by: Double(band) * 0.09)))
+                }
+                context.fill(wall(a, b, from: 0, to: lip), with: .color(terrain.top.mix(with: .black, by: light > 0 ? 0.1 : 0.2)))
+                var surf = Path()
+                surf.move(to: CGPoint(x: a.x, y: a.y + depth))
+                surf.addLine(to: CGPoint(x: b.x, y: b.y + depth))
+                context.stroke(surf, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [1, 5]))
             }
             context.fill(top, with: .color((cell.i + cell.j) % 2 == 0 ? terrain.top : terrain.top.mix(with: .black, by: 0.035)))
         }
