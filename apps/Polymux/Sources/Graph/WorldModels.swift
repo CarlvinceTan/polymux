@@ -368,33 +368,56 @@ struct Iso {
         }
     }
 
-    /// A step of a pipeline: a medal on a plinth, coloured once work reaches it and ticked once it's done.
+    /// A step of a pipeline, drawn as the thing that step is: a clapperboard for film, a waveform panel for sound,
+    /// a signpost for anything else. The silhouette says what it is before the icon does.
     private static func step(_ station: WorldStation, _ iso: inout Iso, _ c: Double, tint: Color, symbol: String) {
-        let color: Color = switch station.state {
+        let colour: Color = switch station.state {
         case WorkNodeState.failed: .red
         case WorkNodeState.waiting: .orange
-        case WorkNodeState.idle: Color(white: 0.64)
+        case WorkNodeState.idle: Color(white: 0.66)
         default: tint
         }
         iso.shadow(i: c, j: c, radius: 20)
-        iso.drum(i: c, j: c, radius: 15, h: 5, color: Color(white: 0.9))
-        let side = 46.0
-        let shape = Path(ellipseIn: CGRect(x: 2, y: 2, width: side - 4, height: side - 4))
-        iso.extrude(i: c, j: c, b: side, z: 5, h: side, depth: 7) { layer, size, front in
-            guard front else {
-                layer.fill(shape, with: .color(color.mix(with: .black, by: 0.3)))
-                return
+        iso.drum(i: c, j: c, radius: 16, h: 4, color: Color(white: 0.9))
+        let film = ["film.stack", "rectangle.split.3x1", "text.alignleft", "scissors"].contains(symbol)
+        let sound = ["waveform", "music.note"].contains(symbol)
+        if film {
+            // A clapperboard: slate, with a striped top arm.
+            iso.panel(i: c, j: c, b: 46, z: 4, h: 34, depth: 3, radius: 2, edge: Color(white: 0.2), face: Color(white: 0.16)) { layer, size in
+                for stripe in 0..<4 {
+                    let x = Double(stripe) * size.width / 4
+                    layer.fill(Path(CGRect(x: x, y: 0, width: size.width / 8, height: 7)), with: .color(.white))
+                }
+                layer.fill(Path(CGRect(x: 4, y: 12, width: size.width - 8, height: 2)), with: .color(.white.opacity(0.35)))
+                let mark = Text(Image(systemName: symbol)).font(.system(size: 15, weight: .semibold)).foregroundStyle(colour)
+                layer.draw(layer.resolve(mark), at: CGPoint(x: size.width / 2, y: size.height / 2 + 6))
             }
-            layer.fill(shape, with: .linearGradient(Gradient(colors: [color.mix(with: .white, by: 0.3), color]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
-            layer.stroke(Path(ellipseIn: CGRect(x: 5, y: 5, width: side - 10, height: side - 10)), with: .color(.white.opacity(0.45)), lineWidth: 1.5)
-            Iso.symbol(symbol, in: &layer, box: CGRect(origin: .zero, size: size).insetBy(dx: 12, dy: 12), color: .white, weight: .bold)
+        } else if sound {
+            // A waveform panel: three lit bars over a shelf.
+            iso.panel(i: c, j: c, b: 42, z: 4, h: 30, depth: 3, radius: 4, edge: colour.mix(with: .black, by: 0.25), face: colour) { layer, size in
+                for (index, height) in [8.0, 16.0, 24.0, 12.0, 7.0].enumerated() {
+                    let x = 5 + Double(index) * 7
+                    layer.fill(Path(roundedRect: CGRect(x: x, y: (size.height - height) / 2, width: 4, height: height), cornerRadius: 2),
+                               with: .color(.white.opacity(0.85)))
+                }
+            }
+        } else {
+            // A signpost: board on two legs, which reads as a stop on a route.
+            iso.box(i: c + 2, j: c + 8, a: 2, b: 2, h: 12, color: .brown)
+            iso.box(i: c + 2, j: c - 8, a: 2, b: 2, h: 12, color: .brown)
+            iso.panel(i: c, j: c, b: 40, z: 10, h: 26, depth: 2, radius: 4, edge: colour.mix(with: .black, by: 0.2), face: Color.graphCard) { layer, size in
+                layer.fill(Path(CGRect(x: 0, y: 0, width: 5, height: size.height)), with: .color(colour))
+                let mark = Text(Image(systemName: symbol)).font(.system(size: 14, weight: .semibold)).foregroundStyle(colour)
+                layer.draw(layer.resolve(mark), at: CGPoint(x: size.width / 2 + 2, y: size.height / 2))
+            }
         }
-        guard station.state == WorkNodeState.done else { return }
-        let at = iso.point(c, c - side / 2 + 4, 5 + side - 6)
-        let badge = CGRect(x: at.x - 9, y: at.y - 9, width: 18, height: 18)
-        iso.context.fill(Path(ellipseIn: badge.insetBy(dx: -2, dy: -2)), with: .color(.white))
-        iso.context.fill(Path(ellipseIn: badge), with: .color(.green))
-        Iso.symbol("checkmark", in: &iso.context, box: badge.insetBy(dx: 3, dy: 3), color: .white, weight: .heavy)
+        if station.state == WorkNodeState.done {
+            let at = iso.point(c, c - 14, 34)
+            let badge = CGRect(x: at.x - 8, y: at.y - 8, width: 16, height: 16)
+            iso.context.fill(Path(ellipseIn: badge.insetBy(dx: -2, dy: -2)), with: .color(.white))
+            iso.context.fill(Path(ellipseIn: badge), with: .color(.green))
+            Iso.symbol("checkmark", in: &iso.context, box: badge.insetBy(dx: 3, dy: 3), color: .white, weight: .heavy)
+        }
     }
 
     /// Home: where whoever isn't working waits.
