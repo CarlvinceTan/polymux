@@ -836,7 +836,7 @@ struct WorldTrails: View {
         var path = Path()
         path.move(to: best.1)
         path.addQuadCurve(to: best.2, control: control)
-        return Crossing(path: path, heading: atan2(best.2.y - best.1.y, best.2.x - best.1.x), zoom: 2.6)
+        return Crossing(path: path, heading: atan2(best.2.y - best.1.y, best.2.x - best.1.x), zoom: 1.3)
     }
 
     private struct Islet {
@@ -849,7 +849,7 @@ struct WorldTrails: View {
 
     /// The islet a group covers, or home for someone with none.
     private func islet(_ group: WorldGroup?) -> Islet {
-        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2) }
+        guard let group else { return Islet(id: "home", minI: -3, minJ: -3, maxI: 3, maxJ: 3) }
         return Islet(id: group.id, minI: group.minI, minJ: group.minJ, maxI: group.maxI, maxJ: group.maxJ)
     }
 
