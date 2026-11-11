@@ -40,7 +40,7 @@ struct VoicePane: View {
                     .font(.footnote).foregroundStyle(.muted)
             }
         } header: {
-            SectionHeader("Dictation", symbol: "mic.fill")
+            SectionHeader("Dictation", symbol: "mic.fill", tint: .pink)
         }
         .panelRow()
     }
@@ -75,7 +75,7 @@ struct VoicePane: View {
                     .font(.footnote).foregroundStyle(.muted)
             }
         } header: {
-            SectionHeader("Recognition", symbol: "cpu.fill")
+            SectionHeader("Recognition", symbol: "cpu.fill", tint: .purple)
         }
         .panelRow()
     }

@@ -604,7 +604,7 @@ struct ConnectionView: View {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
             }
         } header: {
-            SectionHeader("Notifications", symbol: "bell.fill")
+            SectionHeader("Notifications", symbol: "bell.fill", tint: .red)
         }
         .panelRow()
         #if os(macOS)
@@ -641,7 +641,7 @@ struct ConnectionView: View {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
             }
         } header: {
-            SectionHeader("Connections", symbol: "link")
+            SectionHeader("Connections", symbol: "link", tint: .blue)
         }
         .panelRow()
     }

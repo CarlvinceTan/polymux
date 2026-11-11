@@ -35,7 +35,7 @@ struct MediaSettings: View {
                     .accessibilityValue(order.mode == MediaOrderMode.custom ? "Custom" : "Auto")
                 }
             } header: {
-                SectionHeader("Generation", symbol: "photo.fill")
+                SectionHeader("Generation", symbol: "photo.fill", tint: .purple)
             }
             .panelRow()
         }

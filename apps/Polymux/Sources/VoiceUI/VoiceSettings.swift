@@ -41,7 +41,7 @@ struct VoiceSettings: View {
                         .font(.footnote).foregroundStyle(.muted)
                 }
             } header: {
-                SectionHeader("Live voice", symbol: "waveform")
+                SectionHeader("Live voice", symbol: "waveform", tint: .pink)
             }
             .panelRow()
         }

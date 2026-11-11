@@ -81,7 +81,7 @@ struct ProviderSettings: View {
                             levels: providers.levels(provider: settings?.value?.defaultProvider ?? "",
                                                      model: settings?.value?.defaultModel ?? ""))
         } header: {
-            SectionHeader("Default model", symbol: "cpu.fill")
+            SectionHeader("Default model", symbol: "cpu.fill", tint: .purple)
         }
         .disabled(settings?.value == nil)
         .panelRow()
@@ -131,7 +131,7 @@ struct ProviderSettings: View {
             }
             if let issue = issue ?? store?.issue { Text(issue).font(.footnote).foregroundStyle(.muted) }
         } header: {
-            SectionHeader("Providers", symbol: "cloud.fill") {
+            SectionHeader("Providers", symbol: "cloud.fill", tint: .blue) {
                 Group {
                     if reordering {
                         Button("Save order", systemImage: "checkmark") { saveOrder() }

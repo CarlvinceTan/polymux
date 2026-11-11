@@ -108,9 +108,10 @@ struct TabIcon: View {
     }
 }
 
-/// A pane section's glyph on a grey tile, like System Settings' page rows.
+/// A pane section's glyph on a coloured tile, like System Settings' page rows.
 struct SectionTile: View {
     let symbol: String
+    var tint: Color = .gray
 
     var body: some View {
         Image(systemName: symbol)
@@ -119,7 +120,7 @@ struct SectionTile: View {
             .frame(width: 14, height: 14)
             .foregroundStyle(.white)
             .frame(width: 22, height: 22)
-            .background(Color.gray.gradient, in: .rect(cornerRadius: 6, style: .continuous))
+            .background(tint.gradient, in: .rect(cornerRadius: 6, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -128,21 +129,23 @@ struct SectionTile: View {
 struct SectionHeader<Trailing: View>: View {
     let title: String
     let symbol: String
+    let tint: Color
     var trailing: Trailing
 
-    init(_ title: String, symbol: String, @ViewBuilder trailing: () -> Trailing) {
+    init(_ title: String, symbol: String, tint: Color = .gray, @ViewBuilder trailing: () -> Trailing) {
         self.title = title
         self.symbol = symbol
+        self.tint = tint
         self.trailing = trailing()
     }
 
-    init(_ title: String, symbol: String) where Trailing == EmptyView {
-        self.init(title, symbol: symbol) { EmptyView() }
+    init(_ title: String, symbol: String, tint: Color = .gray) where Trailing == EmptyView {
+        self.init(title, symbol: symbol, tint: tint) { EmptyView() }
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            SectionTile(symbol: symbol)
+            SectionTile(symbol: symbol, tint: tint)
             Text(title).foregroundStyle(Color.primary)
             Spacer(minLength: 8)
             trailing

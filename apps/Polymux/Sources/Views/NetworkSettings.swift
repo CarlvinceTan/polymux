@@ -74,7 +74,7 @@ struct NetworkSettings: View {
                     NetworkRow(server: server, store: pool.sessions[server.address]?.network) { open(server.address) }
                 }
             } header: {
-                SectionHeader("Networks", symbol: "network") {
+                SectionHeader("Networks", symbol: "network", tint: .blue) {
                     Button("Join network", systemImage: "plus", action: join)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
