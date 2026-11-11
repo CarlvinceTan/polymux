@@ -764,7 +764,7 @@ struct WorldTrails: View {
             layer.opacity = picked != nil && !lit ? 0.16 : 1
             let flying = trail.active && trail.kind != .road
             let color = flying ? GraphTint.cargo(trail.wire.carries) : Color.primary.opacity(0.4)
-            let crossing = crossing(trail, from: from, to: to)
+            let crossing = crossing(trail, from: from, to: to, lane: index)
             if let crossing {
                 // A lane of disturbed water, from one shore to the other.
                 layer.stroke(crossing.path, with: .color(.white.opacity(0.18)), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [1, 12]))
@@ -815,13 +815,15 @@ struct WorldTrails: View {
     }
 
     /// The water between the two things' islets, or nil when they share one.
-    private func crossing(_ trail: WorldTrail, from: CGPoint, to: CGPoint) -> Crossing? {
+    private func crossing(_ trail: WorldTrail, from: CGPoint, to: CGPoint, lane: Int = 0) -> Crossing? {
         // Home is an islet too, so someone resting there still sends a boat rather than a bare line.
         let start = islet(world.group(of: trail.from))
         let end = islet(world.group(of: trail.to))
         guard start.id != end.id else { return nil }
-        let a = shore(start).map(place)
-        let b = shore(end).map(place)
+        // Each crossing keeps its own lane, so two boats never sail on top of each other.
+        let drift = CGFloat((lane % 3) - 1) * 16
+        let a = shore(start).map(place).map { CGPoint(x: $0.x, y: $0.y + drift) }
+        let b = shore(end).map(place).map { CGPoint(x: $0.x, y: $0.y + drift) }
         // The two shores closest to each other, so a boat takes the short way across.
         var best: (CGFloat, CGPoint, CGPoint) = (.infinity, a[0], b[0])
         for one in a { for other in b {
@@ -849,7 +851,7 @@ struct WorldTrails: View {
 
     /// The islet a group covers, or home for someone with none.
     private func islet(_ group: WorldGroup?) -> Islet {
-        guard let group else { return Islet(id: "home", minI: -3, minJ: -3, maxI: 3, maxJ: 3) }
+        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2) }
         return Islet(id: group.id, minI: group.minI, minJ: group.minJ, maxI: group.maxI, maxJ: group.maxJ)
     }
 
@@ -894,25 +896,26 @@ struct WorldTrails: View {
         var layer = context
         layer.translateBy(x: point.x, y: point.y)
         layer.rotate(by: .radians(heading))
-        let unit = 17 * zoom
+        let unit = 12 * zoom
         var hull = Path()
         hull.move(to: CGPoint(x: -unit, y: 0))
         hull.addLine(to: CGPoint(x: unit, y: 0))
-        hull.addLine(to: CGPoint(x: unit * 0.62, y: unit * 0.42))
-        hull.addLine(to: CGPoint(x: -unit * 0.62, y: unit * 0.42))
+        hull.addLine(to: CGPoint(x: unit * 0.58, y: unit * 0.4))
+        hull.addLine(to: CGPoint(x: -unit * 0.58, y: unit * 0.4))
         hull.closeSubpath()
-        layer.fill(hull, with: .color(Color.brown.mix(with: .black, by: 0.25)))
+        layer.fill(hull, with: .color(Color(red: 0.42, green: 0.26, blue: 0.16)))
+        // One mast, one sail in the colour of what it carries, and a lighter seam.
+        var mast = Path()
+        mast.move(to: CGPoint(x: -unit * 0.05, y: 0))
+        mast.addLine(to: CGPoint(x: -unit * 0.05, y: -unit * 1.05))
+        layer.stroke(mast, with: .color(Color(white: 0.35)), lineWidth: 1.2)
         var sail = Path()
-        sail.move(to: CGPoint(x: -unit * 0.1, y: -unit * 0.05))
-        sail.addLine(to: CGPoint(x: -unit * 0.1, y: -unit * 1.1))
-        sail.addLine(to: CGPoint(x: unit * 0.8, y: -unit * 0.05))
+        sail.move(to: CGPoint(x: -unit * 0.05, y: -unit * 1.02))
+        sail.addLine(to: CGPoint(x: unit * 0.72, y: -unit * 0.12))
+        sail.addLine(to: CGPoint(x: -unit * 0.05, y: -unit * 0.12))
         sail.closeSubpath()
         layer.fill(sail, with: .color(color))
-        layer.stroke(sail, with: .color(.white.opacity(0.7)), lineWidth: 1)
-        // A crate aboard, so a boat reads as carrying something rather than as a decoration.
-        let crate = CGRect(x: -unit * 0.28, y: -unit * 0.24, width: unit * 0.5, height: unit * 0.36)
-        layer.fill(Path(roundedRect: crate, cornerRadius: 1.5), with: .color(Color.brown.mix(with: .white, by: 0.25)))
-        layer.stroke(Path(roundedRect: crate, cornerRadius: 1.5), with: .color(Color.brown.mix(with: .black, by: 0.25)), lineWidth: 1)
+        layer.stroke(sail, with: .color(.white.opacity(0.75)), lineWidth: 1)
     }
 
     private func point(_ path: Path, at progress: Double) -> CGPoint {
