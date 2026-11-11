@@ -17,9 +17,9 @@ await app.click({ role: "button", name: "Mia" });
 await app.waitFor({ role: "button", name: "Back" });
 // A picture opens full size, and closes again.
 await app.click({ role: "button", name: "Open Mia full size" });
-await app.waitFor({ role: "button", name: "Close" });
-await app.click({ role: "button", name: "Close" });
-await app.waitFor({ role: "button", name: "Close", gone: true });
+await app.waitFor({ role: "button", name: "Close preview" });
+await app.click({ role: "button", name: "Close preview" });
+await app.waitFor({ role: "button", name: "Close preview", gone: true });
 await app.click({ role: "button", name: "Back" });
 await app.waitFor({ text: "Made here" });
 await app.click({ role: "button", name: "Close details" });

@@ -153,7 +153,7 @@ struct WorldDetails: View {
                         .accessibilityLabel("Preview of \(found.item.node.title)")
                     Text(found.item.node.title).font(.headline)
                 }
-                Button("Close") { zoomed = false }.keyboardShortcut(.cancelAction)
+                Button("Close preview") { zoomed = false }.keyboardShortcut(.cancelAction)
             }
             .padding(24)
         }
