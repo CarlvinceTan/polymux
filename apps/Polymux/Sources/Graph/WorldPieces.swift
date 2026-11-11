@@ -343,9 +343,10 @@ struct WorldActorView: View {
             .background(alignment: .bottom) { base }
             .overlay(alignment: .top) {
                 if let tag = Self.tag(actor) {
+                    // Stacked by place in line, so two people at one station never write over each other.
                     WorldTag(symbol: tag.symbol, text: tag.text, color: tag.color)
                         .frame(width: 190, height: 24)
-                        .offset(y: -29)
+                        .offset(y: -29 - Double(actor.order) * 27)
                 }
             }
             .overlay(alignment: .bottom) {
