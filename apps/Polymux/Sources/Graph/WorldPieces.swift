@@ -587,9 +587,11 @@ struct WorldGround: View {
         let order = all.sorted { ($0.i + $0.j, $0.i) < ($1.i + $1.j, $1.i) }
 
         // The shelf each islet sits on, seen through the water around it.
+        // The shelf is the land itself sunk to the sea floor; it must stay under the tallest cliff,
+        // so it sinks with the highest terrace rather than with each tile's own ledge.
         var shelf = Path()
-        for cell in land.keys { shelf.addPath(tile(cell, grown: 2.3).top.offsetBy(dx: 0, dy: -Double(terraces.rise[cell] ?? 0) * step)) }
-        context.fill(shelf.offsetBy(dx: 0, dy: depth), with: .color(.worldShallows))
+        for cell in land.keys { shelf.addPath(tile(cell, grown: 2.3).top) }
+        context.fill(shelf.offsetBy(dx: 0, dy: depth + Double(max(0, terraces.maxRise - 1)) * step), with: .color(.worldShallows))
 
         for cell in order {
             let (centre, plankTop) = tile(cell)
