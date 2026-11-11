@@ -366,7 +366,8 @@ struct WorldView: View {
             let whole = picked == "trail:" + trail.id
             let text = whole ? Self.caption(trail, in: world) : trail.wire.label?.isEmpty == false ? trail.wire.label ?? "" : GraphLook.cargoTitle(trail.wire.carries) ?? "Handoff"
             let width = min(190, Double(text.count) * 6.6 + 42)
-            var box = CGRect(x: middle.x - width / 2, y: middle.y - 12, width: width, height: 24)
+            // Below the arc, where a head's own tag never reaches.
+            var box = CGRect(x: middle.x - width / 2, y: middle.y + 14, width: width, height: 24)
             while taken.contains(where: { $0.insetBy(dx: -4, dy: -3).intersects(box) }) { box.origin.y -= 10 }
             taken.append(box)
             out.append((trail, box, text))

@@ -753,6 +753,15 @@ struct WorldTrails: View {
 
     private func draw(_ context: inout GraphicsContext, now: Date) {
         let seconds = now.timeIntervalSinceReferenceDate
+        #if DEBUG
+        if CommandLine.arguments.contains("--verify-graph-trace") {
+            AtlasTrace.once("trails") {
+                for trail in world.trails where trail.kind == .handoff {
+                    print("atlas handoff \(trail.id) active=\(trail.active) shows=\(WorldTrails.shows(trail, in: world, picked: picked)) from=\(world.group(of: trail.from)?.id ?? "-") to=\(world.group(of: trail.to)?.id ?? "-")")
+                }
+            }
+        }
+        #endif
         var drawn = Set<String>()
         for (index, trail) in world.trails.enumerated() where Self.shows(trail, in: world, picked: picked) {
             guard let from = points[trail.from], let to = points[trail.to] else { continue }
@@ -929,3 +938,14 @@ struct WorldTrails: View {
 
 
 
+
+
+#if DEBUG
+@MainActor enum AtlasTrace {
+    private static var said: Set<String> = []
+    static func once(_ key: String, _ body: () -> Void) {
+        guard said.insert(key).inserted else { return }
+        body()
+    }
+}
+#endif
