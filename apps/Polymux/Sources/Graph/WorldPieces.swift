@@ -717,6 +717,8 @@ struct WorldTrails: View {
     /// What's picked. Its own trails light up; the rest step back.
     let picked: String?
     let handoffs: [ActivityStore.Handoff]
+    /// Turns a point on the map into a point on screen, so a route drawn here lands where it's meant to.
+    let place: (CGPoint) -> CGPoint
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -815,8 +817,8 @@ struct WorldTrails: View {
         let start = islet(world.group(of: trail.from))
         let end = islet(world.group(of: trail.to))
         guard start.id != end.id else { return nil }
-        let a = shore(start)
-        let b = shore(end)
+        let a = shore(start).map(place)
+        let b = shore(end).map(place)
         // The two shores closest to each other, so a boat takes the short way across.
         var best: (CGFloat, CGPoint, CGPoint) = (.infinity, a[0], b[0])
         for one in a { for other in b {
@@ -914,5 +916,7 @@ struct WorldTrails: View {
         path.trimmedPath(from: 0, to: min(1, max(0.001, progress))).currentPoint ?? .zero
     }
 }
+
+
 
 

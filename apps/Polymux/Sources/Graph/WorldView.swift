@@ -145,7 +145,7 @@ struct WorldView: View {
                     .animation(reducedMotion ? nil : .smooth(duration: 0.9), value: actor.order)
             }
             // Behind everyone and everything standing, so a line through the air never crosses out what someone's doing.
-            WorldTrails(world: world, points: heads, picked: picked, handoffs: activity.handoffs)
+            WorldTrails(world: world, points: heads, picked: picked, handoffs: activity.handoffs, place: camera.point)
                 .zIndex(5_000)
             ForEach(flights(camera, unit: unit, heads: heads), id: \.trail.id) { flight in
                 let id = "trail:" + flight.trail.id
