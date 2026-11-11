@@ -853,7 +853,7 @@ struct WorldTrails: View {
 
     /// The islet a group covers, or home for someone with none.
     private func islet(_ group: WorldGroup?) -> Islet {
-        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2, margin: 0) }
+        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2, margin: 2) }
         return Islet(id: group.id, minI: group.minI, minJ: group.minJ, maxI: group.maxI, maxJ: group.maxJ)
     }
 
