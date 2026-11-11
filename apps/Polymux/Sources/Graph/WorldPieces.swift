@@ -309,8 +309,8 @@ struct WorldBanner: View {
 /// Someone on the map: who they are, standing on their own base, with what they're doing over their head.
 struct WorldActorView: View {
     let actor: WorldActor
-    /// Whether its activity is worth wearing, or whether someone beside it already says the same thing.
-    var wearsTag = true
+    /// How far its tag rises to clear a neighbour's.
+    var tagLift = 0.0
     let activity: ActivityStore
     let scale: Double
     let selected: Bool
@@ -344,11 +344,11 @@ struct WorldActorView: View {
             .offset(y: hovered ? -3 : 0)
             .background(alignment: .bottom) { base }
             .overlay(alignment: .top) {
-                if wearsTag, let tag = Self.tag(actor) {
+                if let tag = Self.tag(actor) {
                     // Stacked by place in line, so two people at one station never write over each other.
                     WorldTag(symbol: tag.symbol, text: tag.text, color: tag.color)
                         .frame(width: 190, height: 24)
-                        .offset(y: -29 - Double(actor.order) * 27)
+                        .offset(y: -29 - tagLift)
                 }
             }
             .overlay(alignment: .bottom) {
@@ -799,9 +799,12 @@ struct WorldTrails: View {
                 layer.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 5]))
                 guard flying else { continue }
                 // On land the same cargo travels by cart, so work on one island still reads as moving.
-                let end = trail.wire.direction == WorkWireDirection.back ? from : to
-                let start = trail.wire.direction == WorkWireDirection.back ? to : from
-                let control = CGPoint(x: (start.x + end.x) / 2, y: min(start.y, end.y) - max(40, hypot(end.x - start.x, end.y - start.y) * 0.26))
+                // Between the two pads themselves, so a cart crossing the island travels the island, not the gap between heads.
+                let forward = trail.wire.direction != WorkWireDirection.back
+                let start = pad(trail.from, fallback: from, forward: forward)
+                let end = pad(trail.to, fallback: to, forward: forward)
+                let lane = CGFloat((index % 3) - 1) * 8
+                let control = CGPoint(x: (start.x + end.x) / 2, y: min(start.y, end.y) - max(60, hypot(end.x - start.x, end.y - start.y) * 0.3) + lane)
                 let at = WorldMotion.position(WorldRoute(from: start, control: control, to: end), seconds: seconds, index: index, still: reducedMotion)
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas cart \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
@@ -885,6 +888,14 @@ struct WorldTrails: View {
         let bottom = max(near.y, far.y, across.y, other.y)
         let middle = CGPoint(x: (left + right) / 2, y: (top + bottom) / 2)
         return [CGPoint(x: middle.x, y: top), CGPoint(x: right, y: middle.y), CGPoint(x: middle.x, y: bottom), CGPoint(x: left, y: middle.y)]
+    }
+
+    /// Where someone stands on their own pad, or where their head is when they have none.
+    private func pad(_ id: String, fallback: CGPoint, forward: Bool) -> CGPoint {
+        guard let actor = world.actor(id), let station = world.station(actor.station) else { return fallback }
+        let cell = WorldMetrics.cell(station)
+        let foot = place(WorldMetrics.screen(cell.i, cell.j))
+        return CGPoint(x: foot.x, y: foot.y - 14)
     }
 
     /// A two-wheeled cart with a crate aboard.
