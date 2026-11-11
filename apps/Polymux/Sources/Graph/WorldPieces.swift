@@ -822,9 +822,11 @@ struct WorldTrails: View {
             let away = hypot(one.x - other.x, one.y - other.y)
             if away < best.0 { best = (away, one, other) }
         } }
-        let lift = hypot(best.1.x - best.2.x, best.1.y - best.2.y) * 0.12
-        let control = CGPoint(x: (best.1.x + best.2.x) / 2 - (best.2.y - best.1.y) / max(1, lift * 8),
-                              y: (best.1.y + best.2.y) / 2 + (best.2.x - best.1.x) / max(1, lift * 8))
+        // A gentle bow between the two shores, never a sweep out to open sea.
+        let span = max(1, hypot(best.2.x - best.1.x, best.2.y - best.1.y))
+        let bow = min(36, span * 0.18)
+        let control = CGPoint(x: (best.1.x + best.2.x) / 2 - (best.2.y - best.1.y) / span * bow,
+                              y: (best.1.y + best.2.y) / 2 + (best.2.x - best.1.x) / span * bow)
         var path = Path()
         path.move(to: best.1)
         path.addQuadCurve(to: best.2, control: control)

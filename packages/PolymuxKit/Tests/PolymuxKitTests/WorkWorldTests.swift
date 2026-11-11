@@ -134,6 +134,25 @@ struct WorkWorldCoverageTests {
     }
 
     /// A day's work builds fast enough to stay in the frame loop on a phone.
+    /// A handoff between two different islets is what puts a boat in the water.
+    @Test func aHandoffAcrossIslandsHasTwoShores() {
+        let nodes = [WorkNode(id: "agent:t-aria", title: "Aria", kind: WorkKind.agent, agentID: "t-aria", state: WorkNodeState.working),
+                     WorkNode(id: "web", title: "Web", parent: "agent:t-aria", kind: WorkKind.web),
+                     WorkNode(id: "agent:t-milo", title: "Milo", kind: WorkKind.agent, agentID: "t-milo", state: WorkNodeState.working),
+                     WorkNode(id: "film", title: "Launch film", kind: WorkKind.pipeline),
+                     WorkNode(id: "chars", title: "Characters", parent: "film", kind: WorkKind.step)]
+        let wires = [WorkWire(id: "aria-web", from: "agent:t-aria", to: "web", direction: .none, state: WorkWireState.active, carries: WorkKind.data),
+                     WorkWire(id: "milo-chars", from: "agent:t-milo", to: "chars", direction: .none, state: WorkWireState.active, carries: WorkKind.image),
+                     WorkWire(id: "v6", from: "agent:t-aria", to: "agent:t-milo", state: WorkWireState.active, carries: WorkKind.task)]
+        let world = WorkWorld(WorkGraph(revision: 0, nodes: nodes, wires: wires))
+        let aria = world.actor("agent:t-aria"), milo = world.actor("agent:t-milo")
+        #expect(aria?.station != nil && milo?.station != nil)
+        let first = world.group(of: aria?.station), second = world.group(of: milo?.station)
+        #expect(first != nil && second != nil)
+        #expect(first?.id != second?.id, "Aria and Milo share an islet, so no boat can cross")
+        #expect(world.trails.contains { $0.kind == .handoff && $0.active })
+    }
+
     @Test func aLargeDayBuildsQuickly() {
         var nodes: [WorkNode] = []
         var wires: [WorkWire] = []
