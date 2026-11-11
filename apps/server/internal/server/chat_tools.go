@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -82,36 +83,53 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	chain, _ := ctx.Value(chainKey{}).(*chainState)
-	id := t.Name() + ":" + state.run.ID + ":" + call
+	base := t.Name() + ":" + state.run.ID + ":" + call
 	var source *string
 	if chain != nil {
-		old, err := t.store.Message(ctx, id)
-		if err == nil {
-			if old.ThreadID != state.run.ConversationID || value(old.AgentID) != state.run.AgentID {
-				return agent.AgentToolResult{}, store.ErrConflict
+		source = state.run.SourceMessageID
+	}
+	beats := splitBeats([]contract.Part{part})
+	ids := make([]string, 0, len(beats))
+	posted := 0
+	for n, beat := range beats {
+		id := base
+		if len(beats) > 1 {
+			id = fmt.Sprintf("%s:%d", base, n)
+		}
+		if chain != nil {
+			old, err := t.store.Message(ctx, id)
+			if err == nil {
+				if old.ThreadID != state.run.ConversationID || value(old.AgentID) != state.run.AgentID {
+					return agent.AgentToolResult{}, store.ErrConflict
+				}
+				ids = append(ids, old.ID)
+				continue
 			}
-			return toolResult(map[string]any{"message_id": old.ID, "posted": true})
+			if !errors.Is(err, sql.ErrNoRows) {
+				return agent.AgentToolResult{}, err
+			}
+			encoded, err := json.Marshal(beat)
+			if err != nil {
+				return agent.AgentToolResult{}, err
+			}
+			if chain.spend(len(encoded)) {
+				state.hookErr = errGroupBudget
+				return agent.AgentToolResult{}, errGroupBudget
+			}
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return agent.AgentToolResult{}, err
-		}
-		encoded, err := json.Marshal(part)
+		message, err := t.store.PostMessage(ctx, contract.Message{ID: id, ThreadID: state.run.ConversationID, Role: contract.MessageRoleAssistant, Status: contract.MessageStatusDone, CreatedAt: store.Now(), AgentID: &state.run.AgentID, RunID: &state.run.ID, ReplyToID: source, Parts: []contract.Part{beat}})
 		if err != nil {
 			return agent.AgentToolResult{}, err
 		}
-		if chain.spend(len(encoded)) {
-			state.hookErr = errGroupBudget
-			return agent.AgentToolResult{}, errGroupBudget
-		}
-		source = state.run.SourceMessageID
+		ids = append(ids, message.ID)
+		posted++
 	}
-	message, err := t.store.PostMessage(ctx, contract.Message{ID: id, ThreadID: state.run.ConversationID, Role: contract.MessageRoleAssistant, Status: contract.MessageStatusDone, CreatedAt: store.Now(), AgentID: &state.run.AgentID, RunID: &state.run.ID, ReplyToID: source, Parts: []contract.Part{part}})
-	if err != nil {
-		return agent.AgentToolResult{}, err
-	}
-	state.posts++
+	state.posts += posted
 	state.spoke = true
-	return toolResult(map[string]any{"message_id": message.ID, "posted": true})
+	if len(ids) == 1 {
+		return toolResult(map[string]any{"message_id": ids[0], "posted": true})
+	}
+	return toolResult(map[string]any{"message_ids": ids, "posted": true})
 }
 
 func (s *Server) answerChoice(w http.ResponseWriter, r *http.Request) {
