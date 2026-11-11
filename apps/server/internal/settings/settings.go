@@ -267,6 +267,9 @@ func (s *Store) Update(p contract.SettingsPatch) (contract.Settings, error) {
 	if p.UpdateMode != nil {
 		v.UpdateMode = *p.UpdateMode
 	}
+	if p.Transport != nil {
+		v.Transport = strings.TrimSpace(*p.Transport)
+	}
 	if !valid(*v) {
 		return contract.Settings{}, ErrInvalid
 	}
@@ -305,6 +308,9 @@ func valid(v contract.Settings) bool {
 		return false
 	}
 	if v.UpdateMode != "" && v.UpdateMode != contract.SettingsUpdateModeAutomatic && v.UpdateMode != contract.SettingsUpdateModeManual {
+		return false
+	}
+	if v.Transport != "" && !transportName.MatchString(v.Transport) {
 		return false
 	}
 	if !ValidReasoning(v.DefaultReasoning) || v.DefaultModel != "" && !chatModel.MatchString(v.DefaultModel) ||
@@ -407,6 +413,9 @@ func (s *Store) save(d document) error {
 
 // chatModel matches provider model IDs such as "gpt-5", "openai/gpt-5" or "llama3:8b".
 var chatModel = regexp.MustCompile(`^[A-Za-z0-9._/:-]{1,256}$`)
+
+// transportName matches a transport plugin's name, plus the built-in choices.
+var transportName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // ValidReasoning accepts the reasoning levels a bot can run with; empty means off.
 func ValidReasoning(level string) bool {

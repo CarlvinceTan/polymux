@@ -124,8 +124,9 @@ New pairing links advertise the HTTPS address without an Iroh ticket. Existing
 Iroh pairings remain usable until migrated; `--no-tunnel` disables that transport
 once no paired clients need it.
 
-- [OpenTunnel](https://github.com/anomalyco/opentunnel): use its native service
-  with a dedicated profile and a persistent route. TLS terminates on the server
+- [OpenTunnel](https://github.com/anomalyco/opentunnel): install the OpenTunnel
+  transport plugin from Settings → Plugins, or use its native service with a
+  dedicated profile and a persistent route. TLS terminates on the server
   machine, so its relay cannot read requests. The CLI manages reconnection and
   certificate renewal.
 - [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/): use a named

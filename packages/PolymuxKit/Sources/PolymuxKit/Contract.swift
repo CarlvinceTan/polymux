@@ -151,6 +151,7 @@ public struct Settings: Codable, Hashable, Sendable {
     public var updateChannel: String?
     public var updateMode: String?
     public var switcherBadges: Bool?
+    public var transport: String?
 
     public init(
         revision: Int64 = 0,
@@ -169,7 +170,8 @@ public struct Settings: Codable, Hashable, Sendable {
         defaultReasoning: String = "",
         updateChannel: String? = nil,
         updateMode: String? = nil,
-        switcherBadges: Bool? = nil
+        switcherBadges: Bool? = nil,
+        transport: String? = nil
     ) {
         self.revision = revision
         self.appearance = appearance
@@ -188,6 +190,7 @@ public struct Settings: Codable, Hashable, Sendable {
         self.updateChannel = updateChannel
         self.updateMode = updateMode
         self.switcherBadges = switcherBadges
+        self.transport = transport
     }
 }
 
@@ -227,6 +230,7 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
     public var updateChannel: String?
     public var updateMode: String?
     public var switcherBadges: Bool?
+    public var transport: String?
 
     public init(
         appearance: String? = nil,
@@ -243,7 +247,8 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         defaultReasoning: String? = nil,
         updateChannel: String? = nil,
         updateMode: String? = nil,
-        switcherBadges: Bool? = nil
+        switcherBadges: Bool? = nil,
+        transport: String? = nil
     ) {
         self.appearance = appearance
         self.liveProvider = liveProvider
@@ -260,6 +265,7 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         self.updateChannel = updateChannel
         self.updateMode = updateMode
         self.switcherBadges = switcherBadges
+        self.transport = transport
     }
 }
 

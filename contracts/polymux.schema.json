@@ -271,6 +271,11 @@
         },
         "switcherBadges": {
           "type": "boolean"
+        },
+        "transport": {
+          "type": "string",
+          "description": "Transport used in new pairing links: empty for automatic, iroh, public, or a transport plugin's name.",
+          "x-go-value": true
         }
       },
       "required": [
@@ -359,6 +364,10 @@
         },
         "switcherBadges": {
           "type": "boolean"
+        },
+        "transport": {
+          "type": "string",
+          "description": "Transport used in new pairing links: empty for automatic, iroh, public, or a transport plugin's name."
         }
       },
       "required": []

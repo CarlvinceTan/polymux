@@ -44,7 +44,9 @@ A transport plugin makes this server reachable from other networks, so a phone n
 - `POLYMUX_PUBLISH_DEVICE`: the pinned-TLS device listener. The transport must pass it through untouched, or the pinned fingerprint no longer matches.
 - `GET /transport` on the service answers `{state, message, api, device}`, with `state` one of `starting`, `ready` or `error`. A ready `api` goes in invite links; a ready `device` goes in device pairing links.
 
-`GET /transports` on the server lists every transport's report. [`tailscale`](../plugins/tailscale) is the first: it runs `tailscale serve` for both listeners and reports the MagicDNS addresses. Its HTTPS needs certificates enabled once in the Tailscale admin console.
+`GET /transports` on the server lists every transport's report. [`tailscale`](../plugins/tailscale) runs `tailscale serve` for both listeners and reports the MagicDNS addresses; its HTTPS needs certificates enabled once in the Tailscale admin console. [`opentunnel`](../plugins/opentunnel) points an OpenTunnel route at the API listener and requires the `opentunnel` CLI and a dedicated profile. It terminates TLS on this machine and has no raw pass-through, so it publishes only the API listener.
+
+New pairing links follow **Settings → Network**: the chosen transport when it is ready, otherwise the configured public URL, then the first ready plugin (by name), then Iroh.
 
 ## Tools
 

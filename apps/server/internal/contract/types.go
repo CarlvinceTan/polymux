@@ -71,6 +71,7 @@ type Settings struct {
 	UpdateChannel    string       `json:"updateChannel,omitempty"`
 	UpdateMode       string       `json:"updateMode,omitempty"`
 	SwitcherBadges   *bool        `json:"switcherBadges,omitempty"`
+	Transport        string       `json:"transport,omitempty"`
 }
 
 const (
@@ -103,6 +104,7 @@ type SettingsPatch struct {
 	UpdateChannel    *string       `json:"updateChannel,omitempty"`
 	UpdateMode       *string       `json:"updateMode,omitempty"`
 	SwitcherBadges   *bool         `json:"switcherBadges,omitempty"`
+	Transport        *string       `json:"transport,omitempty"`
 }
 
 const (

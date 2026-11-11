@@ -439,13 +439,8 @@ func (s *Server) invite(r *http.Request, token string) map[string]string {
 }
 
 func (s *Server) inviteAt(ctx context.Context, host, token string) map[string]string {
-	if s.config.PublicURL != "" {
-		return map[string]string{"url": s.config.PublicURL, "token": token}
-	}
-	for _, transport := range s.plugins.Transports(ctx) {
-		if transport.State == contract.PluginStateReady && transport.API != "" {
-			return map[string]string{"url": transport.API, "token": token}
-		}
+	if url, ok := pickInvite(s.settings.Snapshot().Transport, s.config.PublicURL, s.plugins.Transports(ctx)); ok {
+		return map[string]string{"url": url, "token": token}
 	}
 	value := map[string]string{"url": "http://" + host, "token": token}
 	if s.config.Ticket != nil {
@@ -454,6 +449,37 @@ func (s *Server) inviteAt(ctx context.Context, host, token string) map[string]st
 		}
 	}
 	return value
+}
+
+// pickInvite chooses where a new pairing link points. An explicit transport
+// wins; otherwise a public URL, then the first ready plugin, and finally the
+// caller's direct address with an Iroh ticket.
+func pickInvite(preference, publicURL string, transports []plugins.Transport) (string, bool) {
+	switch preference {
+	case "iroh":
+		return "", false
+	case "public":
+		if publicURL != "" {
+			return publicURL, true
+		}
+	default:
+		if preference != "" {
+			for _, transport := range transports {
+				if transport.Plugin == preference && transport.State == contract.PluginStateReady && transport.API != "" {
+					return transport.API, true
+				}
+			}
+		}
+	}
+	if publicURL != "" {
+		return publicURL, true
+	}
+	for _, transport := range transports {
+		if transport.State == contract.PluginStateReady && transport.API != "" {
+			return transport.API, true
+		}
+	}
+	return "", false
 }
 
 func (s *Server) network(w http.ResponseWriter, r *http.Request) {

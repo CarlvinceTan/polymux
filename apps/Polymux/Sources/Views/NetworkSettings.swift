@@ -171,6 +171,11 @@ struct NetworkPage: View {
     private var session: AppSession? { pool.sessions[server.address] }
     private var store: NetworkStore? { session?.network }
     private var network: NetworkInfo? { store?.value }
+    private var transports: [PluginTransport] { session?.plugins.transports ?? [] }
+    private var selectedTransport: PluginTransport? {
+        guard let name = session?.settings.value?.transport, !name.isEmpty else { return nil }
+        return transports.first { $0.plugin == name }
+    }
     private var unreachable: Bool { store?.isConnected != true }
     private var title: String { name.isEmpty ? server.title : name }
     private var others: [ServerDevice] { pool.servers.known.filter { $0.address != server.address } }
@@ -207,6 +212,18 @@ struct NetworkPage: View {
                         .onSubmit(save)
                     LabeledContent("Server") {
                         Text(network?.server.name ?? server.name).lineLimit(1).truncationMode(.middle)
+                    }
+                    if !transports.isEmpty {
+                        SettingsPicker("Pairing links", selection: Binding(
+                            get: { session?.settings.value?.transport ?? "" },
+                            set: { session?.settings.edit(SettingsPatch(transport: $0)) }),
+                            options: [("Automatic", "")] + transports.map { ($0.title, $0.plugin) })
+                        .disabled(session?.settings.value == nil)
+                    }
+                } footer: {
+                    if let transport = selectedTransport, transport.state != "ready" {
+                        Text("\(transport.title): \(transportState(transport))")
+                            .font(.footnote).foregroundStyle(.muted)
                     }
                 }
                 .panelRow()
@@ -253,6 +270,7 @@ struct NetworkPage: View {
                 }
             }
             .formStyle(.grouped)
+            .task { await session?.plugins.loadTransports() }
         }
         .panelDismiss(onClose: { close() })
         .alert("Leave \(title)?", isPresented: $leaving) {
@@ -384,6 +402,14 @@ struct NetworkPage: View {
 
     private func restricted(_ device: NetworkInfo.Device) -> Bool {
         network?.restricted?.contains { $0.id == device.id } == true
+    }
+
+    private func transportState(_ transport: PluginTransport) -> String {
+        switch transport.state {
+        case "ready": "Ready"
+        case "error": transport.message ?? "Unavailable"
+        default: transport.message ?? "Starting"
+        }
     }
 
     private func removable(_ device: NetworkInfo.Device) -> Bool {
