@@ -50,7 +50,7 @@ func TestStoredInstructions(t *testing.T) {
 	if got := CustomPrompt(DefaultPrompt + " Be blunt."); got == "" {
 		t.Fatal("an edited default was dropped")
 	}
-	if got := StartPrompt("Run releases."); !strings.HasPrefix(got, DefaultPrompt) || !strings.HasSuffix(got, "Run releases.") {
+	if got := StartPrompt("Run releases."); !strings.HasPrefix(got, DefaultBehavior) || !strings.Contains(got, "Run releases.") || !strings.HasSuffix(got, DefaultVoice) {
 		t.Fatalf("new bot instructions lost a part: %q", got)
 	}
 	if got := StartPrompt(" "); got != "" {
