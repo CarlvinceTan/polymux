@@ -503,7 +503,7 @@ struct WorldGround: View {
     let scale: Double
 
     var body: some View {
-        Canvas { context, _ in draw(&context) }
+        Canvas { context, size in draw(&context, size: size) }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
@@ -537,7 +537,18 @@ struct WorldGround: View {
         return path
     }
 
-    private func draw(_ context: inout GraphicsContext) {
+    private func draw(_ context: inout GraphicsContext, size: CGSize) {
+        // Open water: short wave strokes in rows, which is what makes the sea read as water rather than a colour.
+        for row in 0..<Int(size.height / 46) + 2 {
+            let y = Double(row) * 46 + 12
+            for column in -1..<Int(size.width / 74) + 2 {
+                let x = Double(column) * 74 + (row % 2 == 0 ? 0 : 37)
+                var wave = Path()
+                wave.move(to: CGPoint(x: x, y: y))
+                wave.addQuadCurve(to: CGPoint(x: x + 20, y: y), control: CGPoint(x: x + 10, y: y - 5))
+                context.stroke(wave, with: .color(.white.opacity(0.34)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            }
+        }
         var land: [WorldCell: WorldBiome] = [:]
         var paved = Set<WorldCell>()
         for i in -WorkWorld.homeReach..<WorkWorld.homeReach {
@@ -787,7 +798,7 @@ struct WorldTrails: View {
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas boat \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
-                parcel(&layer, at: at, colour: color)
+                boat(&layer, at: at, heading: crossing.heading, color: color, zoom: crossing.zoom)
                 // A short wake behind it, rather than a line all the way across.
                 let tail = point(crossing.path, at: max(0, (trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase) - 0.06))
                 var wake = Path()
@@ -811,7 +822,7 @@ struct WorldTrails: View {
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas cart \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
-                parcel(&layer, at: at, colour: color)
+                cart(&layer, at: at, colour: color)
             }
         }
         for handoff in handoffs {
@@ -926,14 +937,14 @@ struct WorldTrails: View {
         var layer = context
         layer.translateBy(x: point.x, y: point.y)
         layer.rotate(by: .radians(heading))
-        let unit = 12 * zoom
+        let unit = 15 * zoom
         var hull = Path()
         hull.move(to: CGPoint(x: -unit, y: 0))
         hull.addLine(to: CGPoint(x: unit, y: 0))
         hull.addLine(to: CGPoint(x: unit * 0.58, y: unit * 0.4))
         hull.addLine(to: CGPoint(x: -unit * 0.58, y: unit * 0.4))
         hull.closeSubpath()
-        layer.fill(hull, with: .color(Color(red: 0.42, green: 0.26, blue: 0.16)))
+        layer.fill(hull, with: .color(color.mix(with: Color(red: 0.4, green: 0.25, blue: 0.15), by: 0.55)))
         // One mast, one sail in the colour of what it carries, and a lighter seam.
         var mast = Path()
         mast.move(to: CGPoint(x: -unit * 0.05, y: 0))
@@ -944,8 +955,8 @@ struct WorldTrails: View {
         sail.addLine(to: CGPoint(x: unit * 0.72, y: -unit * 0.12))
         sail.addLine(to: CGPoint(x: -unit * 0.05, y: -unit * 0.12))
         sail.closeSubpath()
-        layer.fill(sail, with: .color(color.mix(with: .white, by: 0.22)))
-        layer.stroke(sail, with: .color(.white.opacity(0.75)), lineWidth: 1)
+        layer.fill(sail, with: .color(.white))
+        layer.stroke(sail, with: .color(color), lineWidth: 2)
     }
 
     private func point(_ path: Path, at progress: Double) -> CGPoint {
