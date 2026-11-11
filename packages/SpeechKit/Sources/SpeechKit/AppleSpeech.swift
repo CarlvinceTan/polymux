@@ -210,6 +210,7 @@ nonisolated final class VoiceCapture: AudioCapture, @unchecked Sendable {
 @MainActor
 final class AppleInput: SpeechInput {
     private let audio: VoiceAudio
+    private let language: DictationLanguage
     private var analyzer: SpeechAnalyzer?
     private var inputs: AsyncStream<AnalyzerInput>.Continuation?
     private var events: AsyncThrowingStream<VoiceEvent, Error>.Continuation?
@@ -219,7 +220,10 @@ final class AppleInput: SpeechInput {
     private var capture: VoiceCapture?
     private var terms = Vocabulary.terms(Vocabulary.base)
 
-    init(audio: VoiceAudio) { self.audio = audio }
+    init(audio: VoiceAudio, language: DictationLanguage = .multilingual) {
+        self.audio = audio
+        self.language = language
+    }
 
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
         let microphone = await AVAudioApplication.requestRecordPermission()
@@ -230,9 +234,14 @@ final class AppleInput: SpeechInput {
             }
         }
         guard permission == .authorized else { throw SpeechFailure.recognition }
-        guard SpeechTranscriber.isAvailable,
-              let selected = await SpeechTranscriber.supportedLocale(equivalentTo: .current) else {
-            let fallback = LegacyInput(audio: audio)
+        let wanted = DictationDevice.locale(for: language)
+        var selected = await SpeechTranscriber.supportedLocale(equivalentTo: wanted)
+        // A multilingual request on an unsupported system language still gets English.
+        if selected == nil, language == .multilingual {
+            selected = await SpeechTranscriber.supportedLocale(equivalentTo: DictationDevice.locale(for: .english))
+        }
+        guard SpeechTranscriber.isAvailable, let selected else {
+            let fallback = LegacyInput(audio: audio, language: language)
             self.fallback = fallback
             await fallback.setVocabulary(terms)
             return try await fallback.start()
@@ -361,11 +370,21 @@ private final class LegacyInput: SpeechInput {
     private var replay: [VoiceBuffer] = []
     private var canReplay = true
     private var terms = Vocabulary.terms(Vocabulary.base)
+    private let language: DictationLanguage
 
-    init(audio: VoiceAudio) { self.audio = audio }
+    init(audio: VoiceAudio, language: DictationLanguage = .multilingual) {
+        self.audio = audio
+        self.language = language
+    }
 
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
-        guard let recognizer = SFSpeechRecognizer(locale: .current) else { throw SpeechFailure.locale }
+        var locale = DictationDevice.locale(for: language)
+        var recognizer = SFSpeechRecognizer(locale: locale)
+        if recognizer == nil, language == .multilingual {
+            locale = DictationDevice.locale(for: .english)
+            recognizer = SFSpeechRecognizer(locale: locale)
+        }
+        guard let recognizer else { throw SpeechFailure.locale }
         guard recognizer.isAvailable else { throw SpeechFailure.unavailable }
         self.recognizer = recognizer
         let bufferStream = AsyncStream<VoiceBuffer>.makeStream(bufferingPolicy: .bufferingNewest(128))

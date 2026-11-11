@@ -15,7 +15,7 @@ public final class DictationInput {
         AVAudioApplication.shared.recordPermission == .denied
             || [.denied, .restricted].contains(SFSpeechRecognizer.authorizationStatus())
     }
-    private let makeInput: () -> (any SpeechInput, () -> Void)
+    private let makeInput: (DictationLanguage) -> (any SpeechInput, () -> Void)
     private var pause: (() -> Void)?
     private var input: (any SpeechInput)?
     private var task: Task<Void, Never>?
@@ -23,29 +23,35 @@ public final class DictationInput {
     private var session = UUID()
     private var stopTask: Task<Void, Never>?
     private var terms = Vocabulary.terms(Vocabulary.base)
+    private var options = DictationOptions()
 
     public init() {
         #if DEBUG
         if CommandLine.arguments.contains("--verify-fixture"), CommandLine.arguments.contains("--verify-dictation") {
             permission = { false }
-            makeInput = { (DictationFixture(), {}) }
+            makeInput = { _ in (DictationFixture(), {}) }
             return
         }
         #endif
         permission = Self.isDenied
-        makeInput = {
+        makeInput = { language in
             let audio = VoiceAudio(duplex: false)
-            return (AppleInput(audio: audio), { audio.stop() })
+            return (AppleInput(audio: audio, language: language), { audio.stop() })
         }
     }
 
-    public init(makeInput: @escaping () -> any SpeechInput, pause: @escaping () -> Void = {},
+    public init(makeInput: @escaping (DictationLanguage) -> any SpeechInput, pause: @escaping () -> Void = {},
          denied: @escaping @Sendable () -> Bool = DictationInput.isDenied) {
-        self.makeInput = { (makeInput(), pause) }
+        self.makeInput = { language in (makeInput(language), pause) }
         permission = denied
     }
 
-    /// Names the recogniser should hear correctly while dictating: agent and chat names.
+    /// Applies the user's language and device policy before the next dictation starts.
+    public func configure(_ options: DictationOptions) {
+        self.options = options
+    }
+
+    /// Names the recogniser should hear correctly while dictating: agent, chat and dictionary terms.
     public func setVocabulary(_ names: [String]) {
         terms = Vocabulary.terms(Vocabulary.base + names)
         let current = terms
@@ -64,7 +70,7 @@ public final class DictationInput {
         ready = false
         session = UUID()
         let current = session
-        let (input, pause) = makeInput()
+        let (input, pause) = makeInput(DictationDevice.language(options.language))
         self.pause = pause
         self.input = input
         let startTerms = terms
@@ -154,8 +160,8 @@ private final class DictationFixture: SpeechInput {
             let levels: [Float] = [0, 0, 0.03, 0.08, 0.2, 0.5, 0.3, 0.1, 0.04, 0, 0.05, 0.15, 0.4, 0.8, 0.2, 0]
             // One segment, revised then closed, as the recogniser reports a sentence with a hesitation.
             let heard: [Int: (text: String, end: Double, final: Bool)] = [
-                2: ("Let's, um,", 1.2, false),
-                6: ("Let's, um, ship it", 2.4, true)
+                2: ("Let's, um, ask Quen to", 1.2, false),
+                6: ("Let's, um, ask Quen to ship it", 2.4, true)
             ]
             var index = 0
             while !Task.isCancelled {

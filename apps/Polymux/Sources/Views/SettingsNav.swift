@@ -199,6 +199,11 @@ struct SettingsEntry: Identifiable {
             add("Onboarding", ["System permissions", "Manage permissions", "Run Setup Again"])
             #endif
             add("Connections", Connections.available.map(Connections.title))
+        case .voice:
+            add("Live voice", ["Provider", "Model", "Voice name", "Fallbacks", "Voice language"])
+            add("Dictation", ["Dictation language", "Filler words", "Smart spacing", "Spoken symbols", "Spoken formatting", "Output fixes", "On-device polish"])
+            add("Dictionary", ["Sounds like", "Add dictionary word"])
+            add("Recognition", ["Engine", "Apple Speech", "Listening for", "Multilingual"])
         case .network:
             add("Networks", ["Join network"])
             if ServerHost.shared.available { add("This Mac", ["Run a server here"]) }
@@ -206,12 +211,13 @@ struct SettingsEntry: Identifiable {
             add("Default model", ["Model", "Reasoning"])
             add("Providers")
             add("Generation", ["Image", "Video"])
-            add("Voice", ["Provider", "Model", "Fallbacks", "Language"])
         case .updates:
             #if os(macOS)
             add("Updates", ["Check automatically"])
             #endif
             add("Version", ["Server channel", "Nightly", "Stable"])
+        case .shortcuts:
+            add("Shortcuts", AppShortcutAction.allCases.map(\.title))
         case .vault, .plugins: break
         }
         return list

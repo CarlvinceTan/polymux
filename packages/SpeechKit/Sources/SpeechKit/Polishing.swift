@@ -3,6 +3,10 @@ import FoundationModels
 
 /// Fixes punctuation and obvious mishears in dictated text on-device; nil when unavailable.
 public enum DictationPolish {
+    public static var isAvailable: Bool {
+        if case .available = SystemLanguageModel.default.availability { true } else { false }
+    }
+
     public static func run(_ text: String) async -> String? {
         let model = SystemLanguageModel.default
         guard case .available = model.availability, text.count > 3 else { return nil }

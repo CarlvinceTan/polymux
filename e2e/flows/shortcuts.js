@@ -1,0 +1,20 @@
+// A remapped shortcut is saved, runs its command, and resets with the other shortcuts.
+const app = await cua.getApp(APP);
+await app.click({ role: "button", name: "Settings" });
+await app.waitFor({ role: "button", name: "Shortcuts", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Shortcuts" });
+await app.waitFor({ role: "button", name: "Search shortcut", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Search shortcut" });
+await app.pressKey("ctrl+alt+j");
+await app.waitFor({ role: "button", name: "Search shortcut", value: "⌃⌥J", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Close Settings" });
+await app.pressKey("ctrl+alt+j");
+await app.waitFor({ role: "textfield", name: "Search everything", timeout_ms: 5000 });
+await app.pressKey("escape");
+await app.waitFor({ role: "button", name: "Settings", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Settings" });
+await app.click({ role: "button", name: "Shortcuts" });
+await app.click({ role: "button", name: "Reset shortcuts" });
+await app.waitFor({ role: "button", name: "Search shortcut", value: "⌘K", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Close Settings" });
+return "ok";

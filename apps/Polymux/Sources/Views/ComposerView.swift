@@ -62,6 +62,7 @@ struct ComposerView: View {
     private var motion: Animation? { Motion.quick.unless(reduceMotion) }
     @State private var dictation = DictationInput()
     @State private var dictationDraft = DictationDraft()
+    @State private var dictationSettings = DictationSettings.shared
     @State private var ignoresDictation = false
     @State private var dictated: Range<Int>?
     @State private var polishing = false
@@ -605,7 +606,8 @@ struct ComposerView: View {
         ignoresDictation = false
         dictationDraft.stop()
         dictated = nil
-        dictation.setVocabulary(vocabularyNames)
+        dictation.configure(dictationSettings.options)
+        dictation.setVocabulary(Vocabulary.bias(dictationSettings.vocabulary, names: vocabularyNames))
         dictation.start { value in
             guard !ignoresDictation else { return }
             if let result = dictationDraft.update(value.text, start: value.start, final: value.final,
@@ -621,6 +623,19 @@ struct ComposerView: View {
         }
     }
 
+    /// A dictation mid-sentence keeps its lowercase opening; after punctuation it starts capitalised.
+    private func startsSentence(in text: String, at offset: Int) -> Bool {
+        guard offset > 0 else { return true }
+        var index = String.Index(utf16Offset: min(offset, text.utf16.count), in: text)
+        while index > text.startIndex {
+            index = text.index(before: index)
+            let character = text[index]
+            if character.isWhitespace || "”’)]}".contains(character) { continue }
+            return ".!?".contains(character)
+        }
+        return true
+    }
+
     private func stopDictation(polish: Bool = false) async {
         await dictation.stop()
         dictationDraft.stop()
@@ -630,11 +645,24 @@ struct ComposerView: View {
         let utf16 = Array(before.utf16)
         guard span.upperBound <= utf16.count else { return }
         let raw = String(decoding: utf16[span], as: UTF16.self)
-        polishing = true
+        let options = dictationSettings.options
+        polishing = options.polish
         defer { polishing = false }
-        // Hesitations leave deterministically; the model polish may add nothing.
-        let cleaned = FillerWords.apply(raw)
-        let final = await DictationPolish.run(cleaned) ?? cleaned
+        // Deterministic fixes always run; the on-device model only adds to them.
+        let cleaned = DictationText.clean(raw, options: options, vocabulary: dictationSettings.vocabulary,
+                                          capitalizeStart: startsSentence(in: before, at: span.lowerBound))
+        var final = cleaned
+        if options.polish {
+            final = await DictationPolish.run(cleaned) ?? cleaned
+            final = Vocabulary.replace(final, entries: dictationSettings.vocabulary)
+        }
+        if options.smartSpacing {
+            let lower = String.Index(utf16Offset: span.lowerBound, in: before)
+            let upper = String.Index(utf16Offset: span.upperBound, in: before)
+            let beforeCharacter = lower > before.startIndex ? before[before.index(before: lower)] : nil
+            let afterCharacter = upper < before.endIndex ? before[upper] : nil
+            final = DictationText.spaced(final, before: beforeCharacter, after: afterCharacter)
+        }
         // Apply only if the draft is untouched, so edits made meanwhile are never overwritten.
         guard final != raw, text == before else { return }
         var updated = Array(utf16)

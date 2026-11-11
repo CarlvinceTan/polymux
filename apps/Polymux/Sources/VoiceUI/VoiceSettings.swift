@@ -19,8 +19,9 @@ struct VoiceSettings: View {
                 SettingsPicker("Model", selection: binding(\.liveModel) { SettingsPatch(liveModel: $0) },
                                options: models(settings).map { ($0, $0) })
                 .accessibilityLabel("Voice model")
-                SettingsPicker("Voice", selection: binding(\.liveVoice) { SettingsPatch(liveVoice: $0) },
+                SettingsPicker("Voice name", selection: binding(\.liveVoice) { SettingsPatch(liveVoice: $0) },
                                options: (Self.voices[settings.liveProvider] ?? []).map { ($0.capitalized, $0) })
+                    .accessibilityLabel("Voice name")
                 Button(action: editFallbacks) {
                     HStack {
                         Text("Fallbacks").lineLimit(1).layoutPriority(1)
@@ -32,14 +33,15 @@ struct VoiceSettings: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Voice fallbacks")
-                SettingsPicker("Language", selection: binding(\.voiceLanguage) { SettingsPatch(voiceLanguage: $0) },
+                SettingsPicker("Voice language", selection: binding(\.voiceLanguage) { SettingsPatch(voiceLanguage: $0) },
                                options: [("System", "")] + Self.languages.map { (VoiceConfig.language($0), $0) })
+                    .accessibilityLabel("Voice language")
                 if !settings.speechKeys.contains(settings.liveProvider) {
                     Text("No \(settings.liveProvider == "openai" ? "OpenAI" : "Gemini") provider yet.")
                         .font(.footnote).foregroundStyle(.muted)
                 }
             } header: {
-                SectionHeader("Voice", symbol: "waveform")
+                SectionHeader("Live voice", symbol: "waveform")
             }
             .panelRow()
         }

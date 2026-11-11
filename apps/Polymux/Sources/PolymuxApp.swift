@@ -560,12 +560,16 @@ struct ConnectionView: View {
         Form {
             switch category {
             case .general: generalSections
+            case .voice:
+                if let settings {
+                    VoicePane(store: settings, providers: providers) { editingVoice = true }
+                }
             case .models:
                 ProviderSettings(client: client, settings: settings) { providerTarget = ProviderTarget(provider: $0) }
                 if let settings { MediaSettings(store: settings) { editingMedia = $0 } }
-                if let settings { VoiceSettings(store: settings, providers: providers) { editingVoice = true } }
             case .vault, .plugins, .network: EmptyView()
             case .updates: UpdatesSettings(network: network, settings: settings)
+            case .shortcuts: ShortcutsSettings()
             }
         }
         .settingsForm()
@@ -649,16 +653,26 @@ private struct ProviderTarget {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, network, models, vault, plugins, updates
+    case general, voice, models, network, vault, plugins, updates, shortcuts
+
+    static var allCases: [SettingsTab] {
+        #if os(macOS)
+        [.general, .voice, .models, .network, .vault, .plugins, .updates, .shortcuts]
+        #else
+        [.general, .voice, .models, .network, .vault, .plugins, .updates]
+        #endif
+    }
 
     var id: String { rawValue }
 
     var title: String { rawValue.capitalized }
 
-    /// UI checks open Settings at launch: --verify-network, or its page with --verify-network-page.
+    /// UI checks open Settings at launch: --verify-network, or its page with --verify-network-page;
+    /// --verify-voice opens the Voice tab.
     static var verifying: SettingsTab? {
         #if DEBUG
-        CommandLine.arguments.contains("--verify-network") || verifiesPage ? .network : nil
+        if CommandLine.arguments.contains("--verify-voice") { return .voice }
+        return CommandLine.arguments.contains("--verify-network") || verifiesPage ? .network : nil
         #else
         nil
         #endif
@@ -676,11 +690,13 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: Image {
         switch self {
         case .general: Image(systemName: "gearshape.fill")
+        case .voice: Image(systemName: "waveform")
         case .network: Image(systemName: "network")
         case .models: Image(systemName: "cpu.fill")
         case .vault: Image(systemName: "lock.fill")
         case .plugins: Image("plug")
         case .updates: Image(systemName: "arrow.down.circle.fill")
+        case .shortcuts: Image(systemName: "keyboard")
         }
     }
 
@@ -688,11 +704,13 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .general: .gray
+        case .voice: .pink
         case .network: .blue
         case .models: .purple
         case .vault: .green
         case .plugins: .orange
         case .updates: .red
+        case .shortcuts: .teal
         }
     }
 }
@@ -726,24 +744,29 @@ private struct SettingsCommands: Commands {
     @FocusedValue(\.searchPanel) private var search
     @FocusedValue(\.findInChat) private var find
     @FocusedValue(\.toggleSidebar) private var sidebar
+    @State private var shortcuts = ShortcutStore.shared
 
     var body: some Commands {
         CommandGroup(replacing: .sidebar) {
             Button("Toggle Sidebar") { sidebar?() }
-                .keyboardShortcut("s", modifiers: [.control, .command])
+                .keyboardShortcut(shortcuts.key(.toggleSidebar).keyEquivalent,
+                                  modifiers: shortcuts.key(.toggleSidebar).eventModifiers)
                 .disabled(sidebar == nil)
         }
         CommandGroup(after: .textEditing) {
             Button("Search…") { search?.wrappedValue = true }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut(shortcuts.key(.search).keyEquivalent,
+                                  modifiers: shortcuts.key(.search).eventModifiers)
                 .disabled(search == nil)
             Button("Find in Chat") { find?() }
-                .keyboardShortcut("f", modifiers: .command)
+                .keyboardShortcut(shortcuts.key(.find).keyEquivalent,
+                                  modifiers: shortcuts.key(.find).eventModifiers)
                 .disabled(find == nil)
         }
         CommandGroup(replacing: .appSettings) {
             Button("Settings…") { settings?.wrappedValue = true }
-                .keyboardShortcut(",", modifiers: .command)
+                .keyboardShortcut(shortcuts.key(.settings).keyEquivalent,
+                                  modifiers: shortcuts.key(.settings).eventModifiers)
                 .disabled(settings == nil)
         }
     }
