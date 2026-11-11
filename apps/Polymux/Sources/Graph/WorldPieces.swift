@@ -777,12 +777,14 @@ struct WorldTrails: View {
             } else {
                 // Whatever else, nothing runs in a straight line: a curve keeps the map from reading as wire.
                 let path = WorldMetrics.arc(from, to).path
-                layer.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: flying ? 2 : 1.5, lineCap: .round, dash: [3, 6]))
+                layer.stroke(path, with: .color(.black.opacity(0.12)), style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                layer.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 5]))
                 guard flying else { continue }
-                let phase = reducedMotion ? 0.6 : (seconds / Self.trip + Double(index) * 0.37).truncatingRemainder(dividingBy: 1)
-                let at = point(path, at: trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase)
                 // On land the same cargo travels by cart, so work on one island still reads as moving.
-                cart(&layer, at: at, colour: color)
+                let end = trail.wire.direction == WorkWireDirection.back ? from : to
+                let start = trail.wire.direction == WorkWireDirection.back ? to : from
+                let control = CGPoint(x: (start.x + end.x) / 2, y: min(start.y, end.y) - max(40, hypot(end.x - start.x, end.y - start.y) * 0.26))
+                let at = WorldMotion.position(WorldRoute(from: start, control: control, to: end), seconds: seconds, index: index, still: reducedMotion)
             }
         }
         for handoff in handoffs {
@@ -860,12 +862,21 @@ struct WorldTrails: View {
     private func cart(_ context: inout GraphicsContext, at point: CGPoint, colour: Color) {
         var layer = context
         layer.translateBy(x: point.x, y: point.y)
-        let box = CGRect(x: -9, y: -13, width: 20, height: 11)
-        layer.fill(Path(roundedRect: box, cornerRadius: 2), with: .color(colour))
-        layer.stroke(Path(roundedRect: box, cornerRadius: 2), with: .color(.white.opacity(0.8)), lineWidth: 1)
-        for dx in [-5.0, 5.0] {
-            layer.fill(Path(ellipseIn: CGRect(x: dx - 3.2, y: 0, width: 6.4, height: 6.4)), with: .color(Color(white: 0.28)))
-            layer.stroke(Path(ellipseIn: CGRect(x: dx - 3.2, y: 0, width: 6.4, height: 6.4)), with: .color(.white.opacity(0.7)), lineWidth: 1)
+        // A shadow first, which is what makes it sit on the ground instead of floating over it.
+        layer.fill(Path(ellipseIn: CGRect(x: -13, y: 3, width: 26, height: 6)), with: .color(.black.opacity(0.18)))
+        let box = CGRect(x: -13, y: -22, width: 28, height: 17)
+        layer.fill(Path(roundedRect: box, cornerRadius: 3), with: .color(colour))
+        layer.stroke(Path(roundedRect: box, cornerRadius: 3), with: .color(.white.opacity(0.9)), lineWidth: 1.5)
+        // Slats on the crate side.
+        for offset in stride(from: box.minX + 4, to: box.maxX - 3, by: 5) {
+            var slat = Path()
+            slat.move(to: CGPoint(x: offset, y: box.minY + 3))
+            slat.addLine(to: CGPoint(x: offset, y: box.maxY - 3))
+            layer.stroke(slat, with: .color(.white.opacity(0.35)), lineWidth: 1)
+        }
+        for dx in [-7.0, 7.0] {
+            layer.fill(Path(ellipseIn: CGRect(x: dx - 4.5, y: -2, width: 9, height: 9)), with: .color(Color(white: 0.26)))
+            layer.stroke(Path(ellipseIn: CGRect(x: dx - 4.5, y: -2, width: 9, height: 9)), with: .color(.white.opacity(0.85)), lineWidth: 1.4)
         }
     }
 
