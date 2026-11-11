@@ -805,7 +805,7 @@ struct WorldTrails: View {
                 let forward = trail.wire.direction != WorkWireDirection.back
                 let start = pad(trail.from, fallback: from, forward: forward)
                 let end = pad(trail.to, fallback: to, forward: forward)
-                let lane = CGFloat((index % 3) - 1) * 8
+                let lane = CGFloat((index % 3) - 1) * 20
                 let control = CGPoint(x: (start.x + end.x) / 2, y: max(start.y, end.y) + max(46, hypot(end.x - start.x, end.y - start.y) * 0.22) + lane)
                 let at = WorldMotion.position(WorldRoute(from: start, control: control, to: end), seconds: seconds, index: index, still: reducedMotion)
                 if CommandLine.arguments.contains("--verify-graph-trace") {
@@ -900,25 +900,17 @@ struct WorldTrails: View {
         return CGPoint(x: foot.x, y: foot.y - 14)
     }
 
-    /// A two-wheeled cart with a crate aboard.
+    /// A two-wheeled cart on the ground, drawn in the same isometric light as the buildings.
     private func cart(_ context: inout GraphicsContext, at point: CGPoint, colour: Color) {
-        var layer = context
-        layer.translateBy(x: point.x, y: point.y)
-        // A shadow first, which is what makes it sit on the ground instead of floating over it.
-        layer.fill(Path(ellipseIn: CGRect(x: -13, y: 3, width: 26, height: 6)), with: .color(.black.opacity(0.18)))
-        let box = CGRect(x: -13, y: -22, width: 28, height: 17)
-        layer.fill(Path(roundedRect: box, cornerRadius: 3), with: .color(colour))
-        layer.stroke(Path(roundedRect: box, cornerRadius: 3), with: .color(.white.opacity(0.9)), lineWidth: 1.5)
-        // Slats on the crate side.
-        for offset in stride(from: box.minX + 4, to: box.maxX - 3, by: 5) {
-            var slat = Path()
-            slat.move(to: CGPoint(x: offset, y: box.minY + 3))
-            slat.addLine(to: CGPoint(x: offset, y: box.maxY - 3))
-            layer.stroke(slat, with: .color(.white.opacity(0.35)), lineWidth: 1)
-        }
-        for dx in [-7.0, 7.0] {
-            layer.fill(Path(ellipseIn: CGRect(x: dx - 4.5, y: -2, width: 9, height: 9)), with: .color(Color(white: 0.26)))
-            layer.stroke(Path(ellipseIn: CGRect(x: dx - 4.5, y: -2, width: 9, height: 9)), with: .color(.white.opacity(0.85)), lineWidth: 1.4)
+        var iso = Iso(context: context, origin: point)
+        // Its shadow, then the body with a lid, then the wheels: the same three cues the buildings use.
+        iso.shadow(i: 0, j: 0, radius: 9)
+        let wood = Color(red: 0.52, green: 0.33, blue: 0.2)
+        iso.box(i: 0, j: 0, a: 14, b: 20, z: 4, h: 11, color: colour.mix(with: wood, by: 0.35))
+        iso.box(i: 0, j: 0, a: 16, b: 22, z: 15, h: 3, color: colour.mix(with: .white, by: 0.2))
+        for side in [-6.0, 6.0] {
+            let wheel = iso.point(side, side, 3)
+            context.fill(Path(ellipseIn: CGRect(x: wheel.x - 4, y: wheel.y - 1.5, width: 8, height: 7)), with: .color(Color(white: 0.24)))
         }
     }
 
