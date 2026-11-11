@@ -24,6 +24,11 @@ func Polymux() (string, error) {
 	return text("polymux/SKILL.md")
 }
 
+// BotCreator returns the bundled guide to designing bots.
+func BotCreator() (string, error) {
+	return text("bot-creator/SKILL.md")
+}
+
 // Report returns the bundled bug-report and feedback skill.
 func Report() (string, error) {
 	return text("report/SKILL.md")

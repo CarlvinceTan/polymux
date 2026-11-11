@@ -163,7 +163,7 @@ func skillPrompt(prompt string, d Definition, canRead bool, installed []skills.S
 	how := "read its file"
 	if !canRead {
 		listed, how = nil, "load it with read_skill"
-		for _, bundled := range []func() (string, error){skills.Polymux, skills.Report} {
+		for _, bundled := range []func() (string, error){skills.Polymux, skills.BotCreator, skills.Report} {
 			text, err := bundled()
 			if err != nil {
 				return "", err
