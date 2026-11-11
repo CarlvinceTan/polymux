@@ -754,6 +754,8 @@ struct WorldTrails: View {
     }
 
     private func draw(_ context: inout GraphicsContext, now: Date) {
+        let started = CFAbsoluteTimeGetCurrent()
+        defer { AtlasFrameCost.shared.record(CFAbsoluteTimeGetCurrent() - started) }
         let seconds = now.timeIntervalSinceReferenceDate
         #if DEBUG
         if CommandLine.arguments.contains("--verify-graph-trace") {
@@ -804,7 +806,7 @@ struct WorldTrails: View {
                 let start = pad(trail.from, fallback: from, forward: forward)
                 let end = pad(trail.to, fallback: to, forward: forward)
                 let lane = CGFloat((index % 3) - 1) * 8
-                let control = CGPoint(x: (start.x + end.x) / 2, y: min(start.y, end.y) - max(60, hypot(end.x - start.x, end.y - start.y) * 0.3) + lane)
+                let control = CGPoint(x: (start.x + end.x) / 2, y: max(start.y, end.y) + max(46, hypot(end.x - start.x, end.y - start.y) * 0.22) + lane)
                 let at = WorldMotion.position(WorldRoute(from: start, control: control, to: end), seconds: seconds, index: index, still: reducedMotion)
                 if CommandLine.arguments.contains("--verify-graph-trace") {
                     print("atlas cart \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
@@ -969,3 +971,23 @@ struct WorldTrails: View {
     }
 }
 #endif
+
+
+/// Frames the moving layer draws, and what they cost, so smoothness can be measured rather than guessed.
+final class AtlasFrameCost: @unchecked Sendable {
+    static let shared = AtlasFrameCost()
+    private var frames = 0
+    private var total = 0.0
+    private var worst = 0.0
+    private let lock = NSLock()
+
+    func record(_ seconds: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        frames += 1
+        total += seconds
+        worst = max(worst, seconds)
+        guard frames % 120 == 0, CommandLine.arguments.contains("--verify-graph-trace") else { return }
+        print(String(format: "atlas frames %d avg=%.2fms worst=%.2fms", frames, total / Double(frames) * 1000, worst * 1000))
+    }
+}
