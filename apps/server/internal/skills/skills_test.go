@@ -20,6 +20,9 @@ func TestSkills(t *testing.T) {
 	if !strings.Contains(guide, "name: polymux") {
 		t.Fatal("polymux skill missing its name")
 	}
+	if !strings.Contains(guide, "bundled bot-creator skill") {
+		t.Fatal("polymux skill must point at bot-creator")
+	}
 	for _, marker := range []string{"gh issue create", "{{REPO}}", IssueRepo, "explicit confirmation in chat"} {
 		if strings.Contains(guide, marker) {
 			t.Fatalf("polymux skill must point at the report skill without filing instructions, found %q", marker)
@@ -64,7 +67,7 @@ func TestFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{cardsFile, "plugin-creator/SKILL.md", "polymux/SKILL.md", "report/SKILL.md", "skill-creator/LICENSE.txt", "skill-creator/SKILL.md"}
+	want := []string{"bot-creator/SKILL.md", cardsFile, "plugin-creator/SKILL.md", "polymux/SKILL.md", "report/SKILL.md", "skill-creator/LICENSE.txt", "skill-creator/SKILL.md"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("embedded files = %v, want %v", paths, want)
 	}
@@ -76,7 +79,7 @@ func TestInstallListsSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(installed) != 5 {
+	if len(installed) != 6 {
 		t.Fatalf("installed %d skills", len(installed))
 	}
 	for _, skill := range installed {

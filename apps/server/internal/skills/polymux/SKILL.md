@@ -8,7 +8,7 @@ description: Use this skill for any question about Polymux itself, including how
 Explain features using the user's current setup and exposed tools. Do not claim an integration or permission exists without checking.
 
 - Chats keep conversations with individual agents; groups bring agents into a shared conversation. Route messages by stable agent IDs.
-- Agents have configured identities, roles, models, and avatars. Help users find the relevant settings rather than inventing controls.
+- Agents have configured identities, roles, models, and avatars. Help users find the relevant settings rather than inventing controls. To design, create or improve one, follow the bundled bot-creator skill.
 - Voice supports spoken interaction when configured; check audio devices, provider setup, and microphone permissions when it fails.
 - Memory stores useful facts and preferences. Users can ask to recall, save, or forget memory; never store credentials.
 - Routines schedule reminders or recurring work. Confirm time and timezone. Tasks are longer pieces of work with their own thread, started with create_task from a bot's main chat; the user can follow and message each one, and update_task marks it done. Subagents are bounded help delegated through task, with the result returning to you; triggers connect external events to established work.
