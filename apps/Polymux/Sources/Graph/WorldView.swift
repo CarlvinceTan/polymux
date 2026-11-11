@@ -321,7 +321,7 @@ struct WorldView: View {
             guard WorldActorView.tag(actor) != nil else { continue }
             let cell = WorldMetrics.cell(actor, in: world, spread: unit / camera.scale)
             let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))
-            let width = min(190, Double((WorldActorView.tag(actor)?.text ?? "").count) * 6.6 + 42)
+            let width = min(190, Double((WorldActorView.tag(actor)?.text ?? "").count) * 7.4 + 54)
             var lift = 0.0
             var box = CGRect(x: feet.x - width / 2, y: feet.y - WorldMetrics.avatar * unit - 29, width: width, height: 24)
             while taken.contains(where: { $0.insetBy(dx: -4, dy: -3).intersects(box) }), lift < 108 {
@@ -388,7 +388,7 @@ struct WorldView: View {
             // Its line already says who it's for, so the tag only says what it is. Picked, it says all of it.
             let whole = picked == "trail:" + trail.id
             let text = whole ? Self.caption(trail, in: world) : trail.wire.label?.isEmpty == false ? trail.wire.label ?? "" : GraphLook.cargoTitle(trail.wire.carries) ?? "Handoff"
-            let width = min(190, Double(text.count) * 6.6 + 42)
+            let width = min(190, Double(text.count) * 7.4 + 54)
             // Below the arc, where a head's own tag never reaches.
             var box = CGRect(x: middle.x - width / 2, y: middle.y + 14, width: width, height: 24)
             while taken.contains(where: { $0.insetBy(dx: -4, dy: -3).intersects(box) }) { box.origin.y -= 10 }
