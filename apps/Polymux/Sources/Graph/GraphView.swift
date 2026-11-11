@@ -2,7 +2,7 @@ import SwiftUI
 import GraphKit
 import PolymuxKit
 
-/// The Graph Visualiser: every bot's work, or one chat's. It only looks; nothing here starts or changes work.
+/// The Atlas: every bot's work, or one chat's. It only looks; nothing here starts or changes work.
 struct GraphView: View {
     let plugin: Plugin
     /// The chat on show, or nil for everything.

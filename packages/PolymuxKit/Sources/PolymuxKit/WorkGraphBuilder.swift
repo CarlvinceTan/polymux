@@ -254,7 +254,7 @@ public struct WorkGraphBuilder {
     ]
 
     private static func app(_ tool: String) -> App? {
-        if quiet.contains(tool) || tool.hasPrefix("graph_visualiser__") { return nil }
+        if quiet.contains(tool) || tool.hasPrefix("atlas__") { return nil }
         if let range = tool.range(of: "__") {
             let name = String(tool[..<range.lowerBound])
             return App(key: name, title: name.prefix(1).uppercased() + name.dropFirst(), kind: WorkKind.plugin)

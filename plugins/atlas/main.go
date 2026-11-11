@@ -1,4 +1,4 @@
-// polymux-graph-visualiser is the Graph Visualiser plugin's service. It keeps the work agents
+// polymux-atlas is the Atlas plugin's service. It keeps the work agents
 // report and reads repositories and GitHub, so the app can draw them beside Polymux's own activity.
 package main
 
@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/CarlvinceTan/polymux/plugins/graph-visualiser/internal/contract"
+	"github.com/CarlvinceTan/polymux/plugins/atlas/internal/contract"
 )
 
 const bodyLimit = 1 << 20
@@ -38,7 +38,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := s.run(ctx, os.Getenv("POLYMUX_PLUGIN_PORT"), os.Getenv("POLYMUX_PLUGIN_TOKEN")); err != nil {
-		log.Error("polymux-graph-visualiser stopped", "error", err)
+		log.Error("polymux-atlas stopped", "error", err)
 		os.Exit(1)
 	}
 }

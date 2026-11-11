@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CarlvinceTan/polymux/plugins/graph-visualiser/internal/contract"
+	"github.com/CarlvinceTan/polymux/plugins/atlas/internal/contract"
 )
 
 const (

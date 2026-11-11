@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Drive a throwaway Polymux server, with the real Graph Visualiser package, from a scripted model.
+"""Drive a throwaway Polymux server, with the real Atlas package, from a scripted model.
 
 GitHub goes through a stand-in gh, so nothing here reaches a real account.
 
-Usage: python3 plugins/graph-visualiser/verify.py
+Usage: python3 plugins/atlas/verify.py
 """
 import json
 import os
@@ -22,9 +22,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-WORK = tempfile.mkdtemp(prefix="polymux-graph-")
-NAME = "graph-visualiser"
-REPORT, READ = "graph_visualiser__report_work", "graph_visualiser__read_work"
+WORK = tempfile.mkdtemp(prefix="polymux-atlas-")
+NAME = "atlas"
+REPORT, READ = "atlas__report_work", "atlas__read_work"
 API, DATA, HEADERS = "", "", {}
 GH_LOG = os.path.join(WORK, "gh.log")
 STAND_IN = f"""#!/bin/sh
@@ -179,7 +179,7 @@ def checks():
     check("the marketplace lists it as both", market and market[0]["kind"] == "both", market)
     api("POST", "/plugins", {"name": NAME})
     plugin = wait("install", lambda: next((p for p in api("GET", "/plugins")["installed"] if p["name"] == NAME and p["state"] == "ready"), None))
-    check("it's called Graph Visualiser", plugin["title"] == "Graph Visualiser", plugin)
+    check("it's called Atlas", plugin["title"] == "Atlas", plugin)
     check("it installs as both", plugin["kind"] == "both" and plugin["surface"] == NAME, plugin)
     layout = api("GET", "/plugins")["layout"]
     check("it gets a chat button, not a switcher tab", NAME not in layout["switcher"] and [NAME] in layout["buttons"], layout)
@@ -256,7 +256,7 @@ def checks():
 
     print("a stopped service", flush=True)
     folder = os.path.join(DATA, "plugins", NAME)
-    pid = int(subprocess.check_output(["pgrep", "-f", folder + "/package/bin/polymux-graph-visualiser"], text=True).split()[0])
+    pid = int(subprocess.check_output(["pgrep", "-f", folder + "/package/bin/polymux-atlas"], text=True).split()[0])
     os.kill(pid, signal.SIGSTOP)
     try:
         answer = run(linus, REPORT, {"nodes": [{"id": "lost", "title": "Lost"}]})

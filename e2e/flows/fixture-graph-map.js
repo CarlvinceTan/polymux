@@ -2,8 +2,8 @@
 // The map: whoever's working stands at their step, a step opens on what it made and each of those opens on its own,
 // a district's banner lists its steps, a handoff says what it is, and nothing here starts or edits work.
 const app = await cua.getApp(APP);
-await app.waitFor({ role: "button", name: "Graph Visualiser" });
-await app.click({ role: "button", name: "Graph Visualiser" });
+await app.waitFor({ role: "button", name: "Atlas" });
+await app.click({ role: "button", name: "Atlas" });
 await app.waitFor({ role: "button", name: "Show diagram" });
 await app.waitFor({ role: "button", name: "Characters, Step" });
 await app.waitFor({ role: "button", name: "Milo, Drawing Robo" });

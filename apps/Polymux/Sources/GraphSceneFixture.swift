@@ -4,7 +4,7 @@ import Foundation
 import ImageIO
 import PolymuxKit
 
-/// Larger scenes for looking at the Graph Visualiser: a film being made, and a crowded day.
+/// Larger scenes for looking at the Atlas: a film being made, and a crowded day.
 enum GraphSceneFixture {
     static let video = CommandLine.arguments.contains("--verify-graph-video")
     static let crowd = CommandLine.arguments.contains("--verify-graph-crowd")

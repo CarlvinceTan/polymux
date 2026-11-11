@@ -3,7 +3,7 @@
 const app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Plugins" });
-const rows = await app.query({ role: "button", name: "Graph Visualiser" });
+const rows = await app.query({ role: "button", name: "Atlas" });
 await app.click(rows[rows.length - 1].element_token);
 await app.waitFor({ text: "Global and Scoped" });
 await app.waitFor({ text: "Repositories", gone: false });

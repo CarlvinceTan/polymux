@@ -8,7 +8,7 @@ The app and server ship no plugin code. A plugin is a versioned package listed i
 | --- | --- | --- | --- |
 | Applies to | Everything | The chats it's active in, direct or group | Everything, with a button in the chats it's active in |
 | UI | A switcher entry that replaces the sidebar and content | A button left of the call button, opening the side panel; optional | A row above the chats that fills the content beside them, plus the Scoped button |
-| Example | Hub | A chat's notes | Graph Visualiser |
+| Example | Hub | A chat's notes | Atlas |
 
 The switcher only appears once a Global plugin can be shown or a second server is known, and always keeps Chats. With more than one server it lists each server's Chats, named after the server, and its Global plugins, and picking one moves the app to that server. iPhone's icons show the server's initial instead, or a number when initials clash. It's the native tab bar on iPhone and sits at the foot of the sidebar elsewhere. The sidebar's Search and + buttons stay in place and act on the plugin on show. Unread badges on the switcher can be turned off in Settings. Scoped buttons share one layout, and each chat shows only those active in it. On iPhone they collapse into a menu. The call button, the sidebar button and the side panel's close button belong to the app.
 
@@ -131,9 +131,9 @@ A transport adds `"provides": ["transport"]` and, if it has options, `"settings"
 
 [`plugins/`](../plugins/) holds the official plugins as one Go module, kept out of `go.work` so a plugin's dependencies can't change the server's build. Its [README](../plugins/README.md) covers packaging and releasing.
 
-## Graph Visualiser
+## Atlas
 
-[`graph-visualiser`](../plugins/graph-visualiser) shows work as a map: who's working, where, on what, and what's passing between them. It's a view: nothing on it starts or changes work.
+[`atlas`](../plugins/atlas) shows work as a map: who's working, where, on what, and what's passing between them. It's a view: nothing on it starts or changes work.
 
 - **Data**: `WorkNode` and `WorkWire` in the schema are all it reads. A node's `kind` decides how it's drawn ([`WorkKind`](../packages/PolymuxKit/Sources/PolymuxKit/WorkKind.swift)), and an unknown kind still draws as a plain item, so new kinds can ship without breaking older apps. A wire's `carries` says what moves along it, and a node's `preview` names a picture of it.
 - **Sources**: the app builds bots, handoffs, delegated tasks and tool use from `GET /work` (`WorkGraphBuilder`). The service adds repositories and GitHub, read with `git` and `gh`, and whatever agents report through its `report_work` tool. It serves previews as small JPEGs from `GET /preview`, so the app never reads a reported path itself.

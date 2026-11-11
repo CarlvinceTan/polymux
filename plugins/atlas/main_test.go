@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CarlvinceTan/polymux/plugins/graph-visualiser/internal/contract"
+	"github.com/CarlvinceTan/polymux/plugins/atlas/internal/contract"
 )
 
 func started(t *testing.T) (*service, http.Handler) {

@@ -6,7 +6,7 @@ import PolymuxKit
 final class PluginFixture: @unchecked Sendable {
     private let lock = NSLock()
     private var layout = PluginLayout(switcher: PluginFixture.graphOn ? ["chats"] : ["chats", "hub"],
-                                      buttons: PluginFixture.webOn ? [["canvas"]] : PluginFixture.graphOn ? [["graph-visualiser"]] : PluginFixture.permissions ? [["permissions"]] : [["notes", "tasks"], ["drive"]])
+                                      buttons: PluginFixture.webOn ? [["canvas"]] : PluginFixture.graphOn ? [["atlas"]] : PluginFixture.permissions ? [["permissions"]] : [["notes", "tasks"], ["drive"]])
     private var installing: String?
     private var rules = PermissionRules()
     private static let permissions = CommandLine.arguments.contains("--verify-permissions")
@@ -35,9 +35,9 @@ final class PluginFixture: @unchecked Sendable {
                version: "0.1.0", kind: PluginKind.scoped, surface: "web", page: "index.html",
                hideClose: CommandLine.arguments.contains("--verify-plugin-noclose"), state: PluginState.ready, source: "Made by Aria", chats: ["t-chief"]),
     ] : PluginFixture.graphOn ? [
-        Plugin(name: "graph-visualiser", title: "Graph Visualiser", description: "See how your bots, people, devices and repositories work together.",
-               symbol: "point.3.connected.trianglepath.dotted", selectedSymbol: "point.3.filled.connected.trianglepath.dotted", version: "0.1.0",
-               kind: PluginKind.both, surface: "graph-visualiser", state: PluginState.ready, source: "example/graph", chats: ["t-chief"]),
+        Plugin(name: "atlas", title: "Atlas", description: "See how your bots, people, devices and repositories work together.",
+               symbol: "map", selectedSymbol: "map.fill", version: "0.1.0",
+               kind: PluginKind.both, surface: "atlas", state: PluginState.ready, source: "example/graph", chats: ["t-chief"]),
     ] : PluginFixture.permissions ? [
         Plugin(name: "permissions", title: "Permissions", description: "Set rules a chat's bots can't break.",
                symbol: "lock.shield", selectedSymbol: "lock.shield.fill", version: "0.1.0", kind: PluginKind.scoped,
@@ -393,10 +393,10 @@ final class PluginFixture: @unchecked Sendable {
             if path == "/work" { return try encoder.encode(Self.work) }
             if path == "/plugins/canvas/ui/index.html" { return Data(Self.page.utf8) }
             if path == "/plugins/canvas/api/ping" { return Data(#"{"answer":"Service answered"}"#.utf8) }
-            if path == "/plugins/graph-visualiser/api/preview" {
+            if path == "/plugins/atlas/api/preview" {
                 return GraphSceneFixture.picture(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value ?? "")
             }
-            if path == "/plugins/graph-visualiser/api/graph" {
+            if path == "/plugins/atlas/api/graph" {
                 // Not a graph, as when the service has stopped and something else answers.
                 if CommandLine.arguments.contains("--verify-graph-down") { return Data("stopped".utf8) }
                 return try encoder.encode(Self.graph)

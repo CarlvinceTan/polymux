@@ -45,8 +45,8 @@ func TestWorkRoute(t *testing.T) {
 }
 
 func TestPluginToolNameIsSafeForModels(t *testing.T) {
-	tool := pluginTool{tool: plugins.AgentTool{Plugin: "graph-visualiser", Tool: plugins.Tool{Name: "report_work"}}}
-	if name := tool.Name(); name != "graph_visualiser__report_work" {
+	tool := pluginTool{tool: plugins.AgentTool{Plugin: "atlas", Tool: plugins.Tool{Name: "report_work"}}}
+	if name := tool.Name(); name != "atlas__report_work" {
 		t.Fatal(name)
 	}
 }

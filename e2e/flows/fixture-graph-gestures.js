@@ -23,8 +23,8 @@ async function moved(title, from, dx, dy) {
   throw new Error(`${title} went to ${frame.x},${frame.y}, not ${from.x + dx},${from.y + dy}`);
 }
 
-await app.waitFor({ role: "button", name: "Graph Visualiser" });
-await app.click({ role: "button", name: "Graph Visualiser" });
+await app.waitFor({ role: "button", name: "Atlas" });
+await app.click({ role: "button", name: "Atlas" });
 // The map comes first; these checks are of the diagram behind it.
 await app.waitFor({ role: "button", name: "Show diagram" });
 await app.click({ role: "button", name: "Show diagram" });

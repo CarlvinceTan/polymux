@@ -3,15 +3,15 @@ import PolymuxKit
 
 /// What each plugin draws. Plugin screens ship with the app; a package only names one.
 @MainActor enum PluginSurface {
-    static let graph = "graph-visualiser"
+    static let atlas = "atlas"
     /// A package's own page, the one surface that doesn't ship with the app.
     static let web = "web"
 
     static var available: Set<String> {
         #if DEBUG
-        if VerifyFixture.enabled { return ["hub", "permissions", graph, web, SampleSurface.name] }
+        if VerifyFixture.enabled { return ["hub", "permissions", atlas, web, SampleSurface.name] }
         #endif
-        return ["hub", "permissions", graph, web]
+        return ["hub", "permissions", atlas, web]
     }
 
     /// A Scoped plugin's content in the side panel. The panel itself stays the app's.
@@ -22,7 +22,7 @@ import PolymuxKit
             let chat = thread.isTask ? thread.agentID : thread.id
             PluginWeb(plugin: plugin, chat: chat, client: session.client, close: close).id(plugin.name + chat)
         }
-        if plugin.surface == graph {
+        if plugin.surface == atlas {
             let chat = thread.isTask ? thread.agentID : thread.id
             GraphView(plugin: plugin, chat: chat, session: session).id(chat)
         }
@@ -33,7 +33,7 @@ import PolymuxKit
 
     /// A both plugin's global view, which fills the content beside the chats.
     @ViewBuilder static func view(_ plugin: Plugin, session: AppSession, openChat: @escaping (String) -> Void) -> some View {
-        if plugin.surface == graph { GraphView(plugin: plugin, chat: nil, session: session, openChat: openChat).id(plugin.name) }
+        if plugin.surface == atlas { GraphView(plugin: plugin, chat: nil, session: session, openChat: openChat).id(plugin.name) }
     }
 
     /// The switcher's count for a tab.

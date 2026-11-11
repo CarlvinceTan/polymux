@@ -1,5 +1,5 @@
 // @fixture --verify-fixture --verify-plugins --verify-graph
-// The Graph Visualiser sits above the chats, shows everything in Full, narrows in Compact,
+// The Atlas sits above the chats, shows everything in Full, narrows in Compact,
 // opens one level at a time, follows a chat from its button, and only ever reads.
 const app = await cua.getApp(APP);
 async function nodes(title) {
@@ -20,12 +20,12 @@ async function hides(title) {
   }
   throw new Error(`${title} never went away`);
 }
-await app.waitFor({ role: "button", name: "Graph Visualiser" });
-const [row] = await app.query({ role: "button", name: "Graph Visualiser" });
+await app.waitFor({ role: "button", name: "Atlas" });
+const [row] = await app.query({ role: "button", name: "Atlas" });
 await shows("Chief");
 const [chief] = await nodes("Chief");
 if (row.frame.y >= chief.frame.y) throw new Error("The global view isn't above the chats");
-await app.click({ role: "button", name: "Graph Visualiser" });
+await app.click({ role: "button", name: "Atlas" });
 // The map comes first; these checks are of the diagram behind it.
 await app.waitFor({ role: "button", name: "Show diagram" });
 await app.click({ role: "button", name: "Show diagram" });
@@ -86,14 +86,14 @@ for (const name of ["Run", "Stop", "Add node", "Draw wire", "Delete node"]) {
 const rows = (await nodes("Chief")).sort((a, b) => a.frame.x - b.frame.x);
 await app.click(rows[0].element_token);
 await app.waitFor({ role: "button", name: "Close side panel", gone: true });
-await app.click({ role: "button", name: "Graph Visualiser", nth: 1 });
+await app.click({ role: "button", name: "Atlas", nth: 1 });
 await app.waitFor({ role: "button", name: "Close side panel" });
 await app.waitFor({ role: "button", name: "Show full view" });
 await shows("Aria");
 await shows("polymux");
 if ((await nodes("Milo")).filter((item) => item.frame.x > rows[0].frame.x + rows[0].frame.w).length) throw new Error("Milo isn't part of this chat");
 await app.click({ role: "button", name: "Close side panel" });
-await app.click({ role: "button", name: "Graph Visualiser", nth: 0 });
+await app.click({ role: "button", name: "Atlas", nth: 0 });
 await app.waitFor({ role: "button", name: "Show full view" });
 await cua.sleep(1500);
 return "ok";

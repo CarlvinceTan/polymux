@@ -1,14 +1,14 @@
 {
-  "name": "graph-visualiser",
-  "title": "Graph Visualiser",
+  "name": "atlas",
+  "title": "Atlas",
   "description": "See how your bots, people, devices and repositories work together.",
-  "symbol": "point.3.connected.trianglepath.dotted",
-  "selectedSymbol": "point.3.filled.connected.trianglepath.dotted",
+  "symbol": "map",
+  "selectedSymbol": "map.fill",
   "version": "0.1.0",
   "kind": "both",
-  "surface": "graph-visualiser",
+  "surface": "atlas",
   "engines": { "plugins": 3 },
-  "service": "bin/polymux-graph-visualiser",
+  "service": "bin/polymux-atlas",
   "skills": ["skills/report-work.md"],
   "provides": ["tools"],
   "settings": [
@@ -18,7 +18,7 @@
   "tools": [
     {
       "name": "report_work",
-      "description": "Add or update what the Graph Visualiser shows. Report work Polymux can't see itself: Claude Code or Codex you started, apps you control and what's in them, and pipelines you run. Use the ID \"me\" for yourself. A node with a parent sits inside that node. A pipeline is a node of kind pipeline holding nodes of kind step, joined in order by wires; give each step a state, put what it made inside it, and add an active wire from \"me\" to the step you're on, labelled with what you're doing.",
+      "description": "Add or update what Atlas shows. Report work Polymux can't see itself: Claude Code or Codex you started, apps you control and what's in them, and pipelines you run. Use the ID \"me\" for yourself. A node with a parent sits inside that node. A pipeline is a node of kind pipeline holding nodes of kind step, joined in order by wires; give each step a state, put what it made inside it, and add an active wire from \"me\" to the step you're on, labelled with what you're doing.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -95,7 +95,7 @@
     },
     {
       "name": "read_work",
-      "description": "List the IDs the Graph Visualiser holds, so a report can link to them, such as a repository you're working in.",
+      "description": "List the IDs Atlas holds, so a report can link to them, such as a repository you're working in.",
       "parameters": { "type": "object", "additionalProperties": false, "properties": {} }
     }
   ]
