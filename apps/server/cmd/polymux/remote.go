@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 )
 
 func remoteURL(value string) (string, error) {
@@ -33,6 +34,23 @@ func remoteListener(address string) (net.Listener, error) {
 		return nil, errors.New("-public-listen must bind a loopback IP:port")
 	}
 	return net.Listen("tcp", address)
+}
+
+// publicListener keeps the tunnel's port steady across restarts, so a tunnel
+// fixed to it keeps reaching the server. Another instance may hold it.
+func publicListener(address string) (net.Listener, error) {
+	if address != "" {
+		return remoteListener(address)
+	}
+	return listenerOrFree("127.0.0.1:7341", "127.0.0.1:0")
+}
+
+func listenerOrFree(preferred, fallback string) (net.Listener, error) {
+	listener, err := remoteListener(preferred)
+	if err == nil || !errors.Is(err, syscall.EADDRINUSE) {
+		return listener, err
+	}
+	return remoteListener(fallback)
 }
 
 // Local proofs must never be reachable through a public tunnel, even with a forged Host.

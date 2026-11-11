@@ -223,6 +223,8 @@ struct NetworkPage: View {
                 } footer: {
                     if let issue = store?.actionIssue ?? store?.issue {
                         Text(issue).font(.footnote).foregroundStyle(.muted)
+                    } else if unreachable, network != nil {
+                        Text("Showing the last known devices.").font(.footnote).foregroundStyle(.muted)
                     }
                 }
                 .panelRow()
@@ -294,16 +296,14 @@ struct NetworkPage: View {
             Button { managing = device } label: {
                 HStack(spacing: 10) {
                     StatusDot(state: status(device))
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(device.title).lineLimit(1).layoutPriority(1)
                             if device.id == network?.current {
                                 Text("This device").font(.subheadline).foregroundStyle(.muted).lineLimit(1)
                             }
                         }
-                        if device.title != device.name {
-                            Text(device.name).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
-                        }
+                        Text(detail(device)).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.right").foregroundStyle(.muted)
@@ -390,6 +390,12 @@ struct NetworkPage: View {
         device.id != network?.current && device.id != network?.host
     }
 
+    /// What a device row shows under its name.
+    private func detail(_ device: NetworkInfo.Device) -> String {
+        [status(device).title, device.title != device.name ? device.name : nil]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
     /// What a device row shows besides its name, for VoiceOver.
     private func details(_ device: NetworkInfo.Device) -> String {
         [device.id == network?.host ? "Server" : nil, status(device).title, device.id == network?.current ? "This device" : nil,
@@ -399,8 +405,12 @@ struct NetworkPage: View {
 
     private func status(_ device: NetworkInfo.Device) -> StatusDot.State {
         if device.paired == false { return .pairing }
-        // The list is from the cache when the server can't be reached, so presence is unknown.
-        if unreachable || store?.issue != nil { return .unknown }
+        // The list is from the cache when the server can't be reached, so show what it last saw.
+        if unreachable || store?.issue != nil {
+            guard let online = network?.online else { return .unknown }
+            let seen = device.id == network?.current || online.contains(device.id)
+            return seen ? .lastOnline : .lastOffline
+        }
         return device.id == network?.current || network?.online?.contains(device.id) == true ? .online : .offline
     }
 

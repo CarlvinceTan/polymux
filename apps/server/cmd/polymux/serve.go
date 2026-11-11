@@ -49,7 +49,7 @@ func runServer(args []string) error {
 	noMDNS := flagSet.Bool("no-mdns", os.Getenv("POLYMUX_NO_MDNS") == "1", "disable Bonjour LAN advertisement")
 	noTunnel := flagSet.Bool("no-tunnel", os.Getenv("POLYMUX_TUNNEL") == "0", "disable pairing from other networks over iroh")
 	publicURL := flagSet.String("public-url", os.Getenv("POLYMUX_PUBLIC_URL"), "HTTPS origin advertised for remote pairing")
-	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341 with -public-url, else a free port for transport plugins)")
+	publicListen := flagSet.String("public-listen", os.Getenv("POLYMUX_PUBLIC_LISTEN"), "loopback listener for the HTTPS tunnel (defaults to 127.0.0.1:7341, or a free port when it is busy)")
 	verify := fixture.Register(flagSet)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -164,15 +164,14 @@ func runServer(args []string) error {
 		return err
 	}
 	defer deviceSocket.Close()
-	publicAddress := *publicListen
-	if publicAddress == "" && *publicURL == "" {
-		publicAddress = "127.0.0.1:0"
-	}
-	publicSocket, err := remoteListener(publicAddress)
+	publicSocket, err := publicListener(*publicListen)
 	if err != nil {
 		return err
 	}
 	defer publicSocket.Close()
+	if *publicListen == "" && publicSocket.Addr().String() != "127.0.0.1:7341" {
+		log.Warn("tunnel port is busy; a tunnel fixed to it won't reach this server", "address", publicSocket.Addr())
+	}
 	deviceServer := &http.Server{Handler: devices, ReadTimeout: 10 * time.Second, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	defer deviceServer.Close()
 	config, err := loadModel(*dir)

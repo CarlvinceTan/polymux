@@ -115,8 +115,10 @@ polymux serve --public-url https://YOUR-HOST \
 ```
 
 Route the tunnel to `http://127.0.0.1:7341`. This dedicated listener excludes local
-proof endpoints. It must stay on loopback. Without `--public-url` it still runs, on a
-free port, for [transport plugins](plugins.md#transports) such as Tailscale. `POLYMUX_PUBLIC_URL` and
+proof endpoints. It must stay on loopback. Without `--public-url` it still runs,
+preferring `127.0.0.1:7341` so a fixed tunnel route keeps working across restarts and
+falling back to a free port if it is taken, for
+[transport plugins](plugins.md#transports) such as Tailscale. `POLYMUX_PUBLIC_URL` and
 `POLYMUX_PUBLIC_LISTEN` provide the same settings for a service manager.
 New pairing links advertise the HTTPS address without an Iroh ticket. Existing
 Iroh pairings remain usable until migrated; `--no-tunnel` disables that transport

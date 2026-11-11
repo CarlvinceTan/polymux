@@ -109,6 +109,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
     private static let providers = ProviderFixture()
     private static let profiles = Profiles()
     private static let profileLoads = ProfileLoads()
+    private static let networkLoads = NetworkLoads()
     private let responseLock = NSLock()
     private var responseTask: Task<Void, Never>?
 
@@ -510,6 +511,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                     data = try JSONEncoder().encode(Settings(appearance: theme))
                 case "network":
                     if CommandLine.arguments.contains("--verify-network-fail") { fail(); return }
+                    if CommandLine.arguments.contains("--verify-network-late-fail"), Self.networkLoads.later() { fail(); return }
                     if CommandLine.arguments.contains("--verify-network-slow") { return }
                     let devices: [[String: Any]] = [
                         ["id": "d-mac", "name": "Home server", "paired": true],
@@ -621,6 +623,19 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
         }
 
         func count(_ path: String) -> Int { lock.withLock { counts[path, default: 0] } }
+    }
+
+    /// Serves the first device list so the next one can fail against a cached copy.
+    private final class NetworkLoads: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+
+        func later() -> Bool {
+            lock.withLock {
+                count += 1
+                return count > 1
+            }
+        }
     }
 
     private final class Profiles: @unchecked Sendable {
