@@ -724,7 +724,8 @@ struct WorldTrails: View {
     private static let flight = 1.2
 
     private var moving: Bool {
-        !reducedMotion && scenePhase == .active && (!handoffs.isEmpty || world.trails.contains { $0.kind != .road && $0.active })
+        // Any trail at all keeps the layer drawing: a paused timeline never even paints its first frame.
+        !reducedMotion && scenePhase == .active && (!handoffs.isEmpty || world.trails.contains { $0.kind != .road })
     }
 
     var body: some View {
@@ -913,3 +914,5 @@ struct WorldTrails: View {
         path.trimmedPath(from: 0, to: min(1, max(0.001, progress))).currentPoint ?? .zero
     }
 }
+
+
