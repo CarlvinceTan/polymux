@@ -15,7 +15,7 @@ import (
 )
 ```
 
-All four use Go 1.27.3. The repository's `go.work` connects them to the server; the server also has relative replacements so it builds with `GOWORK=off` from this checkout. No package release is published by this extraction. After the source is pushed, consumers can pin a commit or a module-specific release tag.
+All four use Go 1.27.4. The repository's `go.work` connects them to the server; the server also has relative replacements so it builds with `GOWORK=off` from this checkout. No package release is published by this extraction. After the source is pushed, consumers can pin a commit or a module-specific release tag.
 
 For a local consumer beside a checkout named `polymux`, use a local replacement:
 

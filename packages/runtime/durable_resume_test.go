@@ -63,6 +63,7 @@ func TestResumeToolRounds(t *testing.T) {
 			if _, err := session.Send(t.Context(), turn("first"), nil); err != nil {
 				t.Fatal(err)
 			}
+			queueTurn(t, session.(*durableSession), "resume")
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			type resumed struct {

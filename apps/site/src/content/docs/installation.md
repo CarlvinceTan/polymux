@@ -15,7 +15,7 @@ Native downloads are published on the [Releases page](/releases/). Until a relea
 ## Requirements
 
 - **Client:** macOS 27 and Xcode 27.
-- **Server:** Go 1.27.3, Git, and a C compiler. Xcode’s command-line tools provide the compiler on macOS.
+- **Server:** Go 1.27.4, Git, and a C compiler. Xcode’s command-line tools provide the compiler on macOS.
 
 ## The Mac app
 

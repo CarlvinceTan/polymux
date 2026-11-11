@@ -7,6 +7,8 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/MichaelKinsy/PiG/ai"
+	// Bedrock is its own provider package since PiG 0.7.0; link it so Settings keeps offering it.
+	_ "github.com/MichaelKinsy/PiG/ai/providers/bedrock"
 )
 
 // builtins are PiG's chat providers by ID, built once.

@@ -68,6 +68,8 @@ test('mobile navigation stays inert when closed and Escape restores the toggle f
 test('documentation navigation opens a closed native dialog and restores focus on close', () => {
   const document = render('Docs', routes.find((route) => route.path === '/docs/').props);
   const button = document.querySelector('.docs-menu-button');
+  // The button is display:none at desktop width, and jsdom 31 will not focus a hidden element.
+  button.style.display = 'block';
   const dialog = document.querySelector('.docs-drawer');
   assert.equal(dialog.open, false);
   runtime.flushSync(() => button.click());
@@ -75,7 +77,8 @@ test('documentation navigation opens a closed native dialog and restores focus o
   assert.equal(dialog.querySelectorAll('nav a').length, 5);
   runtime.flushSync(() => dialog.querySelector('header button').click());
   assert.equal(dialog.open, false);
-  assert.equal(document.activeElement, button);
+  // jsdom 31 returns a fresh wrapper for the same node, so compare node identity.
+  assert.ok(document.activeElement.isSameNode(button), 'focus returns to the menu button');
 });
 
 test('documentation search uses the prepared search index and keyboard shortcut', () => {

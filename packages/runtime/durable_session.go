@@ -21,6 +21,7 @@ import (
 
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/MichaelKinsy/PiG/chord"
 	"github.com/MichaelKinsy/PiG/durable"
 	"github.com/MichaelKinsy/PiG/durable/env"
 	envnode "github.com/MichaelKinsy/PiG/durable/env/node"
@@ -777,7 +778,9 @@ type durableSession struct {
 	emitMu sync.Mutex
 	emit   func(Delta) error
 	// park is set when BeforeTool requests Terminate; AfterTools aborts the in-flight turn.
-	park       atomic.Bool
+	park atomic.Bool
+	// blocked names calls a blocked BeforeTool never started; afterTool still runs for them.
+	blocked    sync.Map
 	clients    []*mcp.Client
 	extensions []*durable.Extension
 	runtime    *DurableRuntime
@@ -849,6 +852,7 @@ func (s *durableSession) hooks() []durable.HookRegistration {
 					if decision.Terminate {
 						s.park.Store(true)
 					}
+					s.blocked.Store(call.ID, struct{}{})
 					return &harness.BeforeToolResult{Block: &reason}, nil
 				}
 				s.report(Delta{Kind: "tool.start", ToolID: call.ID, Tool: call.Name, Brief: toolSummary(call.Name, raw)})
@@ -863,6 +867,9 @@ func (s *durableSession) hooks() []durable.HookRegistration {
 			},
 			AfterTool: func(ctx context.Context, call harness.ToolHookCall, result durable.ToolExecutionResult, api harness.HookApi) (*durable.ToolExecutionResult, error) {
 				if _, ok := s.turnContext(api.ConversationId(), ctx); !ok {
+					return nil, nil
+				}
+				if _, blocked := s.blocked.LoadAndDelete(call.ID); blocked {
 					return nil, nil
 				}
 				s.report(Delta{Kind: "tool.done", ToolID: call.ID, Tool: call.Name, Failed: result.IsError != nil && *result.IsError, Output: toolExcerpt(result.Output)})
@@ -1239,6 +1246,9 @@ func (s *durableSession) replay(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	if settled.State.Outcome == nil || settled.State.Outcome.Status != durable.OutcomeCompleted {
+		if outcome := settled.State.Outcome; outcome != nil && outcome.Error != nil {
+			return Result{}, fmt.Errorf("resume did not finish (%s): %s", outcome.Status, outcome.Error.Message)
+		}
 		return Result{}, errors.New("resume did not finish")
 	}
 	// A tool round completes its generation before starting the next one.
@@ -1350,7 +1360,7 @@ func (s *durableSession) stream(ctx context.Context, emit func(Delta) error) fun
 	if emit == nil {
 		return func() {}
 	}
-	watch, err := s.conversation.Watch(ctx)
+	watch, err := s.conversation.Watch(ctx, nil)
 	if err != nil {
 		return func() {}
 	}
@@ -1358,7 +1368,11 @@ func (s *durableSession) stream(ctx context.Context, emit func(Delta) error) fun
 	seen := ""
 	started := false
 	compactions := map[durable.EntryId]bool{}
-	watch.Start(func(_ context.Context, view harness.ConversationView, _ []durable.Op) error {
+	watch.Start(func(_ context.Context, change chord.WatchCall[harness.ConversationView]) error {
+		if change.Kind == chord.WatchCallFailed {
+			return nil
+		}
+		view := change.Value
 		mu.Lock()
 		defer mu.Unlock()
 		for _, entry := range view.Entries {

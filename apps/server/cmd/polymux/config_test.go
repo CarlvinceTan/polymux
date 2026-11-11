@@ -207,7 +207,7 @@ func TestLoadModelDefaultOnly(t *testing.T) {
 	t.Setenv("POLYMUX_MODELS", "")
 	os.Unsetenv("POLYMUX_MODELS")
 	config, err := loadModel(t.TempDir())
-	if err != nil || config.Model != "openai/gpt-5.5" || !reflect.DeepEqual(config.Models, []string{config.Model}) {
+	if err != nil || config.Model != "openai/gpt-6.1-sol" || !reflect.DeepEqual(config.Models, []string{config.Model}) {
 		t.Fatalf("default config = %+v, error = %v", config, err)
 	}
 }

@@ -9,8 +9,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/MichaelKinsy/PiG/durable"
 )
 
 func isolatePiG(t *testing.T) {
@@ -75,6 +77,21 @@ func (c *testCredentials) List(context.Context) ([]ai.CredentialInfo, error) {
 
 // turnMarker proves a tool sees the caller's turn context, which Polymux's tools rely on.
 type turnMarker struct{}
+
+// queueTurn leaves a user entry the next Resume answers, as a turn interrupted before it ran would.
+func queueTurn(t *testing.T, session *durableSession, text string) {
+	t.Helper()
+	conversation := session.conversation.Id()
+	_, err := session.conversation.Commit(t.Context(), func(tx durable.Tx) (any, error) {
+		_, err := durable.TxAppendEntry(tx, durable.UserEntry, conversation, durable.TypedEntryDraft[durable.Never]{
+			Model: []ai.Message{ai.UserMessage{Content: ai.UserText(text), Timestamp: time.Now().UnixMilli()}},
+		})
+		return nil, err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 // sse writes one scripted assistant turn in the OpenAI streaming shape.
 func sse(w http.ResponseWriter, content string, calls []map[string]any) {

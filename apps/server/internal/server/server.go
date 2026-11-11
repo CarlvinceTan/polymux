@@ -269,7 +269,7 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 			c.Model = assistant.Agent.Model
 		}
 		if c.Model == "" {
-			c.Model = "openai/gpt-5.5"
+			c.Model = "openai/gpt-6.1-sol"
 		}
 	}
 	if err := s.Register(ctx, agents); err != nil {

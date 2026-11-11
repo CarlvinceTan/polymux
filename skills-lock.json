@@ -5,14 +5,14 @@
       "source": "vercel-labs/agent-browser",
       "sourceType": "github",
       "skillPath": "skills/agent-browser/SKILL.md",
-      "computedHash": "e32e16db6b9f84f5c7a250485540d002953284a9e9f7d95e43ed56a7c6c43646"
+      "computedHash": "60a9cbe5af176150582c019e16e5d3703a41bb02d88438e881349876120d7944"
     },
     "cua-driver": {
       "source": "trycua/cua",
-      "ref": "cua-driver-rs-v0.37.0",
+      "ref": "cua-driver-rs-v0.38.0",
       "sourceType": "github",
       "skillPath": "libs/cua-driver/rust/Skills/cua-driver/SKILL.md",
-      "computedHash": "ad3cd3bfb05838e3793b6284a0be478fd987b28590eea0ff055ed9c288f41e17"
+      "computedHash": "05294af4ffee30de9b95b174556f50137c17b8e477b80de7ff519e3adba96b35"
     },
     "golang-code-style": {
       "source": "samber/cc-skills-golang",
