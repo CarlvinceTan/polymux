@@ -180,6 +180,7 @@ struct SettingsEntry: Identifiable {
     private static func terms(_ tab: SettingsTab) -> [String] {
         switch tab {
         case .vault: VaultCategory.allCases.filter { $0 != .all }.map(\.title) + ["Import"]
+        case .plugins: ["Installed", "Marketplace", "Arrange"]
         default: []
         }
     }
@@ -211,7 +212,7 @@ struct SettingsEntry: Identifiable {
             add("Updates", ["Check automatically"])
             #endif
             add("Version", ["Server channel", "Nightly", "Stable"])
-        case .vault: break
+        case .vault, .plugins: break
         }
         return list
     }

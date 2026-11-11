@@ -24,7 +24,7 @@ var mergeCopied = []string{
 var mergeKept = []string{"deleted_agents", "mcp_servers", "projects"}
 
 // mergeHandled have their own step in Merge.
-var mergeHandled = []string{"sections", "messages_fts"}
+var mergeHandled = []string{"sections", "messages_fts", "plugin_chats"}
 
 // mergeSkipped stay behind, each for the reason given.
 var mergeSkipped = map[string]string{
@@ -32,6 +32,8 @@ var mergeSkipped = map[string]string{
 	"credentials":     "sealed to the other server's key; the server re-seals them",
 	"group_sessions":  "point into durable.db, which doesn't merge",
 	"notices":         "alerts already sent, numbered for one server",
+	"plugin_layout":   "this server's layout stands",
+	"plugins":         "plugins don't merge",
 	"push_devices":    "devices register with whichever server they use",
 	"push_queue":      "follows notices",
 	"run_submissions": "point into durable.db, which doesn't merge",
@@ -91,6 +93,7 @@ func mergeTx(ctx context.Context, tx *sql.Tx, name, from, to string) (Merged, er
 	}
 	steps := []string{
 		`INSERT INTO main.messages_fts(message_id,thread_id,body) SELECT message_id,thread_id,body FROM src.messages_fts`,
+		`INSERT INTO main.plugin_chats(name,thread_id) SELECT name,thread_id FROM src.plugin_chats WHERE name IN (SELECT name FROM main.plugins)`,
 		// Nothing merged runs on its own until someone has looked at it.
 		`UPDATE main.routines SET next_at=NULL,data=json_set(data,'$.status','paused')
 			WHERE id IN (SELECT id FROM src.routines) AND json_extract(data,'$.status') IN ('pending','active')`,

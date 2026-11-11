@@ -24,7 +24,7 @@ import (
 var mergeFolders = []string{"agents", "attachments", "drafts", "groups", "media-jobs", "memory", "provider-keys", "skills", "worktrees"}
 
 // mergeLeftFolders stay behind: they belong to one server, or aren't data.
-var mergeLeftFolders = []string{"connections", "credentials", "devices", "provider-device", "proxy", "sessions", "tunnel", "vault"}
+var mergeLeftFolders = []string{"connections", "credentials", "devices", "plugins", "provider-device", "proxy", "sessions", "tunnel", "vault"}
 
 // durableSkipped is all of durable.db. Its integer IDs come from one server's counter and are
 // also written inside its records, so two can't be joined. A bot opens a new session instead.

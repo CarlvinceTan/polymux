@@ -214,6 +214,9 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	for _, connection := range d.MCP {
 		state.prefixes = append(state.prefixes, connection.Name+"__")
 	}
+	if err = v.server.bindGate(ctx, state, outputCWD(d, v.server.config.DataDir)); err != nil {
+		return empty, "", err
+	}
 	ctx = context.WithValue(ctx, turnKey{}, state)
 	ctx = context.WithValue(ctx, htmlKey{}, &htmlScope{messageID: state.run.ID, cwd: outputCWD(d, v.server.config.DataDir), publish: func(ctx context.Context, attachment contract.Attachment, path string) error {
 		return v.publish(ctx, task.target, attachment.ID, "", &attachment, path)

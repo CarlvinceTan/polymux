@@ -23,13 +23,17 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                       "grp-trip", "t-media", "t-activity", "t-fern", "grp-empty"] + loadNames.map { "t-" + $0.lowercased() }
     // Unread state matches the server fixture: t-aria 3, t-milo 1, t-nova 12, the rest read.
     static let unread: [String: Int64] = ["t-aria": 3, "t-milo": 1, "t-nova": 12]
-    static let agents = (["Chief", "Aria", "Milo", "Nova", "Approval", "Fern"] + loadNames).map { name in
+    static let agents = (["Chief", "Aria", "Milo", "Nova", "Approval", "Fern"] + (GraphSceneFixture.crowd ? GraphSceneFixture.extras : []) + loadNames).map { name in
         let avatar = CommandLine.arguments.contains("--verify-blocked") && name == "Chief"
             ? AvatarDesign(shape: "hexagone", color: "orange", expression: "neutre", followCursor: false,
                            animates: !CommandLine.arguments.contains("--verify-still")) : nil
         if CommandLine.arguments.contains("--verify-model-levels") {
             return Agent(id: "t-" + name.lowercased(), name: name, model: "chat", active: true, avatar: avatar,
                          provider: "levels", reasoning: "medium")
+        }
+        if PluginFixture.graphScene, let cast = PluginFixture.cast[name] {
+            return Agent(id: "t-" + name.lowercased(), name: name, role: cast.role, active: true,
+                         avatar: AvatarDesign(shape: cast.shape, color: cast.color, expression: "neutre", followCursor: false, animates: true))
         }
         return Agent(id: "t-" + name.lowercased(), name: name, active: true, avatar: avatar)
     }
@@ -323,6 +327,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                       createdAt: at, payload: row)
             }
     }()
+    private static let plugins = PluginFixture()
     private var onSecondServer: Bool {
         Self.secondServer.map { request.url?.absoluteString.hasPrefix($0) == true } ?? false
     }
@@ -361,6 +366,20 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             return
         }
         if SiteFixture.handle(self) { return }
+        if CommandLine.arguments.contains("--verify-graph"), path == "/work", let data = try? Self.plugins.response(request) {
+            reply(data)
+            return
+        }
+        if CommandLine.arguments.contains("--verify-plugins"), path.hasPrefix("/plugins"), !onSecondServer {
+            // Hub's wait for changes holds its request, as the real server does.
+            let waits = path.hasSuffix("/chats") && request.url?.query?.contains("since") == true
+            let task = Task { @Sendable [self] in
+                if waits { try? await Task.sleep(for: .seconds(2)) }
+                if let data = try? Self.plugins.response(request) { reply(data, mime: path.hasSuffix(".html") ? "text/html" : "application/json") }
+            }
+            responseLock.withLock { responseTask = task }
+            return
+        }
         if CommandLine.arguments.contains("--verify-model-levels"), path == "/providers" {
             let model = ProviderModel(id: "chat", tags: ["text"], enabled: true, reasoning: ["off", "low", "high", "max"])
             let provider = Provider(id: "levels", type: "fixture", name: "Levels", enabled: true, models: [model])

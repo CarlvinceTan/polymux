@@ -24,6 +24,12 @@
      "flows": ["fixture-new-*", "empty-groups.js", "random-name.js", "group.js"]},
     {"paths": ["*/Views/AddDevice.swift", "*/Views/DeviceView.swift", "*/Views/ConnectionStatus.swift", "*/PolymuxKit/Network*.swift", "*/PolymuxKit/Pairing.swift"],
      "flows": ["fixture-devices*", "fixture-pairing.js", "fixture-status*"]},
+    {"paths": ["*/Plugins/*", "*/PluginFixture.swift", "*/PolymuxKit/PluginStore.swift"],
+     "flows": ["fixture-plugin*", "fixture-graph*"]},
+    {"paths": ["*/Graph/*", "packages/GraphKit/*", "*/PolymuxKit/Work*"],
+     "flows": ["fixture-graph*"]},
+    {"paths": ["*/Hub/*", "*/PolymuxKit/HubStore.swift"],
+     "flows": ["fixture-hub*"]},
     {"paths": ["*/AvatarUI/*", "*/Avatar/*", "packages/AvatarKit/**"],
      "flows": ["fixture-avatar*", "fixture-new-bot.js", "fixture-actions.js"]}
   ]

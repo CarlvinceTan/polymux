@@ -85,7 +85,7 @@ Pairing links contain credentials. Share them privately, and use the complete li
 
 ## If something is not working
 
-- **Cannot connect:** check that the server is running and try a fresh pairing link. Other devices connect through an encrypted tunnel. If the tunnel is turned off on the server, install a transport plugin.
+- **Cannot connect:** check that the server is running and try a fresh pairing link. Other devices connect through an encrypted tunnel, or through a transport plugin such as Tailscale. If the tunnel is turned off on the server, install a transport plugin.
 - **Chats open but replies fail:** check your provider and **Default model** in **Settings → Models**.
 
 To update, pull the source version you want and rerun the relevant install command. Release builds check for updates automatically; use **Polymux → Check for Updates…** to check now. Next, [choose a model](/docs/models-and-agents/) and [start a conversation](/docs/).

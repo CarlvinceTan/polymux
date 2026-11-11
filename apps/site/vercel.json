@@ -8,7 +8,7 @@
   "rewrites": [
     {"source": "/appcast.xml", "destination": "/api/appcast"},
     {"source": "/install.sh", "destination": "/api/install"},
-    {"source": "/plugins/index.json", "destination": "https://raw.githubusercontent.com/CarlvinceTan/polymux/experimental/plugins/plugins/index.json"}
+    {"source": "/plugins/index.json", "destination": "https://raw.githubusercontent.com/CarlvinceTan/polymux/dev/plugins/index.json"}
   ],
   "redirects": [
     {"source": "/privacy", "destination": "/privacy-policy/", "permanent": true},

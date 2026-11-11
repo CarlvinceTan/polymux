@@ -1,0 +1,13 @@
+{
+  "name": "permissions",
+  "title": "Permissions",
+  "description": "Set rules a chat's bots can't break: what they may read, write, run and use.",
+  "symbol": "lock.shield",
+  "selectedSymbol": "lock.shield.fill",
+  "version": "0.1.0",
+  "kind": "scoped",
+  "surface": "permissions",
+  "engines": { "plugins": 2 },
+  "service": "bin/polymux-permissions",
+  "provides": ["gate"]
+}

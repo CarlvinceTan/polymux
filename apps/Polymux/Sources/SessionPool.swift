@@ -220,17 +220,24 @@ final class SessionPool {
         if address == active { select(target) }
     }
 
-    /// Every server's switcher entry, once there's a second server to show.
-    var tabs: [ServerTab] {
-        let shown = servers.known.filter { sessions[$0.address] != nil }
+    /// Every server's switcher entries, once there's a second server to show.
+    var tabs: [PluginTab] {
+        let shown = servers.known.compactMap { server in sessions[server.address].map { (server, $0) } }
         guard shown.count > 1 else { return [] }
-        return zip(shown, ServerTab.marks(shown.map(\.title))).map { ServerTab(id: $0.address, name: $0.title, mark: $1) }
+        let marks = PluginTab.marks(shown.map(\.0.title))
+        return zip(shown, marks).flatMap { entry, mark in
+            let (server, session) = entry
+            let tabs = session.plugins.tabs.isEmpty ? [PluginTab(id: PluginTab.chats, plugin: nil)] : session.plugins.tabs
+            return tabs.map {
+                PluginTab(id: "\(server.address)#\($0.id)", plugin: $0.plugin, server: server.address,
+                          serverName: server.title, serverMark: mark)
+            }
+        }
     }
 
-    /// A server's unread chats, unless switcher badges are off.
-    func unread(_ tab: ServerTab) -> Int {
-        guard let session = sessions[tab.id], session.settings.value?.switcherBadges != false else { return 0 }
-        return Int(session.sidebar.chats.reduce(0) { $0 + $1.unreadCount })
+    func unread(_ tab: PluginTab) -> Int {
+        guard let address = tab.server, let session = sessions[address] else { return 0 }
+        return PluginSurface.unread(tab, session: session)
     }
 
     func resume() {
@@ -294,11 +301,12 @@ final class SessionPool {
         Task { await session.prepare() }
     }
 
-    /// A server off screen still needs its unread count, and it has to be noticed
+    /// A server off screen still needs its unread count and plugins, and it has to be noticed
     /// quickly if it stops allowing this device.
     private func keepFresh(_ session: AppSession, fully: Bool) async {
         if fully {
             await session.sidebar.refresh()
+            await session.plugins.refresh()
         }
         await session.network.refresh()
         report(session)

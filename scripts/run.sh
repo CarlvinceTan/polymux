@@ -29,7 +29,8 @@ case ${1:-} in
       light) appearance=Light ;;
       dark) appearance=Dark ;;
     esac
-    set -- --verify-fixture "$@" -AppleInterfaceStyle "$appearance"
+    # The appearance goes first: after an odd number of flags, AppKit pairs its key with a flag and opens its value as a file, so no window appears.
+    set -- -AppleInterfaceStyle "$appearance" --verify-fixture "$@"
     ;;
   *) echo "usage: $0 [--watch|--no-watch|--server|--fresh|--fixture <flags>...]" >&2; exit 2 ;;
 esac
@@ -50,6 +51,8 @@ forget_key() {
   [ "$PLATFORM" = Darwin ] || return 0
   account=$(printf %s "$1/data/vault" | shasum -a 256 | cut -d' ' -f1)
   /usr/bin/security delete-generic-password -s com.polymux.vault -a "$account/password" >/dev/null 2>&1 || true
+  account=$(printf %s "$1/data/plugins/hub/data" | shasum -a 256 | cut -d' ' -f1)
+  /usr/bin/security delete-generic-password -s com.polymux.hub -a "$account" >/dev/null 2>&1 || true
 }
 # Removes an instance's launchd job, if its app started one.
 forget_job() {

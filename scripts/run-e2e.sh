@@ -206,7 +206,8 @@ def start_fixture(flags):
     os.makedirs(root + "/data")
     subprocess.run(["defaults", "delete", identifier], capture_output=True)
     style = "Dark" if "--verify-dark" in flags else "Light"
-    fixture_args = (bundle, root + "/data", root + "/app.log", flags + ["-AppleInterfaceStyle", style])
+    # The appearance goes first, as in run.sh.
+    fixture_args = (bundle, root + "/data", root + "/app.log", ["-AppleInterfaceStyle", style] + flags)
     fixture = (launch(*fixture_args), identifier)
     with open(state + "/fixture.pid", "w") as f:
         f.write(str(fixture[0]))

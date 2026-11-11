@@ -1,8 +1,9 @@
-// @fixture --verify-fixture --verify-servers
+// @fixture --verify-fixture --verify-plugins --verify-servers
 // Every network has a switcher entry, each keeps its own place, and one can be left.
 const app = await cua.getApp(APP);
 const home = { role: "button", name: "Home server" };
 const studio = { role: "button", name: "Studio" };
+const hub = { role: "button", name: "Hub on Home server" };
 const entry = (target) => ({ role: "button", name: `Chats on ${target.name}` });
 
 async function selected(target) {
@@ -24,13 +25,18 @@ async function open(name) {
   await app.click(rows[0].element_token);
 }
 
-for (const target of [entry(home), entry(studio)]) await app.waitFor({ ...target, timeout_ms: 10000 });
+for (const target of [entry(home), entry(studio), hub]) await app.waitFor({ ...target, timeout_ms: 10000 });
 await selected(entry(home));
 await open("Chief");
 
 await app.click(entry(studio));
 await selected(entry(studio));
 await open("Aria");
+
+// Hub belongs to the first server, so its entry moves the app back there.
+await app.click(hub);
+await selected(hub);
+await app.waitFor({ text: "Priya Raman", timeout_ms: 10000 });
 
 // Each server reopens on the chat it was left on.
 await app.click(entry(home));
@@ -63,7 +69,7 @@ for (let i = 0; i < 20; i++) {
 }
 await app.pressKey("escape");
 
-// One server left, so the switcher goes away.
+// One server left, so the switcher goes back to that server's own entries.
 for (let i = 0; i < 40; i++) {
   if (!(await app.query(entry(home))).length && !(await app.query(entry(studio))).length) return "ok";
   await cua.sleep(250);

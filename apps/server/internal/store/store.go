@@ -122,6 +122,9 @@ PRAGMA user_version=2;`)
 	if err := s.migrateTaskThreads(ctx); err != nil {
 		return err
 	}
+	if err := s.migratePlugins(ctx); err != nil {
+		return err
+	}
 	// Background loops look these up every few seconds.
 	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS messages_pending ON messages(status) WHERE indexing_state='pending';
 CREATE INDEX IF NOT EXISTS messages_failed ON messages(id) WHERE indexing_state='error';

@@ -9,18 +9,20 @@ from ci import affected, changed, selection
 class SelectionTests(unittest.TestCase):
     def test_site_only_does_not_build_native_targets(self):
         self.assertEqual(affected(["apps/site/src/content/docs/example.md"]),
-                         {"server": False, "swift": False})
+                         {"server": False, "swift": False, "plugins": False})
 
     def test_shared_contracts_and_scripts_check_both(self):
         for path in ("contracts/polymux.schema.json", "scripts/run.sh", ".github/workflows/tests.yml"):
-            self.assertEqual(affected([path]), {"server": True, "swift": True})
+            self.assertEqual(affected([path]), {"server": True, "swift": True, "plugins": True})
 
     def test_component_inputs_include_tests_locks_and_deletions(self):
         for path in ("apps/server/internal/example_test.go", "go.work.sum", "packages/runtime/runtime.go",
                      "packages/memory/memory_test.go", "packages/vault/go.mod", "packages/search/search_test.go"):
-            self.assertEqual(affected([path]), {"server": True, "swift": False})
+            self.assertEqual(affected([path]), {"server": True, "swift": False, "plugins": False})
         for path in ("Package.resolved", "apps/Polymux/Info.plist", "packages/AvatarKit/removed.swift"):
-            self.assertEqual(affected([path]), {"server": False, "swift": True})
+            self.assertEqual(affected([path]), {"server": False, "swift": True, "plugins": False})
+        for path in ("plugins/hub/main.go", "plugins/go.sum", "plugins/scripts/package.sh"):
+            self.assertEqual(affected([path]), {"server": False, "swift": False, "plugins": True})
 
     def test_manual_delivery_runs_every_check(self):
         self.assertIsNone(selection({}, "workflow_dispatch"))

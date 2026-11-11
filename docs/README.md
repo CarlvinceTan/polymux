@@ -19,6 +19,7 @@ Paths below are relative to the repository root.
 | [`apps/site/`](../apps/site/) | Public website and user-facing documentation. |
 | [`packages/`](../packages/) | Reusable Go backend modules (`runtime`, `memory`, `vault`, `search`) and shared Swift app code. See [Backend packages](packages.md) for backend usage and boundaries. |
 | [`contracts/`](../contracts/) | Shared API schema and code generation for the server and clients. |
+| [`plugins/`](../plugins/) | The official plugins and the scripts that package them. See [Plugins](plugins.md). |
 | [`scripts/`](../scripts/) | Build, run, test, installation, and delivery commands. |
 | [`e2e/`](../e2e/) | UI test flows and fixtures. |
 | [`.agents/skills/`](../.agents/skills/) | Task-specific guidance and helper tools for coding agents. See [Project skills](skills.md). |
@@ -37,6 +38,7 @@ Generated output is separate from source: `.build/` holds caches and local build
 | [Development delivery](development.md) | Development-channel builds, deployment, TestFlight, and delivery status—not general local setup. |
 | [Vault](vault.md) | Credential handling, private cards, secret references, and security boundaries. |
 | [Experiments](experiments.md) | Experimental branches kept out of `dev` and `main`, and what each is about. |
+| [Plugins](plugins.md) | Global and Scoped plugins, packages, the index, and Hub. |
 | [References](references.md) | Other products that inform Polymux's behaviour. |
 | [Benchmarks](benchmarks.md) | The planned benchmark index: quality, speed and cost across harnesses, and how it stays honest. |
 

@@ -8,7 +8,7 @@ trap 'cancel_drain; rm -f "$LOG"' EXIT
 trap 'exit 130' INT TERM HUP
 pick_target install "${1:-}"
 
-# The server listens on loopback; other devices reach it through a tunnel.
+# The server listens on loopback; other devices reach it through a tunnel or a transport plugin.
 ADDRESS="http://127.0.0.1:7337"
 
 backup() {

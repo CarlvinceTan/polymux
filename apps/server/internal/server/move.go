@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/archive"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/network"
 )
@@ -82,6 +83,9 @@ func (s *Server) staysBehind(ctx context.Context) []string {
 	if s.config.Push != nil {
 		stays = append(stays, "Push notification setup")
 	}
+	if list, err := s.plugins.List(ctx); err == nil && slices.ContainsFunc(list.Installed, func(p contract.Plugin) bool { return p.Name == "hub" }) {
+		stays = append(stays, "Hub's iMessage and WeChat bridges")
+	}
 	return stays
 }
 
@@ -131,7 +135,7 @@ func (s *Server) previewMove(w http.ResponseWriter, r *http.Request) {
 
 // previewMerge adds what only a merge changes: a merge is the one time a device's access moves.
 func (s *Server) previewMerge(ctx context.Context, preview map[string]any, check network.Check) {
-	preview["stays"] = []string{"Bots' working context; their chats and memory come along", "Alert history"}
+	preview["stays"] = []string{"Plugins, including Hub's linked accounts", "Bots' working context; their chats and memory come along", "Alert history"}
 	preview["notes"] = []string{"Schedules arrive paused.", "Bots that share a name both stay, tagged with this server's name."}
 	mine, err := s.config.Devices.All(ctx)
 	if err != nil {

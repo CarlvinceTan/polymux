@@ -153,7 +153,7 @@ class E2ETests(unittest.TestCase):
         self.assertIn('const PREVIOUS = {"draft": "second"}', self.scripts[2]["script"])
         self.assertEqual([sig for _, sig in self.signals], [signal.SIGTERM, signal.SIGKILL, signal.SIGTERM])
         for _, _, args in self.launches:
-            self.assertEqual(args[-2:], ["-AppleInterfaceStyle", "Dark"])
+            self.assertEqual(args[args.index("--args") + 1:args.index("--args") + 3], ["-AppleInterfaceStyle", "Dark"])
 
     def test_failed_fixture_cleans_up_without_restarting_live_app(self):
         self.results = [{"ok": False, "error": "expected test failure"}]

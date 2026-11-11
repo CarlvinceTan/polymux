@@ -54,8 +54,11 @@ final class AppSession {
     let settings: SettingsStore
     let avatars: AvatarStore
     let vault: VaultLibrary
+    let plugins: PluginStore
+    let hub: HubStore
     let providers: ProviderStore
     let network: NetworkStore
+    let work: WorkStore
     /// Recent chats stay in memory, so reopening one draws its messages in the first frame.
     private var chats: [String: ChatStore] = [:]
     private var recentChats: [String] = []
@@ -103,8 +106,13 @@ final class AppSession {
         await settings.restore()
         avatars = AvatarStore(sidebar: sidebar)
         vault = VaultLibrary(client: client.vaultClient())
+        plugins = PluginStore(client: client, cache: sidebar.cacheActor, surfaces: PluginSurface.available)
+        await plugins.restore()
+        hub = HubStore(client: client, cache: sidebar.cacheActor)
+        await hub.restore()
         providers = ProviderStore(client: client, cache: sidebar.cacheActor)
         network = NetworkStore(client: client, cache: sidebar.cacheActor)
+        work = WorkStore(client: client, cache: sidebar.cacheActor)
         async let providerCache: () = providers.restore()
         async let deviceCache: () = network.restore()
         _ = await (providerCache, deviceCache)
@@ -144,6 +152,7 @@ final class AppSession {
     /// Warms what's likely to be opened after cached content appears.
     func prepare() async {
         EmojiCatalogue.warm()
+        Task { await prepareHub() }
         await sidebar.refresh()
         await layout.refresh()
         let placed = sidebar.chats.map(layout.applying)
@@ -166,6 +175,21 @@ final class AppSession {
             for image in images.suffix(8) {
                 group.addTask { await DecodedImages.warm(image, client: self.client) }
             }
+        }
+    }
+
+    /// Hub's recent chats, faces and images, so opening it shows them at once. Nothing here marks a chat read.
+    private func prepareHub() async {
+        await plugins.refresh()
+        guard plugins.plugin(named: HubStore.plugin)?.state == PluginState.ready else { return }
+        let recent = await hub.preload()
+        for chat in hub.chats.filter({ !$0.avatar.isEmpty }).sorted(by: { $0.at > $1.at }).prefix(40) {
+            await DecodedImages.warm(HubAvatar.address(chat.avatar, client: client), name: HubAvatar.file(chat.name), client: client)
+        }
+        for chat in recent.prefix(3) {
+            let messages = (hub.messages[chat.id] ?? []).suffix(30).map(\.bubble)
+            let images = messages.flatMap(\.attachments).filter { $0.kind == AttachmentKind.image }
+            for image in images.suffix(8) { await DecodedImages.warm(image, client: client) }
         }
     }
 
@@ -307,6 +331,8 @@ struct AppRoot: View {
         #endif
         .environment((activeSession ?? pool.latest)?.avatars)
         .environment(activeSession?.vault)
+        .environment(activeSession?.plugins)
+        .environment(activeSession?.hub)
         .environment(activeSession?.sidebar)
         .environment(activeSession?.providers)
         .environment(activeSession?.network)
@@ -414,11 +440,14 @@ struct ConnectionView: View {
     let onClose: () -> Void
     @Environment(NetworkStore.self) private var networkStore: NetworkStore?
     @Environment(ProviderStore.self) private var providerStore: ProviderStore?
+    @Environment(PluginStore.self) private var plugins: PluginStore?
     private var network: NetworkInfo? { networkStore?.value }
     private var providers: [Provider] { providerStore?.providers ?? [] }
     @State private var networkPage = SettingsTab.verifiesPage ? UserDefaults.standard.string(forKey: "serverAddress") : nil
     @State private var joining = false
     @State private var providerTarget: ProviderTarget?
+    @State private var pluginTarget: String?
+    @State private var arrangingPlugins = false
     @State private var editingVoice = false
     @State private var editingMedia: MediaKind?
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -454,6 +483,10 @@ struct ConnectionView: View {
                     providerStore?.accept($0)
                     Task { await settings?.refresh() }
                 }
+            } else if let pluginTarget {
+                PluginDetail(name: pluginTarget) { self.pluginTarget = nil }
+            } else if arrangingPlugins, let plugins {
+                PluginLayoutEditor(store: plugins) { arrangingPlugins = false }
             } else if let kind = editingMedia, let settings {
                 MediaOrderView(kind: kind, store: settings, providers: providers, onBack: { editingMedia = nil })
             } else if editingVoice, let settings {
@@ -500,6 +533,7 @@ struct ConnectionView: View {
         case .vault: VaultSettings()
         case .network:
             NetworkSettings(pool: pool, joinIssue: joinIssue, open: { networkPage = $0 }, join: { joining = true })
+        case .plugins: PluginSettings(open: { pluginTarget = $0 }, arrange: { arrangingPlugins = true })
         default: settingsForm
         }
     }
@@ -512,7 +546,7 @@ struct ConnectionView: View {
                 ProviderSettings(client: client, settings: settings) { providerTarget = ProviderTarget(provider: $0) }
                 if let settings { MediaSettings(store: settings) { editingMedia = $0 } }
                 if let settings { VoiceSettings(store: settings, providers: providers) { editingVoice = true } }
-            case .vault, .network: EmptyView()
+            case .vault, .plugins, .network: EmptyView()
             case .updates: UpdatesSettings(network: network, settings: settings)
             }
         }
@@ -526,7 +560,7 @@ struct ConnectionView: View {
                                                       set: { settings?.edit(SettingsPatch(appearance: $0)) }),
                            options: [("Light", "light"), ("Dark", "dark"), ("System", "system")])
             .disabled(settings?.value == nil)
-            if !pool.tabs.isEmpty {
+            if plugins?.tabs.isEmpty == false || !pool.tabs.isEmpty {
                 Toggle("Switcher badges", isOn: Binding(get: { settings?.value?.switcherBadges ?? true },
                                                         set: { settings?.edit(SettingsPatch(switcherBadges: $0)) }))
                     .accessibilityLabel("Switcher badges")
@@ -588,7 +622,7 @@ private struct ProviderTarget {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, network, models, vault, updates
+    case general, network, models, vault, plugins, updates
 
     var id: String { rawValue }
 
@@ -611,12 +645,14 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         #endif
     }
 
+    /// Plugins draws its own plug, because SF Symbols has none at this angle.
     var icon: Image {
         switch self {
         case .general: Image(systemName: "gearshape.fill")
         case .network: Image(systemName: "network")
         case .models: Image(systemName: "cpu.fill")
         case .vault: Image(systemName: "lock.fill")
+        case .plugins: Image("plug")
         case .updates: Image(systemName: "arrow.down.circle.fill")
         }
     }
@@ -628,6 +664,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .network: .blue
         case .models: .purple
         case .vault: .green
+        case .plugins: .orange
         case .updates: .red
         }
     }

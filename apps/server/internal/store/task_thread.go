@@ -99,6 +99,16 @@ func (s *Store) CreateTask(ctx context.Context, id, agent, source, name, descrip
 	return thread, true, err
 }
 
+// TaskOwner names the bot whose main chat started a task thread, or nothing for any other thread.
+func (s *Store) TaskOwner(ctx context.Context, thread string) (string, error) {
+	var owner string
+	err := s.DB.QueryRowContext(ctx, `SELECT t.agent_id FROM task_threads k JOIN threads t ON t.id=k.thread_id WHERE k.thread_id=?`, thread).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return owner, err
+}
+
 // UpdateTask edits a task. A non-empty owner limits it to that bot's tasks.
 func (s *Store) UpdateTask(ctx context.Context, id, owner string, edit TaskEdit) (contract.Thread, error) {
 	if edit.Status != nil && *edit.Status != contract.TaskInfoStatusOpen && *edit.Status != contract.TaskInfoStatusDone {

@@ -6,7 +6,7 @@ await app.click({ role: "button", name: "Settings" });
 await app.waitFor({ ...field, timeout_ms: 5000 });
 await app.typeText("voice", field);
 await app.waitFor({ role: "button", name: "Voice, Models", timeout_ms: 5000 });
-for (const name of ["Network", "Vault", "Updates"]) {
+for (const name of ["Network", "Vault", "Plugins"]) {
     if ((await app.query({ role: "button", name })).length) throw new Error("Search kept the " + name + " tab");
 }
 await app.click({ role: "button", name: "Voice, Models" });
@@ -23,7 +23,7 @@ await app.click(clear);
 await app.typeText("zzq", field);
 await app.waitFor({ text: "No results.", timeout_ms: 5000 });
 await app.click(clear);
-await app.waitFor({ role: "button", name: "Vault", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Plugins", timeout_ms: 5000 });
 const [models] = await app.query({ role: "button", name: "Models" });
 if (!models?.selected) throw new Error("Clearing search left Models unselected");
 await app.click({ role: "button", name: "Close Settings" });

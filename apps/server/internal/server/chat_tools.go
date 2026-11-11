@@ -146,5 +146,9 @@ func (s *Server) answerChoice(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "choice", "This question is unavailable or has already been answered.")
 		return
 	}
+	if err == nil && !s.confirmInstall(r.Context(), thread.ID, card, answer) {
+		fail(w, http.StatusConflict, "plugin", "This plugin can't be installed.")
+		return
+	}
 	s.respond(w, card, err)
 }

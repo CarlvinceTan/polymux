@@ -1,26 +1,104 @@
 import SwiftUI
+import PolymuxKit
 
-/// One switcher entry: a server's chats, once there's more than one server.
-struct ServerTab: Identifiable, Hashable {
-    /// The server's address.
-    let id: String
-    let name: String
-    /// Marks the server where a tab bar shows icons only.
-    let mark: String
-
-    /// Each server's initial, or everyone's position when initials clash or one has no symbol.
-    static func marks(_ names: [String]) -> [String] {
-        let initials = names.compactMap { name in
-            name.lowercased().first { $0.isASCII && ($0.isLetter || $0.isNumber) }.map(String.init)
-        }
-        if initials.count == names.count, Set(initials).count == names.count { return initials }
-        return names.indices.map { String($0 + 1) }
+extension Plugin {
+    /// Filled while selected, unfilled otherwise.
+    func icon(selected: Bool = false) -> String {
+        let name = selected ? selectedSymbol : symbol
+        return name.isEmpty ? "puzzlepiece.extension" + (selected ? ".fill" : "") : name
     }
 }
 
-/// The sidebar's foot on macOS and iPad: one entry per server.
-struct ServerSwitcher: View {
-    let tabs: [ServerTab]
+/// A Scoped plugin's button. Only the icon comes from the plugin.
+private struct PluginButton: View {
+    let plugin: Plugin
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: plugin.icon(selected: selected))
+                .font(.system(size: 15))
+                .foregroundStyle(selected ? Color.accentColor : Color.primary)
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(plugin.title)
+        .accessibilityLabel(plugin.title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Scoped buttons in their shared layout. A group of two or more merges into one piece of glass.
+struct PluginButtons: View {
+    let groups: [[Plugin]]
+    var selected: String?
+    let open: (Plugin) -> Void
+    @Namespace private var glass
+
+    var body: some View {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 8) {
+                ForEach(groups, id: \.first?.name) { group in
+                    HStack(spacing: 0) {
+                        ForEach(group, id: \.name) { plugin in
+                            PluginButton(plugin: plugin, selected: plugin.name == selected) { open(plugin) }
+                                .glassEffect(.regular.interactive(), in: Capsule())
+                                .glassEffectUnion(id: group.first?.name, namespace: glass)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// On iPhone every Scoped button collapses into one menu.
+struct PluginMenu: View {
+    let groups: [[Plugin]]
+    let open: (Plugin) -> Void
+
+    var body: some View {
+        Menu("Plugins", systemImage: "ellipsis") {
+            ForEach(groups.flatMap { $0 }, id: \.name) { plugin in
+                Button(plugin.title, systemImage: plugin.icon()) { open(plugin) }
+            }
+        }
+    }
+}
+
+/// The side panel for a Scoped plugin. The close button belongs to the panel; a web plugin fills
+/// everything else, and may hide the button.
+struct PluginPanel: View {
+    let plugin: Plugin
+    let thread: PolymuxKit.Thread
+    let session: AppSession
+    let close: () -> Void
+
+    var body: some View {
+        PluginSurface.panel(plugin, thread: thread, session: session, close: close)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #if os(macOS)
+            .padding(.top, plugin.surface == PluginSurface.web ? 0 : 52)
+            .ignoresSafeArea(.container, edges: plugin.surface == PluginSurface.web ? .top : [])
+            .panelBar(value: plugin.name, enabled: plugin.hideClose != true) {
+                HStack {
+                    Spacer(minLength: 0)
+                    PanelNavButton(symbol: "xmark", label: "Close side panel", action: close)
+                }
+            }
+            #else
+            .ignoresSafeArea(.container, edges: plugin.surface == PluginSurface.web ? .bottom : [])
+            .navigationTitle(plugin.title)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+    }
+}
+
+/// Icons only: the sidebar's foot on macOS and iPad.
+struct PluginSwitcher: View {
+    let tabs: [PluginTab]
     @Binding var selection: String
     var unread: [String: Int] = [:]
     @State private var width: CGFloat = 0
@@ -68,7 +146,8 @@ struct ServerSwitcher: View {
                 .onChanged { drag in
                     guard cell > 0 else { return }
                     dragX = drag.location.x
-                    dragTarget = tabs[min(max(Int(drag.location.x / cell), 0), tabs.count - 1)].id
+                    let tab = tabs[min(max(Int(drag.location.x / cell), 0), tabs.count - 1)]
+                    if tab.server == nil { selection = tab.id } else { dragTarget = tab.id }
                 }
                 .onEnded { _ in
                     dragX = nil
@@ -84,24 +163,41 @@ struct ServerSwitcher: View {
         .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge)
     }
 
-    /// Each server shows its name, since every server's chats would share an icon.
-    private func entry(_ tab: ServerTab) -> some View {
-        HStack(spacing: 4) {
-            Text(tab.name)
-                .font(.subheadline.weight(.medium))
+    /// Two servers' Chats share an icon, so each shows its server's name instead.
+    @ViewBuilder private func entry(_ tab: PluginTab) -> some View {
+        let count = unread[tab.id] ?? 0
+        if tab.plugin == nil, let name = tab.serverName {
+            HStack(spacing: 4) {
+                Text(name)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                // A dot leaves the name its room; the count stays in the entry's accessibility value.
+                if count > 0 { Circle().fill(Color("Unread")).frame(width: 7, height: 7) }
+            }
+            .padding(.horizontal, 8)
+        } else {
+            Image(systemName: Self.symbol(tab, selected: tab.id == selection))
+                .font(.system(size: 17))
                 .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            // A dot leaves the name its room; the count stays in the entry's accessibility value.
-            if (unread[tab.id] ?? 0) > 0 { Circle().fill(Color("Unread")).frame(width: 7, height: 7) }
+                .frame(width: 24, height: 20)
+                // Overlaps only the icon's corner, clear of the lens's top edge.
+                .overlay(alignment: .topLeading) {
+                    if count > 0 { UnreadPill(count: count, small: true).offset(x: 19, y: -3) }
+                }
         }
-        .padding(.horizontal, 8)
     }
 
-    static func title(_ tab: ServerTab) -> String { "Chats on \(tab.name)" }
+    static func title(_ tab: PluginTab) -> String {
+        let title = tab.plugin?.title ?? "Chats"
+        return tab.serverName.map { "\(title) on \($0)" } ?? title
+    }
 
-    static func symbol(_ tab: ServerTab, selected: Bool = false) -> String {
-        "\(tab.mark).circle" + (selected ? ".fill" : "")
+    static func symbol(_ tab: PluginTab, selected: Bool = false) -> String {
+        if let plugin = tab.plugin { return plugin.icon(selected: selected) }
+        let base = tab.serverMark.map { "\($0).circle" } ?? "bubble.left.and.bubble.right"
+        return base + (selected ? ".fill" : "")
     }
 }
 
