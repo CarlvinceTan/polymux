@@ -547,6 +547,23 @@ struct WorldGround: View {
 
     private var half2: Double { WorldMetrics.half * scale }
 
+    /// A band of the face between two edges of a tile, from one height to the next (both above the ground line).
+    private func steep(_ a: CGPoint, _ b: CGPoint, from: Double, to: Double) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: a.x, y: a.y - from))
+        path.addLine(to: CGPoint(x: b.x, y: b.y - from))
+        path.addLine(to: CGPoint(x: b.x, y: b.y - to))
+        path.addLine(to: CGPoint(x: a.x, y: a.y - to))
+        path.closeSubpath()
+        return path
+    }
+
+    /// The fence colour a coast cell wears: its district's, or a plain one at home.
+    private func fence(district: WorldGroup?, biome: WorldBiome) -> Color? {
+        if biome == .plaza { return Color(red: 0.55, green: 0.45, blue: 0.33).mix(with: .graphCard, by: 0.2) }
+        return district.map { GraphTint.color($0.family) }
+    }
+
     /// A band of the wall under one edge of a tile, from `from` to `to` below the surface.
     private func wall(_ a: CGPoint, _ b: CGPoint, from: Double, to: Double) -> Path {
         var path = Path()
@@ -597,7 +614,7 @@ struct WorldGround: View {
         // The shallow water hugging each coast, drawn before the land so it reads as the same shore sunk a little.
         var coast = Path()
         for cell in land.keys where rise(cell) == 0 {
-            let (centre, top) = tile(cell)
+            let (centre, _) = tile(cell)
             let far = CGPoint(x: centre.x, y: centre.y - half / 2)
             for (a, b, di, dj) in [(CGPoint(x: centre.x - half, y: centre.y), far, 0, -1), (far, CGPoint(x: centre.x + half, y: centre.y), 1, 0),
                                    (CGPoint(x: centre.x + half, y: centre.y), CGPoint(x: centre.x, y: centre.y + half / 2), 0, 1),
@@ -614,6 +631,7 @@ struct WorldGround: View {
             let left = CGPoint(x: centre.x - half, y: centre.y)
             let right = CGPoint(x: centre.x + half, y: centre.y)
             let bottom = CGPoint(x: centre.x, y: centre.y + half / 2)
+            let far = CGPoint(x: centre.x, y: centre.y - half / 2)
             guard let biome = land[cell] else {
                 if !all.contains(WorldCell(i: cell.i, j: cell.j + 1)) { context.fill(wall(left, bottom, from: 0, to: 5 * scale), with: .color(Color.worldWood.mix(with: .black, by: 0.12))) }
                 if !all.contains(WorldCell(i: cell.i + 1, j: cell.j)) { context.fill(wall(bottom, right, from: 0, to: 5 * scale), with: .color(Color.worldWood.mix(with: .black, by: 0.26))) }
@@ -625,25 +643,27 @@ struct WorldGround: View {
             let level = Double(rise(cell)) * step
             let atSand = rise(cell) == 0
             let coastal = [(1, 0), (-1, 0), (0, 1), (0, -1)].contains { land[WorldCell(i: cell.i + $0.0, j: cell.j + $0.1)] == nil }
-            // Two walls, lower-left and lower-right, from this tile's ledge down to its neighbour's or to the sea.
+            // The two faces a tile shows the viewer: down-left and down-right, from its own ledge down to
+            // the neighbour's ledge, or all the way to the sea floor when there is no neighbour.
             for (a, b, di, dj, light) in [(left, bottom, 0, 1, 0.16), (bottom, right, 1, 0, 0.0)] {
-                let foot = shoulder(cell, di, dj)
+                let neighbour = WorldCell(i: cell.i + di, j: cell.j + dj)
+                let foot = land[neighbour] == nil ? -depth : Double(rise(neighbour)) * step
+                guard level > foot + 0.5 else { continue }
+                let beach = land[neighbour] != nil
+                let base = (beach ? terrain.top.mix(with: .brown, by: 0.45) : terrain.sand.mix(with: .brown, by: 0.3)).mix(with: .white, by: light)
                 let span = level - foot
-                guard span > 0.5 else { continue }
-                let beach = foot > -depth / 2
-                let base = (beach ? terrain.sand.mix(with: .brown, by: 0.28) : terrain.cliff).mix(with: .white, by: light)
-                // A cliff in strata, so a terrace reads as piled ground rather than a paper edge.
-                let bands = span > step * 1.4 ? 3 : 2
+                let bands = span > step * 1.4 ? 3 : max(1, Int(span / (step * 0.7)))
                 for band in 0..<bands {
-                    let from = level - span * Double(band) / Double(bands)
-                    context.fill(wall(a, b, from: from - span / Double(bands), to: from),
-                                 with: .color(base.mix(with: .black, by: Double(band) * 0.10)))
+                    let high = level - span * Double(band) / Double(bands)
+                    let low = level - span * Double(band + 1) / Double(bands)
+                    context.fill(steep(a, b, from: high, to: low), with: .color(base.mix(with: .black, by: Double(band) * 0.12)))
                 }
-                context.fill(wall(a, b, from: level - 3.5 * scale, to: level), with: .color(terrain.top.mix(with: .black, by: light > 0 ? 0.06 : 0.14)))
-                if foot < -depth / 2 {
+                // The lip of the terrace: the ground's own colour, cut clean at the edge.
+                context.fill(steep(a, b, from: level, to: level - 4 * scale), with: .color(terrain.top.mix(with: .black, by: light > 0 ? 0.04 : 0.12)))
+                if !beach {
                     var surf = Path()
-                    surf.move(to: CGPoint(x: a.x, y: a.y + foot))
-                    surf.addLine(to: CGPoint(x: b.x, y: b.y + foot))
+                    surf.move(to: CGPoint(x: a.x, y: a.y - foot))
+                    surf.addLine(to: CGPoint(x: b.x, y: b.y - foot))
                     context.stroke(surf, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [1, 5]))
                 }
             }
@@ -651,10 +671,9 @@ struct WorldGround: View {
             let face = atSand && !paved.contains(cell) ? terrain.sand : terrain.top
             context.fill(topShape(cell, level: level), with: .color((cell.i + cell.j) % 2 == 0 ? face : face.mix(with: .black, by: 0.035)))
             // The district's own line along its shore, the way a border is drawn on a tiled map.
-            let fence: Color? = biome == .plaza ? Color(red: 0.55, green: 0.45, blue: 0.33).mix(with: .graphCard, by: 0.2) : owner[cell].map { GraphTint.color($0.family) }
-            if coastal, let tint = fence {
+            if coastal, let tint = fence(district: owner[cell], biome: biome) {
                 var edge = Path()
-                for (a, b, di, dj) in [(left, bottom, 0, 1), (bottom, right, 1, 0), (right, farCorner(cell, level: level), 0, -1), (farCorner(cell, level: level), left, -1, 0)] {
+                for (a, b, di, dj) in [(left, bottom, 0, 1), (bottom, right, 1, 0), (right, far, 0, -1), (far, left, -1, 0)] {
                     if land[WorldCell(i: cell.i + di, j: cell.j + dj)] != nil { continue }
                     edge.move(to: CGPoint(x: a.x, y: a.y - level))
                     edge.addLine(to: CGPoint(x: b.x, y: b.y - level))
