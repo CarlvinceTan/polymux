@@ -755,7 +755,7 @@ struct WorldTrails: View {
         let seconds = now.timeIntervalSinceReferenceDate
         #if DEBUG
         if CommandLine.arguments.contains("--verify-graph-trace") {
-            AtlasTrace.once("trails") {
+            AtlasTrace.everyHalfSecond {
                 for trail in world.trails where trail.kind == .handoff {
                     print("atlas handoff \(trail.id) active=\(trail.active) shows=\(WorldTrails.shows(trail, in: world, picked: picked)) from=\(world.group(of: trail.from)?.id ?? "-") to=\(world.group(of: trail.to)?.id ?? "-")")
                 }
@@ -801,6 +801,10 @@ struct WorldTrails: View {
                 let start = trail.wire.direction == WorkWireDirection.back ? to : from
                 let control = CGPoint(x: (start.x + end.x) / 2, y: min(start.y, end.y) - max(40, hypot(end.x - start.x, end.y - start.y) * 0.26))
                 let at = WorldMotion.position(WorldRoute(from: start, control: control, to: end), seconds: seconds, index: index, still: reducedMotion)
+                if CommandLine.arguments.contains("--verify-graph-trace") {
+                    print("atlas cart \(trail.id) x=\(Int(at.x)) y=\(Int(at.y))")
+                }
+                cart(&layer, at: at, colour: color)
             }
         }
         for handoff in handoffs {
@@ -943,8 +947,11 @@ struct WorldTrails: View {
 #if DEBUG
 @MainActor enum AtlasTrace {
     private static var said: Set<String> = []
-    static func once(_ key: String, _ body: () -> Void) {
-        guard said.insert(key).inserted else { return }
+    static var last = Date.distantPast
+    static func everyHalfSecond(_ body: () -> Void) {
+        let now = Date()
+        guard now.timeIntervalSince(last) > 0.5 else { return }
+        last = now
         body()
     }
 }
