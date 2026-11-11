@@ -847,20 +847,23 @@ struct WorldTrails: View {
         var minJ: Int
         var maxI: Int
         var maxJ: Int
+        /// How far outside its plots the water reaches: none at home, where the paving is the shore.
+        var margin: Int = 4
     }
 
     /// The islet a group covers, or home for someone with none.
     private func islet(_ group: WorldGroup?) -> Islet {
-        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2) }
+        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2, margin: 0) }
         return Islet(id: group.id, minI: group.minI, minJ: group.minJ, maxI: group.maxI, maxJ: group.maxJ)
     }
 
     /// Points around an islet's edge, in map coordinates, where a boat can wait.
     private func shore(_ group: Islet) -> [CGPoint] {
-        let near = WorldMetrics.screen(Double(group.minI) - 4, Double(group.minJ) - 4)
-        let far = WorldMetrics.screen(Double(group.maxI) + 4, Double(group.maxJ) + 4)
-        let across = WorldMetrics.screen(Double(group.minI) - 4, Double(group.maxJ) + 4)
-        let other = WorldMetrics.screen(Double(group.maxI) + 4, Double(group.minJ) - 4)
+        let reach = Double(group.margin)
+        let near = WorldMetrics.screen(Double(group.minI) - reach, Double(group.minJ) - reach)
+        let far = WorldMetrics.screen(Double(group.maxI) + reach, Double(group.maxJ) + reach)
+        let across = WorldMetrics.screen(Double(group.minI) - reach, Double(group.maxJ) + reach)
+        let other = WorldMetrics.screen(Double(group.maxI) + reach, Double(group.minJ) - reach)
         let left = min(near.x, far.x, across.x, other.x)
         let right = max(near.x, far.x, across.x, other.x)
         let top = min(near.y, far.y, across.y, other.y)
@@ -914,7 +917,7 @@ struct WorldTrails: View {
         sail.addLine(to: CGPoint(x: unit * 0.72, y: -unit * 0.12))
         sail.addLine(to: CGPoint(x: -unit * 0.05, y: -unit * 0.12))
         sail.closeSubpath()
-        layer.fill(sail, with: .color(color))
+        layer.fill(sail, with: .color(color.mix(with: .white, by: 0.22)))
         layer.stroke(sail, with: .color(.white.opacity(0.75)), lineWidth: 1)
     }
 
