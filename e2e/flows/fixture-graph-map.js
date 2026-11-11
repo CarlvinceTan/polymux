@@ -15,6 +15,11 @@ await app.waitFor({ role: "button", name: "Close details" });
 await app.waitFor({ text: "Made here" });
 await app.click({ role: "button", name: "Mia" });
 await app.waitFor({ role: "button", name: "Back" });
+// A picture opens full size, and closes again.
+await app.click({ role: "button", name: "Open Mia full size" });
+await app.waitFor({ role: "button", name: "Close" });
+await app.click({ role: "button", name: "Close" });
+await app.waitFor({ role: "button", name: "Close", gone: true });
 await app.click({ role: "button", name: "Back" });
 await app.waitFor({ text: "Made here" });
 await app.click({ role: "button", name: "Close details" });
@@ -33,7 +38,10 @@ await app.waitFor({ text: "Now" });
 await app.click({ role: "button", name: "Close details" });
 
 // A handoff in the air says what it is.
-await app.click({ role: "button", name: "Question for Milo" });
+// Whichever handoff is in the air for Milo: only two fly at once.
+const tags = (await app.query({ role: "button", name: "for Milo" })).filter((item) => / for Milo$/.test(item.label || ""));
+if (!tags.length) throw new Error("no handoff for Milo was in the air");
+await app.click(tags[0].element_token);
 await app.waitFor({ text: "On its way" });
 await app.click({ role: "button", name: "Close details" });
 await app.waitFor({ role: "button", name: "Close details", gone: true });

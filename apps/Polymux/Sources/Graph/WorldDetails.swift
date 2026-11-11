@@ -117,6 +117,8 @@ struct WorldDetails: View {
     @Binding var picked: String?
     var openChat: ((String) -> Void)?
     @Environment(WorldPreviews.self) private var previews
+    /// A preview opened full size, over everything, until it's closed.
+    @State private var zoomed = false
 
     private var actor: WorldActor? { world.actor(picked) }
     private var station: WorldStation? { world.station(picked) }
@@ -141,16 +143,39 @@ struct WorldDetails: View {
                 Button("Chat") { openChat(agent) }
             }
         }
+        // Full size as its own sheet, so it's bigger than the panel and can't be covered by it.
+        .sheet(isPresented: $zoomed) {
+            VStack(spacing: 12) {
+                if let found = world.item(picked), let picture = previews.image(found.item.id) {
+                    picture.resizable().aspectRatio(contentMode: .fit)
+                        .frame(minWidth: 480, idealWidth: 760, maxWidth: 900, minHeight: 320, idealHeight: 520, maxHeight: 700)
+                        .clipShape(.rect(cornerRadius: 12))
+                        .accessibilityLabel("Preview of \(found.item.node.title)")
+                    Text(found.item.node.title).font(.headline)
+                }
+                Button("Close") { zoomed = false }.keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+        }
+        .onChange(of: picked) { zoomed = false }
     }
 
     /// The thing itself, as it stands on the map, over what it is and how it's doing.
     private var hero: some View {
         VStack(spacing: 6) {
             if let found = world.item(picked), let picture = previews.image(found.item.pictured ? found.item.id : nil) {
-                picture.resizable().aspectRatio(contentMode: .fit)
-                    .frame(maxHeight: 190)
-                    .clipShape(.rect(cornerRadius: 12))
-                    .accessibilityLabel("Preview of \(found.item.node.title)")
+                Button { zoomed = true } label: {
+                    picture.resizable().aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 190)
+                        .clipShape(.rect(cornerRadius: 12))
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption.weight(.bold)).foregroundStyle(.white)
+                                .padding(7).background(.black.opacity(0.45), in: Circle()).padding(8)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open \(found.item.node.title) full size")
             } else if let station {
                 Canvas { context, size in
                     WorldModel.draw(station, in: &context, at: CGPoint(x: size.width / 2, y: size.height - 18),
