@@ -111,6 +111,7 @@ struct WorldView: View {
         let unit = max(camera.scale, WorldMetrics.actorFloor)
         let heads = heads(camera, unit: unit)
         let spread = unit / camera.scale
+        let tagged = taggedActors(camera, unit: unit)
         return ZStack(alignment: .topLeading) {
             Color.clear.contentShape(Rectangle())
                 .gesture(SpatialTapGesture(count: 2).onEnded { zoom(by: 1.6, around: $0.location, in: size, animated: true) })
@@ -136,7 +137,7 @@ struct WorldView: View {
             ForEach(world.actors) { actor in
                 let cell = WorldMetrics.cell(actor, in: world, spread: spread)
                 let point = camera.point(WorldMetrics.screen(cell.i, cell.j))
-                WorldActorView(actor: actor, activity: activity, scale: unit, selected: picked == actor.id) { pick(actor.id) }
+                WorldActorView(actor: actor, wearsTag: tagged.contains(actor.id), activity: activity, scale: unit, selected: picked == actor.id) { pick(actor.id) }
                     .opacity(focus.map { $0.contains(actor.id) ? 1 : 0.35 } ?? 1)
                     .position(x: point.x, y: point.y - WorldMetrics.avatar * unit / 2)
                     .zIndex(10_000 + (cell.i + cell.j) * 10 + 5)
@@ -310,6 +311,24 @@ struct WorldView: View {
     }
 
     // MARK: Where things are
+
+    /// The actors whose tags can be read without covering another: the ones needing you first win the space.
+    private func taggedActors(_ camera: Camera, unit: Double) -> Set<String> {
+        let rank = [WorkNodeState.waiting: 0, WorkNodeState.failed: 1, WorkNodeState.working: 2]
+        var taken: [CGRect] = []
+        var shown: Set<String> = []
+        for actor in world.actors.sorted(by: { (rank[$0.node.state ?? ""] ?? 9, $0.node.title) < (rank[$1.node.state ?? ""] ?? 9, $1.node.title) }) {
+            guard WorldActorView.tag(actor) != nil else { continue }
+            let cell = WorldMetrics.cell(actor, in: world, spread: unit / camera.scale)
+            let feet = camera.point(WorldMetrics.screen(cell.i, cell.j))
+            let width = min(190, Double((WorldActorView.tag(actor)?.text ?? "").count) * 6.6 + 42)
+            let box = CGRect(x: feet.x - width / 2, y: feet.y - WorldMetrics.avatar * unit - 29, width: width, height: 24)
+            guard !taken.contains(where: { $0.insetBy(dx: -4, dy: -3).intersects(box) }) else { continue }
+            taken.append(box)
+            shown.insert(actor.id)
+        }
+        return shown
+    }
 
     /// Where trails start and end: over an actor's head, or the top of a station.
     private func heads(_ camera: Camera, unit: Double) -> [String: CGPoint] {

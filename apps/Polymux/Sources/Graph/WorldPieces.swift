@@ -309,6 +309,8 @@ struct WorldBanner: View {
 /// Someone on the map: who they are, standing on their own base, with what they're doing over their head.
 struct WorldActorView: View {
     let actor: WorldActor
+    /// Whether its activity is worth wearing, or whether someone beside it already says the same thing.
+    var wearsTag = true
     let activity: ActivityStore
     let scale: Double
     let selected: Bool
@@ -342,7 +344,7 @@ struct WorldActorView: View {
             .offset(y: hovered ? -3 : 0)
             .background(alignment: .bottom) { base }
             .overlay(alignment: .top) {
-                if let tag = Self.tag(actor) {
+                if wearsTag, let tag = Self.tag(actor) {
                     // Stacked by place in line, so two people at one station never write over each other.
                     WorldTag(symbol: tag.symbol, text: tag.text, color: tag.color)
                         .frame(width: 190, height: 24)
@@ -802,7 +804,7 @@ struct WorldTrails: View {
                 let control = CGPoint(x: (start.x + end.x) / 2, y: min(start.y, end.y) - max(40, hypot(end.x - start.x, end.y - start.y) * 0.26))
                 let at = WorldMotion.position(WorldRoute(from: start, control: control, to: end), seconds: seconds, index: index, still: reducedMotion)
                 if CommandLine.arguments.contains("--verify-graph-trace") {
-                    print("atlas cart \(trail.id) x=\(Int(at.x)) y=\(Int(at.y))")
+                    print("atlas cart \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
                 cart(&layer, at: at, colour: color)
             }
