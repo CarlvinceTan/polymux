@@ -880,7 +880,8 @@ struct WorldTrails: View {
                     print("atlas boat \(trail.id) t=\(String(format: "%.2f", seconds)) x=\(Int(at.x)) y=\(Int(at.y))")
                 }
                 let bob = reducedMotion ? 0 : sin(seconds * 2.2 + Double(index)) * 1.6
-                boat(&layer, at: CGPoint(x: at.x, y: at.y + bob), heading: crossing.heading, color: color, zoom: crossing.zoom)
+                let ahead = point(crossing.path, at: min(1, (trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase) + 0.02))
+                boat(&layer, at: CGPoint(x: at.x, y: at.y + bob), heading: atan2(ahead.y - at.y, ahead.x - at.x), color: color, zoom: crossing.zoom)
                 // A short wake behind it, rather than a line all the way across.
                 let tail = point(crossing.path, at: max(0, (trail.wire.direction == WorkWireDirection.back ? 1 - phase : phase) - 0.06))
                 var wake = Path()
@@ -912,19 +913,26 @@ struct WorldTrails: View {
             let progress = now.timeIntervalSince(handoff.at) / Self.flight
             guard (0...1).contains(progress) else { continue }
             let kind = handoff.result ? WorkKind.result : WorkKind.task
-            let path = WorldMetrics.arc(from, to).path
+            // Over its own island someone carries it; across water it sails the same lanes as everyone else.
+            let source = islet(world.group(of: WorkGraphBuilder.agentNode(handoff.source)))
+            let target = islet(world.group(of: WorkGraphBuilder.agentNode(handoff.target)))
+            guard source.id != target.id else {
+                let at = point(WorldMetrics.arc(from, to).path, at: progress)
+                parcel(&context, at: at, colour: GraphTint.cargo(kind))
+                continue
+            }
+            let path = seaLane(from: source, to: target, lane: Int(handoff.at.timeIntervalSince1970))
             let at = point(path, at: progress)
-            // Something just handed over sails across rather than flying.
-            let heading = atan2(to.y - from.y, to.x - from.x)
+            let ahead = point(path, at: min(1, progress + 0.02))
             let bob = reducedMotion ? 0 : sin(now.timeIntervalSinceReferenceDate * 2.2) * 1.6
-            boat(&context, at: CGPoint(x: at.x, y: at.y + bob), heading: heading, color: GraphTint.cargo(kind), zoom: 1.4)
+            boat(&context, at: CGPoint(x: at.x, y: at.y + bob), heading: atan2(ahead.y - at.y, ahead.x - at.x),
+                 color: GraphTint.cargo(kind), zoom: 1.4)
         }
     }
 
-    /// A boat's course between two islets, with the heading it holds.
+    /// A boat's course between two islets: open water only, bending around any land in the way.
     private struct Crossing {
         var path: Path
-        var heading: Double
         var zoom: CGFloat
     }
 
@@ -932,58 +940,50 @@ struct WorldTrails: View {
     private func crossing(_ trail: WorldTrail, from: CGPoint, to: CGPoint, lane: Int = 0) -> Crossing? {
         // Home is an islet too, so someone resting there still sends a boat rather than a bare line.
         let start = islet(world.group(of: trail.from))
-        let end = islet(world.group(of: trail.to))
-        guard start.id != end.id else { return nil }
-        // Each crossing keeps its own lane, so two boats never sail on top of each other.
-        let drift = CGFloat((lane % 3) - 1) * 16
-        let a = shore(start).map(place).map { CGPoint(x: $0.x, y: $0.y + drift) }
-        let b = shore(end).map(place).map { CGPoint(x: $0.x, y: $0.y + drift) }
-        // The two shores closest to each other, so a boat takes the short way across.
-        var best: (CGFloat, CGPoint, CGPoint) = (.infinity, a[0], b[0])
-        for one in a { for other in b {
-            let away = hypot(one.x - other.x, one.y - other.y)
-            if away < best.0 { best = (away, one, other) }
-        } }
-        // A gentle bow between the two shores, never a sweep out to open sea.
-        let span = max(1, hypot(best.2.x - best.1.x, best.2.y - best.1.y))
-        let bow = min(36, span * 0.18)
-        let control = CGPoint(x: (best.1.x + best.2.x) / 2 - (best.2.y - best.1.y) / span * bow,
-                              y: (best.1.y + best.2.y) / 2 + (best.2.x - best.1.x) / span * bow)
-        var path = Path()
-        path.move(to: best.1)
-        path.addQuadCurve(to: best.2, control: control)
-        return Crossing(path: path, heading: atan2(best.2.y - best.1.y, best.2.x - best.1.x), zoom: 1.3)
+        let finish = islet(world.group(of: trail.to))
+        guard start.id != finish.id else { return nil }
+        return Crossing(path: seaLane(from: start, to: finish, lane: lane), zoom: 1.3)
     }
 
-    private struct Islet {
-        var id: String
-        var minI: Int
-        var minJ: Int
-        var maxI: Int
-        var maxJ: Int
-        /// How far outside its plots the water reaches: none at home, where the paving is the shore.
-        var margin: Int = 4
+    /// A boat's course between two islets, in map coordinates: open water, and a bend round any land in the way.
+    private func seaLane(from: WorkIslet, to: WorkIslet, lane: Int) -> Path {
+        // Each crossing keeps its own lane — the whole map slid a little — so two boats never sail on top of each other.
+        let drift = CGFloat((lane % 3) - 1) * 8
+        let points = WorkSea.route(from: from, to: to, around: obstacles(ignoring: [from.id, to.id]), drift: drift)
+            .map { berth in place(WorldMetrics.screen(Double(berth.x), Double(berth.y))) }
+        return bow(points)
+    }
+
+    /// Every island a boat must stay off, the two it travels between excepted.
+    private func obstacles(ignoring ids: [String]) -> [WorkIslet] {
+        var land = world.groups.map { islet($0) }.filter { !ids.contains($0.id) }
+        if !ids.contains("home") { land.append(islet(nil)) }
+        return land
+    }
+
+    /// A course through a few points, each leg bowing gently so nothing runs in a straight line.
+    private func bow(_ points: [CGPoint]) -> Path {
+        var path = Path()
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        guard points.count > 1 else { return path }
+        for index in 1..<points.count {
+            let (a, b) = (points[index - 1], points[index])
+            let span = max(1, hypot(b.x - a.x, b.y - a.y))
+            let rise = WorkSea.laneBow(Double(span))
+            path.addQuadCurve(to: b, control: CGPoint(x: (a.x + b.x) / 2 - (b.y - a.y) / span * rise,
+                                                      y: (a.y + b.y) / 2 + (b.x - a.x) / span * rise))
+        }
+        return path
     }
 
     /// The islet a group covers, or home for someone with none.
-    private func islet(_ group: WorldGroup?) -> Islet {
-        guard let group else { return Islet(id: "home", minI: -2, minJ: -2, maxI: 2, maxJ: 2, margin: 2) }
-        return Islet(id: group.id, minI: group.minI, minJ: group.minJ, maxI: group.maxI, maxJ: group.maxJ)
-    }
-
-    /// Points around an islet's edge, in map coordinates, where a boat can wait.
-    private func shore(_ group: Islet) -> [CGPoint] {
-        let reach = Double(group.margin)
-        let near = WorldMetrics.screen(Double(group.minI) - reach, Double(group.minJ) - reach)
-        let far = WorldMetrics.screen(Double(group.maxI) + reach, Double(group.maxJ) + reach)
-        let across = WorldMetrics.screen(Double(group.minI) - reach, Double(group.maxJ) + reach)
-        let other = WorldMetrics.screen(Double(group.maxI) + reach, Double(group.minJ) - reach)
-        let left = min(near.x, far.x, across.x, other.x)
-        let right = max(near.x, far.x, across.x, other.x)
-        let top = min(near.y, far.y, across.y, other.y)
-        let bottom = max(near.y, far.y, across.y, other.y)
-        let middle = CGPoint(x: (left + right) / 2, y: (top + bottom) / 2)
-        return [CGPoint(x: middle.x, y: top), CGPoint(x: right, y: middle.y), CGPoint(x: middle.x, y: bottom), CGPoint(x: left, y: middle.y)]
+    private func islet(_ group: WorldGroup?) -> WorkIslet {
+        guard let group else {
+            return WorkIslet(id: "home", minI: -WorkWorld.homeReach, minJ: -WorkWorld.homeReach,
+                             maxI: WorkWorld.homeReach - 1, maxJ: WorkWorld.homeReach - 1, reach: 0)
+        }
+        return WorkIslet(id: group.id, minI: group.minI, minJ: group.minJ, maxI: group.maxI, maxJ: group.maxJ)
     }
 
     /// Where someone stands on their own pad, or where their head is when they have none.
@@ -1086,3 +1086,4 @@ final class AtlasFrameCost: @unchecked Sendable {
         print(String(format: "atlas frames %d avg=%.2fms worst=%.2fms", frames, total / Double(frames) * 1000, worst * 1000))
     }
 }
+
