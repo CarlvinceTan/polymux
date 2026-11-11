@@ -576,14 +576,20 @@ struct WorldGround: View {
         }
         // What grows keeps to the shore, where it marks the land without standing between anything.
         let flags = Set(world.groups.map { WorldCell(i: Int($0.flagI.rounded(.down)), j: Int($0.flagJ.rounded(.down))) })
-        for cell in order where !paved.contains(cell) && !flags.contains(cell) && chance(cell) > 0.6 {
+        for cell in order where !paved.contains(cell) && !flags.contains(cell) && chance(cell) > 0.42 {
             guard let biome = land[cell], biome != .plaza else { continue }
             let shore = [(1, 0), (-1, 0), (0, 1), (0, -1)].contains { !all.contains(WorldCell(i: cell.i + $0.0, j: cell.j + $0.1)) }
             guard shore else { continue }
             let roll = chance(WorldCell(i: cell.j, j: cell.i))
-            stamp(&context, at: WorldMetrics.screen(Double(cell.i) + 0.5, Double(cell.j) + 0.5)) { layer in
-                var iso = Iso(context: layer, origin: .zero)
-                Self.grow(biome, &iso, roll: roll)
+            // Two or three together, the way Polytopia clusters its trees, so a shore reads as a grove.
+            let crowd = chance(WorldCell(i: cell.j * 3, j: cell.i * 7))
+            for index in 0...Int(crowd * 2.9) {
+                let spread = CGFloat(index) * 7 - 7
+                let at = WorldMetrics.screen(Double(cell.i) + 0.5, Double(cell.j) + 0.5)
+                stamp(&context, at: CGPoint(x: at.x + spread, y: at.y + spread * 0.4)) { layer in
+                    var iso = Iso(context: layer, origin: .zero)
+                    Self.grow(biome, &iso, roll: roll - Double(index) * 0.17)
+                }
             }
         }
         // Each banner's pole. The banner itself is a button, drawn over the map.
@@ -782,7 +788,7 @@ struct WorldTrails: View {
         var path = Path()
         path.move(to: best.1)
         path.addQuadCurve(to: best.2, control: control)
-        return Crossing(path: path, heading: atan2(best.2.y - best.1.y, best.2.x - best.1.x), zoom: 1.9)
+        return Crossing(path: path, heading: atan2(best.2.y - best.1.y, best.2.x - best.1.x), zoom: 2.6)
     }
 
     /// Points around an islet's edge, in map coordinates, where a boat can wait.
@@ -804,7 +810,7 @@ struct WorldTrails: View {
         var layer = context
         layer.translateBy(x: point.x, y: point.y)
         layer.rotate(by: .radians(heading))
-        let unit = 13 * zoom
+        let unit = 17 * zoom
         var hull = Path()
         hull.move(to: CGPoint(x: -unit, y: 0))
         hull.addLine(to: CGPoint(x: unit, y: 0))
@@ -819,6 +825,10 @@ struct WorldTrails: View {
         sail.closeSubpath()
         layer.fill(sail, with: .color(color))
         layer.stroke(sail, with: .color(.white.opacity(0.7)), lineWidth: 1)
+        // A crate aboard, so a boat reads as carrying something rather than as a decoration.
+        let crate = CGRect(x: -unit * 0.28, y: -unit * 0.24, width: unit * 0.5, height: unit * 0.36)
+        layer.fill(Path(roundedRect: crate, cornerRadius: 1.5), with: .color(Color.brown.mix(with: .white, by: 0.25)))
+        layer.stroke(Path(roundedRect: crate, cornerRadius: 1.5), with: .color(Color.brown.mix(with: .black, by: 0.25)), lineWidth: 1)
     }
 
     private func point(_ path: Path, at progress: Double) -> CGPoint {
