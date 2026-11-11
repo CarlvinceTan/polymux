@@ -13,7 +13,7 @@ struct WorkSeaTests {
         #expect(route.count == 2)
     }
 
-    @Test func landBetweenTwoIslandsIsGivenAWideBirth() {
+    @Test func landBetweenTwoIslandsIsSailedRound() {
         let blocking = islet("middle", 20)
         let route = WorkSea.route(from: islet("a", 0), to: islet("b", 40), around: [blocking])
         #expect(route.count >= 2)

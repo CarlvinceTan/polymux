@@ -175,8 +175,9 @@ public struct WorkWorld: Hashable, Sendable {
     public static let pitch = 5
     /// Cells from the middle of home to its edge.
     public static let homeReach = 4
-    /// Cells of open water between islets.
-    private static let gap = 5
+    /// Cells of open water between islets. An island's coast reaches four cells past its plots and a boat
+    /// keeps another clear of that, so anything under nine leaves no channel at all between two of them.
+    private static let gap = 9
 
     public init() {}
 

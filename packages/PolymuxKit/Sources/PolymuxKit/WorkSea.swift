@@ -34,33 +34,19 @@ public struct WorkIslet: Hashable, Sendable {
         return copy
     }
 
-    /// The no-go box with a further cell of water, so a boat lying off a coast stays off it.
-    public var mooring: (lowI: Double, highI: Double, lowJ: Double, highJ: Double) {
-        let box = extent
-        return (box.lowI - 1, box.highI + 1, box.lowJ - 1, box.highJ + 1)
-    }
-
     /// Where boats load and wait: the faces and corners of the island, a cell off its no-go line.
-    public var quays: [CGPoint] { points(at: 1) }
-
-    /// Quays plus a wider ring, for when an island's own coast is closed on a side and a lane must pass outside.
-    public var anchorages: [CGPoint] { quays + points(at: Double(reach) + 7) }
-
-    /// The faces and corners of the island grown by a given number of cells.
-    private func points(at out: Double) -> [CGPoint] {
-        let corners = [CGPoint(x: Double(minI) - out, y: Double(minJ) - out),
-                       CGPoint(x: Double(maxI) + 1 + out, y: Double(minJ) - out),
-                       CGPoint(x: Double(maxI) + 1 + out, y: Double(maxJ) + 1 + out),
-                       CGPoint(x: Double(minI) - out, y: Double(maxJ) + 1 + out)]
+    public var quays: [CGPoint] {
+        let corners = [CGPoint(x: minI - 2, y: minJ - 2), CGPoint(x: maxI + 3, y: minJ - 2),
+                       CGPoint(x: maxI + 3, y: maxJ + 3), CGPoint(x: minI - 2, y: maxJ + 3)]
         let middle = CGPoint(x: (Double(minI) + Double(maxI) + 1) / 2, y: (Double(minJ) + Double(maxJ) + 1) / 2)
-        let faces = [CGPoint(x: middle.x, y: Double(minJ) - out), CGPoint(x: Double(maxI) + 1 + out, y: middle.y),
-                     CGPoint(x: middle.x, y: Double(maxJ) + 1 + out), CGPoint(x: Double(minI) - out, y: middle.y)]
+        let faces = [CGPoint(x: middle.x, y: Double(minJ) - 2), CGPoint(x: Double(maxI) + 3, y: middle.y),
+                     CGPoint(x: middle.x, y: Double(maxJ) + 3), CGPoint(x: Double(minI) - 2, y: middle.y)]
         return faces + corners
     }
 }
 
-/// The lanes boats sail: from one island to another over open water only, going round the land in the way.
-/// Points are in ground cells; the map draws them, and the tests assert on them, in the same space.
+/// The lanes boats sail: from one island to another over open water, going round the land in the way.
+/// Points are in ground cells, which is where land is drawn and where the tests look.
 public enum WorkSea {
     /// The points of a course from one island to another, staying off every other island's ground.
     /// Lanes depend only on the map's ground, so each is worked out once and remembered.
@@ -71,8 +57,14 @@ public enum WorkSea {
         defer { lock.unlock() }
         if let known = lanes[key] { return known }
         let route = plan(from: from.shifted(drift), to: to.shifted(drift), around: islands.map { $0.shifted(drift) })
-        if lanes.count > 256 { lanes.removeAll() }
+        // A crowded map has crossings in plenty: forget the oldest lanes rather than every one,
+        // which would leave boats re-planning their course each frame.
+        if remembered.count > 2048 {
+            for gone in remembered.prefix(1024) { lanes.removeValue(forKey: gone) }
+            remembered.removeFirst(1024)
+        }
         lanes[key] = route
+        remembered.append(key)
         return route
     }
 
@@ -84,64 +76,128 @@ public enum WorkSea {
     }
 
     nonisolated(unsafe) private static var lanes: [RouteKey: [CGPoint]] = [:]
+    nonisolated(unsafe) private static var remembered: [RouteKey] = []
     nonisolated(unsafe) private static let lock = NSLock()
 
-    /// The shortest all-water course, sought over anchorages as a graph: getting round a cluster can take several legs.
+    /// The shortest course over open water: a search over the sea itself, then the course pulled to
+    /// as few legs as still sail clear of every coast.
     private static func plan(from: WorkIslet, to: WorkIslet, around islands: [WorkIslet]) -> [CGPoint] {
         let berths = from.quays
         let calls = to.quays
         guard let first = berths.first, let last = calls.first else { return [] }
-        let anchorages = islands.flatMap(\.anchorages) + openSea(of: islands + [from, to])
-        let nodes = berths + anchorages + calls
-        let sources = 0..<berths.count
-        let targets = (nodes.count - calls.count)..<nodes.count
-
-        var best = Array(repeating: Double.infinity, count: nodes.count)
-        var previous = Array(repeating: -1, count: nodes.count)
-        var ahead = Set(sources)
-        for source in sources { best[source] = 0 }
-        while !ahead.isEmpty {
-            let here = ahead.min { best[$0] < best[$1] }!
-            ahead.remove(here)
-            if targets.contains(here) { break }
-            for there in nodes.indices where there != here && !ahead.contains(there)
-                && best[here].isFinite && clear(from: nodes[here], to: nodes[there], around: islands) {
-                let step = best[here] + distance([nodes[here], nodes[there]])
-                guard step < best[there] else { continue }
-                best[there] = step
-                previous[there] = here
-                ahead.insert(there)
-            }
-        }
-        guard let finish = targets.min(by: { best[$0] < best[$1] }), best[finish].isFinite else {
+        guard let course = cross(from: berths, to: calls, around: islands) else {
             // Hemmed in on every side, which a crowded map can do: the shortest crossing rather than no boat at all.
             var shortest = [first, last]
             for berth in berths { for call in calls where shorter([berth, call], than: shortest) { shortest = [berth, call] } }
             return shortest
         }
-        var route: [CGPoint] = []
-        var step = finish
-        while step >= 0 { route.append(nodes[step]); step = previous[step] }
-        return route.reversed()
+        return course
     }
 
-    /// Waypoints on the open sea beyond every island, so a boat can always get outside a cluster.
-    private static func openSea(of islands: [WorkIslet]) -> [CGPoint] {
-        guard let lowI = islands.map({ Double($0.minI) }).min(), let highI = islands.map({ Double($0.maxI) }).max(),
-              let lowJ = islands.map({ Double($0.minJ) }).min(), let highJ = islands.map({ Double($0.maxJ) }).max()
-        else { return [] }
-        let margin = 16.0
-        let box = (lowI - margin, highI + 1 + margin, lowJ - margin, highJ + 1 + margin)
-        let corners = [CGPoint(x: box.0, y: box.2), CGPoint(x: box.1, y: box.2),
-                       CGPoint(x: box.1, y: box.3), CGPoint(x: box.0, y: box.3)]
-        let middle = CGPoint(x: (box.0 + box.1) / 2, y: (box.2 + box.3) / 2)
-        return corners + [CGPoint(x: middle.x, y: box.2), CGPoint(x: box.1, y: middle.y),
-                          CGPoint(x: middle.x, y: box.3), CGPoint(x: box.0, y: middle.y)]
+    /// The sea is searched on this step, in cells: fine enough to find a channel, coarse enough to be quick.
+    private static let sound = 2.0
+    /// Cells a searched lane keeps off the no-go line, so the drawn bow still clears the coast.
+    private static let clearance = 1.4
+
+    /// A search over the water from any berth to any quay.
+    private static func cross(from berths: [CGPoint], to calls: [CGPoint], around islands: [WorkIslet]) -> [CGPoint]? {
+        let sheet = sea(of: islands, and: berths + calls)
+        let across = Int((sheet.high - sheet.low) / sound) + 1
+        func place(_ index: Int) -> CGPoint {
+            CGPoint(x: sheet.low + Double(index % across) * sound, y: sheet.top + Double(index / across) * sound)
+        }
+        func index(_ at: CGPoint) -> Int? {
+            let x = Int(((at.x - sheet.low) / sound).rounded()), y = Int(((at.y - sheet.top) / sound).rounded())
+            guard x >= 0, x < across, y >= 0, y * across + x < sheet.nodes else { return nil }
+            return y * across + x
+        }
+        // The sea is searched a little way off the coast: a lane that runs along the no-go line itself
+        // would brush the sand as soon as it bows.
+        func afloat(_ at: CGPoint) -> Bool {
+            !islands.contains { islet in
+                let box = islet.extent
+                return at.x > box.lowI - Self.clearance && at.x < box.highI + Self.clearance
+                    && at.y > box.lowJ - Self.clearance && at.y < box.highJ + Self.clearance
+            }
+        }
+
+        var known = [Int: Double]()
+        var previous = [Int: Int]()
+        var ahead = [Int: Double]()   // where a course may still be led on, priced by the best course through it
+        for berth in berths {
+            guard let start = index(berth), afloat(place(start)) else { continue }
+            known[start] = 0
+            ahead[start] = calls.map { distance([place(start), $0]) }.min() ?? 0
+        }
+        while let here = ahead.min(by: { $0.value < $1.value })?.key {
+            ahead[here] = nil
+            let at = place(here)
+            // Close enough to a haven that the boat can run in on one last leg.
+            func ashore(_ call: CGPoint) -> Double { hypot(Double(call.x - at.x), Double(call.y - at.y)) }
+            if let haven = calls.min(by: { ashore($0) < ashore($1) }), ashore(haven) <= sound * 2 {
+                let course = trace(here, previous: previous, place: place)
+                return tighten(course + [haven], around: islands, from: course.first ?? at, berths: berths)
+            }
+            for step in [CGPoint(x: 1, y: 0), CGPoint(x: -1, y: 0), CGPoint(x: 0, y: 1), CGPoint(x: 0, y: -1),
+                         CGPoint(x: 1, y: 1), CGPoint(x: 1, y: -1), CGPoint(x: -1, y: 1), CGPoint(x: -1, y: -1)] {
+                let onward = CGPoint(x: at.x + Double(step.x) * sound, y: at.y + Double(step.y) * sound)
+                guard let there = index(onward), afloat(onward) else { continue }
+                // A boat may not slip between two coasts diagonally when it could only pass them one at a time.
+                if step.x != 0, step.y != 0,
+                   !afloat(CGPoint(x: at.x + Double(step.x) * sound, y: at.y)),
+                   !afloat(CGPoint(x: at.x, y: at.y + Double(step.y) * sound)) { continue }
+                let course = known[here]! + distance([at, onward])
+                guard course < (known[there] ?? .infinity) else { continue }
+                known[there] = course
+                previous[there] = here
+                ahead[there] = course + (calls.map { distance([onward, $0]) }.min() ?? 0)
+            }
+        }
+        return nil
+    }
+
+    /// The course the search came in on, from the berth it left to the quay it reached.
+    private static func trace(_ index: Int, previous: [Int: Int], place: (Int) -> CGPoint) -> [CGPoint] {
+        var out: [CGPoint] = []
+        var step: Int? = index
+        while let here = step { out.append(place(here)); step = previous[here] }
+        return out.reversed()
+    }
+
+    /// The fewest legs that still sail clear water: a waypoint goes as soon as the boat can see past it.
+    private static func tighten(_ course: [CGPoint], around islands: [WorkIslet], from leaving: CGPoint, berths: [CGPoint]) -> [CGPoint] {
+        var course = course
+        let start = berths.min { distance([$0, leaving]) < distance([$1, leaving]) } ?? course[0]
+        course.insert(start, at: 0)
+        var route = [course[0]]
+        var here = 0
+        while here < course.count - 1 {
+            var next = course.count - 1
+            while next > here + 1, !clear(from: route[route.count - 1], to: course[next], around: islands) { next -= 1 }
+            route.append(course[next])
+            here = next
+        }
+        return route
+    }
+
+    /// The sheet of water worth searching: every island and quay, with room to sail outside them all.
+    private static func sea(of islands: [WorkIslet], and points: [CGPoint]) -> (low: Double, high: Double, top: Double, bottom: Double, nodes: Int) {
+        let margin = 14.0
+        let low = (islands.map { Double($0.minI) }.min() ?? 0) - margin
+        let high = (islands.map { Double($0.maxI) }.max() ?? 0) + 1 + margin
+        let top = (islands.map { Double($0.minJ) }.min() ?? 0) - margin
+        let bottom = (islands.map { Double($0.maxJ) }.max() ?? 0) + 1 + margin
+        let across = Int((high - low) / sound) + 1, down = Int((bottom - top) / sound) + 1
+        return (min(low, points.map { Double($0.x) - sound }.min() ?? low),
+                max(high, points.map { Double($0.x) + sound }.max() ?? high),
+                min(top, points.map { Double($0.y) - sound }.min() ?? top),
+                max(bottom, points.map { Double($0.y) + sound }.max() ?? bottom),
+                (across + 4) * (down + 4))
     }
 
     /// Whether an island lies between two points: the straight line between them runs over its ground.
     /// A line that only touches the no-go line is not over it.
-    public static func covers(_ a: CGPoint, _ b: CGPoint, _ islet: WorkIslet) -> Bool {
+    static func covers(_ a: CGPoint, _ b: CGPoint, _ islet: WorkIslet) -> Bool {
         let box = islet.extent
         let gap = 0.01
         var entered = 0.0
@@ -165,58 +221,64 @@ public enum WorkSea {
 
     /// How far a drawn lane bows off its chord, in screen pixels for a leg of that many pixels.
     /// The map draws its courses with this same figure, so what is planned is what sails.
-    public static func laneBow(_ span: Double) -> Double { min(span < 260 ? 14 : 30, span * 0.14) }
+    /// A short leg runs straight: it is a turn round a headland, not a stretch of open sea to sweep.
+    public static func laneBow(_ span: Double) -> Double {
+        guard span > 90 else { return 0 }
+        return min(span < 260 ? 12 : 26, span * 0.12)
+    }
 
-    /// The point a drawn lane holds at, for the leg between two waypoints: the chord bowed as the map bows it.
+    /// The point a drawn lane holds at, in cells: the chord bowed as the map bows it, taken back off the screen.
     public static func lanePoint(_ from: CGPoint, _ to: CGPoint, at t: Double) -> CGPoint {
         let (ax, ay) = screenPoint(from)
         let (bx, by) = screenPoint(to)
         let span = max(1, hypot(bx - ax, by - ay))
         let rise = laneBow(span)
+        // The bow is drawn on the screen, so the curve is worked out there and taken back to cells whole.
         let controlX = (ax + bx) / 2 - (by - ay) / span * rise
         let controlY = (ay + by) / 2 + (bx - ax) / span * rise
         let one = 1 - t
-        return CGPoint(x: one * one * ax + 2 * one * t * controlX + t * t * bx,
-                       y: one * one * ay + 2 * one * t * controlY + t * t * by)
+        return point(x: one * one * ax + 2 * one * t * controlX + t * t * bx,
+                     y: one * one * ay + 2 * one * t * controlY + t * t * by)
     }
 
     /// Whether the lane a boat actually sails is open water at every point, bow included.
+    /// Tested in cells, which is where the map's ground is: the screen's box around an island is far bigger than the island.
     public static func clear(from: CGPoint, to: CGPoint, around islands: [WorkIslet]) -> Bool {
         // A drawn lane never drifts off its chord by more than the bow, so a box grown by that
         // much bounds the islands worth testing at all.
         let (ax, ay) = screenPoint(from)
         let (bx, by) = screenPoint(to)
-        let margin = laneBow(max(1, hypot(bx - ax, by - ay)))
+        let drift = laneBow(max(1, hypot(bx - ax, by - ay))) / 28
         let near = islands.filter { islet in
-            let box = extentInScreen(islet)
-            return !(max(ax, bx) < box.low - margin || min(ax, bx) > box.high + margin
-                || max(ay, by) < box.top - margin || min(ay, by) > box.bottom + margin)
+            let box = islet.extent
+            return !(max(from.x, to.x) < box.lowI - drift || min(from.x, to.x) > box.highI + drift
+                || max(from.y, to.y) < box.lowJ - drift || min(from.y, to.y) > box.highJ + drift)
         }
         if near.isEmpty { return true }
         for step in 0...12 {
             let at = lanePoint(from, to, at: Double(step) / 12)
-            if near.contains(where: { touches(extentInScreen($0), at) }) { return false }
+            if near.contains(where: { onLand($0, at) }) { return false }
         }
         return true
     }
 
-    /// An island's no-go box in screen pixels, which is where the map draws and bows its lanes.
-    private static func extentInScreen(_ islet: WorkIslet) -> (low: Double, high: Double, top: Double, bottom: Double) {
+    /// Whether a point stands on an island's ground.
+    private static func onLand(_ islet: WorkIslet, _ at: CGPoint) -> Bool {
         let box = islet.extent
-        let corners = [(box.lowI, box.lowJ), (box.highI, box.lowJ), (box.highI, box.highJ), (box.lowI, box.highJ)]
-            .map { screenPoint(CGPoint(x: $0.0, y: $0.1)) }
-        let xs = corners.map { $0.0 }, ys = corners.map { $0.1 }
-        return (xs.min()!, xs.max()!, ys.min()!, ys.max()!)
+        let gap = 0.01
+        return at.x > box.lowI + gap && at.x < box.highI - gap && at.y > box.lowJ + gap && at.y < box.highJ - gap
     }
 
-    /// A ground cell as the map draws it. Kept in step with the app's own projection.
+    /// A screen point taken back to the cells it was drawn from.
+    private static func point(x: Double, y: Double) -> CGPoint {
+        let half = 28.0
+        return CGPoint(x: x / (2 * half) + y / half, y: -x / (2 * half) + y / half)
+    }
+
+    /// A ground cell as the map draws it, kept in step with the app's own projection.
     private static func screenPoint(_ at: CGPoint) -> (Double, Double) {
         let half = 28.0
         return ((Double(at.x) - Double(at.y)) * half, (Double(at.x) + Double(at.y)) * half / 2)
-    }
-
-    private static func touches(_ box: (low: Double, high: Double, top: Double, bottom: Double), _ at: CGPoint) -> Bool {
-        !(at.x < box.low || at.x > box.high || at.y < box.top || at.y > box.bottom)
     }
 
     /// Distance as the map measures it, in screen pixels.
