@@ -51,23 +51,58 @@ public enum DictationDevice {
         #endif
     }
 
+    /// How many dictation models can run together for multilingual input.
+    public static var maxLocales: Int {
+        #if os(iOS)
+        2
+        #else
+        ProcessInfo.processInfo.physicalMemory >= 32 * 1024 * 1024 * 1024 ? 3 : 2
+        #endif
+    }
+
     /// The language to actually recognise, after the device policy.
     public static func language(_ preferred: DictationLanguage) -> DictationLanguage {
         preferred == .multilingual && !supportsMultilingual ? .english : preferred
     }
 
-    /// English prefers the system's own variant (en-AU, en-GB, …) when it is English.
-    public static func locale(for language: DictationLanguage) -> Locale {
-        let current = Locale.current
-        if language == .multilingual { return current }
-        return current.identifier.hasPrefix("en") ? current : Locale(identifier: "en-US")
+    /// The locales dictation should run. English is always first; multilingual adds
+    /// the non-English languages configured on this device, up to `maxLocales`.
+    public static func locales(for language: DictationLanguage) -> [Locale] {
+        let english = englishLocale
+        guard language == .multilingual else { return [english] }
+        var out = [english]
+        var codes: Set<String> = ["en"]
+        for identifier in Locale.preferredLanguages {
+            let locale = Locale(identifier: identifier)
+            let code = locale.language.languageCode?.identifier ?? identifier
+            guard !codes.contains(code) else { continue }
+            codes.insert(code)
+            out.append(locale)
+            if out.count == maxLocales { break }
+        }
+        return out
     }
 
-    /// The language recognition will actually listen for, named for the current locale.
-    public static func languageName(for language: DictationLanguage) -> String {
-        let locale = locale(for: language)
-        let code = locale.identifier.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map(String.init)
-            ?? locale.identifier
-        return Locale.current.localizedString(forLanguageCode: code) ?? code.capitalized
+    /// English prefers the system's own variant (en-AU, en-GB, …) when it is English.
+    public static func locale(for language: DictationLanguage) -> Locale {
+        if language == .english { return englishLocale }
+        return Locale.current
+    }
+
+    /// The languages recognition will listen for, named for the current locale.
+    public static func languageNames(for language: DictationLanguage) -> String {
+        var names: [String] = []
+        for locale in locales(for: language) {
+            let code = locale.language.languageCode?.identifier ?? locale.identifier
+            let name = Locale.current.localizedString(forLanguageCode: code) ?? code.capitalized
+            guard !names.contains(name) else { continue }
+            names.append(name)
+        }
+        return names.joined(separator: ", ")
+    }
+
+    private static var englishLocale: Locale {
+        let current = Locale.current
+        return current.identifier.hasPrefix("en") ? current : Locale(identifier: "en-US")
     }
 }

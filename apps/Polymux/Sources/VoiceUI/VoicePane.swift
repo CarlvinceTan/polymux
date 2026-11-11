@@ -66,12 +66,12 @@ struct VoicePane: View {
     private var recognitionSection: some View {
         Section {
             LabeledContent("Engine", value: "Apple Speech")
-            LabeledContent("Listening for", value: DictationDevice.languageName(for: dictation.deviceLanguage))
+            LabeledContent("Listening for", value: DictationDevice.languageNames(for: dictation.deviceLanguage))
             if dictation.fallsBack {
                 Text("Multilingual falls back to English on this device.")
                     .font(.footnote).foregroundStyle(.muted)
             } else if dictation.language == .multilingual {
-                Text("Multilingual follows this device’s language.")
+                Text("Multilingual listens for English and this device’s languages.")
                     .font(.footnote).foregroundStyle(.muted)
             }
         } header: {
