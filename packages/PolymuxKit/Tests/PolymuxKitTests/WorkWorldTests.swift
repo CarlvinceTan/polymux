@@ -90,3 +90,68 @@ struct WorkWorldTests {
         #expect(world.station("safari")?.group == "shared")
     }
 }
+
+@Suite
+struct WorkWorldCoverageTests {
+    /// Every kind the map can meet draws as something recognisable, and an unknown one still draws.
+    @Test func everyKindHasALook() {
+        let kinds = ["person", "agent", "worker", "app", "terminal", "web", "tab", "tool", "plugin", "file", "document", "code", "pdf", "archive",
+                     "folder", "design", "image", "video", "audio", "data", "table", "link", "repo", "github", "pull", "issue", "device", "phone",
+                     "tablet", "laptop", "desktop", "server", "task", "pipeline", "step", "message", "question", "result", "status", "command"]
+        for kind in kinds {
+            let look = WorkKind.look(kind)
+            #expect(WorkKind.known(kind), "\(kind) isn't known")
+            #expect(!look.symbol.isEmpty && !look.title.isEmpty)
+        }
+        #expect(!WorkKind.known("quantum-flux"))
+        #expect(WorkKind.look("quantum-flux").shape == .thing, "an unknown kind still lands somewhere")
+        #expect(WorkKind.file(at: "a/b.swift") == WorkKind.code && WorkKind.file(at: "notes/") == WorkKind.folder)
+        #expect(WorkKind.device(named: "Carlvince's iPhone") == WorkKind.phone && WorkKind.device(named: "Studio MacBook Pro") == WorkKind.laptop)
+    }
+
+    /// Every state a run can be in reaches the map, and only the busy ones say so.
+    @Test func everyStateReachesTheMap() {
+        for state in [WorkNodeState.idle, WorkNodeState.working, WorkNodeState.waiting, WorkNodeState.done, WorkNodeState.failed] {
+            let nodes = [WorkNode(id: "agent:a", title: "A", kind: WorkKind.agent, agentID: "a", state: state),
+                         WorkNode(id: "safari", title: "Safari", parent: "agent:a", kind: WorkKind.app, state: state)]
+            let world = WorkWorld(WorkGraph(revision: 0, nodes: nodes, wires: [
+                WorkWire(id: "w", from: "agent:a", to: "safari", state: state == WorkNodeState.working ? WorkWireState.active : "", carries: WorkKind.image)]))
+            let safari = world.stations.first
+            #expect(safari?.node.title == "Safari")
+            #expect(world.station("safari") == nil && safari != nil, "a bot's app is shared, under its own ID")
+            if state == WorkNodeState.working {
+                #expect(world.actor("agent:a")?.station == safari?.id)
+                #expect(world.trails.contains { $0.active })
+            } else {
+                #expect(world.actor("agent:a")?.station == nil)
+            }
+        }
+        // Picked out of a station, the newest picture is the one the map shows.
+        let nodes = [WorkNode(id: "film", title: "Film", kind: WorkKind.pipeline),
+                     WorkNode(id: "s", title: "Shots", parent: "film", kind: WorkKind.step),
+                     WorkNode(id: "a.png", title: "a.png", parent: "s", kind: WorkKind.image, preview: "/tmp/a.png")]
+        #expect(WorkWorld(WorkGraph(revision: 0, nodes: nodes, wires: [])).station("s")?.preview == "a.png")
+    }
+
+    /// A day's work builds fast enough to stay in the frame loop on a phone.
+    @Test func aLargeDayBuildsQuickly() {
+        var nodes: [WorkNode] = []
+        var wires: [WorkWire] = []
+        for index in 0..<120 {
+            let bot = "agent:b\(index % 40)"
+            if index < 40 { nodes.append(WorkNode(id: bot, title: "B\(index)", kind: WorkKind.agent, agentID: "b\(index)", state: WorkNodeState.working)) }
+            nodes.append(WorkNode(id: "app\(index)", title: "App \(index)", parent: bot, kind: WorkKind.app))
+            wires.append(WorkWire(id: "u\(index)", from: bot, to: "app\(index)", direction: .none, state: WorkWireState.active, carries: WorkKind.file))
+            for item in 0..<6 {
+                nodes.append(WorkNode(id: "item\(index)-\(item)", title: "f\(item).png", parent: "app\(index)", kind: WorkKind.image, preview: "/tmp/f\(item).png"))
+            }
+        }
+        for index in 0..<200 { wires.append(WorkWire(id: "h\(index)", from: "agent:b\(index % 40)", to: "agent:b\((index + 1) % 40)", carries: WorkKind.task)) }
+        let graph = WorkGraph(revision: 0, nodes: nodes, wires: wires)
+        let clock = ContinuousClock()
+        var built = WorkWorld()
+        let took = clock.measure { built = WorkWorld(graph) }
+        #expect(built.stations.count == 120 && built.actors.count == 40)
+        #expect(took < .milliseconds(250), "building the map took \(took)")
+    }
+}
