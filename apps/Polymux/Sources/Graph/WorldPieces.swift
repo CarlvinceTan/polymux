@@ -435,14 +435,31 @@ struct WorldToken: View {
     let symbol: String
     let tint: Color
 
+    /// An outside agent's own mark, when the app ships one for it.
+    private var logo: Image? {
+        guard symbol.hasPrefix("acp:") else { return nil }
+        #if canImport(UIKit)
+        guard UIImage(named: "agent-" + symbol.dropFirst(4)) != nil else { return nil }
+        #elseif canImport(AppKit)
+        guard NSImage(named: "agent-" + symbol.dropFirst(4)) != nil else { return nil }
+        #endif
+        return Image("agent-" + symbol.dropFirst(4))
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let side = min(geometry.size.width, geometry.size.height)
             let shape = RoundedRectangle(cornerRadius: side * 0.28, style: .continuous)
             ZStack {
                 shape.fill(tint.mix(with: .black, by: 0.3)).offset(x: side * 0.05, y: side * 0.08)
-                shape.fill(LinearGradient(colors: [tint.mix(with: .white, by: 0.3), tint], startPoint: .top, endPoint: .bottom))
-                Image(systemName: symbol).font(.system(size: side * 0.48, weight: .bold)).foregroundStyle(.white)
+                if let logo {
+                    logo.resizable().interpolation(.high).scaledToFit()
+                        .padding(side * 0.06)
+                        .background(.white, in: shape)
+                } else {
+                    shape.fill(LinearGradient(colors: [tint.mix(with: .white, by: 0.3), tint], startPoint: .top, endPoint: .bottom))
+                    Image(systemName: symbol).font(.system(size: side * 0.48, weight: .bold)).foregroundStyle(.white)
+                }
             }
             .frame(width: side, height: side)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

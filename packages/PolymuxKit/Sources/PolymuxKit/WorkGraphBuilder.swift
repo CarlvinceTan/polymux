@@ -221,8 +221,10 @@ public struct WorkGraphBuilder {
             if let external = run.external {
                 // A task handed to an outside agent, which stands on the map as itself.
                 let id = "run:\(run.id)"
+                // The engine's own logo when the app ships one, which names it faster than any word.
+                let logo = external.agent.map { "acp:" + $0 } ?? Self.mark(external)
                 graph.add(WorkNode(id: id, title: external.name, parent: Self.agentNode(parent.agentID), kind: WorkKind.worker, subtitle: run.summary,
-                                   symbol: Self.mark(external), state: nodeState,
+                                   symbol: logo, state: nodeState,
                                    details: [WorkDetail(label: "Started by", value: agents.first { $0.id == parent.agentID }?.name ?? "A bot")]))
                 graph.add(WorkWire(id: "delegate:\(run.id)", from: Self.agentNode(parent.agentID), to: id, state: wireState, label: "Task", carries: WorkKind.task))
             } else if parent.agentID == run.agentID {
