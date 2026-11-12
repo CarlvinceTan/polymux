@@ -242,10 +242,6 @@ Use the shared entrypoints rather than duplicating build commands:
 
 `scripts/run.sh --fixture --verify-load --verify-renders` seeds 72 chats and writes view update counts to `<data>/renders.txt`, to check that a gesture stays local to what it touches.
 
-`e2e/intents.json` records behaviour that looks like a defect to Argus but is meant. Each entry names the sources behind it and goes stale when they change, at which point Argus reports the finding again. Update it in the same commit as the behaviour, with `argus intent` from the Argus repository.
-
-`e2e/baselines/` holds the approved state of each screen in each Argus journey, one line per element, so a changed screen reads as a plain diff in review. Argus compares against it and fails on anything that appeared, vanished or moved. Runs never write it: after a wanted UI change, `argus baseline approve` records it with a reason, in the same commit as the change.
-
 Build locks are held by the OS and survive until the owning build processes exit; an abandoned lock file does not block later builds. Keep the shared `.build/` caches. Stop owned runs by their recorded runner PID so their processes and data are cleaned up.
 
 Simulator capture creates a device from an available iPhone hardware/runtime pair. `POLYMUX_SIM_DEVICE` selects that pair from an existing device without reusing its data; `POLYMUX_SIM_APP` selects a source bundle to copy. `SIM_WAIT` controls the post-launch delay (25 seconds by default); this is a settling delay, not a UI-readiness assertion. Delete captures after inspection. `--stop` is no longer needed because each capture removes its own device.
