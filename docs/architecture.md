@@ -82,10 +82,16 @@ How a bot's handling of work is judged. A change to how bots run, delegate or sc
 
 - Every GUI (macOS, iOS, web, or any future one) is a client only.
 - No GUI embeds the server. The Mac app carries a copy and has launchd run it, so it outlives the app. A new install starts it; an update never does. Joining a network retires it while it's empty; a server with data stays until someone merges it or turns it off.
-- That copy is `Contents/Helpers/Polymux Server.app`, so System Settings lists it by name and icon, and bots inherit what it's granted. A new install opens with a welcome whose permissions step, like Settings › General, opens the Grant window (`apps/Polymux/Sources/Permissions/`). It docks beside System Settings, where its icon is dragged into the Full Disk Access or Screen Recording list, and reads the server's own answer from `GET /privacy`.
+- That copy is `Contents/Helpers/Polymux Server.app`, so System Settings lists it by name and icon, and bots inherit what it's granted. A new install opens with setup: choose whether this Mac runs the server or connects to another, grant the server's permissions, and install the official plugins it can use. The permissions step, like Settings › General, opens the Grant window (`apps/Polymux/Sources/Permissions/`). It docks inside System Settings, where Polymux Server's icon is dragged into the Full Disk Access or Screen Recording list, and reads the server's own answer from `GET /privacy`. Settings › General can run setup again and open the same list.
 - Clients talk to the server through one documented API (`contracts`). No client gets a private or privileged path.
 - Any client can be removed or replaced without affecting the server or other clients.
 - Clients are interchangeable: the same server works with any number of them at once.
+
+## Policy and extensions
+
+- Permission rules, interactive approval, usage limits and cost reporting are plugin responsibilities, not server policy. The server records what happened and carries a gate's question and answer; it has no rules or defaults of its own.
+- A plugin may use a generic server capability — asking a person before a call, reading token use — while the rules, wording and presentation stay in the plugin. See [Plugins](plugins.md#policy-lives-in-plugins).
+- A new capability may require a plugin API addition. A new rule must not require a server change.
 
 ## Cost and accounts
 

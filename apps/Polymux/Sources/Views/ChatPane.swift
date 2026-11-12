@@ -531,7 +531,7 @@ struct ChatPane: View {
     private var visibleMessages: [Message] {
         store.messages.filter { message in
             message.role != MessageRole.assistant || message.parts.contains {
-                $0.attachment != nil || [PartKind.choice, PartKind.credential, PartKind.vault].contains($0.kind)
+                $0.attachment != nil || [PartKind.choice, PartKind.credential, PartKind.vault, PartKind.approval].contains($0.kind)
                     || (message.status != MessageStatus.streaming && !($0.text ?? "").isEmpty)
             }
         }
@@ -1060,12 +1060,12 @@ struct MessageBubble: View, @MainActor Equatable {
     private var displayParts: [(offset: Int, element: Part)] {
         let parts = Array(message.parts.enumerated())
         let attachments = parts.filter { $0.element.attachment != nil }
-        let choices = parts.filter { [PartKind.choice, PartKind.credential, PartKind.vault].contains($0.element.kind) }
+        let cards = parts.filter { [PartKind.choice, PartKind.credential, PartKind.vault, PartKind.approval].contains($0.element.kind) }
         // A reply still being written is shown whole when it finishes, not as it arrives.
         // Its text is still recorded, so a stopped reply keeps what it managed to say.
-        if message.status == MessageStatus.streaming { return attachments + choices }
-        return attachments + choices +
-            parts.filter { $0.element.attachment == nil && ![PartKind.choice, PartKind.credential, PartKind.vault].contains($0.element.kind) && !($0.element.text ?? "").isEmpty }
+        if message.status == MessageStatus.streaming { return attachments + cards }
+        return attachments + cards +
+            parts.filter { $0.element.attachment == nil && ![PartKind.choice, PartKind.credential, PartKind.vault, PartKind.approval].contains($0.element.kind) && !($0.element.text ?? "").isEmpty }
     }
 
     @ViewBuilder private func partView(_ part: Part, index: Int) -> some View {
@@ -1077,6 +1077,9 @@ struct MessageBubble: View, @MainActor Equatable {
                       reactions: reactions, react: canReact && !reacting ? react : nil)
         } else if part.kind == PartKind.choice {
             ChoiceCard(part: part, client: client, message: message, bubble: bubble)
+                .appMenu { reactionMenu }
+        } else if let approval = part.approval, part.kind == PartKind.approval {
+            ApprovalCard(part: part, client: client, message: message, bubble: bubble)
                 .appMenu { reactionMenu }
         } else if let request = part.credential, part.kind == PartKind.credential {
             CredentialCard(request: request, client: client, message: message, bubble: bubble)

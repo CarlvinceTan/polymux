@@ -1,6 +1,25 @@
 import Foundation
 import Observation
 
+/// Whether a fresh install still needs setup, before the server has started.
+enum SetupDefaults {
+    /// A new install has no saved address and no known servers.
+    static var fresh: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: "serverAddress") == nil && defaults.object(forKey: "serverDevices") == nil
+    }
+
+    /// Setup opens automatically on a fresh install that hasn't finished it.
+    static var pending: Bool {
+        #if DEBUG
+        // Fixture runs are fresh by design; only the explicit check opens setup.
+        if CommandLine.arguments.contains("--verify-fixture") { return false }
+        if Bundle.main.bundleIdentifier?.hasSuffix(".fixture") == true { return false }
+        #endif
+        return fresh && !UserDefaults.standard.bool(forKey: "onboarding.completed")
+    }
+}
+
 /// The server this Mac runs: launchd starts it from the copy inside the app, so it outlives the app.
 @MainActor @Observable
 final class ServerHost {
@@ -60,10 +79,12 @@ final class ServerHost {
         guard !prepared, available else { return }
         prepared = true
         let defaults = UserDefaults.standard
-        let fresh = defaults.object(forKey: "serverAddress") == nil && defaults.object(forKey: "serverDevices") == nil
-        if fresh, !running {
-            await start()
-            if running { defaults.set(true, forKey: "onboarding.pending") }
+        let fresh = SetupDefaults.fresh
+        if fresh {
+            if !running { await start() }
+            if SetupDefaults.pending {
+                defaults.set(true, forKey: "onboarding.pending")
+            }
         } else if running {
             Task { _ = await self.run("update") }
         }

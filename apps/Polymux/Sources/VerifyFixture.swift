@@ -453,7 +453,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didLoad: Data(": connected\n\n".utf8))
             return
         }
-        if request.url?.lastPathComponent == "answer" {
+        if ["answer", "approval"].contains(request.url?.lastPathComponent) {
             Self.answers.add(self)
             return
         }
@@ -745,6 +745,15 @@ struct ApprovalFixture: View {
         ChoiceOption(id: "day", label: "Plan my day"),
         ChoiceOption(id: "code", label: "Build something")
     ])
+    private let gate = Part(kind: PartKind.approval, approval: Approval(
+        title: "Run this command?",
+        detail: "rm -rf build && make test",
+        status: ApprovalStatus.pending,
+        options: [
+            ApprovalOption(id: "allow_once", label: "Allow once", outcome: ApprovalOptionOutcome.allow),
+            ApprovalOption(id: "allow_always", label: "Always allow", outcome: ApprovalOptionOutcome.allow),
+            ApprovalOption(id: "deny", label: "Deny", outcome: ApprovalOptionOutcome.deny),
+        ]))
     private let client = APIClient(baseURL: URL(string: "http://approval.invalid")!,
                                    session: VerifyFixture.session(), token: "")
 
@@ -753,6 +762,9 @@ struct ApprovalFixture: View {
             ChoiceCard(part: part, client: client,
                        message: Message(id: "choice:t-approval", threadID: "t-approval", role: MessageRole.assistant, parts: [part], createdAt: "", status: MessageStatus.done, agentID: "t-approval"),
                        bubble: BubbleStyle.incoming(scheme))
+            ApprovalCard(part: gate, client: client,
+                         message: Message(id: "approval:t-approval", threadID: "t-approval", role: MessageRole.assistant, parts: [gate], createdAt: "", status: MessageStatus.done, agentID: "t-approval"),
+                         bubble: BubbleStyle.incoming(scheme))
             Button("Fail answer") { VerifyFixture.failAnswers() }
                 .accessibilityValue(scheme == .dark ? "dark" : "light")
         }

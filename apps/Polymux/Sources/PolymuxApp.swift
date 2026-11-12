@@ -28,9 +28,6 @@ struct PolymuxApp: App {
         WindowGroup {
             AppRoot()
                 .tint(Color("AccentColor"))
-                #if os(macOS)
-                .frame(minWidth: PaneWidth.window, minHeight: 720)
-                #endif
         }
         #if os(macOS)
         .defaultSize(width: 1060, height: 760)
@@ -228,7 +225,7 @@ struct AppRoot: View {
     @State private var pairingIssue: String?
     #if os(macOS)
     /// Set when a new install starts its own server.
-    @AppStorage("onboarding.pending") private var onboarding = Onboarding.verifying
+    @AppStorage("onboarding.pending") private var onboarding = Onboarding.verifying || SetupDefaults.pending
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
@@ -308,20 +305,17 @@ struct AppRoot: View {
             // Closing Settings answers the join question with the default: keep separate.
             joinChoice = nil
         }
-        .panel(isPresented: $showSettings, page: true) {
+        .panel(isPresented: settingsShown, page: true) {
             ConnectionView(pool: pool, settings: activeSession?.settings,
-                            client: activeSession?.client,
-                            join: join,
-                            joinIssue: pairingIssue,
-                            joined: $joinChoice,
-                            category: $settingsTab,
+                           client: activeSession?.client,
+                           join: join,
+                           joinIssue: pairingIssue,
+                           joined: $joinChoice,
+                           category: $settingsTab,
                            onClose: { showSettings = false })
                 .id(activeSession?.client.id)
         }
         #if os(macOS)
-        .panel(isPresented: $onboarding) {
-            Onboarding { onboarding = false }
-        }
         .task(id: localSession?.client.id) { Permissions.shared.client = localSession?.client }
         .onChange(of: appearance, initial: true) { Permissions.shared.appearance = $1 }
         #endif
@@ -339,7 +333,7 @@ struct AppRoot: View {
         .appAppearance(appearance)
         #if os(macOS)
         .background {
-            WindowFill().frame(width: 0, height: 0).accessibilityHidden(true)
+            WindowFill(setup: onboarding).frame(width: 0, height: 0).accessibilityHidden(true)
             InputFocus().frame(width: 0, height: 0).accessibilityHidden(true)
         }
         #endif
@@ -388,6 +382,15 @@ struct AppRoot: View {
     private var activeSession: AppSession? { pool.sessions[address] }
     private var error: String? { pool.issues[address] }
 
+    /// Settings closes while setup is on screen, then returns when setup finishes.
+    private var settingsShown: Binding<Bool> {
+        #if os(macOS)
+        Binding(get: { showSettings && !onboarding }, set: { showSettings = $0 })
+        #else
+        $showSettings
+        #endif
+    }
+
     /// This Mac's own server, which reports its permissions to the Grant window.
     private var localSession: AppSession? {
         #if DEBUG
@@ -408,7 +411,22 @@ struct AppRoot: View {
         return activeSession?.settings.value?.appearance ?? "system"
     }
 
-    private var content: some View {
+    @ViewBuilder private var content: some View {
+        #if os(macOS)
+        if onboarding {
+            Onboarding(pool: pool, join: join) {
+                UserDefaults.standard.set(true, forKey: "onboarding.completed")
+                onboarding = false
+            }
+        } else {
+            mainContent
+        }
+        #else
+        mainContent
+        #endif
+    }
+
+    private var mainContent: some View {
         Group {
             if let session = activeSession {
                 ShellView(session: session, pool: pool, showSettings: $showSettings)
@@ -588,15 +606,24 @@ struct ConnectionView: View {
         #if os(macOS)
         Section {
             LabeledContent("System permissions") {
-                HStack {
-                    Text(Permissions.shared.summary).foregroundStyle(.muted)
-                    Button("Grant…") { GrantWindow.shared.show() }
-                        .accessibilityLabel("Grant permissions")
-                }
+                Button("Manage") { GrantWindow.shared.show() }
+                    .accessibilityLabel("Manage permissions")
             }
             .task { await Permissions.shared.refresh() }
+            Button {
+                UserDefaults.standard.set(true, forKey: "onboarding.pending")
+            } label: {
+                HStack {
+                    Text("Run Setup Again")
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.muted)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Run setup again")
         } header: {
-            SectionHeader("Permissions", symbol: "hand.raised.fill")
+            SectionHeader("Onboarding", symbol: "sparkles")
         }
         .panelRow()
         #endif

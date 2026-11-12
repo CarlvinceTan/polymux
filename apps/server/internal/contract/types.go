@@ -279,6 +279,7 @@ type Part struct {
 	AllowText  *bool              `json:"allowText,omitempty"`
 	Credential *CredentialRequest `json:"credential,omitempty"`
 	Vault      *VaultCard         `json:"vault,omitempty"`
+	Approval   *Approval          `json:"approval,omitempty"`
 }
 
 const (
@@ -288,6 +289,7 @@ const (
 	PartKindChoice     = "choice"
 	PartKindCredential = "credential"
 	PartKindVault      = "vault"
+	PartKindApproval   = "approval"
 )
 
 type ReplyContext struct {
@@ -584,6 +586,32 @@ const (
 	PeerDeliveryStatusFailed      = "failed"
 	PeerDeliveryStatusCancelled   = "cancelled"
 	PeerDeliveryStatusInterrupted = "interrupted"
+)
+
+type Approval struct {
+	Title    string           `json:"title"`
+	Detail   *string          `json:"detail,omitempty"`
+	Status   string           `json:"status"`
+	AnswerID *string          `json:"answerID,omitempty"`
+	Options  []ApprovalOption `json:"options,omitempty"`
+}
+
+const (
+	ApprovalStatusPending = "pending"
+	ApprovalStatusAllowed = "allowed"
+	ApprovalStatusDenied  = "denied"
+	ApprovalStatusExpired = "expired"
+)
+
+type ApprovalOption struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Outcome string `json:"outcome"`
+}
+
+const (
+	ApprovalOptionOutcomeAllow = "allow"
+	ApprovalOptionOutcomeDeny  = "deny"
 )
 
 type ChoiceOption struct {
@@ -915,6 +943,10 @@ type Activity struct {
 	IconOrAgentID string   `json:"iconOrAgentID"`
 	At            string   `json:"at"`
 	AgentIDs      []string `json:"agentIDs,omitempty"`
+}
+
+type ApprovalAnswer struct {
+	OptionID string `json:"optionID"`
 }
 
 type ChoiceAnswer struct {

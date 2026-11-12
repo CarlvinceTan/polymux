@@ -119,7 +119,7 @@ struct ChoiceCard: View {
 }
 
 /// The card kit's button: flat fill, 8pt corners, darker on hover; quiet ones fill only on hover.
-private struct FlatButton: ButtonStyle {
+struct FlatButton: ButtonStyle {
     var radius: CGFloat = 8
     var height: CGFloat = 32
     var inset: CGFloat = 14

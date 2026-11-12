@@ -12,6 +12,14 @@ The app and server ship no plugin code. A plugin is a versioned package listed i
 
 The switcher only appears once a Global plugin can be shown or a second server is known, and always keeps Chats. With more than one server it lists each server's Chats, named after the server, and its Global plugins, and picking one moves the app to that server. iPhone's icons show the server's initial instead, or a number when initials clash. It's the native tab bar on iPhone and sits at the foot of the sidebar elsewhere. The sidebar's Search and + buttons stay in place and act on the plugin on show. Unread badges on the switcher can be turned off in Settings. Scoped buttons share one layout, and each chat shows only those active in it. On iPhone they collapse into a menu. The call button, the sidebar button and the side panel's close button belong to the app.
 
+## Policy lives in plugins
+
+The server has no permission policy, no approval prompts, no usage limits and no cost rules of its own. Those are plugin decisions, so a network can change them without changing Polymux, and a bot's rules can be as simple or as complex as the person wants.
+
+- **Permissions and approval** belong to a gate plugin. A gate answers `allow`, `deny` or `ask`. An `ask` carries the question, its options and what each answer means; Polymux writes the card, waits, and hands the chosen option back. Whether to ask, what to show and what "always" remembers stay in the plugin. [`permissions`](../plugins/permissions) is the first gate and the reference for this.
+- **Usage and cost** belong to a usage plugin. The server records token use on every final message and knows the model's price; it does not decide what to show. A usage plugin can read subscription windows, credits, tokens per second or anything else a provider exposes, keep its own settings, and render its own surface. No usage plugin ships yet; the data is there for one to read.
+- **Anything else that judges a call** — rate limits, spend caps, content policy — is a gate or tools plugin, not a core setting. A new capability means a plugin API addition, not a rule in the server.
+
 ## How it fits together
 
 - **Index**: [`plugins/index.json`](../plugins/index.json) on `dev`, served at `https://polymux.com/plugins/index.json`. The server reads it from `POLYMUX_PLUGIN_INDEX`, an `index-url` file in its plugins folder, or that default address. The last good copy is kept for offline use.
@@ -50,7 +58,8 @@ A `tools` plugin gives agents tools its service answers. `tools` in `plugin.json
 
 A gate is a Scoped plugin that decides agent tool calls in its active chats. Polymux asks it from `beforeTool` (`internal/server/coordination.go`), which every tool call passes, MCP calls inside codemode and voice turns included.
 
-- **Asking**: `POST /gate` on the service receives `{chat, agent, dir, tool, args}` and answers `{allow, reason}`. A refused call never runs, and `reason` goes back to the model as its result.
+- **Asking**: `POST /gate` on the service receives `{chat, agent, dir, tool, args}` and answers `{allow, reason}` or `{ask}`. A refused call never runs, and `reason` goes back to the model as its result.
+- **Approving**: an `ask` is `{title, detail, options: [{id, label, outcome}]}`. Polymux posts it as a card in the chat and waits; an answer comes back to the same gate as `answer`, so the plugin can allow the call, deny it, or remember it. A gate asks once per call — a second ask declines, so a plugin can't hold a turn forever. Plugin API version 5 adds this to the gate protocol.
 - **Which chats**: a run answers to its own chat and to the chats of whatever started it, so a child task, a peer request or a task thread stays under the rules of the chat it came from (`boundChats`).
 - **Failing closed**: every gate has to allow a call. A gate that's stopped, failed or being reinstalled blocks calls in its chats. Only turning it off for a chat or uninstalling it lifts its rules, and agents have no tool for either.
 - **This machine**: `http_request` can't reach this machine from a bound chat, since an agent could read the local token and change its rules through the API.
@@ -58,7 +67,7 @@ A gate is a Scoped plugin that decides agent tool calls in its active chats. Pol
 
 ### Permissions
 
-[`permissions`](../plugins/permissions) is the first gate. Each chat gets a list of rules, edited in its side panel and kept in the plugin's data folder.
+[`permissions`](../plugins/permissions) is the first gate. Each chat gets a list of rules, edited in its side panel and kept in the plugin's data folder. A rule reads as one sentence: when a bot **runs a command**, **reads a file**, **writes a file** or **uses a tool** matching a pattern, **allow**, **ask** or **deny** it.
 
 | Kind | Covers | Pattern |
 | --- | --- | --- |
@@ -67,7 +76,7 @@ A gate is a Scoped plugin that decides agent tool calls in its active chats. Pol
 | `command` | `bash`, `run_device` | A command. `*` matches anything |
 | `tool` | Every tool, by name | A name, such as `github__*` |
 
-Deny beats allow. A kind with any allow rule becomes an allow list, so whatever they don't cover is blocked. An empty pattern covers everything of that kind.
+`deny` wins, then `ask`, then a wildcard `allow`. An exact `allow` (the one "Always allow" adds) settles the call without asking again. A kind with any wildcard allow rule becomes an allow list, so whatever they don't cover is blocked. An empty pattern covers everything of that kind.
 
 - **Paths** resolve as the file tools do, then again with links followed, so `..` and symlinks don't get around a rule. No rule can open the plugin's own folder.
 - **Commands** are parsed, and each command in a line has to pass on its own, nested ones included. With allow rules, anything that can't be judged without running it is blocked: a command name built from variables, a redirect to a file, or an assignment.

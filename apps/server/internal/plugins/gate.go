@@ -14,12 +14,31 @@ type Call struct {
 	Dir  string          `json:"dir"`
 	Tool string          `json:"tool"`
 	Args json.RawMessage `json:"args"`
+	// Answer is the option a person picked for this call's Ask, when Polymux asks again.
+	Answer string `json:"answer,omitempty"`
 }
 
 // Decision is a gate plugin's answer. Anything short of an allow blocks the call.
 type Decision struct {
 	Allow  bool   `json:"allow"`
 	Reason string `json:"reason,omitempty"`
+	// Ask asks the person before the call runs. Polymux only carries the question;
+	// what to ask, which options to offer and what an answer means stay with the plugin.
+	Ask *Ask `json:"ask,omitempty"`
+}
+
+// Ask is a gate's question for the person.
+type Ask struct {
+	Title   string      `json:"title"`
+	Detail  string      `json:"detail,omitempty"`
+	Options []AskOption `json:"options"`
+}
+
+// AskOption is one answer a person can pick, and what the gate means by it.
+type AskOption struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Outcome string `json:"outcome"`
 }
 
 type gate struct {
@@ -70,11 +89,18 @@ func (m *Manager) Check(ctx context.Context, chats []string, call Call) Decision
 	if err != nil {
 		return Decision{Reason: "This chat's plugins could not be read, so the call was blocked."}
 	}
+	var ask *Ask
 	for _, gate := range gates {
 		call.Chat = gate.chat
 		var decision Decision
 		if gate.unit == nil || gate.unit.post(ctx, "/gate", call, &decision) != nil {
 			return Decision{Reason: gate.title + " isn't running, so the call was blocked."}
+		}
+		if decision.Ask != nil {
+			if ask == nil {
+				ask = decision.Ask
+			}
+			continue
 		}
 		if !decision.Allow {
 			if decision.Reason == "" {
@@ -82,6 +108,9 @@ func (m *Manager) Check(ctx context.Context, chats []string, call Call) Decision
 			}
 			return decision
 		}
+	}
+	if ask != nil {
+		return Decision{Ask: ask}
 	}
 	return Decision{Allow: true}
 }

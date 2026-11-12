@@ -131,7 +131,10 @@ CREATE INDEX IF NOT EXISTS messages_failed ON messages(id) WHERE indexing_state=
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id,status);`); err != nil {
 		return err
 	}
-	return s.closeFocusCards(ctx)
+	if err := s.closeFocusCards(ctx); err != nil {
+		return err
+	}
+	return s.expireApprovals(ctx)
 }
 
 func Now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

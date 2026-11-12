@@ -123,6 +123,7 @@ type Server struct {
 	presence   map[string]int
 	resources  sync.Map
 	turns      sync.Map
+	approvals  sync.Map
 	shells     sync.Map
 	voices     map[string]*voiceWork
 	voiceSeen  map[string]bool
@@ -648,6 +649,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /threads/{id}/tool-runs", s.toolRuns)
 	s.mux.HandleFunc("POST /threads/{id}/messages", s.send)
 	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/answer", s.answerChoice)
+	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/approval", s.answerApproval)
 	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/credential", s.answerCredential)
 	s.mux.HandleFunc("PUT /threads/{id}/messages/{messageID}/reaction", s.react)
 	s.mux.HandleFunc("POST /threads/{id}/voice", s.voice)

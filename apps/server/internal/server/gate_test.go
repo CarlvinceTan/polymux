@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
@@ -34,6 +36,65 @@ func TestGateRefusesBeforeAnyEffect(t *testing.T) {
 	}
 	if result := beforeTool(ctx, "call", "read", json.RawMessage(`{}`)); result.Block || state.tools != 1 {
 		t.Fatalf("%+v tools %d", result, state.tools)
+	}
+}
+
+// An ask rule posts a card, holds the call, and runs it only after the person allows it.
+func TestApprovalWaitsForTheAnswer(t *testing.T) {
+	api, server := startTest(t, &voiceFactory{})
+	ctx := t.Context()
+	if _, err := api.Store.DB.ExecContext(ctx, `INSERT OR IGNORE INTO threads(id,agent_id,title) VALUES('assistant','assistant','Assistant')`); err != nil {
+		t.Fatal(err)
+	}
+	run := store.NewRun("asked", "assistant", "assistant", contract.RunTriggerMessage)
+	state := &turnState{run: run, store: api.Store, chats: []string{"assistant"}}
+	state.gate = func(context.Context, string, json.RawMessage) plugins.Decision {
+		return plugins.Decision{Ask: &plugins.Ask{Title: "Run this command?", Detail: "ls", Options: []plugins.AskOption{
+			{ID: "allow_once", Label: "Allow once", Outcome: "allow"},
+			{ID: "deny", Label: "Deny", Outcome: "deny"},
+		}}}
+	}
+	state.answer = func(ctx context.Context, _ string, _ json.RawMessage, answer, card string) plugins.Decision {
+		status := contract.ApprovalStatusDenied
+		if answer == "allow_once" {
+			status = contract.ApprovalStatusAllowed
+		}
+		api.settleApproval(ctx, run.ConversationID, card, status, answer)
+		if answer == "allow_once" {
+			return plugins.Decision{Allow: true}
+		}
+		return plugins.Decision{Reason: "The person declined this call."}
+	}
+	state.ask = func(ctx context.Context, call string, ask plugins.Ask, tool string, args json.RawMessage) (string, string, error) {
+		return api.askApproval(ctx, state, call, ask, tool, args)
+	}
+	result := make(chan agent.ToolCallHookResult, 1)
+	go func() {
+		result <- beforeTool(context.WithValue(t.Context(), turnKey{}, state), "call-1", "bash", json.RawMessage(`{"command":"ls"}`))
+	}()
+	id := approvalID(run.ID, "call-1")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		card, err := api.Store.ApprovalCard(ctx, run.ConversationID, id)
+		if err == nil && card.Parts[0].Approval.Status == contract.ApprovalStatusPending {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the approval card never appeared: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	response, err := http.Post(server.URL+"/threads/assistant/messages/"+id+"/approval", "application/json", strings.NewReader(`{"optionID":"allow_once"}`))
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("answer: %v %d", err, response.StatusCode)
+	}
+	response.Body.Close()
+	if hook := <-result; hook.Block || state.tools != 1 {
+		t.Fatalf("%+v tools %d", hook, state.tools)
+	}
+	card, err := api.Store.ApprovalCard(ctx, run.ConversationID, id)
+	if err != nil || card.Parts[0].Approval.Status != contract.ApprovalStatusAllowed || card.Parts[0].Approval.AnswerID == nil || *card.Parts[0].Approval.AnswerID != "allow_once" {
+		t.Fatalf("card %+v %v", card.Parts[0].Approval, err)
 	}
 }
 

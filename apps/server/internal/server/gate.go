@@ -25,6 +25,18 @@ func (s *Server) bindGate(ctx context.Context, state *turnState, dir string) err
 	state.gate = func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision {
 		return s.plugins.Check(ctx, chats, plugins.Call{Agent: run.AgentID, Dir: dir, Tool: tool, Args: args})
 	}
+	state.answer = func(ctx context.Context, tool string, args json.RawMessage, answer, card string) plugins.Decision {
+		decision := s.plugins.Check(ctx, chats, plugins.Call{Agent: run.AgentID, Dir: dir, Tool: tool, Args: args, Answer: answer})
+		status := contract.ApprovalStatusDenied
+		if decision.Allow {
+			status = contract.ApprovalStatusAllowed
+		}
+		s.settleApproval(context.WithoutCancel(ctx), run.ConversationID, card, status, answer)
+		return decision
+	}
+	state.ask = func(ctx context.Context, call string, ask plugins.Ask, tool string, args json.RawMessage) (string, string, error) {
+		return s.askApproval(ctx, state, call, ask, tool, args)
+	}
 	return nil
 }
 

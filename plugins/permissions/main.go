@@ -83,12 +83,40 @@ func (s *service) gate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad call", http.StatusBadRequest)
 		return
 	}
-	reply(w, http.StatusOK, s.decide(call))
+	decision, err := s.decide(call)
+	if err != nil {
+		http.Error(w, "rules could not be saved", http.StatusInternalServerError)
+		return
+	}
+	reply(w, http.StatusOK, decision)
 }
 
-func (s *service) decide(call Call) Decision {
-	rules := []Rule{{Effect: EffectDeny, Kind: KindRead, Pattern: s.home}, {Effect: EffectDeny, Kind: KindWrite, Pattern: s.home}}
-	return evaluate(append(rules, s.book.rules(call.Chat)...), call)
+func (s *service) decide(call Call) (Decision, error) {
+	rules := append([]Rule{{Effect: EffectDeny, Kind: KindRead, Pattern: s.home}, {Effect: EffectDeny, Kind: KindWrite, Pattern: s.home}}, s.book.rules(call.Chat)...)
+	if call.Answer == "" {
+		return evaluate(rules, call), nil
+	}
+	switch call.Answer {
+	case "deny":
+		return Decision{Reason: "The user declined this call. Don't try another way. Tell them what you were about to do."}, nil
+	case "allow_once", "allow_always":
+	default:
+		return Decision{Reason: "This chat's permission rules couldn't read the answer, so the call was blocked."}, nil
+	}
+	decision := evaluate(rules, call)
+	if decision.Ask == nil {
+		return decision, nil
+	}
+	if call.Answer == "allow_always" {
+		extra := remember(rules, call)
+		existing := s.book.rules(call.Chat)
+		if len(extra) > 0 && len(existing)+len(extra) <= ruleLimit {
+			if err := s.book.set(call.Chat, append(existing, extra...)); err != nil {
+				return Decision{}, err
+			}
+		}
+	}
+	return Decision{Allow: true}, nil
 }
 
 func (s *service) listRules(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +172,7 @@ func validate(rules []Rule) error {
 		switch {
 		case rule.ID == "" || len(rule.ID) > 64 || seen[rule.ID]:
 			return errors.New("each rule needs its own id")
-		case rule.Effect != EffectAllow && rule.Effect != EffectDeny:
+		case rule.Effect != EffectAllow && rule.Effect != EffectAsk && rule.Effect != EffectDeny:
 			return fmt.Errorf("unknown effect %q", rule.Effect)
 		case !slices.Contains([]string{KindRead, KindWrite, KindCommand, KindTool}, rule.Kind):
 			return fmt.Errorf("unknown kind %q", rule.Kind)

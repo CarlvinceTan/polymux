@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import SwiftUI
 import UserNotifications
 import PolymuxKit
 
@@ -33,13 +34,21 @@ enum Permission: String, CaseIterable, Identifiable {
         }
     }
 
+    var tint: Color {
+        switch self {
+        case .fullDisk: .blue
+        case .screen: .purple
+        case .notifications: .orange
+        }
+    }
+
     /// Granted to Polymux Server, which bots run under, by dragging it into System Settings' list.
     var dragged: Bool { self != .notifications }
 
     var pane: URL {
         switch self {
-        case .fullDisk: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
-        case .screen: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        case .fullDisk: URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")!
+        case .screen: URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture")!
         case .notifications:
             URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(Bundle.main.bundleIdentifier ?? "")")!
         }

@@ -137,6 +137,60 @@ func TestCommandDeny(t *testing.T) {
 	}
 }
 
+func TestAskNeedsAPerson(t *testing.T) {
+	rules := []Rule{rule(EffectAsk, KindCommand, "rm *")}
+	decision := evaluate(rules, bash("rm -rf build"))
+	if decision.Allow || decision.Ask == nil {
+		t.Fatalf("%+v", decision)
+	}
+	if decision.Ask.Title != "Run this command?" || decision.Ask.Detail != "rm -rf build" || len(decision.Ask.Options) != 3 {
+		t.Fatalf("%+v", decision.Ask)
+	}
+	if evaluate(append(rules, rule(EffectDeny, KindCommand, "rm *")), bash("rm -rf build")).Ask != nil {
+		t.Error("a deny rule should beat ask")
+	}
+	// An allow list doesn't silently approve a call an ask rule covers.
+	rules = []Rule{rule(EffectAllow, KindCommand, "git *"), rule(EffectAsk, KindCommand, "git push *")}
+	if decision := evaluate(rules, bash("git push origin")); decision.Ask == nil || decision.Allow {
+		t.Fatalf("ask lost to the allow list: %+v", decision)
+	}
+	if decision := evaluate(rules, bash("git status")); !decision.Allow || decision.Ask != nil {
+		t.Fatalf("an unrelated command was held: %+v", decision)
+	}
+}
+
+func TestAlwaysRemembersTheCall(t *testing.T) {
+	server, s, _ := served(t)
+	if status := send(t, server, "PUT", "/chats/a/rules", `{"rules":[{"id":"1","effect":"ask","kind":"command","pattern":"rm *"}]}`, "token", nil); status != http.StatusOK {
+		t.Fatal(status)
+	}
+	call := bash("rm -rf build")
+	call.Chat = "a"
+	if decision, err := s.decide(call); err != nil || decision.Ask == nil {
+		t.Fatalf("%+v %v", decision, err)
+	}
+	call.Answer = "allow_once"
+	if decision, err := s.decide(call); err != nil || !decision.Allow || len(s.book.rules("a")) != 1 {
+		t.Fatalf("allow once changed the rules: %+v %v", decision, s.book.rules("a"))
+	}
+	call.Answer = "allow_always"
+	if decision, err := s.decide(call); err != nil || !decision.Allow || len(s.book.rules("a")) != 2 {
+		t.Fatalf("always didn't remember the call: %+v %v", decision, s.book.rules("a"))
+	}
+	rules := s.book.rules("a")
+	if rules[1].Effect != EffectAllow || rules[1].Kind != KindCommand || rules[1].Pattern != "rm -rf build" {
+		t.Fatalf("%+v", rules[1])
+	}
+	call.Answer = ""
+	if decision, err := s.decide(call); err != nil || !decision.Allow || decision.Ask != nil {
+		t.Fatalf("the remembered call asked again: %+v %v", decision, err)
+	}
+	call.Answer = "deny"
+	if decision, err := s.decide(call); err != nil || decision.Allow || !strings.Contains(decision.Reason, "declined") {
+		t.Fatalf("deny ran the call: %+v %v", decision, err)
+	}
+}
+
 func TestReasonTellsTheBotToStop(t *testing.T) {
 	decision := evaluate([]Rule{rule(EffectDeny, KindRead, "/secret")}, call("read", map[string]any{"path": "/secret/a"}, "/work"))
 	if !strings.Contains(decision.Reason, "deny read /secret") || !strings.Contains(decision.Reason, "/secret/a") || !strings.Contains(decision.Reason, "Don't try another way") {
@@ -250,13 +304,13 @@ func TestBotsCantReachThePlugin(t *testing.T) {
 	for _, tool := range []string{"read", "write", "edit"} {
 		input := call(tool, map[string]any{"path": path}, "/work")
 		input.Chat = "a"
-		if s.decide(input).Allow {
+		if decision, _ := s.decide(input); decision.Allow {
 			t.Errorf("%s reached the rules", tool)
 		}
 	}
 	free := call("read", map[string]any{"path": path}, "/work")
 	free.Chat = "b"
-	if s.decide(free).Allow {
+	if decision, _ := s.decide(free); decision.Allow {
 		t.Error("the plugin's folder needs guarding with no rules set")
 	}
 }

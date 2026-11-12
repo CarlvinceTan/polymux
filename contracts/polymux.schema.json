@@ -775,7 +775,8 @@
             "tool",
             "choice",
             "credential",
-            "vault"
+            "vault",
+            "approval"
           ]
         },
         "text": {
@@ -814,6 +815,9 @@
         },
         "vault": {
           "$ref": "#/$defs/VaultCard"
+        },
+        "approval": {
+          "$ref": "#/$defs/Approval"
         }
       },
       "required": [
@@ -1631,6 +1635,64 @@
         "createdAt"
       ]
     },
+    "Approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "allowed",
+            "denied",
+            "expired"
+          ]
+        },
+        "answerID": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovalOption"
+          }
+        }
+      },
+      "required": [
+        "title",
+        "status"
+      ]
+    },
+    "ApprovalOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "outcome"
+      ]
+    },
     "ChoiceOption": {
       "type": "object",
       "additionalProperties": false,
@@ -2375,6 +2437,19 @@
         "objectLabel",
         "iconOrAgentID",
         "at"
+      ]
+    },
+    "ApprovalAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "optionID": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "optionID"
       ]
     },
     "ChoiceAnswer": {

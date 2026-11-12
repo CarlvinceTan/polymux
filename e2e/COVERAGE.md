@@ -87,7 +87,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Devices | A network's page lists them; loading, failed, pair | flow | `fixture-devices.js`, `-slow`, `-failed`, `fixture-pairing.js` |
 | Networks | Join a second, switch, each keeps its place, numbered names, rename, leave | flow | `servers.js`, `fixture-servers.js` |
 | This Mac's server | New install, relaunch, off and on, join keeps it or retires it, or merges it from the join screen | flow | `fresh.js`, `join-empty.js`, `join-keeps.js`, `join-merge.js` |
-| First-run welcome | Shown once on a new install, steps to permissions counted from the server, Settings reopens them | flow | `fresh.js`, `fixture-onboarding.js` |
+| First-run setup | Shown once on a new install: server choice, permissions counted from the server, official plugins; Settings reopens it | flow | `fresh.js`, `fixture-onboarding.js` |
 | Move | Preview, move, app follows, old copy, a new server beside it | flow | `move.js` |
 | Merge | Preview, merge, both sets of bots, same names told apart, old server goes | flow | `merge.js` |
 | Vault | Locked, unlocked, import | flow | `vault.js`, `vault_browser.js`, `vault_kdbx.js`, `vault_passkey.js`, `vault_values.js` |

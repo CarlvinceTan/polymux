@@ -196,7 +196,7 @@ struct SettingsEntry: Identifiable {
             add("Appearance", ["Theme", "Light", "Dark", "Switcher badges"])
             add("Notifications", ["Allow notifications"])
             #if os(macOS)
-            add("Permissions", ["System permissions"])
+            add("Onboarding", ["System permissions", "Manage permissions", "Run Setup Again"])
             #endif
             add("Connections", Connections.available.map(Connections.title))
         case .network:

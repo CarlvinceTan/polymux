@@ -78,9 +78,9 @@ private struct VaultBrowser: View {
                 .glassEffect(.regular, in: Capsule())
                 PanelMenu("Add vault item", symbol: "plus") {
                     ForEach(VaultCategory.allCases.filter { $0 != .all }) { kind in
-                        Button(kind.entry, systemImage: kind.symbol) {
+                        Button(kind.entry, systemImage: VaultCategory.symbol(forKind: kind.entryKind)) {
                             query = ""; category = .all
-                            store.add(kind.rawValue)
+                            store.add(kind.entryKind)
                         }
                     }
                     Divider()
@@ -114,7 +114,7 @@ private struct VaultBrowser: View {
                         ForEach(results, id: \.id) { item in
                             Button { store.open(item.id) } label: {
                                 HStack(spacing: PanelStyle.contentInset) {
-                                    Image(systemName: VaultCategory(rawValue: item.kind)?.symbol ?? "lock")
+                                    Image(systemName: VaultCategory.symbol(forKind: item.kind))
                                         .font(.title3).foregroundStyle(.muted)
                                         .frame(width: PanelStyle.actionHeight, height: PanelStyle.actionHeight)
                                     VStack(alignment: .leading, spacing: PanelStyle.cardInset) {
@@ -167,7 +167,7 @@ private struct VaultBrowser: View {
     private var results: [VaultSummary] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return store.items.filter {
-            (category == .all || $0.kind == category.rawValue) &&
+            (category == .all || category.contains($0)) &&
             (query.isEmpty || $0.title.localizedStandardContains(query) || $0.origin.localizedStandardContains(query))
         }
     }
@@ -181,45 +181,56 @@ private struct VaultBrowser: View {
 }
 
 enum VaultCategory: String, CaseIterable, Identifiable {
-    case all, login, card, api, totp, note, recovery, wifi, passkey
+    case all, login, codes, passkey, card, note, recovery
     var id: String { rawValue }
     var title: String {
         switch self {
         case .all: "All"
         case .login: "Logins"
+        case .codes: "Codes"
+        case .passkey: "Passkeys"
         case .card: "Cards"
-        case .api: "Secrets"
-        case .totp: "TOTP"
         case .note: "Notes"
         case .recovery: "Recovery codes"
-        case .wifi: "Wi-Fi"
-        case .passkey: "Passkeys"
         }
     }
     var entry: String {
         switch self {
         case .all: "All"
         case .login: "Login"
+        case .codes: "TOTP"
+        case .passkey: "Passkey"
         case .card: "Card"
-        case .api: "Secret"
-        case .totp: "TOTP"
         case .note: "Note"
         case .recovery: "Recovery codes"
-        case .wifi: "Wi-Fi"
-        case .passkey: "Passkey"
         }
     }
-    var symbol: String {
+    var entryKind: String {
         switch self {
-        case .all: "lock"
-        case .login: "key"
-        case .card: "creditcard"
-        case .api: "curlybraces"
-        case .totp: "timer"
-        case .note: "note.text"
-        case .recovery: "list.bullet.rectangle"
-        case .wifi: "wifi"
-        case .passkey: "person.badge.key"
+        case .codes: "totp"
+        default: rawValue
+        }
+    }
+    // Codes surfaces standalone code items and logins carrying a seed.
+    func contains(_ item: VaultSummary) -> Bool {
+        switch self {
+        case .all: true
+        case .login: ["login", "api", "wifi"].contains(item.kind)
+        case .codes: item.kind == "totp" || item.fields.contains("totp")
+        default: item.kind == rawValue
+        }
+    }
+    static func symbol(forKind kind: String) -> String {
+        switch kind {
+        case "login": "key"
+        case "api": "curlybraces"
+        case "card": "creditcard"
+        case "totp": "timer"
+        case "note": "note.text"
+        case "recovery": "list.bullet.rectangle"
+        case "wifi": "wifi"
+        case "passkey": "person.badge.key"
+        default: "lock"
         }
     }
 }

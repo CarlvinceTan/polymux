@@ -2,13 +2,13 @@
 import AppKit
 import SwiftUI
 
-/// The Grant Permissions window. While System Settings is open it docks beside it, and a hint over
-/// System Settings' list shows where to drag the icon.
+/// The Grant Permissions window. A permission's guide docks inside System Settings, over its list,
+/// with the server's icon ready to drag into it.
 @MainActor
 final class GrantWindow: NSObject, NSWindowDelegate {
     static let shared = GrantWindow()
     private var window: NSPanel?
-    private var hint: NSPanel?
+    private var guide: NSPanel?
     private var following: Task<Void, Never>?
     private var checking: Task<Void, Never>?
 
@@ -18,82 +18,85 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         if !window.isVisible { window.center() }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
-        // Picks up a grant made in System Settings while the window is open.
+        startChecking()
+    }
+
+    /// Shows a permission's guide over System Settings and follows it as it moves.
+    func follow() {
+        guard let permission = Permissions.shared.opened else { return }
+        hideGuide()
+        let panel = makeGuide(permission)
+        guide = panel
+        startFollowing()
+        startChecking()
+    }
+
+    private func startChecking() {
         checking?.cancel()
         checking = Task {
             while !Task.isCancelled {
                 await Permissions.shared.refresh()
+                if Permissions.shared.opened == nil { closeGuide() }
+                if window?.isVisible != true && guide == nil { return }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
     }
 
-    /// Docks beside System Settings until it closes.
-    func follow() {
+    /// Docks the guide inside System Settings until the permission is granted or Settings closes.
+    private func startFollowing() {
         following?.cancel()
-        window?.hidesOnDeactivate = false
         following = Task { [weak self] in
             var seen = false
             let deadline = Date.now.addingTimeInterval(10)
             while !Task.isCancelled {
-                let running = SystemSettings.running
-                if running { seen = true }
-                // Ends once System Settings quits, or if it never opened.
-                if seen ? !running : Date.now > deadline { break }
-                self?.place(SystemSettings.frame())
+                guard let self else { return }
+                if Permissions.shared.opened == nil { break }
+                if let frame = SystemSettings.frame() {
+                    seen = true
+                    place(frame)
+                } else if seen || Date.now > deadline {
+                    break
+                }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-            if !Task.isCancelled { self?.stop() }
+            if !Task.isCancelled { self?.closeGuide() }
         }
+    }
+
+    /// Keeps the guide at the bottom-right of the Settings window, where the list is above it.
+    private func place(_ settings: CGRect) {
+        guard let guide, let screen = NSScreen.screens.first else { return }
+        let top = screen.frame.height - settings.minY
+        let size = guide.frame.size
+        let visible = screen.visibleFrame
+        let x = min(max(settings.maxX - size.width - 16, visible.minX + 8), visible.maxX - size.width - 8)
+        let y = min(max(top - settings.height + 16, visible.minY + 8), visible.maxY - size.height - 8)
+        let origin = NSPoint(x: x, y: y)
+        if guide.frame.origin != origin { guide.setFrameOrigin(origin) }
+        if !guide.isVisible { guide.orderFrontRegardless() }
     }
 
     func windowWillClose(_ notification: Notification) {
+        closeGuide()
         checking?.cancel()
         checking = nil
-        stop()
     }
 
-    private func stop() {
+    private func closeGuide() {
+        hideGuide()
+        Permissions.shared.settle()
+        if window?.isVisible != true {
+            checking?.cancel()
+            checking = nil
+        }
+    }
+
+    private func hideGuide() {
         following?.cancel()
         following = nil
-        hint?.orderOut(nil)
-        window?.hidesOnDeactivate = true
-        Permissions.shared.settle()
-    }
-
-    /// Shows the window beside System Settings and the hint over its list, while either app is in front.
-    private func place(_ settings: CGRect?) {
-        guard let window, let settings, let screen = NSScreen.screens.first else {
-            hint?.orderOut(nil)
-            return
-        }
-        let front = NSApp.isActive || NSWorkspace.shared.frontmostApplication?.bundleIdentifier == SystemSettings.id
-        guard front else {
-            window.orderOut(nil)
-            hint?.orderOut(nil)
-            return
-        }
-        // Window frames use a bottom-left origin; System Settings' comes with a top-left one.
-        let top = screen.frame.height - settings.minY
-        let size = window.frame.size
-        var x = settings.minX - 16 - size.width
-        if x < (window.screen ?? screen).visibleFrame.minX { x = settings.maxX + 16 }
-        let origin = NSPoint(x: x, y: top - 16 - size.height)
-        if window.frame.origin != origin { window.setFrameOrigin(origin) }
-        // A window hidden when Polymux went to the background still counts as visible.
-        if !window.occlusionState.contains(.visible) { window.orderFrontRegardless() }
-
-        guard Permissions.shared.opened != nil else {
-            hint?.orderOut(nil)
-            return
-        }
-        let hint = hint ?? makeHint()
-        self.hint = hint
-        // Ends over the middle of the list, past System Settings' 232-point sidebar.
-        let end = CGPoint(x: settings.minX + (settings.width + 232) / 2, y: settings.minY + 195)
-        let corner = NSPoint(x: end.x - DragHint.end.x, y: top - (end.y - settings.minY) - (DragHint.size.height - DragHint.end.y))
-        if hint.frame.origin != corner { hint.setFrameOrigin(corner) }
-        if !hint.isVisible { hint.orderFrontRegardless() }
+        guide?.orderOut(nil)
+        guide = nil
     }
 
     private func make() -> NSPanel {
@@ -118,17 +121,19 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         return panel
     }
 
-    private func makeHint() -> NSPanel {
-        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: DragHint.size),
+    private func makeGuide(_ permission: Permission) -> NSPanel {
+        let view = PermissionGuide(permission: permission)
+        let size = NSHostingController(rootView: view).sizeThatFits(in: CGSize(width: 480, height: 400))
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.ignoresMouseEvents = true
-        panel.level = NSWindow.Level(NSWindow.Level.floating.rawValue + 1)
+        panel.hasShadow = true
+        panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.isReleasedWhenClosed = false
-        panel.contentView = NSHostingView(rootView: DragHint())
+        panel.hidesOnDeactivate = false
+        panel.contentView = NSHostingView(rootView: view)
         return panel
     }
 }
@@ -142,8 +147,6 @@ private final class GrantPanel: NSPanel {
 enum SystemSettings {
     static let id = "com.apple.systempreferences"
 
-    static var running: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty }
-
     /// Its front window's frame, with the origin at the top left of the main screen.
     static func frame() -> CGRect? {
         guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: id).first?.processIdentifier,
@@ -156,60 +159,47 @@ enum SystemSettings {
     }
 }
 
-/// A faded copy of the icon being carried into the list, on a loop.
-struct DragHint: View {
-    static let size = CGSize(width: 256, height: 193)
-    static let start = CGPoint(x: 65, y: 97)
-    static let end = CGPoint(x: 191, y: 130)
-    private static let bend = CGPoint(x: 125, y: 68)
-    private static let curve = UnitCurve.bezier(startControlPoint: UnitPoint(x: 0.35, y: 0.1),
-                                                endControlPoint: UnitPoint(x: 0.1, y: 0.95))
-    @Environment(\.accessibilityReduceMotion) private var still
-    @State private var begin = Date.now
+/// The card inside System Settings: one instruction and the server's tile to drag into the list.
+private struct PermissionGuide: View {
+    let permission: Permission
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        TimelineView(.animation) { context in
-            let pose = pose(at: context.date.timeIntervalSince(begin).truncatingRemainder(dividingBy: 3.6))
-            ZStack {
-                AppIcon()
-                    .frame(width: 96, height: 96)
-                    .opacity(0.55)
-                Image(nsImage: NSCursor.closedHand.image)
-            }
-            .scaleEffect(pose.scale)
-            .opacity(pose.fade)
-            .position(pose.point)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Drag Polymux Server into the \(permission.title) list above")
+                .font(.callout.weight(.medium))
+                .multilineTextAlignment(.leading)
+            PermissionTile()
         }
-        .frame(width: Self.size.width, height: Self.size.height)
-        .accessibilityHidden(true)
-    }
-
-    /// Fades in, carries the icon along a slight arc, fades out, then rests before the next pass.
-    private func pose(at time: Double) -> (point: CGPoint, scale: Double, fade: Double) {
-        let start = still ? Self.end : Self.start
-        switch time {
-        case ..<0.24:
-            let progress = time / 0.24
-            return (start, 0.95 + 0.05 * progress, progress)
-        case ..<0.35:
-            return (start, 1, 1)
-        case ..<2:
-            let progress = Self.curve.value(at: (time - 0.35) / 1.65)
-            return (still ? Self.end : arc(progress), 1 - 0.025 * progress, 1)
-        case ..<2.12:
-            return (Self.end, 0.975, 1)
-        case ..<2.36:
-            let progress = (time - 2.12) / 0.24
-            return (Self.end, 0.975 - 0.045 * progress, 1 - progress)
-        default:
-            return (Self.end, 0.93, 0)
-        }
-    }
-
-    private func arc(_ t: Double) -> CGPoint {
-        let a = (1 - t) * (1 - t), b = 2 * t * (1 - t), c = t * t
-        return CGPoint(x: a * Self.start.x + b * Self.bend.x + c * Self.end.x,
-                       y: a * Self.start.y + b * Self.bend.y + c * Self.end.y)
+        .padding(16)
+        .frame(width: 480, alignment: .leading)
+        .background(PanelSurface.color(scheme), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .appAppearance(Permissions.shared.appearance)
     }
 }
+
+/// The server as System Settings lists it: its icon and name, ready to drag.
+private struct PermissionTile: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            ServerIcon().frame(width: 30, height: 30)
+            Text("Polymux Server").font(.callout.weight(.medium))
+            Spacer(minLength: 8)
+            Image(systemName: "hand.draw")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(Rectangle())
+        .onDrag { NSItemProvider(contentsOf: ServerHost.bundle) ?? NSItemProvider() }
+        .onHover { inside in
+            if inside { NSCursor.openHand.set() } else { NSCursor.arrow.set() }
+        }
+        .help("Drag Polymux Server into the list in System Settings.")
+        .accessibilityLabel("Polymux Server")
+    }
+}
+
 #endif

@@ -1,12 +1,12 @@
 # Polymux official plugins
 
-Plugins maintained by the Polymux team. The app and server don't include them: each one is a package that's installed when someone asks for it.
+Plugins maintained by the Polymux team. The app and server don't include them: each one is a package that's installed when someone asks for it. Policy lives here too — permission rules, interactive approval and usage reporting are plugins, not core server settings.
 
 | Plugin | What it does |
 | --- | --- |
 | [`hub`](hub) | Your messages and mail in one place, with bridges to chat networks. |
 | [`tailscale`](tailscale) | Reaches your server from other devices over your tailnet. |
-| [`permissions`](permissions) | Rules a chat's bots can't break: what they may read, write, run and use. |
+| [`permissions`](permissions) | Rules a chat's bots can't break: what they may read, write, run and use, with an approval card when a rule asks first. |
 | [`graph-visualiser`](graph-visualiser) | See how your bots, people, devices and repositories work together. |
 
 ## Layout

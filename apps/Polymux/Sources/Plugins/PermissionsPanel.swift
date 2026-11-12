@@ -12,7 +12,11 @@ struct PermissionRule: Codable, Equatable, Identifiable, Sendable {
 
     var summary: String {
         let action = ["read": "reading", "write": "writing", "command": "commands", "tool": "tool"][kind] ?? kind
-        return "\(effect == "allow" ? "Allow" : "Deny") \(action)"
+        switch effect {
+        case "allow": return "Allow \(action)"
+        case "ask": return "Ask before \(action)"
+        default: return "Deny \(action)"
+        }
     }
 }
 
@@ -31,8 +35,8 @@ struct PermissionsPanel: View {
     @State private var saved = PermissionRules()
     @State private var saving: Task<Void, Never>?
     @State private var failed = false
-    @State private var effect = "deny"
-    @State private var kind = "read"
+    @State private var effect = "ask"
+    @State private var kind = "command"
     @State private var pattern = ""
 
     private var path: String { "chats/\(thread.id)/rules" }
@@ -59,14 +63,17 @@ struct PermissionsPanel: View {
             }
             .panelRow()
             Section {
-                SettingsPicker("Rule", selection: $effect, options: [("Deny", "deny"), ("Allow", "allow")])
-                SettingsPicker("Action", selection: $kind, options: [("Reading", "read"), ("Writing", "write"), ("Commands", "command"), ("Tool", "tool")])
+                SettingsPicker("When a bot", selection: $kind, options: [("Runs a command", "command"), ("Reads a file", "read"), ("Writes a file", "write"), ("Uses a tool", "tool")])
                 SettingsField(title: field, text: $pattern, prompt: prompt)
+                SettingsPicker("Then", selection: $effect, options: [("Allow", "allow"), ("Ask me", "ask"), ("Deny", "deny")])
                 Button("Add") { add() }
                     .buttonStyle(.borderless)
                     .frame(maxWidth: .infinity)
                     .disabled(kind == "tool" && entry.isEmpty)
                     .accessibilityLabel("Add rule")
+                Text("Ask posts an approval card in this chat and waits for you. Deny beats Ask, and Ask beats a wildcard Allow.")
+                    .font(.caption)
+                    .foregroundStyle(.muted)
             } header: {
                 Text("New rule").foregroundStyle(.primary)
             }

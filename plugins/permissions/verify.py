@@ -207,6 +207,28 @@ def checks():
     check("command substitution is blocked", run(alpha, "bash", {"command": f"echo $(cat {SECRET})"}), "permission rules blocked", ["top-secret"])
     check("the free chat is unrestricted", run(beta, "bash", {"command": f"cat {SECRET}"}), "top-secret-value")
 
+    print("approval", flush=True)
+    api("PUT", f"/plugins/permissions/api/chats/{alpha}/rules", {"rules": rules + [{"id": "ask", "effect": "ask", "kind": "command", "pattern": "printf *"}]})
+
+    def answer(chat, option, seen):
+        end = time.time() + 30
+        while time.time() < end:
+            for message in api("GET", f"/threads/{chat}/messages?limit=50"):
+                for part in message.get("parts", []):
+                    approval = part.get("approval") or {}
+                    if part.get("kind") == "approval" and approval.get("status") == "pending":
+                        api("POST", f"/threads/{chat}/messages/{message['id']}/approval", {"optionID": option})
+                        seen.append(message["id"])
+                        return
+            time.sleep(0.1)
+
+    for option, want, refuse in (("allow_once", "approved", []), ("deny", "declined", ["denied"]), ("allow_always", "always", [])):
+        seen = []
+        threading.Thread(target=answer, args=(alpha, option, seen), daemon=True).start()
+        check(f"{option} answers an ask rule", run(alpha, "bash", {"command": "printf " + want}), want, refuse)
+        check(f"{option} shows an approval card", "yes" if seen else "no", "yes")
+    check("Always allow is remembered", run(alpha, "bash", {"command": "printf always"}), "always")
+
     print("MCP inside codemode", flush=True)
     code = {"code": "return await tools.fake__probe({})"}
     check("free chat reaches the MCP tool", run(beta, "codemode", code), "probe-ok")

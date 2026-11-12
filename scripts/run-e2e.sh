@@ -205,6 +205,8 @@ def start_fixture(flags):
         shutil.rmtree(root + "/data")
     os.makedirs(root + "/data")
     subprocess.run(["defaults", "delete", identifier], capture_output=True)
+    # A previous run that closed its window would restore no window without this.
+    subprocess.run(["defaults", "write", identifier, "ApplePersistenceIgnoreState", "-bool", "YES"], capture_output=True)
     style = "Dark" if "--verify-dark" in flags else "Light"
     # The appearance goes first, as in run.sh.
     fixture_args = (bundle, root + "/data", root + "/app.log", ["-AppleInterfaceStyle", style] + flags)

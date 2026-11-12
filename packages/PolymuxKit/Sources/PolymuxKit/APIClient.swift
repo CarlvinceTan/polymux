@@ -290,6 +290,10 @@ public struct APIClient: Sendable {
         try await post("threads/\(threadID)/messages/\(messageID)/answer", ChoiceAnswer(optionID: optionID, text: text))
     }
 
+    public func answerApproval(threadID: String, messageID: String, optionID: String) async throws -> Message {
+        try await post("threads/\(threadID)/messages/\(messageID)/approval", ApprovalAnswer(optionID: optionID))
+    }
+
     public func react(threadID: String, messageID: String, request: ReactionRequest) async throws -> Message {
         try await write("threads/\(threadID)/messages/\(messageID)/reaction", method: "PUT", body: request)
     }

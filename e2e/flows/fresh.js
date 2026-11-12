@@ -1,10 +1,18 @@
 // @fresh
 // A new Mac app needs no terminal: it runs its own server, and what's on it survives a relaunch.
 let app = await cua.getApp(APP);
-// A new install opens with the welcome once its server is up.
-for (let i = 0; i < 80 && !(await app.query({ role: "button", name: "Skip" })).length; i++) await cua.sleep(500);
-await app.waitFor({ role: "statictext", name: "Get Started with Polymux" });
-await app.click({ role: "button", name: "Skip" });
+// A new install opens with the welcome once its server is up; it may already be past it.
+for (let i = 0; i < 80; i++) {
+  if ((await app.query({ role: "button", name: "Skip for now" })).length) {
+    await app.click({ role: "button", name: "Skip for now" });
+    break;
+  }
+  await cua.sleep(250);
+}
+await cua.sleep(500);
+for (let i = 0; i < 20; i++) {
+  try { app = await cua.getApp(APP); break; } catch { await cua.sleep(250); }
+}
 const name = "Fresh" + Date.now();
 await app.waitFor({ role: "button", name: "New chat", timeout_ms: 10000 });
 await app.click({ role: "button", name: "New chat" });
@@ -20,7 +28,11 @@ for (let i = 0; i < 40; i++) {
 await app.waitFor({ role: "button", name, timeout_ms: 10000 });
 return name;
 // @relaunch
-const app = await cua.getApp(APP);
+let app;
+for (let i = 0; i < 40; i++) {
+  try { app = await cua.getApp(APP); break; } catch { await cua.sleep(250); }
+}
+if (!app) throw new Error("The app did not reopen");
 await app.waitFor({ role: "button", name: PREVIOUS, timeout_ms: 10000 });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Network" });

@@ -602,6 +602,7 @@ public struct Part: Codable, Hashable, Sendable {
     public var allowText: Bool?
     public var credential: CredentialRequest?
     public var vault: VaultCard?
+    public var approval: Approval?
 
     public init(
         kind: String = "",
@@ -615,7 +616,8 @@ public struct Part: Codable, Hashable, Sendable {
         answerText: String? = nil,
         allowText: Bool? = nil,
         credential: CredentialRequest? = nil,
-        vault: VaultCard? = nil
+        vault: VaultCard? = nil,
+        approval: Approval? = nil
     ) {
         self.kind = kind
         self.text = text
@@ -629,6 +631,7 @@ public struct Part: Codable, Hashable, Sendable {
         self.allowText = allowText
         self.credential = credential
         self.vault = vault
+        self.approval = approval
     }
 }
 
@@ -639,6 +642,7 @@ public enum PartKind {
     public static let choice = "choice"
     public static let credential = "credential"
     public static let vault = "vault"
+    public static let approval = "approval"
 }
 
 public struct ReplyContext: Codable, Hashable, Sendable {
@@ -1288,6 +1292,56 @@ public enum PeerDeliveryStatus {
     public static let interrupted = "interrupted"
 }
 
+public struct Approval: Codable, Hashable, Sendable {
+    public var title: String
+    public var detail: String?
+    public var status: String
+    public var answerID: String?
+    public var options: [ApprovalOption]?
+
+    public init(
+        title: String = "",
+        detail: String? = nil,
+        status: String = "",
+        answerID: String? = nil,
+        options: [ApprovalOption]? = nil
+    ) {
+        self.title = title
+        self.detail = detail
+        self.status = status
+        self.answerID = answerID
+        self.options = options
+    }
+}
+
+public enum ApprovalStatus {
+    public static let pending = "pending"
+    public static let allowed = "allowed"
+    public static let denied = "denied"
+    public static let expired = "expired"
+}
+
+public struct ApprovalOption: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    public var outcome: String
+
+    public init(
+        id: String = "",
+        label: String = "",
+        outcome: String = ""
+    ) {
+        self.id = id
+        self.label = label
+        self.outcome = outcome
+    }
+}
+
+public enum ApprovalOptionOutcome {
+    public static let allow = "allow"
+    public static let deny = "deny"
+}
+
 public struct ChoiceOption: Codable, Hashable, Sendable {
     public var id: String
     public var label: String
@@ -1880,6 +1934,16 @@ public struct Activity: Codable, Hashable, Sendable {
         self.iconOrAgentID = iconOrAgentID
         self.at = at
         self.agentIDs = agentIDs
+    }
+}
+
+public struct ApprovalAnswer: Codable, Hashable, Sendable {
+    public var optionID: String
+
+    public init(
+        optionID: String = ""
+    ) {
+        self.optionID = optionID
     }
 }
 

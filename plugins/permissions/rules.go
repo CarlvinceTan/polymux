@@ -9,7 +9,9 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // unicodeSpaces are what the file tools turn into plain spaces.
@@ -17,6 +19,7 @@ var unicodeSpaces = regexp.MustCompile("[  -   　]")
 
 const (
 	EffectAllow = "allow"
+	EffectAsk   = "ask"
 	EffectDeny  = "deny"
 
 	KindRead    = "read"
@@ -40,12 +43,51 @@ type Call struct {
 	Dir  string          `json:"dir"`
 	Tool string          `json:"tool"`
 	Args json.RawMessage `json:"args"`
+	// Answer is what the person picked for this call's Ask, when Polymux asks again.
+	Answer string `json:"answer,omitempty"`
 }
 
 // Decision answers Polymux's gate.
 type Decision struct {
 	Allow  bool   `json:"allow"`
 	Reason string `json:"reason,omitempty"`
+	Ask    *Ask   `json:"ask,omitempty"`
+}
+
+// Ask is the question a rule with EffectAsk puts in the chat.
+type Ask struct {
+	Title   string      `json:"title"`
+	Detail  string      `json:"detail,omitempty"`
+	Options []AskOption `json:"options"`
+}
+
+// AskOption is one answer, and whether it lets the call run.
+type AskOption struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Outcome string `json:"outcome"`
+}
+
+func askOptions() []AskOption {
+	return []AskOption{
+		{ID: "allow_once", Label: "Allow once", Outcome: "allow"},
+		{ID: "allow_always", Label: "Always allow", Outcome: "allow"},
+		{ID: "deny", Label: "Deny", Outcome: "deny"},
+	}
+}
+
+func askTitle(kind string) string {
+	switch kind {
+	case KindCommand:
+		return "Run this command?"
+	case KindRead:
+		return "Read this file?"
+	case KindWrite:
+		return "Change this file?"
+	case KindTool:
+		return "Use this tool?"
+	}
+	return "Allow this call?"
 }
 
 // subject is what the rules of one kind judge about a call.
@@ -59,14 +101,56 @@ type subject struct {
 	opaque bool
 }
 
-// evaluate lets a call through unless a deny rule covers it, or its kind has allow rules and none cover it.
+// evaluate lets a call through unless a deny rule covers it, an ask rule wants a person, or its
+// kind has allow rules and none cover it. Deny beats ask beats allow.
 func evaluate(rules []Rule, call Call) Decision {
+	var ask *Ask
 	for _, item := range subjects(call) {
-		if reason := item.refusal(rules, call.Dir); reason != "" {
+		reason, question := item.judge(rules, call.Dir)
+		if reason != "" {
 			return Decision{Reason: "This chat's permission rules blocked the call: " + reason + " Don't try another way. Tell the user what was blocked."}
 		}
+		if question != nil && ask == nil {
+			ask = question
+		}
+	}
+	if ask != nil {
+		return Decision{Ask: ask}
 	}
 	return Decision{Allow: true}
+}
+
+// remember turns the ask rules that matched a call into allow rules when the person says "always".
+func remember(rules []Rule, call Call) []Rule {
+	var out []Rule
+	seen := map[string]bool{}
+	for _, item := range subjects(call) {
+		for _, rule := range rules {
+			if rule.Kind != item.kind || rule.Effect != EffectAsk {
+				continue
+			}
+			matches := rule.matcher(call.Dir)
+			// A path can be written plainly and through a link, so allow every form that passed.
+			if !slices.ContainsFunc(item.texts, matches) {
+				continue
+			}
+			for _, text := range item.texts {
+				key := item.kind + "\x00" + text
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, Rule{
+					ID:      "always-" + strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.Itoa(len(out)),
+					Effect:  EffectAllow,
+					Kind:    item.kind,
+					Pattern: text,
+				})
+			}
+			break
+		}
+	}
+	return out
 }
 
 func subjects(call Call) []subject {
@@ -90,33 +174,61 @@ func subjects(call Call) []subject {
 	return out
 }
 
-func (s subject) refusal(rules []Rule, dir string) string {
+func (s subject) judge(rules []Rule, dir string) (string, *Ask) {
+	exact := []func(string) bool{}
 	allowed := []func(string) bool{}
+	asked := []func(string) bool{}
 	for _, rule := range rules {
 		if rule.Kind != s.kind {
 			continue
 		}
 		matches := rule.matcher(dir)
-		if rule.Effect == EffectAllow {
-			allowed = append(allowed, matches)
-			continue
+		switch rule.Effect {
+		case EffectAllow:
+			if strings.ContainsAny(rule.Pattern, "*?") {
+				allowed = append(allowed, matches)
+			} else {
+				exact = append(exact, matches)
+				allowed = append(allowed, matches)
+			}
+		case EffectAsk:
+			asked = append(asked, matches)
+		default:
+			if slices.ContainsFunc(slices.Concat(s.texts, s.aliases), matches) {
+				return fmt.Sprintf("%q is denied by the rule %s.", first(s.texts, matches), rule), nil
+			}
 		}
-		if slices.ContainsFunc(slices.Concat(s.texts, s.aliases), matches) {
-			return fmt.Sprintf("%q is denied by the rule %s.", first(s.texts, matches), rule)
+	}
+	// An exact allow is the answer to "always allow", so it settles the call without asking again.
+	if len(exact) > 0 && len(s.texts) > 0 {
+		all := true
+		for _, text := range s.texts {
+			if !slices.ContainsFunc(exact, func(matches func(string) bool) bool { return matches(text) }) {
+				all = false
+				break
+			}
 		}
+		if all {
+			return "", nil
+		}
+	}
+	if at := slices.IndexFunc(s.texts, func(text string) bool {
+		return slices.ContainsFunc(asked, func(matches func(string) bool) bool { return matches(text) })
+	}); at >= 0 {
+		return "", &Ask{Title: askTitle(s.kind), Detail: s.texts[at], Options: askOptions()}
 	}
 	if len(allowed) == 0 {
-		return ""
+		return "", nil
 	}
 	if s.opaque {
-		return "this command can't be checked against the allow list. Run plain commands, without variables, redirects or assignments."
+		return "this command can't be checked against the allow list. Run plain commands, without variables, redirects or assignments.", nil
 	}
 	for _, text := range s.texts {
 		if !slices.ContainsFunc(allowed, func(matches func(string) bool) bool { return matches(text) }) {
-			return fmt.Sprintf("%q isn't on the %s allow list.", text, s.kind)
+			return fmt.Sprintf("%q isn't on the %s allow list.", text, s.kind), nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func first(texts []string, matches func(string) bool) string {

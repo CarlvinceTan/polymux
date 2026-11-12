@@ -49,7 +49,11 @@ type turnState struct {
 	spoke      bool
 	status     func(string) error
 	// gate asks plugins about a tool call. chats are those whose rules bind this run.
-	gate  func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision
+	gate func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision
+	// answer asks again with the person's answer, so a plugin can remember it.
+	answer func(ctx context.Context, tool string, args json.RawMessage, answer, card string) plugins.Decision
+	// ask carries a plugin's question to the person and returns their answer and the card.
+	ask   func(ctx context.Context, call string, ask plugins.Ask, tool string, args json.RawMessage) (string, string, error)
 	chats []string
 }
 
@@ -63,7 +67,22 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 	}
 	// Asked outside the lock, since a plugin takes a moment to answer.
 	if state.gate != nil {
-		if decision := state.gate(ctx, name, args); !decision.Allow {
+		decision := state.gate(ctx, name, args)
+		if decision.Ask != nil {
+			if state.ask == nil || state.answer == nil {
+				return agent.ToolCallHookResult{Block: true, Reason: "This chat's rules need an approval, but no one can answer it."}
+			}
+			answer, card, err := state.ask(ctx, call, *decision.Ask, name, args)
+			if err != nil {
+				return agent.ToolCallHookResult{Block: true, Reason: err.Error()}
+			}
+			decision = state.answer(ctx, name, args, answer, card)
+			// A plugin may ask once per call. Asking again would hold the turn with no way out.
+			if decision.Ask != nil {
+				return agent.ToolCallHookResult{Block: true, Reason: "This chat's rules asked for another approval that can't be answered."}
+			}
+		}
+		if !decision.Allow {
 			return agent.ToolCallHookResult{Block: true, Reason: decision.Reason}
 		}
 	}
