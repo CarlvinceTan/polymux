@@ -8,6 +8,7 @@ struct VoicePane: View {
     let providers: [Provider]
     let editFallbacks: () -> Void
     @State private var dictation = DictationSettings.shared
+    @State private var models = ModelStore.shared
 
     var body: some View {
         VoiceSettings(store: store, providers: providers, editFallbacks: editFallbacks)
@@ -94,6 +95,10 @@ struct VoicePane: View {
         Section {
             LabeledContent("Engine", value: "Apple Speech")
             LabeledContent("Listening for", value: DictationDevice.languageNames(for: dictation.deviceLanguage))
+            // The review model only feeds on-device polish, and is untested on iPhone.
+            #if os(macOS)
+            if DictationPolish.isAvailable, DecisionModels.default.downloadURL != nil { modelRow }
+            #endif
         } header: {
             SectionHeader("Recognition", symbol: "cpu.fill", tint: .purple)
         } footer: {
@@ -106,6 +111,38 @@ struct VoicePane: View {
             }
         }
         .panelRow()
+    }
+
+    private var modelRow: some View {
+        let model = DecisionModels.default
+        let state = models.state(model.id)
+        return HStack(spacing: PanelStyle.rowInset) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Review model")
+                Group {
+                    if case .failed(let reason) = state { Text(reason) } else { Text(model.licenseNotice) }
+                }
+                .font(.footnote).foregroundStyle(.muted)
+            }
+            Spacer(minLength: 0)
+            switch state {
+            case .downloading(let fraction):
+                ProgressView(value: fraction).frame(width: 80)
+                    .accessibilityLabel("Review model download")
+                Button("Cancel") { models.remove(model.id) }
+                    .buttonStyle(.plain).foregroundStyle(.muted)
+            case .ready:
+                Text(model.displayName).foregroundStyle(.muted)
+                Button("Remove") { models.remove(model.id) }
+                    .buttonStyle(.plain).foregroundStyle(.muted)
+            case .notDownloaded, .failed:
+                Text(ByteCountFormatter.string(fromByteCount: model.byteSize, countStyle: .file))
+                    .foregroundStyle(.muted)
+                Button("Download") { models.download(model) }
+                    .buttonStyle(.plain).foregroundStyle(.tint)
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 
     private func row(_ entry: VocabularyEntry) -> some View {

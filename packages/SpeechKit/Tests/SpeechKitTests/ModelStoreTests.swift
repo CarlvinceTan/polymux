@@ -79,6 +79,17 @@ struct ModelStoreTests {
         #expect(throws: ModelError.archive) { try ModelStore.extractTar(url, into: dir) }
     }
 
+    @Test func installRejectsWrongChecksum() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("gate-test-\(UUID().uuidString)")
+        try Data("hello".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        for sha in [nil, String(repeating: "0", count: 64)] {
+            let model = DecisionModelDescriptor(id: "gate-test", displayName: "", downloadURL: nil, byteSize: 0, sha256: sha,
+                                                licenseNotice: "", gate: DecisionModels.glide04B.gate, maxTokens: 256)
+            #expect(throws: ModelError.checksum) { try ModelStore.install(model, archive: url) }
+        }
+    }
+
     @Test func sha256MatchesKnownDigest() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("gate-test-\(UUID().uuidString)")
         try Data("hello".utf8).write(to: url)

@@ -656,19 +656,20 @@ struct ComposerView: View {
                                           capitalizeStart: startsSentence(in: before, at: span.lowerBound))
         var final = cleaned
         if options.polish {
-            // The on-device model combines its P(misheard) with word confidences;
-            // until it is downloaded (or the prompt is too long), confidence alone decides.
-            let model: any DecisionModel = GlideModel.shared
-            let worthReview: Bool
-            if model.isAvailable,
-               let score = await model.score(transcript: cleaned, confidences: dictatedConfidence) {
-                worthReview = score >= model.descriptor.gate.threshold
-            } else {
-                worthReview = DictationGate.needsReview(dictatedConfidence)
-            }
-            if worthReview {
-                let known = dictationSettings.vocabulary
-                Task { dictationSettings.suggest(await DictationReview.suggest(cleaned, known: known)) }
+            let known = dictationSettings.vocabulary
+            let confidences = dictatedConfidence
+            // Off the typing path: the decision model takes a moment to load.
+            Task {
+                // The model combines its P(misheard) with word confidences; until it is
+                // downloaded (or when the prompt is too long), confidence alone decides.
+                let model = GlideModel.shared
+                let worthReview = if let score = await model.score(transcript: cleaned, confidences: confidences) {
+                    score >= model.descriptor.gate.threshold
+                } else {
+                    DictationGate.needsReview(confidences)
+                }
+                guard worthReview else { return }
+                dictationSettings.suggest(await DictationReview.suggest(cleaned, known: known))
             }
         }
         if options.polish {

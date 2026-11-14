@@ -5,33 +5,28 @@ import CryptoKit
 /// Where decision models live on disk and how they become ready. Non-isolated so
 /// the inference path can resolve a model without hopping to the main actor.
 public enum ModelCache {
-    /// Pre-seeded directory for local verification (no public host needed).
-    static let overrideKey = "POLYMUX_DECISION_MODEL_DIR"
-
+    /// Beside the client's other data, in the folder a test instance relocates.
     public static var root: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("DecisionModels", isDirectory: true)
+        let environment = ProcessInfo.processInfo.environment
+        if let path = environment["POLYMUX_CLIENT_DIR"] ?? environment["POLYMUX_DATA_DIR"], !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true).appending(path: "models", directoryHint: .isDirectory)
+        }
+        #if os(macOS)
+        return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".polymux/models", directoryHint: .isDirectory)
+        #else
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "Polymux/models", directoryHint: .isDirectory)
+        #endif
     }
 
     public static func directory(_ id: String) -> URL {
         root.appendingPathComponent(id, isDirectory: true)
     }
 
-    /// The compiled model to load, or nil when not installed. A dev override directory
-    /// is checked first so a pre-seeded model can be used without downloading.
+    /// The compiled model to load, or nil when not installed.
     public static func compiledModel(_ id: String) -> URL? {
-        let fm = FileManager.default
-        var dirs = [URL]()
-        if let override = ProcessInfo.processInfo.environment[overrideKey] {
-            dirs.append(URL(fileURLWithPath: override, isDirectory: true))
-        }
-        dirs.append(directory(id))
-        for dir in dirs {
-            if dir.pathExtension == "mlmodelc", fm.fileExists(atPath: dir.path) { return dir }
-            let compiled = dir.appendingPathComponent("\(id).mlmodelc")
-            if fm.fileExists(atPath: compiled.path) { return compiled }
-        }
-        return nil
+        let compiled = directory(id).appendingPathComponent("\(id).mlmodelc")
+        return FileManager.default.fileExists(atPath: compiled.path) ? compiled : nil
     }
 
     static func package(_ id: String) -> URL? {
@@ -54,6 +49,7 @@ public enum ModelCache {
             try FileManager.default.removeItem(at: dest)
         }
         try FileManager.default.moveItem(at: compiled, to: dest)
+        try? FileManager.default.removeItem(at: package)
         return dest
     }
 }
@@ -99,13 +95,6 @@ public final class ModelStore {
 
     public func state(_ id: String) -> ModelState { states[id] ?? .notDownloaded }
 
-    public func refresh() {
-        for descriptor in DecisionModels.all where state(descriptor.id) != .downloading(0) {
-            if case .downloading = state(descriptor.id) { continue }
-            states[descriptor.id] = ModelCache.isReady(descriptor.id) ? .ready : .notDownloaded
-        }
-    }
-
     public func download(_ descriptor: DecisionModelDescriptor) {
         guard let url = descriptor.downloadURL else {
             states[descriptor.id] = .failed(ModelError.noSource.localizedDescription)
@@ -127,27 +116,26 @@ public final class ModelStore {
         states[id] = .notDownloaded
     }
 
-    fileprivate func update(_ id: String, _ state: ModelState) {
+    fileprivate func update(_ delegate: DownloadDelegate, _ state: ModelState) {
+        let id = delegate.descriptor.id
+        guard delegates[id] === delegate else {
+            // Removed mid-install: drop what the install left behind.
+            if delegates[id] == nil, states[id] == .notDownloaded {
+                try? FileManager.default.removeItem(at: ModelCache.directory(id))
+            }
+            return
+        }
         states[id] = state
         if case .downloading = state {} else { delegates[id] = nil }
     }
 
-    fileprivate func install(_ descriptor: DecisionModelDescriptor, archive: URL) {
-        let id = descriptor.id
-        do {
-            if let expected = descriptor.sha256 {
-                let digest = try Self.sha256(archive)
-                guard digest == expected.lowercased() else { throw ModelError.checksum }
-            }
-            let dir = ModelCache.directory(id)
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try Self.extractTar(archive, into: dir)
-            try ModelCache.compile(id)
-            states[id] = .ready
-        } catch {
-            states[id] = .failed(error.localizedDescription)
-        }
-        delegates[id] = nil
+    /// Verifies, unpacks and compiles a downloaded archive. Slow, so it runs off the main actor.
+    nonisolated static func install(_ descriptor: DecisionModelDescriptor, archive: URL) throws {
+        guard try sha256(archive) == descriptor.sha256?.lowercased() else { throw ModelError.checksum }
+        let dir = ModelCache.directory(descriptor.id)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try extractTar(archive, into: dir)
+        try ModelCache.compile(descriptor.id)
     }
 
     nonisolated static func sha256(_ url: URL) throws -> String {
@@ -162,7 +150,7 @@ public final class ModelStore {
 
     /// Minimal ustar extractor: regular files and directories, no compression.
     nonisolated static func extractTar(_ url: URL, into dir: URL) throws {
-        let data = try Data(contentsOf: url)
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
         let fm = FileManager.default
         var offset = 0
         func field(_ range: Range<Int>) -> String {
@@ -205,28 +193,24 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unc
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         let fraction = totalBytesExpectedToWrite > 0 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : 0
-        let id = descriptor.id
-        Task { @MainActor in store?.update(id, .downloading(fraction)) }
+        Task { @MainActor in store?.update(self, .downloading(fraction)) }
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        let id = descriptor.id
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".tar")
+        // The file at `location` only lasts until this returns, so install here on the session queue.
+        let state: ModelState
         do {
-            try FileManager.default.moveItem(at: location, to: temp)
+            try ModelStore.install(descriptor, archive: location)
+            state = .ready
         } catch {
-            Task { @MainActor in store?.update(id, .failed(error.localizedDescription)) }
-            return
+            state = .failed(error.localizedDescription)
         }
-        Task { @MainActor in
-            store?.install(descriptor, archive: temp)
-            try? FileManager.default.removeItem(at: temp)
-        }
+        Task { @MainActor in store?.update(self, state) }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let error else { return }
-        let id = descriptor.id
-        Task { @MainActor in store?.update(id, .failed(error.localizedDescription)) }
+        session.finishTasksAndInvalidate()
+        guard let error, (error as? URLError)?.code != .cancelled else { return }
+        Task { @MainActor in store?.update(self, .failed(error.localizedDescription)) }
     }
 }
