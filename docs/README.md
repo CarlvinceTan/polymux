@@ -40,6 +40,7 @@ Generated output is separate from source: `.build/` holds caches and local build
 | [Experiments](experiments.md) | Experimental branches kept out of `dev` and `main`, and what each is about. |
 | [Plugins](plugins.md) | Global and Scoped plugins, packages, the index, and Hub. |
 | [References](references.md) | Other products that inform Polymux's behaviour. |
+| [Speech](speech.md) | Dictation stages, the review gate, and how its on-device model is converted and checked. |
 | [Benchmarks](benchmarks.md) | The planned benchmark index: quality, speed and cost across harnesses, and how it stays honest. |
 
 ## Working on a change
