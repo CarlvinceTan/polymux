@@ -57,6 +57,7 @@ public enum ModelCache {
 public enum ModelError: LocalizedError {
     case noSource
     case noPackage
+    case server
     case checksum
     case archive
 
@@ -64,6 +65,7 @@ public enum ModelError: LocalizedError {
         switch self {
         case .noSource: "No download source is configured for this model."
         case .noPackage: "The downloaded model is missing its package."
+        case .server: "The model isn’t available to download right now."
         case .checksum: "The download failed its integrity check."
         case .archive: "The model archive could not be read."
         }
@@ -200,6 +202,9 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unc
         // The file at `location` only lasts until this returns, so install here on the session queue.
         let state: ModelState
         do {
+            if let status = (downloadTask.response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+                throw ModelError.server
+            }
             try ModelStore.install(descriptor, archive: location)
             state = .ready
         } catch {

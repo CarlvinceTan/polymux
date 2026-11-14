@@ -46,9 +46,9 @@ public enum DecisionModels {
     public static let glide04B = DecisionModelDescriptor(
         id: "glide-0.4b",
         displayName: "GLiDE 0.4B",
-        downloadURL: nil,
-        byteSize: 0,
-        sha256: nil,
+        downloadURL: URL(string: "https://github.com/CarlvinceTan/polymux/releases/download/models/glide-0.4b.tar"),
+        byteSize: 790_334_464,
+        sha256: "565248bf6acd39eba0ad1712c9d9b151dffd1e719e303e956ebdc910933da5b1",
         licenseNotice: "Built with Fastino GLiDE",
         gate: GateConstants(mu: [0.114230225010415, 0.2858353562653065],
                             sd: [0.10470903221297216, 0.2029116127454439],
