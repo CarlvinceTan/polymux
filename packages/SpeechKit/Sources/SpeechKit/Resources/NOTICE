@@ -1,0 +1,12 @@
+GLiDE
+Developed by Fastino Inc.
+https://fastino.ai
+https://huggingface.co/fastino/GLiDE-0.4B
+
+GLiDE 0.4B is a modified version of Ettin-encoder-400m developed by Johns Hopkins University CLSP.
+Fastino modified the base model for decision modeling. Fastino contributions
+are subject to the Fastino Community License in LICENSE.
+
+Ettin-encoder-400m: Copyright 2025 the Ettin authors (Johns Hopkins University CLSP).
+The original upstream license is preserved in licenses/Ettin-encoder-400m-LICENSE.
+Ettin and other third-party components remain subject to their original licenses.

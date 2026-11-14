@@ -6,11 +6,14 @@ public struct VoiceTranscript: Sendable {
     public let start: Double
     public let end: Double
     public let final: Bool
-    public init(text: String, start: Double, end: Double, final: Bool) {
+    /// Per-word recogniser confidence, empty when the engine gives none.
+    public let confidences: [Double]
+    public init(text: String, start: Double, end: Double, final: Bool, confidences: [Double] = []) {
         self.text = text
         self.start = start
         self.end = end
         self.final = final
+        self.confidences = confidences
     }
 }
 

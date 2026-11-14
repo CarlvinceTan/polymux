@@ -480,7 +480,8 @@ private final class LegacyInput: SpeechInput {
                     text: result.bestTranscription.formattedString,
                     start: start,
                     end: start + max(0.01, (last?.timestamp ?? 0) + (last?.duration ?? 0)),
-                    final: result.isFinal
+                    final: result.isFinal,
+                    confidences: result.isFinal ? result.bestTranscription.segments.map { Double($0.confidence) } : []
                 )
             }
             Task { @MainActor in

@@ -12,6 +12,7 @@ struct VoicePane: View {
     var body: some View {
         VoiceSettings(store: store, providers: providers, editFallbacks: editFallbacks)
         dictationSection
+        if !dictation.suggestions.isEmpty { suggestionSection }
         dictionarySection
         recognitionSection
     }
@@ -40,6 +41,30 @@ struct VoicePane: View {
             }
         } header: {
             SectionHeader("Dictation", symbol: "mic.fill", tint: .pink)
+        }
+        .panelRow()
+    }
+
+    private var suggestionSection: some View {
+        Section {
+            ForEach(dictation.suggestions) { item in
+                HStack(spacing: PanelStyle.rowInset) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.term)
+                        Text(item.heard).font(.caption).foregroundStyle(.muted)
+                    }
+                    Spacer(minLength: 0)
+                    Button("Dismiss") { dictation.dismiss(item) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.muted)
+                    Button("Add") { dictation.accept(item) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                }
+                .accessibilityElement(children: .contain)
+            }
+        } header: {
+            SectionHeader("Suggested", symbol: "sparkles", tint: .orange)
         }
         .panelRow()
     }

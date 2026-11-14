@@ -44,6 +44,20 @@ public final class DictationSettings {
         }
     }
 
+    /// Misheard words the model found, waiting for the user to add or dismiss them.
+    public private(set) var suggestions: [VocabSuggestion] {
+        didSet {
+            guard let data = try? JSONEncoder().encode(suggestions) else { return }
+            defaults.set(data, forKey: Key.suggestions)
+        }
+    }
+
+    @ObservationIgnored private var dismissed: Set<String> {
+        didSet { defaults.set(Array(dismissed), forKey: Key.dismissed) }
+    }
+
+    static let maxSuggestions = 12
+
     @ObservationIgnored private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -55,6 +69,9 @@ public final class DictationSettings {
         spokenFormatting = defaults.object(forKey: Key.spokenFormatting) as? Bool ?? false
         outputFixes = defaults.object(forKey: Key.outputFixes) as? Bool ?? true
         polish = defaults.object(forKey: Key.polish) as? Bool ?? DictationPolish.isAvailable
+        suggestions = defaults.data(forKey: Key.suggestions)
+            .flatMap { try? JSONDecoder().decode([VocabSuggestion].self, from: $0) } ?? []
+        dismissed = Set(defaults.stringArray(forKey: Key.dismissed) ?? [])
         if let data = defaults.data(forKey: Key.vocabulary),
            let saved = try? JSONDecoder().decode([VocabularyEntry].self, from: data) {
             vocabulary = Vocabulary.clean(saved)
@@ -84,7 +101,36 @@ public final class DictationSettings {
         vocabulary.removeAll { $0.id == id }
     }
 
+    /// Queues new suggestions, skipping ones already pending, dismissed or covered by the dictionary.
+    public func suggest(_ found: [VocabSuggestion]) {
+        for item in found where suggestions.count < Self.maxSuggestions {
+            let covered = vocabulary.contains {
+                $0.term.lowercased() == item.term.lowercased()
+                    && $0.soundsLike.contains { $0.lowercased() == item.heard.lowercased() }
+            }
+            guard !covered, !dismissed.contains(item.id), !suggestions.contains(where: { $0.id == item.id }) else { continue }
+            suggestions.append(item)
+        }
+    }
+
+    public func accept(_ item: VocabSuggestion) {
+        suggestions.removeAll { $0.id == item.id }
+        if let index = vocabulary.firstIndex(where: { $0.term.lowercased() == item.term.lowercased() }) {
+            vocabulary[index].soundsLike.append(item.heard)
+            vocabulary = Vocabulary.clean(vocabulary)
+        } else if canAddEntry {
+            vocabulary.append(VocabularyEntry(term: item.term, soundsLike: [item.heard]))
+        }
+    }
+
+    public func dismiss(_ item: VocabSuggestion) {
+        suggestions.removeAll { $0.id == item.id }
+        dismissed.insert(item.id)
+    }
+
     private enum Key {
+        static let suggestions = "dictation.suggestions"
+        static let dismissed = "dictation.dismissed"
         static let language = "dictation.language"
         static let fillerWords = "dictation.fillerWords"
         static let smartSpacing = "dictation.smartSpacing"

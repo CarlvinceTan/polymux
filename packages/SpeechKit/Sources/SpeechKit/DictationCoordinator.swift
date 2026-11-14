@@ -5,6 +5,7 @@ import Speech
 struct DictationFinal: Equatable, Sendable {
     let text: String
     let confidence: Double
+    var words: [Double] = []
 }
 
 enum DictationChoice {
@@ -45,10 +46,11 @@ actor DictationCoordinator {
     func accept(_ result: DictationTranscriber.Result, locale: String) {
         accept(text: String(result.text.characters), start: result.range.start.seconds,
                end: result.range.end.seconds, final: result.isFinal,
-               confidence: averageConfidence(result.text), locale: locale)
+               confidence: averageConfidence(result.text), locale: locale, words: wordConfidences(result.text))
     }
 
-    func accept(text: String, start: Double, end: Double, final: Bool, confidence: Double, locale: String) {
+    func accept(text: String, start: Double, end: Double, final: Bool, confidence: Double, locale: String,
+                words: [Double] = []) {
         guard !finished, !failed.contains(locale) else { return }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if current == nil || abs(start - current!.start) > 0.6 {
@@ -59,7 +61,7 @@ actor DictationCoordinator {
         guard current != nil else { return }
         current!.end = max(current!.end, end)
         if final {
-            current!.finals[locale] = DictationFinal(text: text, confidence: confidence)
+            current!.finals[locale] = DictationFinal(text: text, confidence: confidence, words: words)
             current!.partials[locale] = text
             if current!.finals.count >= activeLocales.count {
                 commit()
@@ -122,10 +124,15 @@ actor DictationCoordinator {
         segment.timer?.cancel()
         current = nil
         lastText = ""
-        let text = DictationChoice.best(segment.finals)?.text
-            ?? segment.partials.values.max { $0.count < $1.count } ?? ""
+        let best = DictationChoice.best(segment.finals)
+        let text = best?.text ?? segment.partials.values.max { $0.count < $1.count } ?? ""
         guard !text.isEmpty else { return }
-        continuation.yield(.transcript(VoiceTranscript(text: text, start: segment.start, end: segment.end, final: true)))
+        continuation.yield(.transcript(VoiceTranscript(text: text, start: segment.start, end: segment.end,
+                                                       final: true, confidences: best?.words ?? [])))
+    }
+
+    private func wordConfidences(_ text: AttributedString) -> [Double] {
+        text.runs.compactMap { $0.transcriptionConfidence }
     }
 
     private func averageConfidence(_ text: AttributedString) -> Double {

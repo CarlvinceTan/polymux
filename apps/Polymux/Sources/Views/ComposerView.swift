@@ -65,6 +65,7 @@ struct ComposerView: View {
     @State private var dictationSettings = DictationSettings.shared
     @State private var ignoresDictation = false
     @State private var dictated: Range<Int>?
+    @State private var dictatedConfidence: [Double] = []
     @State private var polishing = false
     @State private var mentions: [MentionToken] = []
     @State private var text = ""
@@ -606,10 +607,12 @@ struct ComposerView: View {
         ignoresDictation = false
         dictationDraft.stop()
         dictated = nil
+        dictatedConfidence = []
         dictation.configure(dictationSettings.options)
         dictation.setVocabulary(Vocabulary.bias(dictationSettings.vocabulary, names: vocabularyNames))
         dictation.start { value in
             guard !ignoresDictation else { return }
+            if value.final { dictatedConfidence += value.confidences }
             if let result = dictationDraft.update(value.text, start: value.start, final: value.final,
                                                   text: text, selection: insertion) {
                 editText(result.text, range: result.range)
@@ -652,6 +655,22 @@ struct ComposerView: View {
         let cleaned = DictationText.clean(raw, options: options, vocabulary: dictationSettings.vocabulary,
                                           capitalizeStart: startsSentence(in: before, at: span.lowerBound))
         var final = cleaned
+        if options.polish {
+            // The on-device model combines its P(misheard) with word confidences;
+            // until it is downloaded (or the prompt is too long), confidence alone decides.
+            let model: any DecisionModel = GlideModel.shared
+            let worthReview: Bool
+            if model.isAvailable,
+               let score = await model.score(transcript: cleaned, confidences: dictatedConfidence) {
+                worthReview = score >= model.descriptor.gate.threshold
+            } else {
+                worthReview = DictationGate.needsReview(dictatedConfidence)
+            }
+            if worthReview {
+                let known = dictationSettings.vocabulary
+                Task { dictationSettings.suggest(await DictationReview.suggest(cleaned, known: known)) }
+            }
+        }
         if options.polish {
             final = await DictationPolish.run(cleaned) ?? cleaned
             final = Vocabulary.replace(final, entries: dictationSettings.vocabulary)
