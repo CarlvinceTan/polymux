@@ -625,7 +625,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /client/requests", s.clientStream)
 	s.mux.HandleFunc("POST /client/requests/{id}", s.answerClient)
 	s.pluginRoutes()
-	s.mux.HandleFunc("GET /work", s.recentWork)
 	s.mux.HandleFunc("GET /settings", s.getSettings)
 	s.mux.HandleFunc("PATCH /settings", s.updateSettings)
 	s.mux.HandleFunc("GET /speech/live", s.speechLive)

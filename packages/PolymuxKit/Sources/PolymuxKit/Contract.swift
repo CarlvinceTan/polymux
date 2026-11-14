@@ -3677,19 +3677,3 @@ public struct HubMailSent: Codable, Hashable, Sendable {
         self.draft = draft
     }
 }
-
-public struct WorkActivity: Codable, Hashable, Sendable {
-    public var build: String
-    public var runs: [Run]
-    public var deliveries: [PeerDelivery]
-
-    public init(
-        build: String = "",
-        runs: [Run] = [],
-        deliveries: [PeerDelivery] = []
-    ) {
-        self.build = build
-        self.runs = runs
-        self.deliveries = deliveries
-    }
-}

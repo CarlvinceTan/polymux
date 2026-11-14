@@ -1643,9 +1643,3 @@ type HubMailDraft struct {
 type HubMailSent struct {
 	Draft *HubMailDraft `json:"draft,omitempty"`
 }
-
-type WorkActivity struct {
-	Build      string         `json:"build"`
-	Runs       []Run          `json:"runs"`
-	Deliveries []PeerDelivery `json:"deliveries"`
-}

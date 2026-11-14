@@ -4750,32 +4750,6 @@
         }
       },
       "required": []
-    },
-    "WorkActivity": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "build": {
-          "type": "string"
-        },
-        "runs": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Run"
-          }
-        },
-        "deliveries": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/PeerDelivery"
-          }
-        }
-      },
-      "required": [
-        "build",
-        "runs",
-        "deliveries"
-      ]
     }
   },
   "oneOf": [
@@ -5094,15 +5068,6 @@
     },
     "ANY /plugins/hub/api/{path...}": {
       "description": "The Hub plugin's API: status, chats, sync, media, logins, links, broadcasts and mail. Its types are the Hub definitions here; docs/plugins.md lists the routes."
-    },
-    "GET /work": {
-      "response": {
-        "$ref": "#/$defs/WorkActivity"
-      },
-      "query": {
-        "limit": "Newest runs and deliveries to return, each at most 200."
-      },
-      "authentication": "Paired device required. Tool output is left out."
     }
   }
 }
