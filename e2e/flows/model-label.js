@@ -11,15 +11,15 @@ await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL
 await app.typeText("gpt-6-1-sol", { role: "textfield", name: "Model ID" });
 await app.click({ role: "button", name: "Add" });
 await app.click({ role: "button", name: "Save" });
-await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 10000 });
+await app.waitFor({ role: "button", name: "Edit model-provider-2-5", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Model" });
 await app.typeText("Gpt 6.1 Sol", { role: "textfield", name: "Search models" });
-await app.waitFor({ role: "button", name: "Gpt 6.1 Sol Custom" });
+await app.waitFor({ role: "button", name: "Gpt 6.1 Sol Model Provider 2.5" });
 await app.setValue({ role: "textfield", name: "Search models" }, "");
 await app.typeText("gpt-6-1-sol", { role: "textfield", name: "Search models" });
-await app.click({ role: "button", name: "Gpt 6.1 Sol Custom" });
+await app.click({ role: "button", name: "Gpt 6.1 Sol Model Provider 2.5" });
 app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
-await app.waitFor({ role: "button", name: "Model", value: "Gpt 6.1 Sol Custom", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Model", value: "Gpt 6.1 Sol Model Provider 2.5", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Close Settings" });
 await app.click({ role: "button", name: "New chat" });
 app = await pick(app, "New Bot");
@@ -32,7 +32,7 @@ await app.waitFor({ role: "button", name: "Model", value: "Gpt 6.1 Sol Model Pro
 await app.click({ role: "button", name: "Close side panel" });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
-await app.click({ role: "button", name: "Edit Custom" });
+await app.click({ role: "button", name: "Edit model-provider-2-5" });
 await app.waitFor({ role: "checkbox", name: "gpt-6-1-sol", value: "1" });
 await app.click({ role: "button", name: "Delete" });
 await app.click({ role: "button", name: "Close Settings" });

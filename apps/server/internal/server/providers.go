@@ -41,7 +41,7 @@ func (s *Server) syncProviders(reg *providers.Registry) {
 			continue
 		}
 		key, _ := reg.Secrets.Get(p.ID)
-		spec := agentruntime.ProviderSpec{ID: p.ID, Type: p.Type, BaseURL: p.BaseURL, Key: key, Headers: p.Headers, Session: p.SessionHeader, Preferred: providers.Preferred(p.Type), Windows: map[string]int{}}
+		spec := agentruntime.ProviderSpec{ID: p.ID, Type: p.Type, BaseURL: p.BaseURL, Key: key, Headers: p.Headers, Session: p.SessionHeader, Preferred: providers.Preferred(p.Type), Windows: map[string]int{}, Levels: map[string][]string{}}
 		if builtin := providers.Builtin(p.Type); builtin != nil {
 			spec.Builtin, spec.Credentials = builtin, reg.Credentials()
 		}
@@ -49,6 +49,11 @@ func (s *Server) syncProviders(reg *providers.Registry) {
 			if model.Enabled && (len(model.Tags) == 0 || slices.Contains(model.Tags, "text")) {
 				spec.Models = append(spec.Models, model.ID)
 				spec.Windows[model.ID] = int(model.ContextWindow)
+				levels := model.Reasoning
+				if len(levels) == 0 && spec.Builtin == nil {
+					levels = providers.LocalLevels
+				}
+				spec.Levels[model.ID] = levels
 			}
 		}
 		specs = append(specs, spec)

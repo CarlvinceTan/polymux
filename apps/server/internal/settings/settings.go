@@ -411,8 +411,9 @@ func (s *Store) save(d document) error {
 	return os.Rename(f.Name(), s.path)
 }
 
-// chatModel matches provider model IDs such as "gpt-5", "openai/gpt-5" or "llama3:8b".
-var chatModel = regexp.MustCompile(`^[A-Za-z0-9._/:-]{1,256}$`)
+// chatModel matches provider model IDs such as "gpt-5", "openai/gpt-5" or "llama3:8b",
+// plus the names local servers give their files: "Qwen3.8-Flash-Next UD-Q4_K_XL (tuned)".
+var chatModel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,256}$`)
 
 // transportName matches a transport plugin's name, plus the built-in choices.
 var transportName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)

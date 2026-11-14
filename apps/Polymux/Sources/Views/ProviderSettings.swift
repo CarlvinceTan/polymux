@@ -427,6 +427,44 @@ struct ModelPicker: View {
     }
 }
 
+/// The reasoning levels a model takes, set where its provider is added.
+struct ReasoningLevelsMenu: View {
+    @Binding var levels: [String]?
+    @State private var choosing = false
+    private let all = [("Off", SettingsDefaultReasoning.off), ("Low", SettingsDefaultReasoning.low),
+                       ("Medium", SettingsDefaultReasoning.medium), ("High", SettingsDefaultReasoning.high),
+                       ("Xhigh", SettingsDefaultReasoning.xhigh), ("Max", SettingsDefaultReasoning.max)]
+
+    /// The highest level the model takes, which bounds the levels below it.
+    private var level: String {
+        all.last { levels?.contains($0.1) ?? false }?.1 ?? SettingsDefaultReasoning.off
+    }
+
+    private var title: String { all.first { $0.1 == level }?.0 ?? "Off" }
+
+    var body: some View {
+        Button { choosing = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "brain")
+                Text(title).lineLimit(1)
+            }
+            .foregroundStyle(.muted)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reasoning levels")
+        .accessibilityValue(title)
+        .dropdown(isPresented: $choosing) {
+            DropdownOptions(selection: Binding(get: { level }, set: { reset(upTo: $0) }), options: all)
+        }
+    }
+
+    private func reset(upTo level: String) {
+        let index = all.firstIndex { $0.1 == level } ?? 0
+        levels = Array(all[..<index].map(\.1)) + [level]
+    }
+}
+
 struct ReasoningPicker: View {
     @Binding var selection: String
     var inset = false
@@ -440,16 +478,18 @@ struct ReasoningPicker: View {
                            ("High", SettingsDefaultReasoning.high), ("Xhigh", SettingsDefaultReasoning.xhigh),
                            ("Max", SettingsDefaultReasoning.max)]
 
+    /// Off, then the levels the model declared.
     private var options: [(String, String)] {
-        levels.isEmpty ? all : all.filter { levels.contains($0.1) }
+        levels.isEmpty ? all : all.filter { $0.1 == SettingsDefaultReasoning.off || levels.contains($0.1) }
     }
 
     /// A saved level the model lacks shows as the one it runs at: the next up, else the next down.
     private var level: String {
-        guard !levels.isEmpty, !levels.contains(selection) else { return selection }
+        let offered = options.map(\.1)
+        guard !offered.contains(selection) else { return selection }
         let order = all.map(\.1)
         let index = order.firstIndex(of: selection) ?? 0
-        return order[index...].first(where: levels.contains) ?? order[..<index].last(where: levels.contains) ?? selection
+        return order[index...].first(where: offered.contains) ?? order[..<index].last(where: offered.contains) ?? selection
     }
 
     private var chosen: Binding<String> {
@@ -552,7 +592,7 @@ struct ProviderForm: View {
 
     var body: some View {
         let type = current?.type ?? preset?.rawValue ?? "custom"
-        let title = store?.names[type] ?? preset?.label ?? name
+        let title = manual ? name : store?.names[type] ?? preset?.label ?? name
         PanelView(manual ? (current == nil ? "Add connection" : title) : (current?.status == ProviderOptionAuth.apiKey ? "Edit key" : "Edit account"),
                   enabled: !saving, onClose: { close() }, onBack: onBack) {
             Form {
@@ -618,7 +658,13 @@ struct ProviderForm: View {
                             .accessibilityLabel("All models")
                             ForEach($models, id: \.id) { $model in
                                 if query.isEmpty || model.id.localizedStandardContains(query) {
-                                    Toggle(model.id, isOn: $model.enabled).accessibilityLabel(model.id)
+                                    HStack {
+                                        Toggle(isOn: $model.enabled) { Text(model.id).lineLimit(1) }
+                                            .accessibilityLabel(model.id)
+                                        if preset != .elevenlabs {
+                                            ReasoningLevelsMenu(levels: $model.reasoning)
+                                        }
+                                    }
                                 }
                             }
                             if !query.isEmpty && !models.contains(where: { $0.id.localizedStandardContains(query) }) {
@@ -704,6 +750,7 @@ struct ProviderForm: View {
         do {
             provider = try await client.saveProvider(provider, isNew: current == nil)
             current = provider
+            models = provider.models
             if !key.isEmpty {
                 try await client.setProviderKey(id: id, key: key)
                 provider.status = ProviderOptionAuth.apiKey

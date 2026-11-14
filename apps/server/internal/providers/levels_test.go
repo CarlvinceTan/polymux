@@ -21,8 +21,15 @@ func TestWithLevels(t *testing.T) {
 	if !slices.Equal(got[0].Models[0].Reasoning, want) {
 		t.Fatalf("levels %v, want %v", got[0].Models[0].Reasoning, want)
 	}
-	if got[0].Models[1].Reasoning != nil || got[1].Models[0].Reasoning != nil {
+	if got[0].Models[1].Reasoning != nil {
 		t.Fatalf("unknown models got levels: %+v", got)
+	}
+	if !slices.Equal(got[1].Models[0].Reasoning, LocalLevels) {
+		t.Fatalf("local levels %v, want %v", got[1].Models[0].Reasoning, LocalLevels)
+	}
+	deeper := WithLevels([]Provider{{Type: "custom", Models: []Model{{ID: "local", Reasoning: []string{"low", "medium", "xhigh"}}}}})
+	if !slices.Equal(deeper[0].Models[0].Reasoning, []string{"low", "medium", "xhigh"}) {
+		t.Fatalf("declared levels replaced: %v", deeper[0].Models[0].Reasoning)
 	}
 	if stored[0].Models[0].Reasoning != nil {
 		t.Fatal("stored settings changed")

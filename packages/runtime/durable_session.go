@@ -366,6 +366,8 @@ type modelRegistry struct {
 	// reasoning lets a bot's reasoning level reach the provider; the fallback endpoint never had it.
 	reasoning bool
 	windows   map[string]int
+	// levels are the reasoning levels each model declares, by model; nil takes high.
+	levels    map[string][]string
 	providers map[string]ai.Provider
 	models    []*ai.Model
 	// builtin is the PiG provider that owns this provider's endpoints, models and sign-in.
@@ -407,6 +409,8 @@ type ProviderSpec struct {
 	Preferred string
 	// Windows holds the context windows the provider reported, by model.
 	Windows map[string]int
+	// Levels holds the reasoning levels each model declares, by model.
+	Levels map[string][]string
 	// Builtin is the PiG provider serving this type, with its credential in Credentials; nil uses BaseURL and Key.
 	Builtin     *ai.ModelsProvider
 	Credentials ai.CredentialStore
@@ -418,7 +422,8 @@ func SettingsProvider(id string) string { return "settings:" + id }
 // newSpecRegistry serves a local or custom Settings provider over the OpenAI-compatible API.
 func newSpecRegistry(spec ProviderSpec) *modelRegistry {
 	client := Client{Headers: spec.Headers, Session: spec.Session}
-	r := &modelRegistry{id: SettingsProvider(spec.ID), baseURL: spec.BaseURL, key: spec.Key, client: client, reasoning: true, windows: spec.Windows, providers: make(map[string]ai.Provider)}
+	r := &modelRegistry{id: SettingsProvider(spec.ID), baseURL: spec.BaseURL, key: spec.Key, client: client, reasoning: true,
+		windows: spec.Windows, levels: spec.Levels, providers: make(map[string]ai.Provider)}
 	r.api = ai.APIOpenAICompletions
 	r.open = func(model string) ai.Provider {
 		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: spec.BaseURL, APIKey: spec.Key, Model: model, ProviderID: r.id, ExtraHeaders: spec.Headers})
@@ -492,10 +497,29 @@ func (r *modelRegistry) add(id string) {
 	}
 	model := &ai.Model{ID: id, Capabilities: ai.ModelCapabilities{ContextWindow: window}, ProviderMeta: ai.ProviderMetadata{ProviderID: r.id, API: r.api, BaseURL: r.baseURL}}
 	if r.reasoning {
-		model.Capabilities.MaxThinking = ai.ThinkingLevelHigh
-		model.ProviderMeta.Reasoning = true
+		if top := maxThinking(r.levels[id]); top != ai.ThinkingOff {
+			model.Capabilities.MaxThinking = ai.ThinkingLevel(top)
+			model.ProviderMeta.Reasoning = true
+		}
 	}
 	r.models = append(r.models, model)
+}
+
+// thinkingRank orders Pi's thinking levels, lowest first.
+var thinkingRank = []ai.ModelThinkingLevel{ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow, ai.ThinkingMedium, ai.ThinkingHigh, ai.ThinkingXHigh, ai.ThinkingMax}
+
+// maxThinking is the highest level the model declares, high when it declares none.
+func maxThinking(levels []string) ai.ModelThinkingLevel {
+	if len(levels) == 0 {
+		return ai.ThinkingHigh
+	}
+	best := ai.ThinkingOff
+	for _, level := range thinkingRank {
+		if slices.Contains(levels, string(level)) {
+			best = level
+		}
+	}
+	return best
 }
 
 func (r *modelRegistry) list() []*ai.Model {
