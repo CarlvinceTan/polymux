@@ -84,8 +84,8 @@ struct NewGroupView: View {
                 remove($0.id)
             }
             if selected.count > 1 {
-                TextField("Chat name (optional)", text: $name)
-                    .accessibilityLabel("Chat name (optional)")
+                TextField("Chat name", text: $name)
+                    .accessibilityLabel("Chat name")
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
                     .padding(.horizontal, 14).padding(.vertical, 10)

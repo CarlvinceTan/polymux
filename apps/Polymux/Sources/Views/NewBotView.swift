@@ -19,7 +19,7 @@ struct NewBotView: View {
                         AvatarView(options: options, playing: creating, mood: creating ? .spawning : .idle)
                             .frame(width: 80, height: 80)
                         InlineText(text: $name, prompt: "Name", font: .title2.weight(.semibold),
-                                   placeholder: "Name (optional)", autofocus: true)
+                                   placeholder: "Name")
                     }
                     ShapeGrid(options: $options, labels: false, columns: 5, size: 40, colorSize: 28, rowSpacing: 4)
                 }

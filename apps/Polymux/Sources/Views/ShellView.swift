@@ -371,13 +371,11 @@ struct ShellView: View {
             .listStyle(.plain)
             #endif
             .scrollIndicators(.hidden)
-            #if os(iOS)
             .overlay {
                 if session.sidebar.isConnected && session.sidebar.chats.isEmpty && dropSections.isEmpty {
-                    Text("No chats yet.").foregroundStyle(.muted)
+                    Text("No chats").foregroundStyle(.muted)
                 }
             }
-            #endif
             #if os(macOS)
             .sidebarFade(bottom: tabs.isEmpty ? SidebarFade.plain : SidebarFade.switcher)
             #endif
@@ -480,7 +478,10 @@ struct ShellView: View {
                 VStack(spacing: 16) {
                     // Waits for the server, so a first launch never claims there are no chats.
                     if session.sidebar.isConnected && session.sidebar.chats.isEmpty {
-                        Text("No chats yet.").foregroundStyle(.muted)
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 58, weight: .regular))
+                            .foregroundStyle(.secondary)
+                        Text("No chats").foregroundStyle(.muted)
                         Button("New Bot", systemImage: "plus") { newBot() }
                             .buttonStyle(.glass)
                     }

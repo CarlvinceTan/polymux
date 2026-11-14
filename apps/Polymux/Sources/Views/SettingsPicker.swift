@@ -7,7 +7,8 @@ struct SettingsField: View {
     var secure = false
 
     var body: some View {
-        LabeledContent(title) {
+        HStack(spacing: 8) {
+            Text(title).lineLimit(1).layoutPriority(1)
             Group {
                 if secure {
                     SecureField("", text: $text)
@@ -20,6 +21,9 @@ struct SettingsField: View {
             .foregroundStyle(.primary)
             .multilineTextAlignment(.trailing)
             .autocorrectionDisabled()
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .clipped()
             .accessibilityLabel(title)
             .accessibilityHint(prompt)
             .overlay(alignment: .trailing) {
