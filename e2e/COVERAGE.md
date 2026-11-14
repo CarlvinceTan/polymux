@@ -127,11 +127,6 @@ Release builds have no fixture, so the render counts are Debug numbers.
 | Install from the marketplace | Asks first, shows the source, joins the switcher | flow | `fixture-plugin-settings.js` |
 | Scoped buttons | Shared order, only active plugins, call button last | flow | `fixture-plugins.js`, `fixture-plugin-layout.js` |
 | Side panel swap | Plugin and profile swap at one width; close button stays | flow | `fixture-plugins.js` |
-| Atlas global view | A row above the chats fills the content and keeps the sidebar; comes back after a relaunch | flow | `fixture-graph.js` |
-| Atlas modes and depth | Full shows everything, Compact stops one step down, each node opens on its own, undo steps back | flow | `fixture-graph.js` |
-| Atlas in a chat | The chat's button opens only that chat's work in the side panel | flow | `fixture-graph.js` |
-| Atlas without its service | Polymux's own work still shows, with no error | flow | `fixture-graph-down.js` |
-| Atlas arranging | Dragging a node moves it, undo returns it, dragging the background selects | flow | `fixture-graph-gestures.js`; wheel, right drag and pinch need a real pointer and aren't covered |
 | Permission rules | Rules are added and removed in the side panel; warns while commands can reach path rules | flow | `fixture-permissions.js` |
 | Web plugin panel | Its page fills the side panel and reaches its service; the edge resizes it; it can hide the close button | flow | `fixture-plugin-web.js`, `fixture-plugin-web-noclose.js` |
 | Plugin made by a bot | Waits for a person, stays out of the Marketplace, only serves its own page; tapping Install shows its button, page and service in the app | done | `TestBotPluginWaitsForAPerson`, `local_test.go`; a scripted bot on a `run.sh` server, 2026-11-02 |

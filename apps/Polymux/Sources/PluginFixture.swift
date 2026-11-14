@@ -5,22 +5,11 @@ import PolymuxKit
 /// The plugin routes for UI checks: --verify-plugins, empty with --verify-plugins-empty.
 final class PluginFixture: @unchecked Sendable {
     private let lock = NSLock()
-    private var layout = PluginLayout(switcher: PluginFixture.graphOn ? ["chats"] : ["chats", "hub"],
-                                      buttons: PluginFixture.webOn ? [["canvas"]] : PluginFixture.graphOn ? [["atlas"]] : PluginFixture.permissions ? [["permissions"]] : [["notes", "tasks"], ["drive"]])
+    private var layout = PluginLayout(switcher: ["chats", "hub"],
+                                      buttons: PluginFixture.webOn ? [["canvas"]] : PluginFixture.permissions ? [["permissions"]] : [["notes", "tasks"], ["drive"]])
     private var installing: String?
     private var rules = PermissionRules()
     private static let permissions = CommandLine.arguments.contains("--verify-permissions")
-    static let graphOn = CommandLine.arguments.contains("--verify-graph")
-    /// A full working day rather than the minimum the checks need: every kind of node, with things moving.
-    static let graphBusy = CommandLine.arguments.contains("--verify-graph-busy") || GraphSceneFixture.crowd
-    /// Any of the scenes that dress the bots up.
-    static var graphScene: Bool { graphBusy || GraphSceneFixture.video }
-    static let cast: [String: (role: String, shape: String, color: String)] = [
-        "Chief": ("Chief of staff", "fox", "orange"), "Aria": ("Researcher", "whale", "bleu"), "Milo": ("Designer", "strawberry", "rose"),
-        "Nova": ("Engineer", "robot", "violet"), "Approval": ("Reviewer", "penguin", "turquoise"), "Fern": ("Gardener", "fern", "vert"),
-        "Juno": ("Support", "cat", "ambre"), "Kai": ("Planner", "dog", "brun"), "Lumi": ("Writer", "rabbit", "rose"),
-        "Otto": ("Builder", "bear", "rouge"), "Pia": ("Assistant", "duck", "ambre"), "Rex": ("Analyst", "frog", "vert"),
-    ]
     static let webOn = CommandLine.arguments.contains("--verify-plugin-web")
     private static let page = """
     <!doctype html><html><head><title>Canvas</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>
@@ -34,11 +23,6 @@ final class PluginFixture: @unchecked Sendable {
         Plugin(name: "canvas", title: "Canvas", description: "A page of its own.", symbol: "paintbrush", selectedSymbol: "paintbrush.fill",
                version: "0.1.0", kind: PluginKind.scoped, surface: "web", page: "index.html",
                hideClose: CommandLine.arguments.contains("--verify-plugin-noclose"), state: PluginState.ready, source: "Made by Aria", chats: ["t-chief"]),
-    ] : PluginFixture.graphOn ? [
-        Plugin(name: "atlas", title: "Atlas", description: "See how your bots, people, devices and repositories work together.",
-               symbol: "map", selectedSymbol: "map.fill", version: "0.1.0",
-               kind: PluginKind.both, surface: "atlas", state: PluginState.ready, source: "example/graph", chats: ["t-chief"]),
-        PluginFixture.hub(state: PluginState.ready),
     ] : PluginFixture.permissions ? [
         Plugin(name: "permissions", title: "Permissions", description: "Set rules a chat's bots can't break.",
                symbol: "lock.shield", selectedSymbol: "lock.shield.fill", version: "0.1.0", kind: PluginKind.scoped,
@@ -146,114 +130,6 @@ final class PluginFixture: @unchecked Sendable {
     private var mail: [HubMailAccount] = []
     private let mailFixture = HubMailFixture()
     private var clients: Set<String> = ["google"]
-
-    /// Chief hands Aria a task and runs Claude Code; Aria drives Safari, and Milo is idle.
-    private static var work: WorkActivity {
-        let stamp = "2026-11-01T00:00:00Z"
-        func run(_ id: String, agent: String, chat: String, trigger: String = RunTrigger.message, status: String = RunStatus.running,
-                 parent: String? = nil, summary: String = "", external: ExternalAgent? = nil, tools: [ToolActivity]) -> Run {
-            Run(jobID: id, id: id, conversationID: chat, trigger: trigger, parentRunID: parent, tools: tools, attempt: 1, seq: 1,
-                createdAt: stamp, updatedAt: stamp, activity: "", agentID: agent, status: status, summary: summary, external: external)
-        }
-        func tool(_ id: String, _ name: String, _ summary: String, status: String = ToolActivityStatus.completed) -> ToolActivity {
-            ToolActivity(id: id, runID: "run", name: name, status: status, summary: summary)
-        }
-        func delivery(_ id: String, _ from: String, _ to: String, _ intent: String, _ status: String, run: String) -> PeerDelivery {
-            PeerDelivery(id: id, sourceAgentID: from, targetAgentID: to, conversationID: from, parentRunID: run, intent: intent, status: status, createdAt: stamp)
-        }
-        let running = ToolActivityStatus.running
-        if GraphSceneFixture.video { return GraphSceneFixture.videoWork }
-        if graphBusy {
-            return WorkActivity(build: "abc1234", runs: (GraphSceneFixture.crowd ? GraphSceneFixture.crowdRuns : []) + [
-                run("run-chief", agent: "t-chief", chat: "t-chief", summary: "Shipping the sign-in fix", tools: [
-                    tool("claude", "bash", "claude -p 'Fix the sign-in bug'", status: running),
-                    tool("c-edit", "edit", "apps/server/auth.go", status: running),
-                    tool("c-read", "read", "docs/sign-in.md"),
-                    tool("c-test", "bash", "go test ./..."),
-                ]),
-                run("run-aria", agent: "t-aria", chat: "t-aria", trigger: RunTrigger.peer, summary: "Researching sign-in flows", tools: [
-                    tool("a-web", "http_request", "api.github.com/repos/example/polymux/issues", status: running),
-                    tool("a-csv", "read", "research/competitors.csv"),
-                    tool("a-notes", "write", "research/findings.md"),
-                    tool("a-pdf", "read", "research/passkeys.pdf"),
-                ]),
-                run("run-milo", agent: "t-milo", chat: "t-milo", trigger: RunTrigger.peer, summary: "Drawing the new sign-in screen", tools: [
-                    tool("m-image", "generate_image", "Sign-in hero", status: running),
-                    tool("m-video", "generate_video", "Walkthrough"),
-                    tool("m-png", "write", "design/hero.png"),
-                    tool("m-mov", "write", "design/walkthrough.mp4"),
-                    tool("m-voice", "write", "design/voiceover.m4a"),
-                ]),
-                run("run-codex", agent: "t-nova", chat: "t-nova", trigger: RunTrigger.child, parent: "run-nova", summary: "Profiling the build",
-                    external: ExternalAgent(agent: "codex-acp", name: "Codex"), tools: []),
-                run("run-nova", agent: "t-nova", chat: "t-nova", status: RunStatus.waitingInput, summary: "Waiting on a question", tools: [
-                    tool("n-build", "bash", "swift build", status: ToolActivityStatus.failed),
-                    tool("n-swift", "edit", "apps/Polymux/Sources/SignIn.swift"),
-                    tool("n-json", "write", "bench/metrics.json"),
-                ]),
-            ], deliveries: [
-                delivery("task", "t-chief", "t-aria", PeerDeliveryIntent.request, PeerDeliveryStatus.delivered, run: "run-chief"),
-                delivery("result", "t-aria", "t-chief", PeerDeliveryIntent.result, PeerDeliveryStatus.completed, run: "run-aria"),
-                delivery("draw", "t-chief", "t-milo", PeerDeliveryIntent.request, PeerDeliveryStatus.delivered, run: "run-chief"),
-                delivery("ask", "t-nova", "t-chief", PeerDeliveryIntent.question, PeerDeliveryStatus.queued, run: "run-nova"),
-            ])
-        }
-        return WorkActivity(build: "abc1234", runs: [
-            run("run-chief", agent: "t-chief", chat: "t-chief", tools: [
-                tool("claude", "bash", "claude -p 'Fix the sign-in bug'", status: ToolActivityStatus.running),
-                tool("read", "read", "apps/server/main.go"),
-            ]),
-            run("run-aria", agent: "t-aria", chat: "t-aria", trigger: RunTrigger.peer, tools: [tool("open", "bash", "git status")]),
-        ], deliveries: [
-            PeerDelivery(id: "task", sourceAgentID: "t-chief", targetAgentID: "t-aria", conversationID: "t-chief", parentRunID: "run-chief",
-                         intent: PeerDeliveryIntent.request, status: PeerDeliveryStatus.delivered, createdAt: stamp),
-            PeerDelivery(id: "result", sourceAgentID: "t-aria", targetAgentID: "t-chief", conversationID: "t-aria", parentRunID: "run-aria",
-                         intent: PeerDeliveryIntent.result, status: PeerDeliveryStatus.completed, createdAt: stamp),
-        ])
-    }
-
-    private static var graph: WorkGraph {
-        if GraphSceneFixture.video { return GraphSceneFixture.videoGraph }
-        var nodes = [
-            WorkNode(id: "safari", title: "Safari", parent: "agent:t-aria", kind: "app", symbol: "safari", state: WorkNodeState.working,
-                     blocks: [WorkBlock(kind: WorkBlockKind.progress, text: "Loading", value: 0.6), WorkBlock(kind: WorkBlockKind.badge, text: "2 tabs")],
-                     chats: ["t-aria"]),
-            WorkNode(id: "tab-docs", title: "Polymux docs", parent: "safari", kind: "tab", symbol: "doc.text", chats: ["t-aria"]),
-            WorkNode(id: "tab-issues", title: "Open issues", parent: "safari", kind: "tab", symbol: "exclamationmark.circle", chats: ["t-aria"]),
-            WorkNode(id: "repo:polymux", title: "polymux", parent: WorkGraphBuilder.serverDevice, kind: "repo", subtitle: "dev at 7e36d11",
-                     blocks: [WorkBlock(kind: WorkBlockKind.badge, text: "3 changes", tint: WorkBlockTint.orange)],
-                     details: [WorkDetail(label: "Path", value: "~/code/proj/polymux"), WorkDetail(label: "Branch", value: "dev")]),
-            WorkNode(id: "github:example/polymux", title: "example/polymux", kind: "github", symbol: "arrow.triangle.branch"),
-            WorkNode(id: "github:example/polymux#7", title: "Add the graph", parent: "github:example/polymux", kind: "pull", subtitle: "Pull request 7", symbol: "arrow.triangle.pull", state: WorkNodeState.working),
-        ]
-        var wires = [
-            WorkWire(id: "repo-github", from: "repo:polymux", to: "github:example/polymux", direction: WorkWireDirection.both, line: WorkWireLine.dashed),
-            WorkWire(id: "chief-repo", from: "agent:t-chief", to: "repo:polymux", label: "Works in", chats: ["t-chief"]),
-        ]
-        if graphBusy {
-            nodes += [
-                WorkNode(id: "figma", title: "Figma", parent: "agent:t-milo", kind: WorkKind.app, symbol: "paintbrush.pointed", tint: WorkNodeTint.purple,
-                         state: WorkNodeState.working, chats: ["t-milo"]),
-                WorkNode(id: "figma-file", title: "Sign-in screens.fig", parent: "figma", kind: WorkKind.design, subtitle: "3 frames", chats: ["t-milo"]),
-                WorkNode(id: "db:users", title: "users.db", parent: WorkGraphBuilder.serverDevice, kind: WorkKind.data, subtitle: "SQLite"),
-            ]
-            wires += [
-                WorkWire(id: "claude-repo", from: "worker:claude", to: "repo:polymux", state: WorkWireState.active, label: "Fixing the sign-in bug", carries: WorkKind.code,
-                         chats: ["t-chief"]),
-                WorkWire(id: "milo-figma", from: "agent:t-milo", to: "figma", direction: WorkWireDirection.none, state: WorkWireState.active, label: "Laying out 3 frames", carries: WorkKind.design,
-                         chats: ["t-milo"]),
-                WorkWire(id: "nova-db", from: "agent:t-nova", to: "db:users", label: "Queries", carries: WorkKind.table, chats: ["t-nova"]),
-            ]
-        }
-        if GraphSceneFixture.crowd {
-            nodes += GraphSceneFixture.crowdNodes
-            wires += GraphSceneFixture.crowdWires
-        }
-        if CommandLine.arguments.contains("--verify-graph-long") {
-            nodes.append(WorkNode(id: "long", title: "A title long enough to need truncating on every card it appears on, in any language", subtitle: "With a subtitle just as long, which has to give way before the title does"))
-        }
-        return WorkGraph(revision: 1, nodes: nodes, wires: wires)
-    }
 
     /// WhatsApp chats split between two linked accounts, with one group both are in.
     private static var accountChats: [HubChat] {
@@ -391,17 +267,8 @@ final class PluginFixture: @unchecked Sendable {
             let path = request.url!.path
             let name = request.url!.lastPathComponent
             let encoder = JSONEncoder()
-            if path == "/work" { return try encoder.encode(Self.work) }
             if path == "/plugins/canvas/ui/index.html" { return Data(Self.page.utf8) }
             if path == "/plugins/canvas/api/ping" { return Data(#"{"answer":"Service answered"}"#.utf8) }
-            if path == "/plugins/atlas/api/preview" {
-                return GraphSceneFixture.picture(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value ?? "")
-            }
-            if path == "/plugins/atlas/api/graph" {
-                // Not a graph, as when the service has stopped and something else answers.
-                if CommandLine.arguments.contains("--verify-graph-down") { return Data("stopped".utf8) }
-                return try encoder.encode(Self.graph)
-            }
             if path.hasPrefix("/plugins/hub/api/") {
                 return try hub(request, path: String(path.dropFirst("/plugins/hub/api/".count)))
             }

@@ -10,7 +10,6 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000001 /* PolymuxKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000020 /* PolymuxKit */; };
 		A10000000000000000000021 /* AvatarKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000022 /* AvatarKit */; };
-		A10000000000000000000050 /* GraphKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000051 /* GraphKit */; };
 		A10000000000000000000023 /* PolymuxUpdates in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000024 /* PolymuxUpdates */; };
 		A10000000000000000000030 /* PolymuxCall in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000031 /* PolymuxCall */; };
 		A10000000000000000000032 /* PolymuxCall in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000033 /* PolymuxCall */; };
@@ -58,7 +57,6 @@
 			files = (
 				A10000000000000000000001 /* PolymuxKit in Frameworks */,
 				A10000000000000000000021 /* AvatarKit in Frameworks */,
-				A10000000000000000000050 /* GraphKit in Frameworks */,
 				A10000000000000000000023 /* PolymuxUpdates in Frameworks */,
 				A10000000000000000000030 /* PolymuxCall in Frameworks */,
 			);
@@ -117,7 +115,6 @@
 			packageProductDependencies = (
 				A10000000000000000000020 /* PolymuxKit */,
 				A10000000000000000000022 /* AvatarKit */,
-				A10000000000000000000051 /* GraphKit */,
 				A10000000000000000000024 /* PolymuxUpdates */,
 				A10000000000000000000031 /* PolymuxCall */,
 				A10000000000000000000070 /* SpeechKit */,
@@ -430,11 +427,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
 			productName = AvatarKit;
-		};
-		A10000000000000000000051 /* GraphKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A10000000000000000000019 /* XCLocalSwiftPackageReference "../.." */;
-			productName = GraphKit;
 		};
 		A10000000000000000000024 /* PolymuxUpdates */ = {
 			isa = XCSwiftPackageProductDependency;

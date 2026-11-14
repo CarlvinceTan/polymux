@@ -55,7 +55,6 @@ final class AppSession {
     let hub: HubStore
     let providers: ProviderStore
     let network: NetworkStore
-    let work: WorkStore
     /// Recent chats stay in memory, so reopening one draws its messages in the first frame.
     private var chats: [String: ChatStore] = [:]
     private var recentChats: [String] = []
@@ -109,7 +108,6 @@ final class AppSession {
         await hub.restore()
         providers = ProviderStore(client: client, cache: sidebar.cacheActor)
         network = NetworkStore(client: client, cache: sidebar.cacheActor)
-        work = WorkStore(client: client, cache: sidebar.cacheActor)
         async let providerCache: () = providers.restore()
         async let deviceCache: () = network.restore()
         _ = await (providerCache, deviceCache)

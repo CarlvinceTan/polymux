@@ -8,7 +8,6 @@ Plugins maintained by the Polymux team. The app and server don't include them: e
 | [`tailscale`](tailscale) | Reaches your server from other devices over your tailnet. |
 | [`opentunnel`](opentunnel) | Reaches your server through an OpenTunnel route. |
 | [`permissions`](permissions) | Rules a chat's bots can't break: what they may read, write, run and use, with an approval card when a rule asks first. |
-| [`atlas`](atlas) | See how your bots, people, devices and repositories work together. |
 
 ## Layout
 

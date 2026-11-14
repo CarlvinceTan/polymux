@@ -443,23 +443,6 @@ public struct APIClient: Sendable {
         try await get("plugins/market")
     }
 
-    /// Recent runs and handoffs across every chat.
-    public func work() async throws -> WorkActivity {
-        try await get("work", retrying: false)
-    }
-
-    /// What a plugin's service knows beyond Polymux's own activity.
-    public func workGraph(plugin: String) async throws -> WorkGraph {
-        try await get("plugins/\(plugin)/api/graph", retrying: false)
-    }
-
-    /// A small picture of something on the graph, which the plugin's service makes from the file a report named.
-    public func workPreview(plugin: String, node: String) async throws -> Data {
-        let (data, response) = try await session.data(for: request("plugins/\(plugin)/api/preview", query: [URLQueryItem(name: "id", value: node)]))
-        try validate(response, data: data)
-        return data
-    }
-
     public func installPlugin(name: String, version: String) async throws -> Plugin {
         try await write("plugins", method: "POST", body: InstallPlugin(name: name, version: version))
     }
