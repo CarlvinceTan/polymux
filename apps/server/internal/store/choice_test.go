@@ -66,6 +66,36 @@ func TestChoiceAnswer(t *testing.T) {
 	}
 }
 
+func TestDismissChoices(t *testing.T) {
+	s := runStore(t)
+	allow := true
+	for _, card := range []contract.Message{
+		{ID: "open", ThreadID: "a", Role: "assistant", Status: "done", AgentID: ptr("a"), Parts: []contract.Part{{Kind: "choice", Question: ptr("Which approach?"), Options: []contract.ChoiceOption{{ID: "one", Label: "First"}}, AllowText: &allow}}},
+		{ID: "answered", ThreadID: "a", Role: "assistant", Status: "done", AgentID: ptr("a"), Parts: []contract.Part{{Kind: "choice", Question: ptr("Which way?"), Options: []contract.ChoiceOption{{ID: "one", Label: "First"}}, AnswerID: ptr("one")}}},
+		{ID: "other", ThreadID: "b", Role: "assistant", Status: "done", AgentID: ptr("b"), Parts: []contract.Part{{Kind: "choice", Question: ptr("Which one?"), Options: []contract.ChoiceOption{{ID: "one", Label: "First"}}}}},
+	} {
+		if _, err := s.PostMessage(t.Context(), card); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DismissChoices(t.Context(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"open": ChoiceDismissed, "answered": "one", "other": ""} {
+		message, err := s.Message(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if message.Parts[0].AnswerID != nil {
+			got = *message.Parts[0].AnswerID
+		}
+		if got != want {
+			t.Fatalf("%s answered %q, want %q", id, got, want)
+		}
+	}
+}
+
 func TestRetiredFocusCardsCloseOnOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db")
 	s, err := Open(t.Context(), path)

@@ -1282,6 +1282,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 			s.stopReviews(r.Context(), t.AgentID)
 		}
 	}
+	// A message instead of an answer settles any question still waiting in this chat.
+	if err := s.Store.DismissChoices(r.Context(), t.ID); err != nil {
+		s.config.Log.Error("dismiss questions", "error", err)
+	}
 	write(w, status, m)
 }
 
