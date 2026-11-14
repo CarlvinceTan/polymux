@@ -42,7 +42,7 @@ public protocol DecisionModel: AnyObject, Sendable {
 /// The known decision models. GLiDE-0.4B is the first; others register here without
 /// touching the gate.
 public enum DecisionModels {
-    /// Fitted on the held-out eval (variant "a"): held-out FN 17/241, flag 53%, acc 81%.
+    /// Fitted by `scripts/glide.py fit`: on the held-out set it misses 17 of 241 and flags 53%.
     public static let glide04B = DecisionModelDescriptor(
         id: "glide-0.4b",
         displayName: "GLiDE 0.4B",
@@ -54,7 +54,7 @@ public enum DecisionModels {
                             sd: [0.10470903221297216, 0.2029116127454439],
                             w: [1.7384098615132817, 1.4493768572378511],
                             bias: 0.21930574753156917,
-                            threshold: -1.3090432768358349),
+                            threshold: -1.309043276835835),
         maxTokens: 256)
 
     public static let all: [DecisionModelDescriptor] = [glide04B]

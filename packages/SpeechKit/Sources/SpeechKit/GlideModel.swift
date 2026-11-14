@@ -26,7 +26,7 @@ public final class GlideModel: DecisionModel, @unchecked Sendable {
     }
 
     public func score(transcript: String, confidences: [Double]) async -> Double? {
-        guard let wrap = self.wrap(transcript),
+        guard isAvailable, let wrap = self.wrap(transcript),
               let probability = await probability(wrap),
               let confidence = DictationGate.score(confidences) else { return nil }
         return descriptor.gate.score(confidence: 1 - confidence, probability: probability)
@@ -35,12 +35,13 @@ public final class GlideModel: DecisionModel, @unchecked Sendable {
     /// The [CLS]-wrapped prompt ids fed to the model; nil when the tokenizer is
     /// unavailable or the prompt exceeds the model window.
     public func wrap(_ transcript: String) -> [Int]? {
-        guard isAvailable, let tokenizer = BPETokenizer.shared else { return nil }
+        guard let tokenizer = BPETokenizer.shared else { return nil }
         let wrap = [Self.cls] + tokenizer.encode(GlidePrompt.text(transcript)) + [Self.sep]
         return wrap.count <= descriptor.maxTokens ? wrap : nil
     }
 
-    private func probability(_ wrap: [Int]) async -> Double? {
+    /// P(misheard) for wrapped prompt ids; nil when the model is not installed.
+    func probability(_ wrap: [Int]) async -> Double? {
         guard let url = ModelCache.compiledModel(descriptor.id), let model = loadModel(at: url) else { return nil }
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

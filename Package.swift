@@ -36,7 +36,9 @@ let package = Package(
         .target(name: "PolymuxUpdates", dependencies: [.product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS]))], path: "packages/PolymuxUpdates/Sources/PolymuxUpdates"),
         .executableTarget(name: "MediaText", path: "packages/MediaText/Sources/MediaText"),
         .testTarget(name: "PolymuxKitTests", dependencies: ["PolymuxKit", "PolymuxAvatar", "AvatarKit"], path: "packages/PolymuxKit/Tests/PolymuxKitTests"),
-        .testTarget(name: "SpeechKitTests", dependencies: ["SpeechKit"], path: "packages/SpeechKit/Tests/SpeechKitTests", resources: [.copy("tokenizer_fixtures.json")]),
+        .testTarget(name: "SpeechKitTests", dependencies: ["SpeechKit"], path: "packages/SpeechKit/Tests/SpeechKitTests"),
+        // The dictation gate against its oracle; see docs/speech.md.
+        .testTarget(name: "SpeechKitBench", dependencies: ["SpeechKit"], path: "packages/SpeechKit/Bench", resources: [.copy("oracle.json")]),
         .testTarget(name: "PolymuxVoiceTests", dependencies: ["PolymuxVoice", "PolymuxKit", "SpeechKit"], path: "packages/PolymuxVoice/Tests/PolymuxVoiceTests"),
         .testTarget(name: "AvatarKitTests", dependencies: ["AvatarKit"], path: "packages/AvatarKit/Tests/AvatarKitTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "AvatarKitCTests", dependencies: ["AvatarKit", "AvatarKitC", "AvatarKitCTypes"], path: "packages/AvatarKitC/Tests/AvatarKitCTests"),

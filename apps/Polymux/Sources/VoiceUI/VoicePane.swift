@@ -95,10 +95,8 @@ struct VoicePane: View {
         Section {
             LabeledContent("Engine", value: "Apple Speech")
             LabeledContent("Listening for", value: DictationDevice.languageNames(for: dictation.deviceLanguage))
-            // The review model only feeds on-device polish, and is untested on iPhone.
-            #if os(macOS)
+            // The review model only feeds on-device polish.
             if DictationPolish.isAvailable, DecisionModels.default.downloadURL != nil { modelRow }
-            #endif
         } header: {
             SectionHeader("Recognition", symbol: "cpu.fill", tint: .purple)
         } footer: {

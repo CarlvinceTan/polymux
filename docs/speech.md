@@ -22,18 +22,28 @@ The gate keeps the review model from running on transcripts that are probably fi
 - **Confidence only.** Without a downloaded model, [`DictationGate`](../packages/SpeechKit/Sources/SpeechKit/Review.swift) flags a dictation when its mean word confidence is below 0.92.
 - **With the model.** [`GlideModel`](../packages/SpeechKit/Sources/SpeechKit/GlideModel.swift) runs GLiDE 0.4B on a fixed prompt and reads one number, the probability that a word was misheard. [`GateConstants`](../packages/SpeechKit/Sources/SpeechKit/GateConstants.swift) combines it with confidence in a fitted logistic. Prompts over 256 tokens fall back to confidence only.
 
-The model is never bundled. [`ModelStore`](../packages/SpeechKit/Sources/SpeechKit/ModelStore.swift) downloads the archive described in [`DecisionModel.swift`](../packages/SpeechKit/Sources/SpeechKit/DecisionModel.swift) from the `models` GitHub release, checks its SHA-256, compiles it and keeps it in the client data folder under `models/`. The Review model row in Voice settings controls it, on the Mac only.
+The model is never bundled. [`ModelStore`](../packages/SpeechKit/Sources/SpeechKit/ModelStore.swift) downloads the archive described in [`DecisionModel.swift`](../packages/SpeechKit/Sources/SpeechKit/DecisionModel.swift) from the `models` GitHub release, checks its SHA-256, compiles it and keeps it in the client data folder under `models/`. The Review model row in Voice settings controls it. Scoring runs in the app on both the Mac and iPhone.
 
 GLiDE is under the Fastino Community License. The licence files ship in the package's [`Resources/`](../packages/SpeechKit/Sources/SpeechKit/Resources/) and inside the archive, and the settings row shows "Built with Fastino GLiDE".
 
 ## Conversion and the oracle
 
-Fastino publishes GLiDE as PyTorch weights. Three things in the repository are derived from them offline, and must be redone together if the model, prompt or tokenizer changes:
+Scoring happens in the app; only preparing the model is offline. Fastino publishes GLiDE as PyTorch weights, and [`scripts/glide.py`](../scripts/glide.py) derives what the app uses from them:
 
-- **The archive.** The encoder converted to a Core ML package (16-bit floats, fixed 256-token input) that returns the misheard probability directly, packed as a plain tar with the licence files.
-- **The tokenizer.** `tokenizer.json` is the model's own; [`BPETokenizer`](../packages/SpeechKit/Sources/SpeechKit/BPETokenizer.swift) is a Swift port of its encoder.
-- **The gate constants.** Fitted on 600 labelled transcripts, with the threshold chosen to miss few wrong transcripts (best F2).
+| Step | Produces |
+| --- | --- |
+| `oracle <checkout>` | Rescores the oracle with the PyTorch model. Needed only when the model or prompt changes. |
+| `fit` | The gate constants for [`DecisionModel.swift`](../packages/SpeechKit/Sources/SpeechKit/DecisionModel.swift), with the threshold that misses fewest wrong transcripts (best F2). |
+| `convert <checkout> <out>` | The Core ML package: 16-bit floats, a fixed 256-token input, one probability out. |
+| `parity <package>` | Fails if the Core ML probabilities drift more than 0.01 from the oracle. |
+| `pack <package>` | `dist/models/glide-0.4b.tar` with the licence files, and the size and SHA-256 to put in `DecisionModel.swift`. |
 
-The oracle is the reference these are checked against: 1,200 dictation transcripts (600 for fitting, 600 held out), each with its word confidences, whether it was wrong, and the token ids and probability the original PyTorch model gave it. The port passes when the Swift tokenizer produces the same ids, the Core ML probability stays within 0.01, and the flags agree. At conversion it matched 1,200 of 1,200 ids and 1,199 of 1,200 flags; on the held-out set the gate missed 17 of 241 wrong transcripts while flagging 53%.
+`tokenizer.json` is the model's own; [`BPETokenizer`](../packages/SpeechKit/Sources/SpeechKit/BPETokenizer.swift) is a Swift port of its encoder. Upload a new archive under a new file name on the `models` release, since installed apps verify the old one by its checksum.
 
-[`TokenizerTests`](../packages/SpeechKit/Tests/SpeechKitTests/TokenizerTests.swift) and [`GateTests`](../packages/SpeechKit/Tests/SpeechKitTests/GateTests.swift) pin a sample of oracle rows. The conversion scripts and the full oracle are not in the repository.
+The oracle, [`packages/SpeechKit/Bench/oracle.json`](../packages/SpeechKit/Bench/oracle.json), is the benchmark all of this is checked against: 1,200 dictation transcripts (600 for fitting, 600 held out), each with its word confidences, whether it was wrong, and the token ids and probability the PyTorch model gave it. The transcripts came from spoken sentences run through the app's own dictation path.
+
+[`OracleBench`](../packages/SpeechKit/Bench/OracleBench.swift) runs with the Swift tests. It checks that the Swift tokenizer reproduces every row's ids and that the shipped constants miss 17 of the 241 wrong held-out transcripts while flagging 320 of 600. To also score an installed model against the oracle, name the client folder that holds it:
+
+```sh
+POLYMUX_CLIENT_DIR=~/.polymux swift test --filter SpeechKitBench
+```

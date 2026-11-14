@@ -134,8 +134,12 @@ public final class ModelStore {
     /// Verifies, unpacks and compiles a downloaded archive. Slow, so it runs off the main actor.
     nonisolated static func install(_ descriptor: DecisionModelDescriptor, archive: URL) throws {
         guard try sha256(archive) == descriptor.sha256?.lowercased() else { throw ModelError.checksum }
-        let dir = ModelCache.directory(descriptor.id)
+        var dir = ModelCache.directory(descriptor.id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // It can be downloaded again, so it stays out of device backups.
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? dir.setResourceValues(values)
         try extractTar(archive, into: dir)
         try ModelCache.compile(descriptor.id)
     }
