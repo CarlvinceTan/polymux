@@ -1,7 +1,7 @@
 // Voice fallbacks save from Settings and survive a relaunch.
 let app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });
-await app.click({ role: "button", name: "Models" });
+await app.click({ role: "button", name: "Voice" });
 await app.click({ role: "button", name: "Voice fallbacks" });
 await app.waitFor({ role: "button", name: "Mode", value: "Auto", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Mode" });
@@ -19,7 +19,7 @@ return "saved";
 // @relaunch
 const app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });
-await app.click({ role: "button", name: "Models" });
+await app.click({ role: "button", name: "Voice" });
 await app.click({ role: "button", name: "Voice fallbacks" });
 await app.waitFor({ role: "button", name: "Mode", value: "Custom", timeout_ms: 10000 });
 await app.waitFor({ role: "button", name: "Voice fallback 1", value: "OpenAI Realtime · gpt-realtime-mini", timeout_ms: 5000 });
