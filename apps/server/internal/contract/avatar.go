@@ -5,15 +5,15 @@ import (
 	"strings"
 )
 
-// GrokBotAvatarDesign maps Grok Bot profile.json avatarShape/avatarColor to Polymux AvatarDesign ids.
-func GrokBotAvatarDesign(shape, color string) *AvatarDesign {
+// AvatarDesignFromProfile maps an imported bot profile's avatarShape/avatarColor to Polymux AvatarDesign ids.
+func AvatarDesignFromProfile(shape, color string) *AvatarDesign {
 	shape = strings.TrimSpace(strings.ToLower(shape))
 	color = strings.TrimSpace(strings.ToLower(color))
 	if shape == "" && (color == "" || color == "-") {
 		return nil
 	}
-	mappedShape := mapGrokShape(shape)
-	mappedColor := mapGrokColor(color)
+	mappedShape := mapProfileShape(shape)
+	mappedColor := mapProfileColor(color)
 	if mappedShape == "" && mappedColor == "" {
 		return nil
 	}
@@ -33,7 +33,7 @@ func GrokBotAvatarDesign(shape, color string) *AvatarDesign {
 	}
 }
 
-func mapGrokShape(shape string) string {
+func mapProfileShape(shape string) string {
 	switch shape {
 	case "blob":
 		return "cercle"
@@ -50,7 +50,7 @@ func mapGrokShape(shape string) string {
 	}
 }
 
-func mapGrokColor(color string) string {
+func mapProfileColor(color string) string {
 	if color == "" || color == "-" {
 		return ""
 	}
@@ -82,7 +82,7 @@ func mapGrokColor(color string) string {
 	}
 }
 
-func GrokBotAvatarFromDefinition(definition json.RawMessage) *AvatarDesign {
+func AvatarFromDefinition(definition json.RawMessage) *AvatarDesign {
 	var raw struct {
 		AvatarShape string `json:"avatarShape"`
 		AvatarColor string `json:"avatarColor"`
@@ -90,5 +90,5 @@ func GrokBotAvatarFromDefinition(definition json.RawMessage) *AvatarDesign {
 	if err := json.Unmarshal(definition, &raw); err != nil {
 		return nil
 	}
-	return GrokBotAvatarDesign(raw.AvatarShape, raw.AvatarColor)
+	return AvatarDesignFromProfile(raw.AvatarShape, raw.AvatarColor)
 }

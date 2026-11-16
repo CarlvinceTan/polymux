@@ -167,7 +167,7 @@ func (s *Store) saveDefinition(ctx context.Context, a contract.Agent, definition
 	}
 	a.Active = false
 	if a.Avatar == nil {
-		if avatar := contract.GrokBotAvatarFromDefinition(definition); avatar != nil {
+		if avatar := contract.AvatarFromDefinition(definition); avatar != nil {
 			a.Avatar = avatar
 		}
 	}
@@ -422,7 +422,7 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	}
 	a = saved
 	if avatar == nil {
-		avatar = contract.GrokBotAvatarFromDefinition(definition)
+		avatar = contract.AvatarFromDefinition(definition)
 	}
 	if avatar != nil {
 		a.Avatar = avatar
