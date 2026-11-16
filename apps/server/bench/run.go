@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
@@ -248,9 +249,10 @@ var (
 	filler   = regexp.MustCompile(`(?i)(^|\n)\s*(great question|certainly!|absolutely!|of course!)|i hope this helps|let me know if you have any (other |more )?questions`)
 )
 
-// hygiene lists plumbing and filler the user saw.
+// hygiene lists plumbing, filler, walls and parroted openers the user saw.
 func hygiene(seen []Message) []string {
 	var out []string
+	last, streak := "", 0
 	for _, m := range seen {
 		if found := plumbing.FindString(m.Text); found != "" {
 			out = append(out, "plumbing: "+found)
@@ -258,8 +260,48 @@ func hygiene(seen []Message) []string {
 		if found := filler.FindString(m.Text); found != "" {
 			out = append(out, "filler: "+strings.TrimSpace(found))
 		}
+		// Cards and question cards aren't chat bubbles.
+		if m.Question || strings.Contains(m.Text, "[card]") || strings.Contains(m.Text, "[secret card]") {
+			continue
+		}
+		if !strings.Contains(m.Text, "```") {
+			if n := len(strings.Fields(m.Text)); n > 45 {
+				out = append(out, fmt.Sprintf("wall: %d words in one bubble", n))
+			}
+		}
+		if o := opener(m.Text); o != "" {
+			if o == last {
+				streak++
+			} else {
+				streak = 1
+			}
+			last = o
+			if streak == 3 {
+				out = append(out, "parrot: "+o+" three times in a row")
+			}
+		}
 	}
 	return out
+}
+
+// opener is a message's first three words, lowercased and stripped of punctuation.
+func opener(text string) string {
+	if strings.Contains(text, "```") {
+		return ""
+	}
+	words := strings.Fields(strings.ToLower(text))
+	if len(words) > 3 {
+		words = words[:3]
+	}
+	var out []string
+	for _, w := range words {
+		if w = strings.TrimFunc(w, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+		}); w != "" {
+			out = append(out, w)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func (s *Suite) record(dir string, row Row, v *View) {

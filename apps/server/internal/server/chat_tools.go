@@ -33,7 +33,7 @@ func (t *chatTool) Description() string {
 	if t.question {
 		return "Post a question card with choices and optional free text. Continue independent work; the user's answer starts a new turn in this chat. Use stable unique option IDs. Only ask when the answer is needed."
 	}
-	return "Send one short message bubble to the user's chat immediately, then continue. Use it for each beat of a reply, an acknowledgement before real work, a real update or a result."
+	return "Send a short message bubble to the user's chat immediately, then continue. Usually one bubble per reply; a blank line starts a second for a genuinely separate idea. Use it for an acknowledgement before real work, a real update or a result."
 }
 func (t *chatTool) Schema() ai.ToolSchema {
 	properties := map[string]any{"text": map[string]any{"type": "string", "minLength": 1, "maxLength": 8192}}
@@ -89,6 +89,12 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 		source = state.run.SourceMessageID
 	}
 	beats := splitBeats([]contract.Part{part})
+	// Groups keep their own byte budget and post findings freely; pacing is for direct chat.
+	if chain == nil && !t.question {
+		if err := t.pace(ctx, state, beats); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+	}
 	ids := make([]string, 0, len(beats))
 	posted := 0
 	for n, beat := range beats {
@@ -125,6 +131,9 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 		posted++
 	}
 	state.posts += posted
+	if !t.question {
+		state.bubbles += posted
+	}
 	state.spoke = true
 	if len(ids) == 1 {
 		return toolResult(map[string]any{"message_id": ids[0], "posted": true})

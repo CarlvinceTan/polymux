@@ -28,26 +28,29 @@ type chainState struct {
 }
 
 type turnState struct {
-	run        contract.Run
-	work       store.Work
-	mu         sync.Mutex
-	handoff    *store.Work
-	target     string
-	tools      int
-	reload     bool
-	notice     *string
-	external   map[string]bool
-	prefixes   []string
-	waits      map[string]bool
-	checkpoint *store.Checkpoint
-	store      *store.Store
-	hookErr    error
-	task       *store.Task
-	cancel     context.CancelFunc
-	removals   []string
-	posts      int
-	spoke      bool
-	status     func(string) error
+	run           contract.Run
+	work          store.Work
+	mu            sync.Mutex
+	handoff       *store.Work
+	target        string
+	tools         int
+	reload        bool
+	notice        *string
+	external      map[string]bool
+	prefixes      []string
+	waits         map[string]bool
+	checkpoint    *store.Checkpoint
+	store         *store.Store
+	hookErr       error
+	task          *store.Task
+	cancel        context.CancelFunc
+	removals      []string
+	posts         int
+	spoke         bool
+	bubbles       int
+	wallBounced   bool
+	parrotBounced bool
+	status        func(string) error
 	// gate asks plugins about a tool call. chats are those whose rules bind this run.
 	gate func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision
 	// answer asks again with the person's answer, so a plugin can remember it.
@@ -94,6 +97,9 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 	state.tools++
 	if !slices.Contains(quietTools, name) {
 		state.spoke = false
+		// Real work between messages starts a fresh reply burst.
+		state.bubbles = 0
+		state.wallBounced = false
 	}
 	if state.work.Trigger == contract.RunTriggerChild && (name == "task" || name == "message_agent" || name == "handoff_agent" || name == "manage_tasks") {
 		return agent.ToolCallHookResult{Block: true, Reason: "Child tasks cannot delegate or schedule continuations"}
