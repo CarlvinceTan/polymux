@@ -1,6 +1,6 @@
 # Experiments
 
-Experimental work lives on `experimental/*` branches so `dev` and `main` stay free of it. Check out the branch to work on it; nothing here ships until it is deliberately merged.
+Experimental work lives on `experimental/*` branches so `dev` and `main` stay free of it. The commit guard only allows commits on `dev` or a detached HEAD, so work on a branch in a detached worktree and move the branch to your commit with `git branch -f experimental/<name> HEAD`. Nothing here ships until it is deliberately merged.
 
 | Branch | About |
 | --- | --- |

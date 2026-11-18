@@ -41,17 +41,20 @@ How the result is *said* stays a separate system: [Chat style](chat-style.md) go
 
 People take in information without deciding to: reading the news, walking around, overhearing. A bot should too, instead of only keeping what it chooses to save from chat.
 
-- **Sources, by proximity.** Most comes from the bot's surroundings (its chats, its repos, issues and CI, its own work). Some comes from its domain, as a person reads news. A little comes from outside its domain entirely, which is where unexpected references come from. There is no right ratio; start with a loose mix and tune it by observing what sticks and what sparks ideas.
+- **Sources, by proximity.** Most comes from the bot's surroundings (its chats, its repos, issues and CI, its own work). Some comes from its domain, as a person reads news. A little comes from adjacent fields outside its domain, which is where unexpected references come from: papers in human-computer interaction or neuroscience for a bot that builds an assistant, not a random encyclopedia page (see [Experiment](#experiment)). There is no right ratio; start with a loose mix and tune it by observing what sticks and what sparks ideas.
 - **An attention filter decides what sticks.** Everything is skimmed cheaply against the bot's purpose, goals and current impressions; only what is salient or new becomes an impression. Most items pass by. The target is a small decision model like the one the [speech review gate](speech.md) uses, not the bot's main model.
+- **A curiosity slot.** Judged only on relevance, nothing outside the bot's goals ever sticks. So the filter also scores how striking an item is, and each day keeps the single most striking item from a source where nothing relevant stuck, the way a person remembers an odd story.
 - **Impressions are short-lived.** Each keeps its source, so it can be cited as a reference, a strength that fades with time, and links to the goals and impressions it relates to. An impression that new items keep touching is reinforced; one touched often or used in an idea is promoted into memory. The rest fade, as most of what a person sees does.
 
 ## References and creativity
 
 Creativity usually comes from references that spark ideas: hypothesising something that may be ridiculous but is still worth trying.
 
-- Dreaming puts a current goal next to references, both close ones and deliberately distant ones, and asks what follows.
+- Dreaming puts a current goal next to references, both close ones and deliberately distant ones, and asks what follows. For a distant reference it borrows the mechanism, not the topic: what the thing does, and what the equivalent would be for this goal.
 - Every idea names the reference that sparked it, so the user can always see why the bot thought of it.
-- An idea reaches the user only past the idea bar: it has to save more attention than it costs. Everything else stays in the journal.
+- Most cited references are decoration: the idea would be the same without them. Before the idea bar, a check asks exactly that, and an idea whose references are decoration doesn't count as sparked.
+- An idea reaches the user only past the idea bar: it has to save more attention than it costs. Ideas worth reading but not worth an interruption go on the card; everything else stays in the journal. Rank a night's ideas against each other rather than against fixed score thresholds, which the experiment found brittle.
+- Dreams fixate: a strong impression keeps coming back night after night. An impression that has already fed several ideas should weigh less in the next dream, as a person habituates.
 
 ## Dreaming
 
@@ -102,8 +105,10 @@ This is hard to score with fixed scenarios, so it is judged by watching what the
 | --- | --- |
 | Consolidation loop, propose-only reports, reject by default, guarded reversible writes, use-ranked memory | Proven elsewhere (Agent Swarm) |
 | Inactivity trigger, light and deep dreaming, at least one deep dream a day | Experimental |
-| Ambient ingestion, attention filter, impressions | Experimental |
-| References sparking ideas, the idea bar | Experimental |
+| Ambient ingestion, attention filter, impressions | Experimental; behaved believably in the replay |
+| Curiosity slot, adjacent-field outside sources, analogy | Experimental; gave the best ideas in the replay |
+| References sparking ideas, decoration check, idea bar | Experimental; the check is needed, fixed thresholds are brittle |
+| Habituation against fixation | Experimental; not yet tried |
 
 ## Open questions
 
@@ -116,4 +121,17 @@ This is hard to score with fixed scenarios, so it is judged by watching what the
 
 ## Experiment
 
-Not yet run.
+`experimental/dreaming` replays past days of this repository through the loop above (its dreamlab command, whose README holds the full results). The bot's purpose and goals come from the repository as it stood on the first replayed day. Each evening it skims that day's commits (surroundings), Hacker News stories over 100 points (domain) and an outside source; each morning it dreams. One model, DeepSeek v4.1 Flash, does every step, so the attention filter is a stand-in for a small decision model. The replay doesn't exercise the inactivity trigger, waking on a message or allowance priority.
+
+First run, 18 November 2026: 31 October to 11 November, four rounds, two reps per arm, about 600 model calls and $0.90.
+
+- **The filter and fading behave believably.** About one commit in ten sticks and two to seven of about 285 news stories; untouched impressions fade in about four days and touched ones are promoted.
+- **Goals alone give chores.** Without references, dreams produce predictable work (a module-boundary canary, a search ablation harness) night after night.
+- **Adjacent oddities spark the best ideas.** The curiosity slot's picks were striking stories next to the bot's field: residential proxies found on the White House network became per-tool network egress checks for MCP servers; a fake-job-interview heist became an adversarial install test for bot-installed tools; lawyers sanctioned for prompt injection became trust labels on tool output before it reaches memory.
+- **Random outside references are forced.** Wikipedia's daily feed rarely struck the filter (median 0.15) and gave forced analogies. Papers in human-computer interaction and neuroscience shaped twice as many of the ideas that cited them (31% against 14%), for example "Do agents need to sleep?" leading to a memory consolidation pass.
+- **Most cited references are decoration** (70 to 78% in every variant), so the decoration check stays.
+- **Fixed thresholds on the bar's scores are brittle.** It turned down ideas at 0.58 novelty that read better than ones it kept.
+- **Showing dreams their earlier ideas didn't stop fixation**: about a fifth kept circling one theme.
+- **Checking ideas against later commits told us nothing**: no arm, and no control window, had an idea a later commit realised. Reading the journal is what showed the above.
+
+Next: habituation against fixation, ranking a night's ideas instead of thresholds, the card for ideas below the interruption bar, and running it live on idle time for a bot with real sources.
