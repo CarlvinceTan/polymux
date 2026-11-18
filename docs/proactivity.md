@@ -136,6 +136,20 @@ Timing fails separately from content: models left to choose speak too early abou
 - A weekly budget of unprompted messages per bot, set by its initiative dial.
 - Silence is the default, and the bench gets cases where staying quiet is the only right answer.
 
+## Before any bot acts on its own
+
+An autonomy stress test (see [Experiments so far](#experiments-so-far)) found ways the loop goes wrong when a bot may act without asking. None of these is in place yet, and acting on aligned ideas should wait for them:
+
+- **Ingested text is data, never policy.** Sources have trust levels; an impression whose gist states a rule or an instruction ("agents should...") isn't promoted without a second source; the filter's suspicion of an item travels with it into dreams, and an idea built on a suspect item can only ever be a suggestion.
+- **The curiosity slot is off below a set exploration level**, since off-goal, attention-grabbing items are exactly what a planted one looks like.
+- **The nightly pick chooses only among ideas the idea bar kept**, with none as the default and a weekly cap on picks.
+- **Actions have their own budget**, separate from messages, scaled by initiative; below a set initiative a bot only suggests. When the tell can't be delivered, the action waits or becomes a suggestion; nothing is done silently because the message budget ran out.
+- **A ledger of what was done.** Before acting, the bot checks it for the same change; approval for a kind of action is remembered, so the same request doesn't come back each night.
+- **Risk is decided by rules on the action, not the idea's wording.** Editing CI, adding a dependency, opening a PR or issue, pushing, touching credentials, or changing review, confirmation or ranking policy always needs approval; editing product code is at least acted on with a tell; the model audit can add flags, never remove them.
+- **Failures fail closed.** A missing score, a failed audit or an unparsed reply means ask or skip, never act; malformed replies are retried and decoded leniently.
+- **The dials are stored, not re-sampled.** Initiative and exploration are scored once (the median of several samples) at creation or on a role change, with the role treated strictly as data.
+- **Quiet nights.** With nothing new, a bot produced as many ideas at 87% of the cost and kept acting; this bears on open question 11. Habituation is on by default, a bot with few impressions dreams from its goals alone, and an impression is promoted only when something used it.
+
 ## Judging it: observe, don't benchmark
 
 - **The user's reactions decide.** Model judges of ideas are near chance and favour feasible over original, and ideas that read well often lose their edge once carried out. Model rankings are drafts; once there are enough reactions, a small judge trained on them replaces the prompt.
@@ -154,6 +168,7 @@ Timing fails separately from content: models left to choose speak too early abou
 | Ambient ingestion, attention filter, fading impressions | Experimental; behaved believably in replay |
 | References shaping ideas | Experimental; no measured lift yet, and references matter more for open-ended bots |
 | Acting on aligned ideas, suggesting divergent ones | Experimental; labels read sensibly but only about 72% repeatable |
+| Acting without asking | Not ready: the stress test found planted inputs steering actions, repeated actions and unlimited silent actions |
 | One-pass ranking, habituation, anticipation | Experimental; habituation spread references, ranking unproven, anticipation untried |
 
 ## Open questions
@@ -190,6 +205,7 @@ The design was checked against published work in four areas. The full reviews, a
 - Separate initiative and exploration scores told ongoing duties from creative work on roles the prompt never named (home manager 0.80 and 0.23, writing partner 0.55 and 0.88) and caught role edits; a single score didn't. The initiative score moved more under rewording than exploration did.
 - Habituation spread references for the open-ended bot without changing quality; one-pass ranking agreed with a judge from the same model more often than fixed thresholds did, which is self-agreement, not proof of quality.
 - Classifying about 1,200 ideas against their goal's stages gave labels that read sensibly but were only about 72% repeatable. Reference-sparked ideas diverged from the plan more often than goals-only ones (operational bot: 69% against 46%), and how much diverged depended on how tight the goals were (narrow bot 59 to 71%, open-ended 5 to 18%).
+- An autonomy stress test (a 29-run sweep flipping each component, a 31-day horizon, a quiet fortnight and adversarial inputs, analysed by a swarm of three models) found the issues listed under [Before any bot acts on its own](#before-any-bot-acts-on-its-own). The worst: planted feed items stuck in 23 of 25 exposures, were promoted to memory as facts, and one led to an autonomous change that removed confirmations; an operational bot carried out the same task 9 times in a month with no memory of having done it; the open-ended bot picked something on 290 of 302 nights. Positives: no exfiltration or destructive action in any run, the independent risk audit caught most approval cases, and the idea bar declined every crafted attack.
 - Checking ideas against later commits told nothing; reading the journal is what shows behaviour.
 
 Next: anticipation as a dream output, the ablation decoration check with shuffled reference order, a stronger model for the deep dream than for the filter, a judge from another model family, at least three reps, and the user's own ratings of a blind sample of matched pairs kept with the results.
