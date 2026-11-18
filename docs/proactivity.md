@@ -54,7 +54,7 @@ Creativity usually comes from references that spark ideas: hypothesising somethi
 - Every idea names the reference that sparked it, so the user can always see why the bot thought of it.
 - Most cited references are decoration: the idea would be the same without them. Before the idea bar, a check asks exactly that, and an idea whose references are decoration doesn't count as sparked.
 - An idea reaches the user only past the idea bar: it has to save more attention than it costs. Ideas worth reading but not worth an interruption go on the card; everything else stays in the journal. Rank a night's ideas against each other rather than against fixed score thresholds, which the experiment found brittle.
-- Dreams fixate: a strong impression keeps coming back night after night. An impression that has already fed several ideas should weigh less in the next dream, as a person habituates.
+- One strong impression can feed dreams night after night. An impression that has already fed several ideas should weigh less in the next dream, as a person habituates.
 
 ## Dreaming
 
@@ -106,9 +106,9 @@ This is hard to score with fixed scenarios, so it is judged by watching what the
 | Consolidation loop, propose-only reports, reject by default, guarded reversible writes, use-ranked memory | Proven elsewhere (Agent Swarm) |
 | Inactivity trigger, light and deep dreaming, at least one deep dream a day | Experimental |
 | Ambient ingestion, attention filter, impressions | Experimental; behaved believably in the replay |
-| Curiosity slot, adjacent-field outside sources, analogy | Experimental; gave the best ideas in the replay |
+| Curiosity slot, adjacent-field outside sources, analogy | Experimental; the most distinctive ideas on reading, no measured lift |
 | References sparking ideas, decoration check, idea bar | Experimental; the check is needed, fixed thresholds are brittle |
-| Habituation against fixation | Experimental; not yet tried |
+| Habituation for an impression that keeps feeding dreams | Experimental; not yet tried |
 
 ## Open questions
 
@@ -126,12 +126,12 @@ This is hard to score with fixed scenarios, so it is judged by watching what the
 First run, 18 November 2026: 31 October to 11 November, four rounds, two reps per arm, about 600 model calls and $0.90.
 
 - **The filter and fading behave believably.** About one commit in ten sticks and two to seven of about 285 news stories; untouched impressions fade in about four days and touched ones are promoted.
-- **Goals alone give chores.** Without references, dreams produce predictable work (a module-boundary canary, a search ablation harness) night after night.
-- **Adjacent oddities spark the best ideas.** The curiosity slot's picks were striking stories next to the bot's field: residential proxies found on the White House network became per-tool network egress checks for MCP servers; a fake-job-interview heist became an adversarial install test for bot-installed tools; lawyers sanctioned for prompt injection became trust labels on tool output before it reaches memory.
-- **Random outside references are forced.** Wikipedia's daily feed rarely struck the filter (median 0.15) and gave forced analogies. Papers in human-computer interaction and neuroscience shaped twice as many of the ideas that cited them (31% against 14%), for example "Do agents need to sleep?" leading to a memory consolidation pass.
+- **The goals-only control scored best on the bar.** It put 7 ideas past the bar and 82 on the card, more than any arm with references (1 to 6 past the bar, 12 to 21 on the card). The decoration check doesn't apply to it, so the counts aren't like for like. Read side by side, its ideas are predictable engineering chores (a module-boundary canary, a search ablation harness) and the reference arms' are fewer but more specific, but that is a reading, not a measurement: a blind sample of both is in the branch's results for judging.
+- **Adjacent oddities gave the most distinctive ideas.** The curiosity slot's picks were striking stories next to the bot's field: residential proxies found on the White House network became per-tool network egress checks for MCP servers; a fake-job-interview heist became an adversarial install test for bot-installed tools; lawyers sanctioned for prompt injection became trust labels on tool output before it reaches memory. In numbers, ideas citing those picks were shaped by them about as often as ideas citing anything else (23% against 22 to 31%), so this is what the ideas read like, not a measured lift.
+- **Random outside references are forced.** Wikipedia's daily feed rarely struck the filter (median 0.15) and gave forced analogies. Of ideas citing papers in human-computer interaction and neuroscience, 15 of 49 were shaped by them, against 3 of 21 for Wikipedia; that round also added idea memory, and none of those ideas passed the bar. One example: "Do agents need to sleep?" led to a memory consolidation pass.
 - **Most cited references are decoration** (70 to 78% in every variant), so the decoration check stays.
 - **Fixed thresholds on the bar's scores are brittle.** It turned down ideas at 0.58 novelty that read better than ones it kept.
-- **Showing dreams their earlier ideas didn't stop fixation**: about a fifth kept circling one theme.
+- **One impression feeds most nights.** The commit that let bots set up their own skills and MCP servers was cited on 8 to 10 of 12 nights. The ideas themselves rarely repeated (0 to 9% near-duplicates of an earlier night's); the many MCP ideas came from a goal that names MCP, not from fixation.
 - **Checking ideas against later commits told us nothing**: no arm, and no control window, had an idea a later commit realised. Reading the journal is what showed the above.
 
-Next: habituation against fixation, ranking a night's ideas instead of thresholds, the card for ideas below the interruption bar, and running it live on idle time for a bot with real sources.
+Next: a blind rating of control and reference ideas, habituation for an impression that keeps feeding dreams, ranking a night's ideas instead of thresholds, the card for ideas below the interruption bar, and running it live on idle time for a bot with real sources.
