@@ -159,3 +159,80 @@ func TestAskSkipsPacing(t *testing.T) {
 		t.Fatalf("question counted as a bubble: %d", state.bubbles)
 	}
 }
+
+func TestSendStyle(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	tool := &chatTool{store: api.Store}
+	state, ctx := paceState("run")
+	err := postBeat(t, tool, ctx, "c1", "Booked it \u2014 Friday at 8")
+	if err == nil || !strings.Contains(err.Error(), "em dash") {
+		t.Fatalf("styled send: %v", err)
+	}
+	if messages, _ := api.Store.Messages(t.Context(), "assistant", 0, 10); len(messages) != 0 {
+		t.Fatalf("bounced message posted %d messages", len(messages))
+	}
+	// The bounce is guidance once per turn: the retry and later tells go through.
+	if err := postBeat(t, tool, ctx, "c2", "Booked it \u2014 Friday at 8"); err != nil {
+		t.Fatal(err)
+	}
+	beforeTool(ctx, "c3", "read", nil)
+	if err := postBeat(t, tool, ctx, "c4", "Great question, it's 8 km"); err != nil {
+		t.Fatal(err)
+	}
+	if state.bubbles != 1 || !state.styleBounced {
+		t.Fatalf("bubbles = %d, bounced = %v", state.bubbles, state.styleBounced)
+	}
+}
+
+func TestSendStyleGroup(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	tool := &chatTool{store: api.Store}
+	_, ctx := paceState("run")
+	ctx = context.WithValue(ctx, chainKey{}, &chainState{seen: map[string]bool{}, pending: map[string]string{}})
+	if err := postBeat(t, tool, ctx, "c1", "Happy to help with that"); err == nil || !strings.Contains(err.Error(), "stock assistant phrase") {
+		t.Fatalf("group styled send: %v", err)
+	}
+	if err := postBeat(t, tool, ctx, "c2", "On it"); err != nil {
+		t.Fatal(err)
+	}
+	// A replayed group message that was already posted isn't bounced.
+	state, replay := paceState("run")
+	replay = context.WithValue(replay, chainKey{}, &chainState{seen: map[string]bool{}, pending: map[string]string{}})
+	if err := postBeat(t, tool, replay, "c2", "On it \u2014 really"); err != nil || state.styleBounced {
+		t.Fatalf("replay bounced: %v", err)
+	}
+}
+
+func TestSendTidy(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	tool := &chatTool{store: api.Store}
+	_, ctx := paceState("run")
+	if err := postBeat(t, tool, ctx, "c1", "yeah I\u2019m on it"); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := api.Store.Messages(t.Context(), "assistant", 0, 10)
+	if err != nil || len(messages) != 1 || messages[0].Parts[0].Text == nil || *messages[0].Parts[0].Text != "yeah I'm on it" {
+		t.Fatalf("tidied message: %+v %v", messages, err)
+	}
+}
+
+func TestAskStyle(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	tool := &chatTool{store: api.Store, question: true}
+	_, ctx := paceState("run")
+	ask := func(call, question string) error {
+		args := fmt.Sprintf(`{"question":%q,"options":[{"id":"a","label":"I\u2019ll pick"},{"id":"b","label":"B"}]}`, question)
+		_, err := tool.Execute(ctx, call, json.RawMessage(args), nil)
+		return err
+	}
+	if err := ask("c1", "Certainly! Which time works?"); err == nil {
+		t.Fatal("styled question went through")
+	}
+	if err := ask("c2", "Which time works, 6:30 or 9:15?"); err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := api.Store.Messages(t.Context(), "assistant", 0, 10)
+	if len(messages) != 1 || messages[0].Parts[0].Options[0].Label != "I'll pick" {
+		t.Fatalf("question card: %+v", messages)
+	}
+}

@@ -50,6 +50,7 @@ type turnState struct {
 	bubbles       int
 	wallBounced   bool
 	parrotBounced bool
+	styleBounced  bool
 	status        func(string) error
 	// gate asks plugins about a tool call. chats are those whose rules bind this run.
 	gate func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision

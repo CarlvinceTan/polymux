@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/chatstyle"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
@@ -249,7 +250,7 @@ var (
 	filler   = regexp.MustCompile(`(?i)(^|\n)\s*(great question|certainly!|absolutely!|of course!)|i hope this helps|let me know if you have any (other |more )?questions`)
 )
 
-// hygiene lists plumbing, filler, walls and parroted openers the user saw.
+// hygiene lists plumbing, filler, assistant style, walls and parroted openers the user saw.
 func hygiene(seen []Message) []string {
 	var out []string
 	last, streak := "", 0
@@ -259,6 +260,8 @@ func hygiene(seen []Message) []string {
 		}
 		if found := filler.FindString(m.Text); found != "" {
 			out = append(out, "filler: "+strings.TrimSpace(found))
+		} else if label, _ := chatstyle.Tell(m.Text); label != "" {
+			out = append(out, "style: "+label)
 		}
 		// Cards and question cards aren't chat bubbles.
 		if m.Question || strings.Contains(m.Text, "[card]") || strings.Contains(m.Text, "[secret card]") {

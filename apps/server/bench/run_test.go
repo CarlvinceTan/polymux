@@ -18,6 +18,9 @@ func TestHygiene(t *testing.T) {
 		{"question", []Message{{Text: strings.Repeat("word ", 50), Question: true}}, ""},
 		{"parrot", []Message{{Text: "Done, pushed."}, {Text: "Done, pushed."}, {Text: "Done, pushed."}}, "parrot: done pushed"},
 		{"varied", []Message{{Text: "Done, pushed."}, {Text: "All set."}, {Text: "Done, pushed."}}, ""},
+		{"em dash", []Message{{Text: "Booked it — Friday at 8"}}, "style: an em dash"},
+		{"assistant word", []Message{{Text: "Let's delve into the options"}}, "style: an assistant word"},
+		{"filler first", []Message{{Text: "Great question! It's 8 km"}}, "filler: Great question"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := hygiene(test.seen)

@@ -30,6 +30,7 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/acp"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/chatstyle"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/network"
@@ -1759,9 +1760,15 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	if !silent && result.Text != "" && result.Text != st.content.String() {
 		setText(&m, &result.Text)
 	}
-	// Models that skip send_to_user still reach the chat as separate messages.
+	// Models that skip send_to_user still reach the chat as separate messages, tidied as send_to_user would.
 	if err == nil && voiced && !silent {
 		m.Parts = splitBeats(m.Parts)
+		for n, part := range m.Parts {
+			if part.Kind == contract.PartKindText && part.Text != nil {
+				text := chatstyle.Tidy(*part.Text)
+				m.Parts[n].Text = &text
+			}
+		}
 	}
 	if err == nil && !silent && !handed && work.Trigger != contract.RunTriggerReview && len(m.Parts) == 0 {
 		err = errEmptyReply

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/chatstyle"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
@@ -62,9 +63,10 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
 	}
+	input.Text = chatstyle.Tidy(input.Text)
 	part := contract.Part{Kind: contract.PartKindText, Text: &input.Text}
 	if t.question {
-		input.Question = strings.TrimSpace(input.Question)
+		input.Question = chatstyle.Tidy(strings.TrimSpace(input.Question))
 		if input.Question == "" || len(input.Question) > 4096 || len(input.Options) < 2 || len(input.Options) > 8 {
 			return agent.AgentToolResult{}, errors.New("provide a question and two to eight choices")
 		}
@@ -74,6 +76,9 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 				return agent.AgentToolResult{}, errors.New("provide unique option ids and nonempty labels")
 			}
 			seen[option.ID] = true
+		}
+		for n := range input.Options {
+			input.Options[n].Label = chatstyle.Tidy(input.Options[n].Label)
 		}
 		allow := input.AllowText == nil || *input.AllowText
 		part = contract.Part{Kind: contract.PartKindChoice, Question: &input.Question, Options: input.Options, AllowText: &allow}
@@ -89,6 +94,9 @@ func (t *chatTool) Execute(ctx context.Context, call string, args json.RawMessag
 		source = state.run.SourceMessageID
 	}
 	beats := splitBeats([]contract.Part{part})
+	if err := t.style(ctx, state, chain != nil, base, beats, input.Question); err != nil {
+		return agent.AgentToolResult{}, err
+	}
 	// Groups keep their own byte budget and post findings freely; pacing is for direct chat.
 	if chain == nil && !t.question {
 		if err := t.pace(ctx, state, beats); err != nil {

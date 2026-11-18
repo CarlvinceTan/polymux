@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/chatstyle"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
@@ -62,6 +63,36 @@ func (t *chatTool) pace(ctx context.Context, state *turnState, beats []contract.
 	if streak >= 2 || count >= openerWindow/3 {
 		state.parrotBounced = true
 		return fmt.Errorf("your recent messages keep opening with %q; vary the opener, or react instead if it's just an ack", o)
+	}
+	return nil
+}
+
+// style bounces a message to the user that reads like an assistant wrote it, once per turn: the bounce is
+// guidance, so a retry goes through. A group message that was already posted is a replay and isn't checked.
+func (t *chatTool) style(ctx context.Context, state *turnState, group bool, base string, beats []contract.Part, question string) error {
+	if state.styleBounced {
+		return nil
+	}
+	if group {
+		id := base
+		if len(beats) > 1 {
+			id += ":0"
+		}
+		if _, err := t.store.Message(ctx, id); err == nil {
+			return nil
+		}
+	}
+	texts := []string{question}
+	for _, beat := range beats {
+		if beat.Text != nil {
+			texts = append(texts, *beat.Text)
+		}
+	}
+	for _, text := range texts {
+		if label, fix := chatstyle.Tell(text); label != "" {
+			state.styleBounced = true
+			return fmt.Errorf("that has %s, which reads like an assistant rather than a person texting: %s, then send it again", label, fix)
+		}
 	}
 	return nil
 }
