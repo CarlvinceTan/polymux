@@ -2,7 +2,17 @@
 
 Status: runs in [`apps/server/bench`](../apps/server/bench/) with two suites. Solo has 16 tier 1 scenarios and 24 tier 2 and 3 errands on a persona's inbox, calendar, bank and six simulated websites. Group has 6 scenarios for a team of specialist bots. Systems: Polymux, a Polymux team, opencode and `null`, which does nothing. The rest of this page is the target design; [the catalogue](../apps/server/bench/catalog.md) tracks what is planned.
 
-The benchmark scores how well a harness handles real assistant work, so changes to Polymux, and other harnesses, can be compared on quality, speed and cost. It complements [`apps/server/evals/`](../apps/server/evals/), which checks the server's behaviour deterministically against a scripted model; the benchmark uses a real, pinned model. What it optimises for is [Bot quality](architecture.md#bot-quality).
+The benchmark is an indicator, not a target. It runs real assistant work against a simulated world so a change to Polymux, or another harness, can be checked for regressions in quality, speed and cost. It complements [`apps/server/evals/`](../apps/server/evals/), which checks the server's behaviour deterministically against a scripted model; the benchmark uses a real, pinned model. What it watches is [Bot quality](architecture.md#bot-quality).
+
+## Reading it
+
+A score that becomes a goal stops measuring what it was meant to, and some of these scores can mislead outright, so read them with care.
+
+- **Trust it where the outcome is checkable**: did the booking happen, were the tasks done, was nothing done unasked, how long until the first reply. These are what the checks read from the world's state.
+- **Treat it as a weak hint for the rest.** Tone, the value of proactivity, ideas and creativity don't reduce to a pass or a count: counting assistant tells doesn't show a bot sounds human, and model judges of ideas are near chance. Those are judged by reading transcripts and traces and by the user's reactions ([Proactivity](proactivity.md#judging-it-observe-dont-benchmark)).
+- **Use it as a regression guard**: a change should not make an indicator worse beyond noise. Don't tune prompts or behaviour to raise a score.
+- **Every number has a spread.** Run at least three reps, show the spread, and don't read a gap inside it as a difference. Two reps once showed a responsiveness drop that disappeared at four.
+- **Read what users saw.** Every comparison comes with a sample of transcripts from `run.json`; numbers alone have hidden overclaims before.
 
 ## What it reports
 
@@ -22,7 +32,7 @@ An index version weights categories; a category holds scenarios; a scenario expa
 
 [`apps/server/bench/catalog.md`](../apps/server/bench/catalog.md) lists the 19 quality categories, their weights and every planned scenario, set in the lives of recurring personas so the data and phrasing stay realistic.
 
-Conversational quality, whether the agent talks like a thoughtful person, as long as the content needs and without filler, has no standard benchmark. It is scored by a rubric judge calibrated against hand-rated replies, on a different pinned model and controlled for length, backed by automatic checks for filler, Markdown and walls of text.
+Conversational quality, whether the agent talks like a thoughtful person, as long as the content needs and without filler, has no standard benchmark. It is scored by a rubric judge calibrated against hand-rated replies, on a different pinned model and controlled for length, backed by automatic checks for filler, Markdown and walls of text. Like every judged score here it is a hint; the transcripts decide.
 
 ## Fixed conditions
 

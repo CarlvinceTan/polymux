@@ -76,6 +76,22 @@ Creativity often comes from references that spark ideas, but the experiments and
 - **The idea bar ranks a night's ideas in one pass, and may pick none.** It scores usefulness, originality and feasibility separately rather than one combined number, since a single "attention saved" score favours safe chores. Fixed thresholds on model scores proved brittle.
 - **Diversity is tracked per bot.** A bot's ideas narrow over weeks; when its diversity drops, its source mix changes.
 
+## Acting on ideas: aligned or not
+
+Who decides depends on where an idea points. One that continues a goal's current direction is the bot's job; one that would change the direction changes the user's plan, so it is the user's to confirm.
+
+| The idea... | Treatment |
+| --- | --- |
+| Continues the goal's current stage | The bot acts on it, within its initiative dial and message budget |
+| Brings a later stage forward, or reorders the stages | The bot acts and tells the user, or asks first when it is costly |
+| Steers the goal in a direction its stages don't take | A suggestion on the card, with its reasoning and evidence; nothing changes until the user accepts |
+| Implies a goal the bot doesn't have | Always a suggestion |
+
+- **Alignment isn't the only gate.** An aligned idea that is hard to undo, costs money or reaches outside the user's own machine and accounts still needs their approval, as any such action does.
+- **Suggestive doesn't mean idle.** For a divergent idea the bot may do cheap, reversible homework (check feasibility, gather evidence) so the suggestion arrives with substance, without acting on it. Accepting it rewrites the goal's stages, so the change of direction is the user's decision on record.
+- **When unsure, the cautious class wins.** A decision model reads each idea against its goal and current stage; on a borderline call it treats the idea as the more divergent class.
+- **Stages have to be concrete.** Broad stages absorb almost any idea as aligned, which would let an open-ended bot act on nearly everything; the risk gate and the message budget stay in force either way.
+
 ## Dreaming
 
 Dreaming uses time the user isn't using. It has two depths, like sleep stages, and how much of it a bot does follows its exploration dial.
@@ -137,6 +153,7 @@ Timing fails separately from content: models left to choose speak too early abou
 | Two latitude dials scored from the role | Experimental; separated duties from creative work and caught role drift |
 | Ambient ingestion, attention filter, fading impressions | Experimental; behaved believably in replay |
 | References shaping ideas | Experimental; no measured lift yet, and references matter more for open-ended bots |
+| Acting on aligned ideas, suggesting divergent ones | Experimental; labels read sensibly but only about 72% repeatable |
 | One-pass ranking, habituation, anticipation | Experimental; habituation spread references, ranking unproven, anticipation untried |
 
 ## Open questions
@@ -172,6 +189,7 @@ The design was checked against published work in four areas. The full reviews, a
 - Adjacent-field sources gave usable references; a random encyclopedia feed gave forced analogies.
 - Separate initiative and exploration scores told ongoing duties from creative work on roles the prompt never named (home manager 0.80 and 0.23, writing partner 0.55 and 0.88) and caught role edits; a single score didn't. The initiative score moved more under rewording than exploration did.
 - Habituation spread references for the open-ended bot without changing quality; one-pass ranking agreed with a judge from the same model more often than fixed thresholds did, which is self-agreement, not proof of quality.
+- Classifying about 1,200 ideas against their goal's stages gave labels that read sensibly but were only about 72% repeatable. Reference-sparked ideas diverged from the plan more often than goals-only ones (operational bot: 69% against 46%), and how much diverged depended on how tight the goals were (narrow bot 59 to 71%, open-ended 5 to 18%).
 - Checking ideas against later commits told nothing; reading the journal is what shows behaviour.
 
 Next: anticipation as a dream output, the ablation decoration check with shuffled reference order, a stronger model for the deep dream than for the filter, a judge from another model family, at least three reps, and the user's own ratings of a blind sample of matched pairs kept with the results.
