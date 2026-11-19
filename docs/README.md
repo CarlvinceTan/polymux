@@ -42,6 +42,7 @@ Generated output is separate from source: `.build/` holds caches and local build
 | [References](references.md) | Other products that inform Polymux's behaviour. |
 | [Chat style](chat-style.md) | How bots' messages to the user read, what the style is modelled on, and where it is enforced. |
 | [Proactivity](proactivity.md) | Design for proactive behaviour: the goal hierarchy, intentions, ambient ingestion through an attention filter, and dreaming. |
+| [Intake sources](intake-sources.md) | Catalogue of sources for ambient ingestion by field and kind, with trust tiers, learned weights and swappable source, search and fetch interfaces. |
 | [Speech](speech.md) | Dictation stages, the review gate, and how its on-device model is converted and checked. |
 | [Benchmarks](benchmarks.md) | The planned benchmark index: quality, speed and cost across harnesses, and how it stays honest. |
 
