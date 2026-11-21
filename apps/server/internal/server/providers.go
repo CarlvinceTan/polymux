@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,7 +42,7 @@ func (s *Server) syncProviders(reg *providers.Registry) {
 			continue
 		}
 		key, _ := reg.Secrets.Get(p.ID)
-		spec := agentruntime.ProviderSpec{ID: p.ID, Type: p.Type, BaseURL: p.BaseURL, Key: key, Headers: p.Headers, Session: p.SessionHeader, Preferred: providers.Preferred(p.Type), Windows: map[string]int{}, Levels: map[string][]string{}}
+		spec := agentruntime.ProviderSpec{ID: p.ID, Name: cmp.Or(strings.TrimSpace(p.Name), p.Type), Type: p.Type, BaseURL: p.BaseURL, Key: key, Headers: p.Headers, Session: p.SessionHeader, Preferred: providers.Preferred(p.Type), Windows: map[string]int{}, Levels: map[string][]string{}}
 		if builtin := providers.Builtin(p.Type); builtin != nil {
 			spec.Builtin, spec.Credentials = builtin, reg.Credentials()
 		}

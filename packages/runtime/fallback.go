@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/MichaelKinsy/PiG/ai"
 )
@@ -413,7 +414,7 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 			}
 			attempts++
 			if model.ID != original.ID {
-				if err := notifySwitch(markerID(transcript), switchNotice(original.ID, model.ID, f.limited(own))); err != nil {
+				if err := notifySwitch(markerID(transcript), f.switchNotice(original, model, f.limited(own))); err != nil {
 					f.release(id, epoch)
 					endFallback(target, model, err.Error(), ai.StopReasonAborted)
 					return
@@ -542,11 +543,45 @@ func failureReason(result *ai.AssistantMessage, err error) string {
 	return reason[:min(len(reason), 300)]
 }
 
-func switchNotice(from, to string, limited bool) string {
+func (f *fallbackModels) switchNotice(original, replacement *ai.Model, limited bool) string {
+	from, to := modelLabel(original), modelLabel(replacement)
+	if strings.EqualFold(from, to) && original.ProviderID() != replacement.ProviderID() {
+		from += " on " + f.providerLabel(original.ProviderID())
+		to = f.providerLabel(replacement.ProviderID())
+	}
 	if limited {
 		return from + " hit its usage limit, so " + to + " replied instead."
 	}
 	return from + " is unavailable, so " + to + " replied instead."
+}
+
+func modelLabel(model *ai.Model) string {
+	if name := strings.TrimSpace(model.DisplayName); name != "" {
+		return name
+	}
+	if strings.ContainsRune(model.ID, '/') {
+		return model.ID
+	}
+	id := []rune(model.ID)
+	for i := 1; i+1 < len(id); i++ {
+		if id[i] == '-' && unicode.IsDigit(id[i-1]) && unicode.IsDigit(id[i+1]) {
+			id[i] = '.'
+		}
+	}
+	words := strings.Fields(strings.ReplaceAll(string(id), "-", " "))
+	for i, word := range words {
+		label := []rune(word)
+		label[0] = unicode.ToUpper(label[0])
+		words[i] = string(label)
+	}
+	return strings.Join(words, " ")
+}
+
+func (f *fallbackModels) providerLabel(id string) string {
+	if provider := f.Models.GetProvider(id); provider != nil && provider.Name != "" {
+		return provider.Name
+	}
+	return strings.TrimPrefix(id, "settings:")
 }
 
 func endFallback(target *ai.AssistantMessageEventStream, model *ai.Model, message string, reason ai.StopReason) {

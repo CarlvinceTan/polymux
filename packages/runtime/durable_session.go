@@ -358,6 +358,7 @@ const MaxRequestBytes = 128 << 10
 type modelRegistry struct {
 	mu      sync.RWMutex
 	id      string
+	name    string
 	api     ai.API
 	baseURL string
 	key     string
@@ -399,6 +400,7 @@ func newModelRegistry(baseURL, key string, client Client) *modelRegistry {
 // ProviderSpec is a provider from Settings that chats can use.
 type ProviderSpec struct {
 	ID      string
+	Name    string
 	Type    string
 	BaseURL string
 	Key     string
@@ -422,7 +424,7 @@ func SettingsProvider(id string) string { return "settings:" + id }
 // newSpecRegistry serves a local or custom Settings provider over the OpenAI-compatible API.
 func newSpecRegistry(spec ProviderSpec) *modelRegistry {
 	client := Client{Headers: spec.Headers, Session: spec.Session}
-	r := &modelRegistry{id: SettingsProvider(spec.ID), baseURL: spec.BaseURL, key: spec.Key, client: client, reasoning: true,
+	r := &modelRegistry{id: SettingsProvider(spec.ID), name: spec.Name, baseURL: spec.BaseURL, key: spec.Key, client: client, reasoning: true,
 		windows: spec.Windows, levels: spec.Levels, providers: make(map[string]ai.Provider)}
 	r.api = ai.APIOpenAICompletions
 	r.open = func(model string) ai.Provider {
@@ -436,7 +438,7 @@ func newSpecRegistry(spec ProviderSpec) *modelRegistry {
 
 // newBuiltinRegistry serves a Settings provider through PiG's own provider.
 func newBuiltinRegistry(spec ProviderSpec) *modelRegistry {
-	r := &modelRegistry{id: SettingsProvider(spec.ID), client: Client{Headers: spec.Headers, Session: spec.Session}, windows: spec.Windows,
+	r := &modelRegistry{id: SettingsProvider(spec.ID), name: spec.Name, client: Client{Headers: spec.Headers, Session: spec.Session}, windows: spec.Windows,
 		builtin: spec.Builtin, credentials: spec.Credentials, providers: make(map[string]ai.Provider)}
 	for _, model := range spec.Models {
 		r.add(model)
@@ -552,7 +554,7 @@ func (r *modelRegistry) register(models *ai.Models) {
 		}, r.client.Session)(ctx, selected, transcript, opts)
 	}
 	models.SetProvider(&ai.ModelsProvider{
-		ID: r.id, Name: r.id, BaseURL: r.baseURL,
+		ID: r.id, Name: r.name, BaseURL: r.baseURL,
 		GetModels: func() ([]*ai.Model, error) {
 			return r.list(), nil
 		},
@@ -585,8 +587,12 @@ func (r *modelRegistry) registerBuiltin(models *ai.Models) {
 		return r.builtin.StreamSimple(ctx, &selected, transcript, opts)
 	}, r.client.Session)
 	auth := r.builtin.Auth
+	name := r.name
+	if name == "" {
+		name = r.builtin.Name
+	}
 	models.SetProvider(&ai.ModelsProvider{
-		ID: r.id, Name: r.builtin.Name, Headers: r.builtin.Headers,
+		ID: r.id, Name: name, Headers: r.builtin.Headers,
 		GetModels: func() ([]*ai.Model, error) {
 			return r.list(), nil
 		},

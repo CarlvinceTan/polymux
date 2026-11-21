@@ -181,7 +181,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                                   createdAt: "2026-10-27T06:00:00Z", status: MessageStatus.done, seq: 1, agentID: "t-chief")
             let run = Run(id: "switched-reply", conversationID: "t-chief", trigger: RunTrigger.message,
                           seq: 2, createdAt: "2026-10-27T06:00:00Z", agentID: "t-chief", status: RunStatus.completed,
-                          summary: "Ready", notice: "gpt-6.1-sol hit its usage limit, so deepseek-v4-pro replied instead.")
+                          summary: "Ready", notice: "DeepSeek V4.1 Flash on DeepSeek is unavailable, so OpenCode Go replied instead.")
             return [Event(seq: 1, conversationID: "t-chief", type: EventType.messageDone, message: message, createdAt: message.createdAt),
                     Event(seq: 2, conversationID: "t-chief", type: EventType.runDone, run: run)]
         }
