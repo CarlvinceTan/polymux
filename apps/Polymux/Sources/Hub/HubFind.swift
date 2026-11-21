@@ -2,6 +2,10 @@ import SwiftUI
 import PolymuxKit
 
 extension HubStore {
+    var filterDisplay: String {
+        selector == HubSettingsSelector.logo ? HubSettingsSelector.logo : HubSettingsSelector.both
+    }
+
     /// What Hub's + offers, starting with what fits the list on show.
     var actions: [PluginAction] {
         var out = [PluginAction(title: "New chat", symbol: "plus.message") { self.panel = .chat },
@@ -36,9 +40,8 @@ struct HubPluginSettings: View {
                 .accessibilityLabel("Accounts")
                 .accessibilityValue(String(count(store)))
                 SettingsPicker("Platform selector",
-                               selection: Binding(get: { store.selector }, set: { value in Task { await store.setSelector(value) } }),
-                               options: [("Text", HubSettingsSelector.text), ("Text and logo", HubSettingsSelector.both),
-                                         ("Logo", HubSettingsSelector.logo)])
+                               selection: Binding(get: { store.filterDisplay }, set: { value in Task { await store.setSelector(value) } }),
+                               options: [("Compact", HubSettingsSelector.logo), ("Full", HubSettingsSelector.both)])
                 Toggle("Incognito", isOn: Binding(get: { store.incognito }, set: { on in Task { await store.setIncognito(on) } }))
                     .accessibilityLabel("Incognito")
             } header: {

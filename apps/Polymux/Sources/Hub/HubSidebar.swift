@@ -18,7 +18,7 @@ struct PlatformMark: View {
         .accessibilityHidden(true)
     }
 
-    static let known: Set<String> = ["bluesky", "gmessages", "imessage", "instagram", "linkedin", "matrix", "messenger",
+    static let known: Set<String> = ["bluesky", "discord", "gmessages", "imessage", "instagram", "linkedin", "matrix", "messenger",
                                      "signal", "slack", "telegram", "twitter", "wechat", "whatsapp"]
 }
 
@@ -178,12 +178,11 @@ struct HubSidebar: View {
     }
 
     private func sourceLabel(_ source: HubSource) -> AnyView {
-        let title = options.first { $0.value == source }?.title ?? ""
-        switch store.selector {
-        case HubSettingsSelector.logo: return AnyView(sourceMark(source))
-        case HubSettingsSelector.both: return AnyView(HStack(spacing: 5) { sourceMark(source); Text(title) })
-        default: return AnyView(Text(title))
+        if store.filterDisplay == HubSettingsSelector.logo {
+            return AnyView(sourceMark(source))
         }
+        let title = options.first { $0.value == source }?.title ?? ""
+        return AnyView(HStack(spacing: 5) { sourceMark(source); Text(title) })
     }
 
     @ViewBuilder private func sourceMark(_ source: HubSource) -> some View {
