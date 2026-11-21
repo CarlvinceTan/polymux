@@ -95,7 +95,7 @@
         {/if}
         <a class="secondary" href="#explore">Explore <span aria-hidden="true">↓</span></a>
       </div>
-      <p class="availability">Client + server · macOS only · Open source</p>
+      <p class="availability">{nightly ? 'Nightly build · ' : ''}Client + server · macOS only · Open source</p>
     </div>
     <AgentWorld active={phrases[phrase].agent} />
     <AgentDemo />
@@ -166,7 +166,7 @@
       {/if}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Terminal" aria-labelledby="install-tab-Terminal" tabindex="0" hidden={selectedTab !== 'Terminal'}>
-      <p>Install the stable CLI on Apple silicon{downloads?.platforms.macos ? '' : ' when a stable release is available'}.</p>
+      <p>Install the stable CLI on Apple silicon. Requires a published stable CLI release.</p>
       <div class="terminal-command">
         <code>{installCommand}</code>
         <button type="button" onclick={copyInstall} aria-label="Copy Terminal install command">Copy</button>
