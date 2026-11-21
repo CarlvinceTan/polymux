@@ -39,6 +39,9 @@ struct Onboarding: View {
     @AppStorage("serverAddress") private var address = ServerHost.address
     @Environment(PluginStore.self) private var plugins: PluginStore?
     @Environment(\.colorScheme) private var scheme
+    #if os(iOS)
+    @Environment(\.dynamicTypeSize) private var typeSize
+    #endif
     #if os(macOS)
     private let permissions = Permissions.shared
     #endif
@@ -228,10 +231,12 @@ struct Onboarding: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Button(step == .plugins ? "Done" : "Continue", action: advance)
-                .buttonStyle(OnboardingPrimaryButton())
-                .keyboardShortcut(.defaultAction)
-                .disabled(joining || needsPairing)
+            if !needsPairing {
+                Button(step == .plugins ? "Done" : "Continue", action: advance)
+                    .buttonStyle(OnboardingPrimaryButton())
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(joining)
+            }
         }
         .padding(.top, 4)
     }
@@ -307,36 +312,12 @@ struct Onboarding: View {
     private var pairing: some View {
         VStack(alignment: .leading, spacing: 8) {
             #if os(iOS)
-            if QRScanner.available && !joined {
-                Button("Scan QR code", systemImage: "qrcode.viewfinder") {
-                    Keyboard.close()
-                    scanning = true
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(joining)
+            if !joined {
+                phonePairing
             }
+            #else
+            linkEntry
             #endif
-            HStack(spacing: 8) {
-                TextField("Pairing link", text: $link, prompt: Text("Paste a pairing link"))
-                    .labelsHidden()
-                    .lineLimit(1)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    .textFieldStyle(.roundedBorder)
-                    #endif
-                    .disabled(joining)
-                    .onSubmit(connect)
-                Button("Connect", action: connect)
-                    .tint(.blue)
-                    #if os(iOS)
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    #endif
-                    .disabled(joining || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
             if joining {
                 ProgressView().controlSize(.small)
             } else if joined {
@@ -347,7 +328,7 @@ struct Onboarding: View {
             if let joinIssue {
                 Text(joinIssue).font(.footnote).foregroundStyle(.secondary)
             } else if !joined {
-                Text("On the other device, open Settings › Network › Add device.")
+                Text("On the other device, choose your network in Settings › Network, then tap +.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -355,7 +336,62 @@ struct Onboarding: View {
         }
     }
 
+    private var linkEntry: some View {
+        #if os(iOS)
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+        #else
+        let layout = HStackLayout(spacing: 8)
+        #endif
+        return layout {
+            TextField("Pairing link", text: $link, prompt: Text("Paste a pairing link"))
+                .labelsHidden()
+                .lineLimit(1)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
+                #endif
+                .disabled(joining)
+                .onSubmit(connect)
+            Button("Connect", action: connect)
+                .tint(.blue)
+                #if os(iOS)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                #endif
+                .disabled(joining || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
     #if os(iOS)
+    private var phonePairing: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if QRScanner.available || Self.verifying {
+                Button {
+                    Keyboard.close()
+                    scanning = true
+                } label: {
+                    Label("Scan QR code", systemImage: "qrcode.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(joining)
+                HStack(spacing: 12) {
+                    Rectangle().fill(.separator).frame(height: 1)
+                    Text("or paste a link").font(.subheadline).foregroundStyle(.secondary)
+                        .layoutPriority(1)
+                    Rectangle().fill(.separator).frame(height: 1)
+                }
+            }
+            linkEntry
+        }
+    }
+
     private func acceptLink(_ url: URL) {
         guard !joining else { return }
         step = .host
