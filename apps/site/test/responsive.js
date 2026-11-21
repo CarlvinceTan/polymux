@@ -175,6 +175,7 @@ test('the stable disk image is the primary download; Nightly stays optional', as
       await page.locator(`.hero a.primary[href="${want}"]`).waitFor();
       assert.deepEqual(await page.locator('.download-line a').evaluateAll((links) => links.map((link) => link.href)),
         hasStable ? [want] : []);
+      assert.equal(await page.getByRole('link', {name: 'Terminal install', exact: true}).count(), hasStable ? 1 : 0);
       const unstable = page.getByRole('link', {name: 'Download Nightly'});
       if (hasNightly) assert.equal(await unstable.getAttribute('href'), nightly.macos.url);
       else assert.equal(await unstable.count(), 0);

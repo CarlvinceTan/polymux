@@ -70,6 +70,22 @@ POLYMUX_SIGN_IDENTITY="-" POLYMUX_TEAM_ID="" \
 
 Open Polymux, then pair it with your server.
 
+## Terminal
+
+Once a stable Mac release is available, this command installs just the CLI on an Apple silicon Mac. It does not install the app, start a server, or overwrite an existing `polymux` executable:
+
+```sh
+curl -fsSL https://polymux.com/install-cli.sh | sh
+```
+
+To download the same Mac disk image as the website, run:
+
+```sh
+~/.local/bin/polymux app download
+```
+
+The `.dmg` is saved in the current directory. Open it and drag Polymux to Applications.
+
 ## Pair another Mac
 
 1. On an already connected client, open **Settings → Network**, choose the network, and press **+** beside the close button to get a pairing link and QR code.

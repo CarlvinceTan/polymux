@@ -106,14 +106,14 @@
     <div class="section-heading">
       <p class="eyebrow">Install Polymux</p>
       <h2 id="install-title">Start with <span class="glow">your Mac.</span></h2>
-      <p>{client ? 'Open the disk image, drag Polymux to Applications, then open it to start setup. The Mac app includes the server.' : 'The stable Mac installer is currently unavailable. See the installation guide for other ways to get started.'}</p>
+      <p>Open the disk image, drag Polymux to Applications, then open it to start setup. The Mac app includes the server.</p>
     </div>
     {#if client}
       <p class="download-line">
         <a class="primary" href={client.url}><DownloadIcon />Download for macOS</a>
         <span>Polymux {downloads?.version} · DMG · {formatFileSize(client.size)}</span>
       </p>
-      <p class="install-note">Apple silicon · macOS 27 or later · <a href="/docs/installation/">Installation guide</a></p>
+      <p class="install-note">Apple silicon · macOS 27 or later · <a href="/docs/installation/#terminal">Terminal install</a></p>
     {:else}
       <p class="install-note"><a href="/docs/installation/">Installation guide</a></p>
     {/if}

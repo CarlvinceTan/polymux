@@ -17,12 +17,15 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Println("usage: polymux serve [server flags] | pair [--url URL] [--no-qr] | drain [--status | --id ID [--cancel]] | host install|remove|update|forget | move --to SERVER_ID | export FILE | import FILE [--force] | version")
+		fmt.Println("usage: polymux serve [server flags] | app download | pair [--url URL] [--no-qr] | drain [--status | --id ID [--cancel]] | host install|remove|update|forget | move --to SERVER_ID | export FILE | import FILE [--force] | version")
 		return nil
 	}
 	if args[0] == "version" {
 		fmt.Println(buildSHA)
 		return nil
+	}
+	if args[0] == "app" {
+		return app(args[1:])
 	}
 	// The server's /privacy runs this, so each answer comes from a fresh process.
 	if args[0] == "privacy" {
