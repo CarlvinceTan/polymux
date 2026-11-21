@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import PolymuxKit
+@testable import PolymuxAvatar
 
 @MainActor struct ResponsiveStoreTests {
     @Test func providerSectionsShareWorkAndPublishIndependently() async throws {
@@ -172,6 +173,21 @@ import Testing
         #expect(chat.messages.first?.threadID == "created")
     }
 
+    @Test func createdBotKeepsItsAvatarWhenTheServerIdReplacesTheStagedOne() async throws {
+        let rig = try await ResponsiveRig()
+        defer { rig.close() }
+        let sidebar = SidebarStore(client: rig.client, cache: rig.rawCache)
+        let avatars = AvatarStore(sidebar: sidebar)
+        await sidebar.load()
+        var done = false
+        let local = sidebar.createAgent(CreateAgentRequest(name: "Pending Bot", avatar: ResponsiveBackend.createdAvatar)) { done = true }
+        avatars.sync(agents: sidebar.agents)
+        #expect(avatars.options(for: local.id).design == ResponsiveBackend.createdAvatar)
+        try await eventually { done }
+        // No other sync runs: the real id must already carry the avatar, not the default.
+        #expect(avatars.options(for: "created").design == ResponsiveBackend.createdAvatar)
+    }
+
     @Test func attachmentsWaitForCreationAndUseTheResolvedThread() async throws {
         let rig = try await ResponsiveRig(holding: ["POST /threads"])
         defer { rig.close() }
@@ -272,6 +288,11 @@ private actor ResponsiveBackend {
     private var failures: [String: Int] = [:]
     private var offline = false
 
+    static let createdAvatar: AvatarDesign = {
+        var options = AvatarOptions.default
+        options.shape = .star
+        return options.design
+    }()
     static let network = NetworkInfo(server: .init(name: "Server", build: "", platform: "macOS", role: "server"),
                                     devices: [.init(id: "mac", name: "Mac")], current: "mac", host: nil, online: [])
     static func message(_ id: String, text: String) -> Message {
@@ -313,7 +334,7 @@ private actor ResponsiveBackend {
             let event = Event(seq: 1, conversationID: "chat", type: "message.start", message: Self.message("live", text: "Live reply"))
             data = Data("data: \(String(decoding: try JSONEncoder().encode(event), as: UTF8.self))\n\n".utf8)
         case "GET /threads/chat/tool-runs": data = try JSONEncoder().encode([Run(id: "history", conversationID: "chat", seq: 1, status: "done")])
-        case "POST /agents": data = try JSONEncoder().encode(Agent(id: "created", name: "Pending Bot"))
+        case "POST /agents": data = try JSONEncoder().encode(Agent(id: "created", name: "Pending Bot", avatar: Self.createdAvatar))
         case "POST /threads": data = try JSONEncoder().encode(Thread(id: "created", agentID: "a", title: "Created group", agentIDs: ["a", "b"]))
         case "GET /agents", "GET /threads", "GET /threads/chat/events": data = Data("[]".utf8)
         default: data = Data("{}".utf8)

@@ -94,6 +94,8 @@ struct AvatarPoke: Equatable {
     init(sidebar: SidebarStore) {
         self.sidebar = sidebar
         sync(agents: sidebar.agents)
+        // A new bot's server id replaces its staged one; carry its avatar over before it draws once as the default.
+        sidebar.onAgentsReplaced = { [weak self] in self?.sync(agents: sidebar.agents) }
     }
 
     func options(for agentID: String) -> AvatarOptions {

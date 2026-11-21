@@ -186,9 +186,12 @@ public final class SidebarStore {
             merge(thread, into: &threads)
         }
         clearNotice()
+        onAgentsReplaced?()
         await accept(agent)
     }
 
+    /// Runs once a created agent's server copy has replaced its staged one, before anything else can draw it.
+    @ObservationIgnored public var onAgentsReplaced: (@MainActor () -> Void)?
     public let activity = ActivityStore()
     public let commits = ProfileCommit()
     public private(set) var agents: [Agent] = []
