@@ -25,7 +25,7 @@ A bot is for a persistent role with its own chat and memory. Use a task for boun
 
 ## Write the instructions
 
-- `role` is a short label of the one job, not a paragraph. It is what the user sees.
+- `role` is a short job title in Title Case that names who the bot is, such as "Polymux Maintainer" or "Travel Planner"; never the duty ("Polymux maintenance") or a paragraph. It is what the user sees.
 - `prompt` is the job, the anti-jobs, the concrete how (which inbox, API, folder or channel), and when to stay quiet.
 - Do not restate Polymux's default behaviour or voice. `create_agent` appends them. If the user wants a distinct voice, create the bot first, then set its full instructions with `update_agent`; that replaces the defaults, so carry over the job, anti-jobs and the parts that still apply.
 - No "I can also help with..." or capability lists. No instructions for work the bot will not do. Keep it short enough to read in one screen.

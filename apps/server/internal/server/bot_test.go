@@ -233,7 +233,7 @@ func TestBotManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile, err := api.Store.Profile(t.Context(), "assistant")
-	if err != nil || profile.Agent.Name != "Coach" || profile.Agent.Role != "Study guide" || profile.Prompt != "Explain one step at a time" || profile.Agent.Avatar == nil || profile.Agent.Avatar.Color != "bleu" {
+	if err != nil || profile.Agent.Name != "Coach" || profile.Agent.Role != "Study Guide" || profile.Prompt != "Explain one step at a time" || profile.Agent.Avatar == nil || profile.Agent.Avatar.Color != "bleu" {
 		t.Fatal("self configuration was not persisted", profile, err)
 	}
 	created, err := (&agentTool{server: api, action: "create"}).Execute(ctx, "hire", json.RawMessage(`{"role":"Researcher","prompt":"Find primary sources","initial_task":"Find the reference"}`), nil)

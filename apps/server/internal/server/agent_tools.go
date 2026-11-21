@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
+	"unicode"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
@@ -39,7 +41,7 @@ func (t *agentTool) Schema() ai.ToolSchema {
 		required = append(required, "agent_id")
 	} else {
 		properties["name"] = map[string]any{"type": "string", "maxLength": 128}
-		properties["role"] = map[string]any{"type": "string", "maxLength": 256}
+		properties["role"] = map[string]any{"type": "string", "maxLength": 256, "description": "The bot's job title in Title Case, naming who it is, such as \"Polymux Maintainer\" or \"Travel Planner\"; never the duty or activity (not \"Polymux maintenance\")"}
 		properties["prompt"] = map[string]any{"type": "string", "maxLength": 64000}
 		if t.action == "create" {
 			delete(properties, "agent_id")
@@ -82,6 +84,10 @@ func (t *agentTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
+	}
+	if input.Role != nil {
+		title := roleTitle(*input.Role)
+		input.Role = &title
 	}
 	if t.action == "delete" && input.AgentID == "" {
 		return agent.AgentToolResult{}, errors.New("provide the bot ID to delete")
@@ -145,4 +151,21 @@ func (t *agentTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 		return toolResult(map[string]any{"agent_id": input.AgentID, "status": "scheduled"})
 	}
 	return agent.AgentToolResult{}, errors.New("invalid bot action")
+}
+
+// roleTitle capitalises each word of a role, leaving small joining words and words with their own capitals (iOS) alone.
+func roleTitle(role string) string {
+	small := map[string]bool{"a": true, "an": true, "and": true, "at": true, "by": true, "for": true, "in": true, "of": true, "on": true, "or": true, "the": true, "to": true}
+	words := strings.Fields(role)
+	for i, word := range words {
+		if i > 0 && small[word] {
+			continue
+		}
+		runes := []rune(word)
+		if unicode.IsLower(runes[0]) && !strings.ContainsFunc(word[len(string(runes[0])):], unicode.IsUpper) {
+			runes[0] = unicode.ToUpper(runes[0])
+			words[i] = string(runes)
+		}
+	}
+	return strings.Join(words, " ")
 }
