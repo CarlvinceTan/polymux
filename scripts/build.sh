@@ -94,12 +94,24 @@ dmg() (
   [ -d "$APP" ] || { echo "Build the app first: scripts/build.sh macos" >&2; exit 1; }
   VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
   OUT="$DIST/macos/Polymux-$VERSION-arm64.dmg"
-  STAGE=$(mktemp -d "${TMPDIR:-/tmp}/polymux-dmg.XXXXXX")
-  trap 'rm -rf "$STAGE"' EXIT
+  WORK=$(mktemp -d "${TMPDIR:-/tmp}/polymux-dmg.XXXXXX")
+  STAGE="$WORK/stage" IMAGE="$WORK/layout.dmg" DISK=
+  trap '[ -z "$DISK" ] || diskutil eject "$DISK" >/dev/null 2>&1; rm -rf "$WORK"' EXIT
+  mkdir -p "$STAGE/.background"
   ditto "$APP" "$STAGE/Polymux.app"
   ln -s /Applications "$STAGE/Applications"
+  cp "$ROOT/apps/Polymux/Installer/Background.tiff" "$STAGE/.background/"
   rm -f "$OUT"
-  if ! diskutil image create from --volumeName "Polymux $VERSION" --format UDZO "$STAGE" "$OUT"; then
+  # diskutil leaves .DS_Store out of a folder, so the window layout is written
+  # into a writable copy of the volume before it is compressed.
+  diskutil image create from --volumeName "Polymux $VERSION" --format RAW "$STAGE" "$IMAGE"
+  ATTACHED=$(diskutil image attach --mountOptions nobrowse "$IMAGE")
+  DISK=$(printf '%s\n' "$ATTACHED" | awk 'NR == 1 {print $1}')
+  VOLUME=$(printf '%s\n' "$ATTACHED" | awk -F '\t' '$3 != "" {print $3}')
+  [ -d "$VOLUME/Polymux.app" ] || { echo "The disk image did not mount." >&2; exit 1; }
+  python3 "$ROOT/scripts/lib/dmg-layout.py" "$VOLUME/.DS_Store" "Polymux $VERSION"
+  diskutil eject "$DISK" >/dev/null && DISK=
+  if ! diskutil image create from --format UDZO "$IMAGE" "$OUT"; then
     rm -f "$OUT"
     exit 1
   fi

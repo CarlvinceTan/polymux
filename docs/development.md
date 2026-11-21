@@ -64,6 +64,8 @@ The repository and Mac prerelease downloads are public. TestFlight access is con
 
 Development delivery runs are serialized. `scripts/dev-version.py` sets the iOS build number to the `dev` commit count (shown as `0.4.0 (190)`), so local and CI uploads never collide; the script defaults to the same number. The Mac build number stays monotonic across workflow runs and reruns. Do not rewrite `dev` history or upload an arbitrary larger iOS build. Build `1.0.1` was the first manual upload; every later iOS build must exceed it.
 
+`scripts/build.sh dmg` lays out the release disk image's Finder window without Finder: `scripts/lib/dmg-layout.py` writes its `.DS_Store` (window size, icon positions, background), and `apps/Polymux/Installer/background.swift` draws the committed `Background.tiff` to the same geometry. Rerun the Swift script after changing either; `scripts/dmg_test.py` checks they match. Finder always draws icon labels black over a background picture, so the art stays light.
+
 Native validation and delivery use GitHub's [`xcode-27` preview runner](https://github.com/actions/runner-images/issues/14404) and select its latest stable Xcode for the required macOS/iOS 27 SDKs. The `macos-26` image only provides Xcode 26. Do not lower deployment targets or execute public PR code on the server to work around SDK availability.
 
 ## Crash logs
