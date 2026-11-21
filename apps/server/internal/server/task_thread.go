@@ -206,5 +206,14 @@ func (t *taskThreadTool) Execute(ctx context.Context, call string, args json.Raw
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
+	if id == thread && thread != owner && input.Status != nil && *input.Status == contract.TaskInfoStatusDone {
+		report := ""
+		if messages, err := t.server.Store.TaskMessages(ctx, id, 1); err == nil && len(messages) > 0 {
+			report = bounded(store.Text(messages[0]), 2048)
+		}
+		if err := t.server.Store.WakeOwner(ctx, owner, id, updated.Title, report); err != nil {
+			return agent.AgentToolResult{}, err
+		}
+	}
 	return toolResult(summarize(updated))
 }
