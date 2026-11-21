@@ -3,6 +3,7 @@
   "title": "OpenTunnel",
   "description": "Reach this server through an OpenTunnel route.",
   "version": "0.1.0",
+  "symbol": "brand-anomaly",
   "kind": "global",
   "engines": { "plugins": 1 },
   "service": "bin/polymux-opentunnel",

@@ -96,7 +96,7 @@ private struct PluginBrowser: View {
         ForEach(rows, id: \.name) { plugin in
             Button { open(plugin.name) } label: {
                 HStack {
-                    Label(plugin.title, systemImage: plugin.icon())
+                    Label(plugin.title, pluginSymbol: plugin.icon())
                         .labelStyle(PluginLabel()).lineLimit(1).layoutPriority(1)
                     Spacer(minLength: PanelStyle.rowInset)
                     Text(note(plugin)).foregroundStyle(.muted).lineLimit(1)
@@ -134,7 +134,7 @@ private struct PluginBrowser: View {
                         Text(item.description).font(.caption).foregroundStyle(.muted).lineLimit(2)
                     }
                 } icon: {
-                    Image(systemName: item.symbol.isEmpty ? "puzzlepiece.extension" : item.symbol)
+                    Image(plugin: item.symbol.isEmpty ? PluginBrand.symbol(name: item.name) ?? "puzzlepiece.extension" : item.symbol)
                 }
                 .labelStyle(PluginLabel())
                 Spacer(minLength: PanelStyle.rowInset)

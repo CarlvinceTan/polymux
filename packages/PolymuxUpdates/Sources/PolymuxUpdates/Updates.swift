@@ -39,7 +39,7 @@ import Sparkle
     public func check() {
         guard !checking else { return }
         do { try controller.updater.start() }
-        catch { status = "Couldn’t check for updates."; return }
+        catch { settle("Couldn’t check for updates."); return }
         guard !controller.updater.sessionInProgress else {
             status = "An update check is already in progress."
             return
@@ -57,7 +57,7 @@ import Sparkle
 
     public func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
         available = false
-        if checking { status = "No updates available." }
+        if checking { settle("No updates available.") }
     }
 
     public func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
@@ -65,8 +65,18 @@ import Sparkle
         checking = false
         if let error {
             let failure = error as NSError
-            status = failure.domain == SUSparkleErrorDomain && failure.code == SUError.noUpdateError.rawValue
-                ? "No updates available." : "Couldn’t check for updates."
+            settle(failure.domain == SUSparkleErrorDomain && failure.code == SUError.noUpdateError.rawValue
+                ? "No updates available." : "Couldn’t check for updates.")
+        }
+    }
+
+    /// Shows a check's outcome briefly; a found update stays until it's installed.
+    private func settle(_ text: String) {
+        status = text
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, !self.checking, self.status == text else { return }
+            self.status = nil
         }
     }
 

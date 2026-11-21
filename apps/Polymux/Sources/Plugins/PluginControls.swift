@@ -5,7 +5,28 @@ extension Plugin {
     /// Filled while selected, unfilled otherwise.
     func icon(selected: Bool = false) -> String {
         let name = selected ? selectedSymbol : symbol
-        return name.isEmpty ? "puzzlepiece.extension" + (selected ? ".fill" : "") : name
+        if !name.isEmpty { return name }
+        return PluginBrand.symbol(name: self.name) ?? "puzzlepiece.extension" + (selected ? ".fill" : "")
+    }
+}
+
+/// Brand marks bundled with the app, for plugins whose installed manifest predates its symbol.
+enum PluginBrand {
+    static func symbol(name: String) -> String? {
+        ["tailscale": "brand-tailscale", "opentunnel": "brand-anomaly"][name]
+    }
+}
+
+extension Image {
+    /// An SF Symbol, or a bundled brand mark named `brand-…`.
+    init(plugin symbol: String) {
+        if symbol.hasPrefix("brand-") { self.init(symbol) } else { self.init(systemName: symbol) }
+    }
+}
+
+extension Label where Title == Text, Icon == Image {
+    init(_ title: String, pluginSymbol symbol: String) {
+        self.init { Text(title) } icon: { Image(plugin: symbol) }
     }
 }
 
@@ -17,7 +38,7 @@ private struct PluginButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: plugin.icon(selected: selected))
+            Image(plugin: plugin.icon(selected: selected))
                 .font(.system(size: 15))
                 .foregroundStyle(selected ? Color.accentColor : Color.primary)
                 .frame(width: 36, height: 36)
@@ -62,7 +83,7 @@ struct PluginMenu: View {
     var body: some View {
         Menu("Plugins", systemImage: "ellipsis") {
             ForEach(groups.flatMap { $0 }, id: \.name) { plugin in
-                Button(plugin.title, systemImage: plugin.icon()) { open(plugin) }
+                Button { open(plugin) } label: { Label(plugin.title, pluginSymbol: plugin.icon()) }
             }
         }
     }
@@ -191,7 +212,7 @@ struct PluginSwitcher: View {
             }
         } else {
             VStack(spacing: 2) {
-                Image(systemName: Self.symbol(tab, selected: tab.id == selection))
+                Image(plugin: Self.symbol(tab, selected: tab.id == selection))
                     .font(.system(size: 17))
                     .foregroundStyle(Color.primary)
                     .frame(width: 24, height: 20)

@@ -6,6 +6,8 @@ await app.waitFor({ role: "button", name: "Updates", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Updates" });
 await app.click({ role: "button", name: "Check for updates" });
 await app.waitFor({ role: "statictext", name: "Couldn’t check for updates.", timeout_ms: 10000 });
+// The outcome is shown briefly beside the button, then clears.
+await app.waitFor({ role: "statictext", name: "Couldn’t check for updates.", gone: true, timeout_ms: 10000 });
 const button = await app.query({ role: "button", name: "Check for updates" });
 if (!button.some(item => item.enabled)) throw new Error("Update check did not finish");
 for (const name of ["Cancel Update", "Software Update"]) {

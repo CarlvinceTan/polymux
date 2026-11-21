@@ -54,7 +54,7 @@ struct PluginLayoutEditor: View {
                 .moveDisabled(true)
             ForEach(switcher, id: \.self) { name in
                 HStack {
-                    Label(title(name), systemImage: symbol(name)).labelStyle(PluginLabel()).lineLimit(1)
+                    Label(title(name), pluginSymbol: symbol(name)).labelStyle(PluginLabel()).lineLimit(1)
                     Spacer(minLength: 8)
                     arrows(title(name), first: name == switcher.first, last: name == switcher.last) { shift(name, by: $0) }
                 }
@@ -72,7 +72,7 @@ struct PluginLayoutEditor: View {
                 .moveDisabled(true)
             ForEach($buttons) { $row in
                 HStack {
-                    Label(title(row.id), systemImage: symbol(row.id)).labelStyle(PluginLabel()).lineLimit(1)
+                    Label(title(row.id), pluginSymbol: symbol(row.id)).labelStyle(PluginLabel()).lineLimit(1)
                     Spacer(minLength: 8)
                     if row.id != buttons.first?.id {
                         Text("Merge").foregroundStyle(.muted).accessibilityHidden(true)

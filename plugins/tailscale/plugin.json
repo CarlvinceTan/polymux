@@ -3,6 +3,7 @@
   "title": "Tailscale",
   "description": "Reach this server from your other devices over your tailnet.",
   "version": "0.1.0",
+  "symbol": "brand-tailscale",
   "kind": "global",
   "engines": { "plugins": 1 },
   "service": "bin/polymux-tailscale",

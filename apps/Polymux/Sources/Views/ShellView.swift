@@ -735,7 +735,7 @@ struct ShellView: View {
     @ViewBuilder private func pluginRow(_ plugin: Plugin) -> some View {
         let id = PluginStore.viewID(plugin.name)
         let on = selection == id
-        let label = Label(plugin.title, systemImage: plugin.icon(selected: on))
+        let label = Label(plugin.title, pluginSymbol: plugin.icon(selected: on))
             .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             .contentShape(Rectangle())
         Group {

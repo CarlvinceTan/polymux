@@ -596,7 +596,7 @@ private struct PluginBanner: View {
     }
 
     private var genericMock: some View {
-        Image(systemName: symbol.isEmpty ? "puzzlepiece.extension.fill" : symbol)
+        Image(plugin: symbol.isEmpty ? PluginBrand.symbol(name: name) ?? "puzzlepiece.extension.fill" : symbol)
             .font(.system(size: 42, weight: .semibold))
             .foregroundStyle(tint)
     }

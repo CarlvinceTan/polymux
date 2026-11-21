@@ -27,6 +27,12 @@ final class PluginFixture: @unchecked Sendable {
         Plugin(name: "permissions", title: "Permissions", description: "Set rules a chat's bots can't break.",
                symbol: "lock.shield", selectedSymbol: "lock.shield.fill", version: "0.1.0", kind: PluginKind.scoped,
                surface: "permissions", state: PluginState.ready, source: "example/permissions", chats: ["t-chief"]),
+    ] : CommandLine.arguments.contains("--verify-plugin-brands") ? [
+        // Installed before their manifests named a symbol, as on existing servers.
+        Plugin(name: "tailscale", title: "Tailscale", description: "Reach this server from your other devices over your tailnet.",
+               symbol: "", version: "0.1.0", kind: PluginKind.global, state: PluginState.ready, source: "CarlvinceTan/polymux-official-plugins"),
+        Plugin(name: "opentunnel", title: "OpenTunnel", description: "Reach this server through an OpenTunnel route.",
+               symbol: "", version: "0.1.0", kind: PluginKind.global, state: PluginState.ready, source: "CarlvinceTan/polymux-official-plugins"),
     ] : CommandLine.arguments.contains("--verify-plugins-empty") ? [] : [
         PluginFixture.hub(state: PluginState.ready),
         PluginFixture.scoped("notes", "Notes", "doc.text", chats: ["t-chief", "grp-trip"]),

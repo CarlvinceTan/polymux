@@ -47,14 +47,13 @@ struct UpdatesSettings: View {
                                                                set: { settings?.edit(SettingsPatch(updateMode: $0)) }),
                            options: [("Automatic", SettingsUpdateMode.automatic), ("Manual", SettingsUpdateMode.manual)])
                 .disabled(settings?.value == nil)
-            #if os(macOS)
-            if let status = Updates.shared.status {
-                Text(status).font(.footnote).foregroundStyle(.muted)
-            }
-            #endif
         } header: {
             #if os(macOS)
             SectionHeader("Version", symbol: "info.circle.fill") {
+                if let status = Updates.shared.status {
+                    Text(status).font(.footnote).foregroundStyle(.muted).lineLimit(1)
+                        .transition(.opacity)
+                }
                 Button("Check for updates", systemImage: "arrow.clockwise") { Updates.shared.check() }
                     .accessibilityLabel("Check for updates")
                     .help("Check for updates")
@@ -68,6 +67,9 @@ struct UpdatesSettings: View {
             #endif
         }
         .panelRow()
+        #if os(macOS)
+        .animation(.default, value: Updates.shared.status)
+        #endif
     }
 
     private var clientLabel: String {
