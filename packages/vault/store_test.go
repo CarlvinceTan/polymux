@@ -83,6 +83,25 @@ func TestEncryptedLifecycle(t *testing.T) {
 	}
 }
 
+func TestNoteCredentials(t *testing.T) {
+	s, _, _ := testStore(t)
+	ctx := t.Context()
+	item := testItem()
+	item.Kind = "note"
+	item.Fields = map[string]string{"token": "synthetic-token"}
+	item.Codes = []Code{{ID: "first", Value: "synthetic-recovery"}}
+	if _, err := s.Save(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	values, err := s.Values(ctx, item.ID, "https://example.com", []string{"token", "recovery"})
+	if err != nil || values["token"] != item.Fields["token"] || values["recovery"] != item.Codes[0].Value {
+		t.Fatal("note credentials are not usable", err)
+	}
+	if _, err := s.Values(ctx, item.ID, "https://example.com", []string{"recovery"}); err == nil {
+		t.Fatal("note recovery code could be reused")
+	}
+}
+
 func TestHiddenEdits(t *testing.T) {
 	s, _, _ := testStore(t)
 	item := testItem()

@@ -78,9 +78,9 @@ private struct VaultBrowser: View {
                 .glassEffect(.regular, in: Capsule())
                 PanelMenu("Add vault item", symbol: "plus") {
                     ForEach(VaultCategory.allCases.filter { $0 != .all }) { kind in
-                        Button(kind.entry, systemImage: VaultCategory.symbol(forKind: kind.entryKind)) {
+                        Button(kind.entry, systemImage: VaultCategory.symbol(forKind: kind.rawValue)) {
                             query = ""; category = .all
-                            store.add(kind.entryKind)
+                            store.add(kind.rawValue)
                         }
                     }
                     Divider()
@@ -181,42 +181,35 @@ private struct VaultBrowser: View {
 }
 
 enum VaultCategory: String, CaseIterable, Identifiable {
-    case all, login, codes, passkey, card, note, recovery
+    case all, login, card, totp, passkey, wifi, note
     var id: String { rawValue }
     var title: String {
         switch self {
         case .all: "All"
         case .login: "Logins"
-        case .codes: "Codes"
+        case .totp: "TOTP"
         case .passkey: "Passkeys"
         case .card: "Cards"
         case .note: "Notes"
-        case .recovery: "Recovery codes"
+        case .wifi: "Wi-Fi"
         }
     }
     var entry: String {
         switch self {
         case .all: "All"
         case .login: "Login"
-        case .codes: "TOTP"
+        case .totp: "TOTP"
         case .passkey: "Passkey"
         case .card: "Card"
         case .note: "Note"
-        case .recovery: "Recovery codes"
+        case .wifi: "Wi-Fi"
         }
     }
-    var entryKind: String {
-        switch self {
-        case .codes: "totp"
-        default: rawValue
-        }
-    }
-    // Codes surfaces standalone code items and logins carrying a seed.
     func contains(_ item: VaultSummary) -> Bool {
         switch self {
         case .all: true
-        case .login: ["login", "api", "wifi"].contains(item.kind)
-        case .codes: item.kind == "totp" || item.fields.contains("totp")
+        case .note: ["note", "api", "recovery"].contains(item.kind)
+        case .totp: item.kind == rawValue || item.fields.contains("totp")
         default: item.kind == rawValue
         }
     }

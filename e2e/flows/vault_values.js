@@ -24,8 +24,8 @@ for (const entry of entries) {
     await app.click({ role: "button", name: "Save vault item" });
     await app.waitFor({ role: "button", name: entry.title });
 }
-// A login carrying a seed and a standalone code item both surface under Codes.
-await app.click({ role: "button", name: "Codes" });
+// A login carrying a seed and a standalone code item both surface under TOTP.
+await app.click({ role: "button", name: "TOTP" });
 for (const entry of entries) {
     await app.waitFor({ role: "button", name: entry.title });
     await app.click({ role: "button", name: entry.title });
