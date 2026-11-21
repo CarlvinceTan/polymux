@@ -51,7 +51,7 @@ struct ProviderSettings: View {
     private var labels: [String: String] { store?.names ?? [:] }
 
     private var ordered: [Provider] { draft ?? providers }
-    private var groups: [ProviderGroup] { ProviderGroup.collect(ordered, names: labels) }
+    private var groups: [ProviderGroup] { ProviderGroup.collect(ordered) }
 
     var body: some View {
         Section {
@@ -88,7 +88,7 @@ struct ProviderSettings: View {
         Section {
             ForEach(groups) { group in
                 HStack {
-                    Button { edit(group.connections[0]) } label: {
+                    Button { edit(group.provider) } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(group.name)
@@ -167,7 +167,7 @@ struct ProviderSettings: View {
 
     private var selection: ModelName {
         guard let value = settings?.value, !value.defaultModel.isEmpty, !value.defaultProvider.isEmpty else { return ModelName(model: "") }
-        let name = groups.first { $0.connections.contains { $0.id == value.defaultProvider } }?.name ?? value.defaultProvider
+        let name = groups.first { $0.id == value.defaultProvider }?.name ?? value.defaultProvider
         return ModelName(model: value.defaultModel, provider: name)
     }
 
@@ -202,14 +202,14 @@ struct ProviderSettings: View {
         if draft != nil {
             var ordered = groups
             ordered.insert(ordered.remove(at: source), at: target)
-            draft = ordered.flatMap(\.connections)
+            draft = ordered.map(\.provider)
             return true
         }
         guard let client else { return false }
         let previous = providers
         var ordered = groups
         ordered.insert(ordered.remove(at: source), at: target)
-        var list = ordered.flatMap(\.connections)
+        var list = ordered.map(\.provider)
         for index in list.indices { list[index].order = Int64(index) }
         store?.begin()
         store?.accept(list)
@@ -298,7 +298,7 @@ struct ModelPicker: View {
                             heading(group.name)
                             ForEach(matches(group), id: \.id) { item in
                                 option(ModelName.format(item.id), id: key(group, item.id),
-                                       selected: group.connections.contains { $0.id == provider } && model == item.id,
+                                       selected: group.id == provider && model == item.id,
                                        label: ModelName(model: item.id, provider: group.name).title) {
                                     choose(source(group, model: item.id), item.id)
                                 }
@@ -402,14 +402,13 @@ struct ModelPicker: View {
 
     private var available: [ProviderGroup] {
         let connected = providers.filter {
-            $0.enabled && (ProviderPreset(rawValue: $0.type) != nil || !($0.status ?? "").isEmpty)
+            $0.enabled && (ProviderPreset(rawValue: $0.type) != nil || $0.signedIn)
         }
-        return ProviderGroup.collect(connected, names: store?.names ?? [:]).filter { !matches($0).isEmpty }
+        return ProviderGroup.collect(connected).filter { !matches($0).isEmpty }
     }
 
     private var currentTitle: String {
-        ProviderGroup.collect(providers, names: store?.names ?? [:])
-            .first { $0.connections.contains { $0.id == provider } }?.name ?? (provider.isEmpty ? "Default" : provider)
+        ProviderGroup.collect(providers).first { $0.id == provider }?.name ?? (provider.isEmpty ? "Default" : provider)
     }
 
     private func matches(_ group: ProviderGroup) -> [ProviderModel] {
@@ -422,8 +421,7 @@ struct ModelPicker: View {
     }
 
     private func source(_ group: ProviderGroup, model: String) -> String {
-        let candidates = group.connections.filter { $0.models.contains { $0.id == model && $0.enabled } }
-        return candidates.first { $0.id == provider }?.id ?? candidates.first?.id ?? ""
+        group.provider.models.contains { $0.id == model && $0.enabled } ? group.id : ""
     }
 }
 
@@ -542,271 +540,6 @@ struct ReasoningPicker: View {
             DropdownOptions(selection: chosen, options: options)
         }
         .sectionRow()
-    }
-}
-
-struct ProviderForm: View {
-    let client: APIClient
-    let preset: ProviderPreset?
-    let connections: [Provider]
-    let onBack: () -> Void
-    let connect: (ProviderOption, String?) -> Void
-    let select: (Provider) -> Void
-    let add: () -> Void
-    let saved: (Provider) -> Void
-    let deleted: (String) -> Void
-    @Environment(\.panelClose) private var close
-    @State private var current: Provider?
-    @State private var name: String
-    @State private var baseURL: String
-    @State private var key = ""
-    @State private var enabled: Bool
-    @State private var models: [ProviderModel]
-    @Environment(ProviderStore.self) private var store: ProviderStore?
-    private var options: [ProviderOption] { store?.options ?? [] }
-    @State private var query = ""
-    @State private var modelID = ""
-    @State private var newLevels: [String]?
-    /// The custom model loaded into the add row for editing.
-    @State private var editing: String?
-    @State private var saving = false
-    @State private var issue: String?
-
-    init(client: APIClient, original: Provider?, preset: ProviderPreset?, connections: [Provider], onBack: @escaping () -> Void,
-         connect: @escaping (ProviderOption, String?) -> Void, select: @escaping (Provider) -> Void, add: @escaping () -> Void,
-         saved: @escaping (Provider) -> Void, deleted: @escaping (String) -> Void) {
-        self.client = client
-        self.preset = preset
-        self.connections = connections
-        self.onBack = onBack
-        self.connect = connect
-        self.select = select
-        self.add = add
-        self.saved = saved
-        self.deleted = deleted
-        _current = State(initialValue: original)
-        _name = State(initialValue: original?.name ?? preset?.label ?? "")
-        _baseURL = State(initialValue: original?.baseURL ?? preset?.baseURL ?? "")
-        _enabled = State(initialValue: original?.enabled ?? true)
-        _models = State(initialValue: original?.models ?? [])
-    }
-
-    private var manual: Bool { preset != nil }
-
-    var body: some View {
-        let type = current?.type ?? preset?.rawValue ?? "custom"
-        let title = manual ? name : store?.names[type] ?? preset?.label ?? name
-        PanelView(manual ? (current == nil ? "Add connection" : title) : (current?.status == ProviderOptionAuth.apiKey ? "Edit key" : "Edit account"),
-                  enabled: !saving, onClose: { close() }, onBack: onBack,
-                  accessory: current != nil && manual ? PanelAccessory(symbol: "plus", label: "Add connection", action: add) : nil) {
-            Form {
-                Section {
-                    SettingsField(title: "Name", text: $name, prompt: "Enter name")
-                    if manual {
-                        SettingsField(title: "Base URL", text: $baseURL, prompt: "https://api.example.com/v1")
-                    }
-                    if current?.status == ProviderOptionAuth.apiKey {
-                        LabeledContent("API key") {
-                            Text(current?.keyHint ?? "••••••••").monospaced().foregroundStyle(.muted)
-                        }
-                    } else if manual {
-                        SettingsField(title: "API key", text: $key, prompt: "Enter API key", secure: true)
-                    } else if let current {
-                        ForEach(options.filter { $0.auth == ProviderOptionAuth.oauth }, id: \.auth) { option in
-                            LabeledContent("Account") {
-                                Button("Reconnect") { connect(option, current.id) }
-                                    .buttonStyle(.bordered)
-                                    .accessibilityLabel("Reconnect account")
-                            }
-                        }
-                    }
-                    if current != nil && manual { Toggle("Enabled", isOn: $enabled) }
-                } header: {
-                    Text(manual ? "Connection" : "Details").foregroundStyle(.primary)
-                }
-                .panelRow()
-                if manual && connections.count > 1 {
-                    Section {
-                        ForEach(connections) { connection in
-                            Button { select(connection) } label: {
-                                HStack {
-                                    Text(connection.name).lineLimit(1)
-                                    Spacer()
-                                    if current?.id == connection.id { Image(systemName: "checkmark") }
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Select \(connection.name)")
-                            .accessibilityValue(current?.id == connection.id ? "Selected" : "")
-                        }
-                    } header: { Text("Connections").foregroundStyle(.primary) }
-                    .panelRow()
-                }
-                if manual {
-                    Section {
-                        if !models.isEmpty {
-                            PanelSearch("Search models", text: $query)
-                            Toggle("All models", isOn: Binding(get: { models.allSatisfy(\.enabled) }, set: { enabled in
-                                for index in models.indices { models[index].enabled = enabled }
-                            }))
-                            .accessibilityLabel("All models")
-                            ForEach($models, id: \.id) { $model in
-                                if query.isEmpty || model.id.localizedStandardContains(query) {
-                                    HStack {
-                                        Toggle(isOn: $model.enabled) { Text(model.id).lineLimit(1) }
-                                            .accessibilityLabel(model.id)
-                                        if preset == .custom {
-                                            Button("Edit", systemImage: "pencil") {
-                                                editing = model.id
-                                                modelID = model.id
-                                                newLevels = model.reasoning
-                                            }
-                                            .labelStyle(.iconOnly)
-                                            .buttonStyle(.borderless)
-                                            .foregroundStyle(.muted)
-                                            .accessibilityLabel("Edit \(model.id)")
-                                        }
-                                    }
-                                }
-                            }
-                            if !query.isEmpty && !models.contains(where: { $0.id.localizedStandardContains(query) }) {
-                                Text("No models found.").frame(maxWidth: .infinity)
-                            }
-                        }
-                        if preset != .elevenlabs {
-                            HStack {
-                                SettingsField(title: "Model ID", text: $modelID, prompt: "Enter model ID")
-                                ReasoningLevelsMenu(levels: $newLevels)
-                                Button(editing == nil ? "Add" : "Save") { addModel() }.disabled(modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            }
-                        }
-                    } header: {
-                        HStack {
-                            Text("Models").foregroundStyle(.primary)
-                            Spacer()
-                            if current != nil && preset != .elevenlabs {
-                                Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
-                                    .accessibilityLabel("Refresh models")
-                                    .help("Refresh models")
-                                    .labelStyle(.iconOnly)
-                                    .buttonStyle(.borderless)
-                            }
-                        }
-                    }
-                    .panelRow()
-                }
-                if let issue {
-                    Section { Text(issue).font(.footnote).foregroundStyle(.muted) }.panelRow()
-                }
-                if current != nil && manual {
-                    Section {
-                        Button("Delete", role: .destructive) { Task { await delete() } }
-                            .buttonStyle(.borderless)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .panelRow()
-                }
-            }
-            .formStyle(.grouped)
-            .disabled(saving)
-        } actions: {
-            Button { Task { await save() } } label: {
-                if saving { ProgressView().controlSize(.small) } else { Text("Save") }
-            }
-            .disabled(!valid || saving)
-            .keyboardShortcut(.defaultAction)
-        }
-        .interactiveDismissDisabled(saving)
-        .panelDismiss(enabled: !saving, onClose: { close() })
-        .task { await store?.refreshOptions() }
-    }
-
-    private var valid: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (!manual || URL(string: baseURL)?.host() != nil)
-    }
-
-    private func addModel() {
-        let id = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return }
-        if let editing, let index = models.firstIndex(where: { $0.id == editing }) {
-            let taken = models.contains { $0.id == id && $0.id != editing }
-            if !taken { models[index].id = id }
-            models[index].reasoning = newLevels
-        } else if !models.contains(where: { $0.id == id }) {
-            models.append(ProviderModel(id: id, tags: ["text"], enabled: true, reasoning: newLevels))
-        }
-        editing = nil
-        modelID = ""
-        newLevels = nil
-    }
-
-    private func save() async {
-        guard valid else { return }
-        saving = true
-        defer { saving = false }
-        issue = nil
-        if !manual, let current {
-            do {
-                let provider = try await client.renameProvider(id: current.id, name: name.trimmingCharacters(in: .whitespacesAndNewlines))
-                saved(provider)
-                onBack()
-            } catch { issue = error.isOffline ? nil : error.reason(or: "Couldn’t save this name.") }
-            return
-        }
-        let id = current?.id ?? "\(preset?.rawValue ?? "custom")-\(UUID().uuidString.lowercased())"
-        var provider = Provider(id: id, type: current?.type ?? preset?.rawValue ?? "custom", name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                                baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines), headers: current?.headers,
-                                sessionHeader: current?.sessionHeader, enabled: enabled, order: current?.order ?? 0, models: models)
-        let discover = manual && models.isEmpty && preset != .elevenlabs
-        do {
-            provider = try await client.saveProvider(provider, isNew: current == nil)
-            current = provider
-            models = provider.models
-            if !key.isEmpty {
-                try await client.setProviderKey(id: id, key: key)
-                provider.status = ProviderOptionAuth.apiKey
-                key = ""
-            }
-            if discover {
-                do {
-                    provider = try await client.discoverModels(id: id)
-                    models = provider.models
-                } catch {
-                    saved(provider)
-                    issue = error.reason(or: "Saved, but couldn’t load its models.")
-                    return
-                }
-            }
-            saved(provider)
-            onBack()
-        } catch {
-            issue = error.isOffline ? "Connection lost before setup finished." : error.reason(or: "Couldn’t finish saving this provider.")
-        }
-    }
-
-    private func refresh() async {
-        guard let current else { return }
-        saving = true
-        defer { saving = false }
-        do {
-            let provider = try await client.discoverModels(id: current.id)
-            self.current = provider
-            models = provider.models
-            saved(provider)
-            issue = nil
-        } catch { issue = error.reason(or: "Couldn’t load models.") }
-    }
-
-    private func delete() async {
-        guard let current else { return }
-        saving = true
-        defer { saving = false }
-        do {
-            try await client.deleteProvider(id: current.id)
-            deleted(current.id)
-            onBack()
-        } catch { issue = error.reason(or: "Couldn’t delete this provider.") }
     }
 }
 

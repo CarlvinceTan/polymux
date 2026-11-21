@@ -272,8 +272,8 @@ func collectKeys(dir string) ([]network.MovedKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, provider := range store.Providers() {
-		wanted = append(wanted, network.MovedKey{Service: "com.polymux.provider", Folder: "provider-keys", Suffix: "/" + provider.ID})
+	for _, provider := range providerKeys(store.Providers()) {
+		wanted = append(wanted, network.MovedKey{Service: "com.polymux.provider", Folder: "provider-keys", Suffix: "/" + provider})
 	}
 	found := []network.MovedKey{}
 	for _, key := range wanted {
@@ -470,8 +470,8 @@ func forgetKeys(dir, old string) {
 	}
 	wanted := []network.MovedKey{{Service: "com.polymux.vault", Folder: "vault", Suffix: "/password"}, {Service: "com.polymux.hub", Folder: filepath.Join("plugins", "hub", "data")}}
 	if store, err := settings.Open(filepath.Join(old, "settings.json")); err == nil {
-		for _, provider := range store.Providers() {
-			wanted = append(wanted, network.MovedKey{Service: "com.polymux.provider", Folder: "provider-keys", Suffix: "/" + provider.ID})
+		for _, provider := range providerKeys(store.Providers()) {
+			wanted = append(wanted, network.MovedKey{Service: "com.polymux.provider", Folder: "provider-keys", Suffix: "/" + provider})
 		}
 	}
 	for _, key := range wanted {
@@ -479,4 +479,19 @@ func forgetKeys(dir, old string) {
 			_ = exec.Command("/usr/bin/security", "delete-generic-password", "-s", key.Service, "-a", account).Run()
 		}
 	}
+}
+
+// providerKeys names every account a provider list keeps a secret under: each connection, or the
+// provider itself in a list saved before connections.
+func providerKeys(list []settings.Provider) []string {
+	var ids []string
+	for _, provider := range list {
+		if len(provider.Connections) == 0 {
+			ids = append(ids, provider.ID)
+		}
+		for _, connection := range provider.Connections {
+			ids = append(ids, connection.ID)
+		}
+	}
+	return ids
 }

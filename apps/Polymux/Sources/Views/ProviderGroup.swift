@@ -1,25 +1,18 @@
 import PolymuxKit
 
+/// A provider as the model lists show it.
 struct ProviderGroup: Identifiable {
     let id: String
     let name: String
-    var connections: [Provider]
+    let provider: Provider
 
+    /// Its models, off when the provider is.
     var models: [ProviderModel] {
-        var result: [ProviderModel] = []
-        var indices: [String: Int] = [:]
-        for connection in connections {
-            for var model in connection.models {
-                model.enabled = connection.enabled && model.enabled
-                if let index = indices[model.id] {
-                    result[index].enabled = result[index].enabled || model.enabled
-                } else {
-                    indices[model.id] = result.count
-                    result.append(model)
-                }
-            }
+        provider.models.map { model in
+            var model = model
+            model.enabled = provider.enabled && model.enabled
+            return model
         }
-        return result
     }
 
     var summary: String {
@@ -27,35 +20,17 @@ struct ProviderGroup: Identifiable {
         let count = models.count
         let active = models.filter(\.enabled).count
         let status = count > 0 && active == count ? "all active" : "\(active) active"
-        let prefix = connections.count > 1 ? "\(connections.count) connections · " : ""
+        let connections = provider.connections.count
+        let prefix = connections > 1 ? "\(connections) connections · " : ""
         return "\(prefix)\(count) \(count == 1 ? "model" : "models") (\(status))"
     }
 
-    /// What groups connections together: a server you point at stands alone, others share their type.
-    static func id(of provider: Provider) -> String { server(provider.type) ? provider.id : provider.type }
-
-    static func collect(_ providers: [Provider], names: [String: String]) -> [Self] {
-        var groups: [Self] = []
-        for provider in providers {
-            // The user names servers they point at; each one gets its own row.
-            let own = server(provider.type)
-            let id = Self.id(of: provider)
-            if let index = groups.firstIndex(where: { $0.id == id }) {
-                groups[index].connections.append(provider)
-            } else {
-                let preset = ProviderPreset(rawValue: provider.type)?.label
-                let name = own ? (provider.name.isEmpty ? preset ?? provider.type : provider.name)
-                    : names[provider.type] ?? preset ?? provider.name
-                groups.append(Self(id: id, name: name, connections: [provider]))
-            }
-        }
-        return groups
+    static func collect(_ providers: [Provider]) -> [Self] {
+        providers.map { Self(id: $0.id, name: $0.name.isEmpty ? $0.type : $0.name, provider: $0) }
     }
+}
 
-    private static func server(_ type: String) -> Bool {
-        switch ProviderPreset(rawValue: type) {
-        case .custom, .ollama, .lmstudio: true
-        default: false
-        }
-    }
+extension Provider {
+    /// Whether one of its enabled connections is signed in or holds a key.
+    var signedIn: Bool { connections.contains { $0.enabled && !($0.status ?? "").isEmpty } }
 }

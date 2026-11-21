@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -93,14 +94,17 @@ func (s *Server) readImports(ctx context.Context, folder string, note network.Mo
 	if err != nil {
 		return found, err
 	}
-	for _, provider := range theirs.Providers() {
+	imported, _ := providers.Migrate(theirs.Providers())
+	for _, provider := range imported {
 		found.providers = append(found.providers, provider)
-		if value, ok := note.Key("com.polymux.provider", "/"+provider.ID); ok {
-			key, err := hex.DecodeString(value)
-			if err != nil {
-				return found, err
+		for _, connection := range provider.Connections {
+			if value, ok := note.Key("com.polymux.provider", "/"+connection.ID); ok {
+				key, err := hex.DecodeString(value)
+				if err != nil {
+					return found, err
+				}
+				found.keys[connection.ID] = string(key)
 			}
-			found.keys[provider.ID] = string(key)
 		}
 	}
 	return found, nil
@@ -124,14 +128,31 @@ func (s *Server) apply(ctx context.Context, found imports) error {
 	mine := s.settings.Providers()
 	added := false
 	for _, provider := range found.providers {
-		if slices.ContainsFunc(mine, func(p settings.Provider) bool { return p.ID == provider.ID }) {
+		// Another server's account-based provider joins the one this server has, as more connections.
+		target := slices.IndexFunc(mine, func(p settings.Provider) bool {
+			return p.ID == provider.ID || (!providers.Standalone(provider.Type) && p.Type == provider.Type)
+		})
+		if target < 0 {
+			provider.Order = len(mine)
+			mine = append(mine, provider)
+			target = len(mine) - 1
+			added = true
+			for _, connection := range provider.Connections {
+				if key, ok := found.keys[connection.ID]; ok {
+					failed = errors.Join(failed, s.keys.Set(connection.ID, key))
+				}
+			}
 			continue
 		}
-		provider.Order = len(mine)
-		mine = append(mine, provider)
-		added = true
-		if key, ok := found.keys[provider.ID]; ok {
-			failed = errors.Join(failed, s.keys.Set(provider.ID, key))
+		for _, connection := range provider.Connections {
+			if slices.ContainsFunc(mine[target].Connections, func(c providers.Connection) bool { return c.ID == connection.ID }) {
+				continue
+			}
+			mine[target].Connections = append(slices.Clone(mine[target].Connections), connection)
+			added = true
+			if key, ok := found.keys[connection.ID]; ok {
+				failed = errors.Join(failed, s.keys.Set(connection.ID, key))
+			}
 		}
 	}
 	if added {

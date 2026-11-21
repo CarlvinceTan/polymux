@@ -10,7 +10,7 @@ public final class ProviderSignIn {
 
     public init(client: APIClient) { self.client = client }
 
-    public func connect(option: ProviderOption, provider: String? = nil) async {
+    public func connect(option: ProviderOption, provider: String? = nil, connection: String? = nil) async {
         defer {
             if let state, !state.done {
                 let client = client
@@ -18,7 +18,7 @@ public final class ProviderSignIn {
             }
         }
         do {
-            state = try await client.startLogin(type: option.type, auth: option.auth, provider: provider)
+            state = try await client.startLogin(type: option.type, auth: option.auth, provider: provider, connection: connection)
             while let current = state, !current.done, !Task.isCancelled {
                 do {
                     state = try await client.providerLogin(id: current.id, after: current.revision)

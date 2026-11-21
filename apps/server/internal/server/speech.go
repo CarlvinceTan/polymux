@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,8 +38,11 @@ func dialSpeech(ctx context.Context, provider, model, key string) (*websocket.Co
 // before voice used Providers.
 func (s *Server) speechKey(provider string) string {
 	for _, p := range s.settings.Providers() {
-		if p.Enabled && p.Type == provider {
-			if key, err := s.keys.Get(p.ID); err == nil && key != "" {
+		if p.Type != provider {
+			continue
+		}
+		for _, c := range providers.Active(p) {
+			if key, err := s.keys.Get(c.ID); err == nil && key != "" {
 				return key
 			}
 		}

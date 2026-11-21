@@ -1086,17 +1086,24 @@ type ProviderModel struct {
 }
 
 type Provider struct {
-	ID            string            `json:"id"`
-	Type          string            `json:"type"`
-	Name          string            `json:"name"`
-	BaseURL       string            `json:"baseURL"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	SessionHeader string            `json:"sessionHeader,omitempty"`
-	Status        string            `json:"status,omitempty"`
-	KeyHint       string            `json:"keyHint,omitempty"`
-	Enabled       bool              `json:"enabled"`
-	Order         int               `json:"order"`
-	Models        []ProviderModel   `json:"models"`
+	ID            string               `json:"id"`
+	Type          string               `json:"type"`
+	Name          string               `json:"name"`
+	BaseURL       string               `json:"baseURL"`
+	Headers       map[string]string    `json:"headers,omitempty"`
+	SessionHeader string               `json:"sessionHeader,omitempty"`
+	Enabled       bool                 `json:"enabled"`
+	Order         int                  `json:"order"`
+	Models        []ProviderModel      `json:"models"`
+	Connections   []ProviderConnection `json:"connections"`
+}
+
+type ProviderConnection struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	Status  string `json:"status,omitempty"`
+	KeyHint string `json:"keyHint,omitempty"`
 }
 
 type ProviderOption struct {

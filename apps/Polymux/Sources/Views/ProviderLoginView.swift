@@ -4,16 +4,18 @@ import PolymuxKit
 struct ProviderLoginView: View {
     let option: ProviderOption
     let provider: String?
+    let connection: String?
     let onBack: () -> Void
     let connected: (Provider) -> Void
     @Environment(\.panelClose) private var close
     @State private var signIn: ProviderSignIn
     @State private var answer = ""
 
-    init(client: APIClient, option: ProviderOption, provider: String?, onBack: @escaping () -> Void,
+    init(client: APIClient, option: ProviderOption, provider: String?, connection: String? = nil, onBack: @escaping () -> Void,
          connected: @escaping (Provider) -> Void) {
         self.option = option
         self.provider = provider
+        self.connection = connection
         self.onBack = onBack
         self.connected = connected
         _signIn = State(initialValue: ProviderSignIn(client: client))
@@ -94,7 +96,7 @@ struct ProviderLoginView: View {
             }
         }
         .panelDismiss(onClose: { close() })
-        .task { await signIn.connect(option: option, provider: provider) }
+        .task { await signIn.connect(option: option, provider: provider, connection: connection) }
         .onChange(of: signIn.state?.prompt?.id) { answer = "" }
         .onChange(of: signIn.state?.provider) { _, provider in
             if let provider { connected(provider) }

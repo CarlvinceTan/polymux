@@ -390,9 +390,12 @@ public struct APIClient: Sendable {
         try await get("providers/options")
     }
 
-    public func startLogin(type: String, auth: String, provider: String? = nil) async throws -> ProviderLogin {
+    /// Signs in to a provider. With `provider`, it is another account of it, or with `connection` the
+    /// one signing in again.
+    public func startLogin(type: String, auth: String, provider: String? = nil, connection: String? = nil) async throws -> ProviderLogin {
         var body = ["type": type, "auth": auth]
         if let provider { body["provider"] = provider }
+        if let connection { body["connection"] = connection }
         return try await write("providers/logins", method: "POST", body: body)
     }
 
@@ -424,18 +427,41 @@ public struct APIClient: Sendable {
         try await write("providers/\(id)", method: "PATCH", body: ["name": name])
     }
 
-    public func updateProvider(type: String, enabled: Bool? = nil, models: [String: Bool]? = nil) async throws -> [Provider] {
-        struct Patch: Encodable { let enabled: Bool?; let models: [String: Bool]? }
-        return try await write("providers/groups/\(type)", method: "PATCH", body: Patch(enabled: enabled, models: models))
+    /// Adds an API key to a provider as another connection.
+    public func addConnection(provider: String, key: String, name: String? = nil) async throws -> Provider {
+        var body = ["key": key]
+        if let name { body["name"] = name }
+        return try await write("providers/\(provider)/connections", method: "POST", body: body)
     }
 
-    public func setProviderKey(id: String, key: String) async throws {
-        let _: [String: String] = try await write("providers/\(id)/key", method: "PUT", body: ["key": key])
+    /// Replaces the API key a connection uses.
+    public func setConnectionKey(provider: String, connection: String, key: String) async throws -> Provider {
+        try await write("providers/\(provider)/connections/\(connection)/key", method: "PUT", body: ["key": key])
+    }
+
+    public func renameConnection(provider: String, connection: String, name: String) async throws -> Provider {
+        try await write("providers/\(provider)/connections/\(connection)", method: "PATCH", body: ["name": name])
+    }
+
+    public func enableConnection(provider: String, connection: String, enabled: Bool) async throws -> Provider {
+        try await write("providers/\(provider)/connections/\(connection)", method: "PATCH", body: ["enabled": enabled])
+    }
+
+    public func removeConnection(provider: String, connection: String) async throws -> Provider {
+        var request = try await request("providers/\(provider)/connections/\(connection)")
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        return try JSONDecoder().decode(Provider.self, from: data)
     }
 
     /// Asks the provider for its models; the server replaces the provider's model list with them.
-    public func discoverModels(id: String) async throws -> Provider {
-        try await post("providers/\(id)/test")
+    public func discoverModels(id: String, connection: String? = nil) async throws -> Provider {
+        var request = try await request("providers/\(id)/test", query: connection.map { [URLQueryItem(name: "connection", value: $0)] } ?? [])
+        request.httpMethod = "POST"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        return try JSONDecoder().decode(Provider.self, from: data)
     }
 
     public func deleteProvider(id: String) async throws {

@@ -10,6 +10,9 @@ for (const model of ["alpha", "beta"]) {
     await app.typeText(model, { role: "textfield", name: "Model ID" });
     await app.click({ role: "button", name: "Add" });
 }
+await app.click({ role: "button", name: "Save" });
+await app.waitFor({ role: "button", name: "Edit Model controls", value: "2 models (all active)", timeout_ms: 10000 });
+await app.click({ role: "button", name: "Edit Model controls" });
 async function check(name, value) {
     await app.waitFor({ role: "checkbox", name, value, timeout_ms: 5000 });
     const [item] = await app.query({ role: "checkbox", name });
@@ -21,7 +24,8 @@ await check("beta", "0");
 await app.click({ role: "checkbox", name: "alpha" });
 await check("alpha", "1");
 await check("All models", "0");
-await app.click({ role: "button", name: "Save" });
+// Changes save as they are made.
+await app.click({ role: "button", name: "Back" });
 await app.waitFor({ role: "button", name: "Edit Model controls", value: "2 models (1 active)", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Edit Model controls" });
 await check("alpha", "1");
@@ -29,11 +33,20 @@ await check("beta", "0");
 await app.typeText("beta", { role: "textfield", name: "Search models" });
 await app.click({ role: "checkbox", name: "All models" });
 await check("beta", "1");
-await app.click({ role: "button", name: "Save" });
+await app.click({ role: "button", name: "Back" });
 await app.waitFor({ role: "button", name: "Edit Model controls", value: "2 models (all active)", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Edit Model controls" });
 await check("alpha", "1");
 await check("beta", "1");
+// A custom provider's models can be edited and removed.
+await app.click({ role: "button", name: "Edit alpha" });
+await app.setValue({ role: "textfield", name: "Model ID" }, "");
+await app.typeText("gamma", { role: "textfield", name: "Model ID" });
+await app.click({ role: "button", name: "Save" });
+await app.waitFor({ role: "checkbox", name: "gamma", timeout_ms: 5000 });
+await app.waitFor({ role: "checkbox", name: "alpha", gone: true, timeout_ms: 5000 });
+await app.click({ role: "button", name: "Remove beta" });
+await app.waitFor({ role: "checkbox", name: "beta", gone: true, timeout_ms: 5000 });
 await app.click({ role: "button", name: "Delete" });
 await app.click({ role: "button", name: "Close Settings" });
 return "ok";

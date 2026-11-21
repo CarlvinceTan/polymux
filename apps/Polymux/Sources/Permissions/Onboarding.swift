@@ -55,7 +55,7 @@ struct Onboarding: View {
 
     private var session: AppSession? { pool.sessions[address] }
     private var providers: [Provider] { session?.providers.providers ?? [] }
-    private var groups: [ProviderGroup] { ProviderGroup.collect(providers, names: session?.providers.names ?? [:]) }
+    private var groups: [ProviderGroup] { ProviderGroup.collect(providers) }
 
     /// A Mac sets up its own server; an iPhone only pairs, and adds a model when the server has none.
     private var steps: [Step] {
@@ -612,7 +612,7 @@ struct Onboarding: View {
         guard let value = session?.settings.value, !value.defaultModel.isEmpty, !value.defaultProvider.isEmpty else {
             return ModelName(model: "")
         }
-        let name = groups.first { $0.connections.contains { $0.id == value.defaultProvider } }?.name ?? value.defaultProvider
+        let name = groups.first { $0.id == value.defaultProvider }?.name ?? value.defaultProvider
         return ModelName(model: value.defaultModel, provider: name)
     }
 

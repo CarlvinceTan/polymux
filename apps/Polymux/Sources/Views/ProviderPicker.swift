@@ -12,7 +12,9 @@ struct ProviderEditor: View {
     private var providers: [Provider] { store?.providers ?? original.map { [$0] } ?? [] }
 
     private enum Page {
-        case picker, provider, form(ProviderPreset?), login(ProviderOption, String?)
+        case picker, provider, create(ProviderPreset), connection(ProviderConnection?)
+        /// Signing in: the option, the provider it adds to, and the connection signing in again.
+        case login(ProviderOption, String?, String?)
     }
 
     init(client: APIClient?, original: Provider?, onBack: @escaping () -> Void, saved: @escaping ([Provider]) -> Void) {
@@ -20,9 +22,7 @@ struct ProviderEditor: View {
         self.original = original
         self.onBack = onBack
         self.saved = saved
-        _page = State(initialValue: original.map {
-            ProviderPreset(rawValue: $0.type).map { .form($0) } ?? .provider
-        } ?? .picker)
+        _page = State(initialValue: original == nil ? .picker : .provider)
         _selection = State(initialValue: original)
     }
 
@@ -30,49 +30,36 @@ struct ProviderEditor: View {
         if let client {
             switch page {
             case .picker:
-                ProviderPicker(client: client, onBack: onBack, choose: { page = .login($0, nil) }, manual: { page = .form($0) })
+                ProviderPicker(client: client, onBack: onBack, choose: { page = .login($0, nil, nil) }, manual: { page = .create($0) })
             case .provider:
-                let type = original?.type ?? selection?.type ?? ""
-                ProviderPage(client: client, type: type, connections: providers.filter { sibling($0, of: selection ?? original, type: type) }, onBack: onBack,
-                             edit: { selection = $0; page = .form(nil) }, connect: { page = .login($0, nil) },
-                             removed: { publish(nil, removing: $0) }, changed: publish)
-            case .form(let preset):
-                let type = selection?.type ?? preset?.rawValue ?? "custom"
-                ProviderForm(client: client, original: selection, preset: preset,
-                             connections: providers.filter { sibling($0, of: selection, type: type) },
-                             onBack: { if preset == nil { page = .provider } else { onBack() } }, connect: { page = .login($0, $1) },
-                             select: { selection = $0; page = .form(ProviderPreset(rawValue: $0.type)) },
-                             add: { selection = nil; page = .form(preset) },
-                             saved: publish, deleted: { publish(nil, removing: $0) })
-                    .id(selection?.id)
-            case .login(let option, let target):
-                ProviderLoginView(client: client, option: option, provider: target, onBack: {
-                    page = original == nil ? .picker : .provider
+                if let selection {
+                    ProviderPage(client: client, providerID: selection.id, onBack: onBack,
+                                 connect: { option, connection in page = .login(option, selection.id, connection) },
+                                 editConnection: { page = .connection($0) },
+                                 removed: { publish(nil, removing: $0); onBack() })
+                }
+            case .create(let preset):
+                ProviderCreate(client: client, preset: preset, onBack: onBack) { provider in
+                    publish(provider)
+                    onBack()
+                }
+            case .connection(let connection):
+                if let selection {
+                    ConnectionForm(client: client, provider: selection, connection: connection, onBack: { page = .provider },
+                                   reconnect: { page = .login($0, selection.id, connection?.id) }, saved: publish)
+                }
+            case .login(let option, let target, let connection):
+                ProviderLoginView(client: client, option: option, provider: target, connection: connection, onBack: {
+                    page = selection == nil ? .picker : .provider
                 }) { provider in
                     publish(provider)
-                    if original == nil {
-                        onBack()
-                    } else {
-                        selection = provider
-                        page = .provider
-                    }
+                    if selection == nil { onBack() } else { selection = provider; page = .provider }
                 }
             }
         }
     }
 
-    /// Whether a provider is another connection of the same account kind; servers you named stand alone.
-    private func sibling(_ provider: Provider, of anchor: Provider?, type: String) -> Bool {
-        guard let anchor else { return provider.type == type && ProviderGroup.id(of: provider) == type }
-        return ProviderGroup.id(of: provider) == ProviderGroup.id(of: anchor)
-    }
-
     private func publish(_ provider: Provider) { publish(provider, removing: provider.id) }
-
-    private func publish(_ updates: [Provider]) {
-        store?.merge(updates)
-        saved(store?.providers ?? providers)
-    }
 
     private func publish(_ provider: Provider?, removing id: String) {
         if let provider { store?.merge([provider]) }

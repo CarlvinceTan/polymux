@@ -45,8 +45,9 @@ final class ProviderFixture: @unchecked Sendable {
             if path.hasSuffix("/answer") {
                 phase += 1
                 if phase == 3 {
-                    providers = [Provider(id: "subscription", type: "fixture", name: "Subscription", status: "oauth", enabled: true,
-                                          models: [ProviderModel(id: "subscription-chat", tags: ["text"], enabled: true)])]
+                    providers = [Provider(id: "subscription", type: "fixture", name: "Subscription", enabled: true,
+                                          models: [ProviderModel(id: "subscription-chat", tags: ["text"], enabled: true)],
+                                          connections: [ProviderConnection(id: "subscription", name: "", enabled: true, status: "oauth")])]
                 }
                 return Data()
             }

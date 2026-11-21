@@ -824,7 +824,7 @@ func (s *Server) autoModel() (provider, model string, err error) {
 		return provider, model, nil
 	}
 	for _, p := range s.settings.Providers() {
-		if !p.Enabled {
+		if !providers.Usable(p) {
 			continue
 		}
 		if preferred := providers.Preferred(p.Type); preferred != "" && s.enabledModel(p.ID, preferred) {

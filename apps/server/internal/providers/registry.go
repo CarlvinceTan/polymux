@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 
@@ -12,8 +13,6 @@ import (
 
 type Provider = settings.Provider
 type Model = settings.Model
-
-var ErrKeyExists = errors.New("API key already saved")
 
 type SecretStore interface {
 	Set(id, key string) error
@@ -49,20 +48,21 @@ func (r *Registry) Save(providers []Provider) error {
 	}
 	return r.Settings.SetProviders(providers)
 }
-func (r *Registry) SetKey(id, key string) error {
+
+// SetKey stores an API key under a connection of a saved provider, replacing the one it had.
+func (r *Registry) SetKey(connection, key string) error {
 	for _, p := range r.Settings.Providers() {
-		if p.ID == id {
-			_, err := r.Credentials().Modify(context.Background(), Prefix+id, func(current *ai.Credential) (*ai.Credential, error) {
-				if current != nil && current.Type == ai.CredentialAPIKey && current.Key != "" {
-					if current.Key == key {
-						return current, nil
-					}
-					return nil, ErrKeyExists
-				}
-				return &ai.Credential{Type: ai.CredentialAPIKey, Key: key}, nil
-			})
-			return err
+		if slices.ContainsFunc(p.Connections, func(c Connection) bool { return c.ID == connection }) {
+			return r.StoreKey(connection, key)
 		}
 	}
-	return errors.New("unknown provider")
+	return errors.New("unknown connection")
+}
+
+// StoreKey stores an API key before its connection is saved.
+func (r *Registry) StoreKey(connection, key string) error {
+	_, err := r.Credentials().Modify(context.Background(), Prefix+connection, func(*ai.Credential) (*ai.Credential, error) {
+		return &ai.Credential{Type: ai.CredentialAPIKey, Key: key}, nil
+	})
+	return err
 }

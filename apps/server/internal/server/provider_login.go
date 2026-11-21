@@ -22,12 +22,14 @@ import (
 
 // login is a provider sign-in running on the server; the app polls it and answers its prompts.
 type login struct {
-	mu       sync.Mutex
-	state    contract.ProviderLogin
-	answers  map[int]chan string
-	changed  chan struct{}
-	cancel   context.CancelFunc
+	mu      sync.Mutex
+	state   contract.ProviderLogin
+	answers map[int]chan string
+	changed chan struct{}
+	cancel  context.CancelFunc
+	// target is the connection being signed in, and provider the one it belongs to.
 	target   string
+	provider string
 	existing bool
 }
 
@@ -135,7 +137,7 @@ func (s *Server) loginRoutes(reg *providers.Registry, mu *sync.Mutex) {
 		return l
 	}
 
-	// finish adds or updates the Settings provider once its credential is stored.
+	// finish adds the connection, and its provider if new, once its credential is stored.
 	finish := func(ctx context.Context, l *login, kind string, credential ai.Credential) (*contract.Provider, error) {
 		if kind == "groq" && credential.Type == ai.CredentialAPIKey {
 			if err := providers.VerifyKey(ctx, providers.Builtin(kind).BaseURL, credential.Key); err != nil {
@@ -149,57 +151,33 @@ func (s *Server) loginRoutes(reg *providers.Registry, mu *sync.Mutex) {
 		}
 		id, builtin := l.target, providers.Builtin(kind)
 		list := reg.Settings.Providers()
-		index := -1
-		for i, p := range list {
-			if p.ID == id {
-				index = i
-			}
-		}
+		index := slices.IndexFunc(list, func(p providers.Provider) bool { return p.ID == l.provider })
 		if index < 0 && l.existing {
 			return nil, errors.New("provider removed during sign-in")
 		}
 		if index < 0 {
-			name := builtin.Name
-			inherited := []providers.Model{}
-			enabled := true
-			for _, p := range list {
-				if p.Type == kind {
-					inherited, enabled = p.Models, p.Enabled
-					break
-				}
-			}
-			if credential.Type == ai.CredentialAPIKey {
-				number := 1
-				for _, p := range list {
-					if p.Type == kind {
-						number++
-					}
-				}
-				name = fmt.Sprintf("API key %d", number)
-				for slices.ContainsFunc(list, func(p providers.Provider) bool { return p.Type == kind && p.Name == name }) {
-					number++
-					name = fmt.Sprintf("API key %d", number)
-				}
-			} else {
-				for suffix := 2; slices.ContainsFunc(list, func(p providers.Provider) bool { return p.Name == name }); suffix++ {
-					name = fmt.Sprintf("%s %d", builtin.Name, suffix)
-				}
-			}
 			list = append(list, providers.Provider{
-				ID: id, Type: kind, Name: name, BaseURL: builtin.BaseURL,
-				Enabled: enabled, Order: len(list), Models: inherited,
+				ID: l.provider, Type: kind, Name: builtin.Name, BaseURL: builtin.BaseURL,
+				Enabled: true, Order: len(list), Models: []providers.Model{},
 			})
 			index = len(list) - 1
 		}
 		if list[index].Type != kind {
 			return nil, errors.New("provider changed during sign-in")
 		}
+		if !slices.ContainsFunc(list[index].Connections, func(c providers.Connection) bool { return c.ID == id }) {
+			name := ""
+			switch {
+			case credential.Type == ai.CredentialAPIKey:
+				name = providers.NextName(list[index], "API key")
+			case len(list[index].Connections) > 0:
+				name = providers.NextName(list[index], builtin.Name)
+			}
+			list[index].Connections = append(slices.Clone(list[index].Connections), providers.Connection{ID: id, Name: name, Enabled: true})
+		}
 		store := reg.Credentials()
 		var previous *ai.Credential
 		if _, err := store.Modify(ctx, providers.Prefix+id, func(current *ai.Credential) (*ai.Credential, error) {
-			if credential.Type == ai.CredentialAPIKey && current != nil && current.Type == ai.CredentialAPIKey && current.Key != "" {
-				return nil, providers.ErrKeyExists
-			}
 			previous = current
 			return &credential, nil
 		}); err != nil {
@@ -218,11 +196,7 @@ func (s *Server) loginRoutes(reg *providers.Registry, mu *sync.Mutex) {
 			return nil, errors.Join(err, restoreErr)
 		}
 		s.syncProviders(reg)
-		saved := list[index]
-		saved.Status = string(credential.Type)
-		if credential.Type == ai.CredentialAPIKey && credential.Key != "" {
-			saved.KeyHint = providers.KeyHint(credential.Key)
-		}
+		saved := described(ctx, reg, []providers.Provider{list[index]})[0]
 		return &saved, nil
 	}
 
@@ -240,21 +214,30 @@ func (s *Server) loginRoutes(reg *providers.Registry, mu *sync.Mutex) {
 			return
 		}
 		var body struct {
-			Type     string `json:"type"`
-			Auth     string `json:"auth"`
-			Provider string `json:"provider"`
+			Type       string `json:"type"`
+			Auth       string `json:"auth"`
+			Provider   string `json:"provider"`
+			Connection string `json:"connection"`
 		}
 		if !decode(w, r, &body) {
 			return
 		}
-		id, kind := body.Provider, body.Type
-		if id != "" {
-			// Signing in again keeps the provider and its model choices.
+		provider, id, kind := body.Provider, body.Connection, body.Type
+		if provider != "" {
+			// Another account for a provider, or signing in again, keeps its models.
 			kind = ""
 			for _, p := range reg.Settings.Providers() {
-				if p.ID == id {
-					kind = p.Type
+				if p.ID != provider {
+					continue
 				}
+				kind = p.Type
+				if id != "" && !slices.ContainsFunc(p.Connections, func(c providers.Connection) bool { return c.ID == id }) {
+					fail(w, 404, "unknown_connection", "Connection not found.")
+					return
+				}
+			}
+			if id == "" {
+				id = providers.NewConnectionID(provider)
 			}
 		}
 		builtin := providers.Builtin(kind)
@@ -266,13 +249,6 @@ func (s *Server) loginRoutes(reg *providers.Registry, mu *sync.Mutex) {
 			fail(w, 400, "invalid_login", "This provider can’t be signed in to.")
 			return
 		}
-		if id != "" {
-			credential, _ := reg.Credentials().Read(r.Context(), providers.Prefix+id)
-			if credential != nil && credential.Type == ai.CredentialAPIKey && credential.Key != "" {
-				fail(w, 409, "key_exists", "Remove the saved key before adding another.")
-				return
-			}
-		}
 		var device string
 		if auth == ai.CredentialOAuth {
 			var err error
@@ -282,10 +258,11 @@ func (s *Server) loginRoutes(reg *providers.Registry, mu *sync.Mutex) {
 				return
 			}
 		}
-		if id == "" {
+		if provider == "" {
 			suffix := make([]byte, 16)
 			_, _ = rand.Read(suffix)
-			id = kind + "-" + hex.EncodeToString(suffix)
+			provider = kind + "-" + hex.EncodeToString(suffix)
+			id = provider
 		}
 		token := make([]byte, 16)
 		_, _ = rand.Read(token)
@@ -295,7 +272,7 @@ func (s *Server) loginRoutes(reg *providers.Registry, mu *sync.Mutex) {
 		}
 		ctx, cancel := context.WithTimeout(parent, loginTimeout)
 		l := &login{state: contract.ProviderLogin{ID: hex.EncodeToString(token), Events: []contract.LoginEvent{}},
-			answers: map[int]chan string{}, changed: make(chan struct{}), cancel: cancel, target: id, existing: body.Provider != ""}
+			answers: map[int]chan string{}, changed: make(chan struct{}), cancel: cancel, target: id, provider: provider, existing: body.Provider != ""}
 		lock.Lock()
 		active := 0
 		for _, pending := range logins {

@@ -1158,3 +1158,71 @@ func Text(m contract.Message) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+// RemapProviders repoints bots at the provider that took over a retired provider record's ID.
+func (s *Store) RemapProviders(ctx context.Context, remap map[string]string) error {
+	if len(remap) == 0 {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id,data FROM agents`)
+	if err != nil {
+		return err
+	}
+	changed := map[string]string{}
+	for rows.Next() {
+		var id, data string
+		if err := rows.Scan(&id, &data); err != nil {
+			rows.Close()
+			return err
+		}
+		var agent map[string]any
+		if json.Unmarshal([]byte(data), &agent) != nil {
+			continue
+		}
+		touched := repoint(agent, remap)
+		if fallback, ok := agent["fallback"].(map[string]any); ok {
+			if models, ok := fallback["models"].([]any); ok {
+				for _, model := range models {
+					if step, ok := model.(map[string]any); ok && repoint(step, remap) {
+						touched = true
+					}
+				}
+			}
+		}
+		if !touched {
+			continue
+		}
+		next, err := json.Marshal(agent)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		changed[id] = string(next)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for id, data := range changed {
+		if _, err := tx.ExecContext(ctx, `UPDATE agents SET data=? WHERE id=?`, data, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// repoint swaps a retired provider ID in a JSON object's "provider" field.
+func repoint(object map[string]any, remap map[string]string) bool {
+	current, _ := object["provider"].(string)
+	if next, ok := remap[current]; ok {
+		object["provider"] = next
+		return true
+	}
+	return false
+}

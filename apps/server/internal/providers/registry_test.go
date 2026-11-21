@@ -38,7 +38,7 @@ func TestP2KeysNeverPersisted(t *testing.T) {
 	old := log.Writer()
 	log.SetOutput(&logs)
 	defer log.SetOutput(old)
-	want := []Provider{{ID: "p2", Type: "openai", Name: "Test", BaseURL: "https://example.test/v1", Enabled: true, Order: 7, Headers: map[string]string{"X-Test": "yes"}, SessionHeader: "X-Session", Models: []Model{{ID: "text", Tags: []string{"text", "vision"}, Enabled: true}, {ID: "off", Enabled: false}}}, {ID: "disabled", Order: 1}}
+	want := []Provider{{ID: "p2", Type: "openai", Name: "Test", BaseURL: "https://example.test/v1", Enabled: true, Order: 7, Headers: map[string]string{"X-Test": "yes"}, SessionHeader: "X-Session", Models: []Model{{ID: "text", Tags: []string{"text", "vision"}, Enabled: true}, {ID: "off", Enabled: false}}, Connections: []Connection{{ID: "p2", Enabled: true}}}, {ID: "disabled", Order: 1}}
 	if err := r.Save(want); err != nil {
 		t.Fatal(err)
 	}

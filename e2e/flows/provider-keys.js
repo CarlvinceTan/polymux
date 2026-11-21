@@ -1,5 +1,6 @@
-// Provider models stay on the main page; its keys have names and immutable masked secrets.
-const app = await cua.getApp(APP);
+// A provider keeps one page of its own: its connections are named and their secrets stay masked.
+let app = await cua.getApp(APP);
+const host = await app.getState({ query: "Settings", include_screenshot: false });
 async function confirm(label) {
   await app.waitFor({ role: "button", name: label });
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -25,38 +26,37 @@ if ((await app.query({ text: "abcd-private-first-wxyz" })).length) throw new Err
 await app.click({ role: "button", name: "Continue" });
 await app.waitFor({ role: "button", name: "Edit DeepSeek", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Edit DeepSeek" });
-await app.waitFor({ text: "abcd••••wxyz", timeout_ms: 5000 });
+// The provider's own details come first, then its connections, then its models.
+await app.waitFor({ role: "checkbox", name: "Enabled", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Edit API key 1", value: "abcd••••wxyz", timeout_ms: 5000 });
 await app.click({ role: "checkbox", name: "All models" });
 await app.waitFor({ role: "checkbox", name: "All models", value: "0", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Edit API key 1" });
-if ((await app.query({ role: "textfield", name: "API key" })).length) throw new Error("saved secret is editable");
+await app.waitFor({ role: "textfield", name: "API key", timeout_ms: 5000 });
+if ((await app.query({ text: "abcd-private-first-wxyz" })).length) throw new Error("the saved secret was shown");
 await app.typeText("Work", { role: "textfield", name: "Name" });
-if ((await app.query({ role: "checkbox", name: "All models" })).length) throw new Error("provider models moved into the key editor");
+if ((await app.query({ role: "checkbox", name: "All models" })).length) throw new Error("provider models moved into the connection editor");
 await app.click({ role: "button", name: "Save" });
 await app.waitFor({ role: "button", name: "Edit Work", timeout_ms: 5000 });
-await app.click({ role: "button", name: "Add API key" });
+await app.click({ role: "button", name: "Add connection" });
 await app.typeText("short-key", { role: "textfield", name: "API key" });
 await app.click({ role: "button", name: "Continue" });
 await app.waitFor({ role: "button", name: "Edit API key 2", timeout_ms: 10000 });
 await app.waitFor({ role: "checkbox", name: "All models", value: "0", timeout_ms: 5000 });
-await app.waitFor({ text: "••••••••", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Edit API key 2", value: "••••••••", timeout_ms: 5000 });
 if ((await app.query({ text: "short-key" })).length) throw new Error("short key was exposed");
-await app.click({ role: "button", name: "Edit Work" });
-await app.waitFor({ role: "textfield", name: "Name", value: "Work", timeout_ms: 5000 });
-await app.click({ role: "button", name: "Back" });
-await app.waitFor({ role: "checkbox", name: "All models", value: "0", timeout_ms: 5000 });
-await app.click({ role: "button", name: "Remove Work" });
+await app.click({ role: "menubutton", name: "More actions for Work" });
+await app.click({ role: "menuitem", name: "Remove" });
+app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
 await confirm("Cancel");
 await app.waitFor({ role: "button", name: "Edit Work" });
-await app.click({ role: "button", name: "Remove Work" });
+await app.click({ role: "menubutton", name: "More actions for Work" });
+await app.click({ role: "menuitem", name: "Remove" });
+app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
 await confirm("Remove");
-await app.waitFor({ role: "button", name: "Edit API key 2", timeout_ms: 5000 });
 await app.waitFor({ role: "button", name: "Edit Work", gone: true, timeout_ms: 5000 });
-await app.click({ role: "button", name: "Remove API key 2" });
-await confirm("Remove");
-await app.waitFor({ text: "No API keys yet.", timeout_ms: 5000 });
-await app.waitFor({ role: "button", name: "Add API key", timeout_ms: 5000 });
-await app.click({ role: "button", name: "Back" });
+await app.waitFor({ role: "button", name: "Edit API key 2", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Delete" });
 await app.waitFor({ role: "button", name: "Edit DeepSeek", gone: true, timeout_ms: 5000 });
 await app.click({ role: "button", name: "Close Settings" });
 return "ok";

@@ -1,20 +1,5 @@
 // Provider methods stay distinct; keys and manual endpoints feed the searchable default model picker.
 let app = await cua.getApp(APP);
-async function confirm(label) {
-  await app.waitFor({ role: "button", name: label });
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const buttons = await app.query({ role: "button", name: label });
-    const button = buttons.find(row => row.label === label && row.frame?.w > 10 && row.frame?.h > 10);
-    if (!button && attempt > 0) return;
-    if (!button) throw new Error("Confirmation button missing: " + label);
-    try { await app.click(button.element_token); return; }
-    catch (error) {
-      if (!String(error.message).includes("-25205") || attempt === 2) throw error;
-      // Native alerts can replace their accessibility objects while appearing.
-      await cua.sleep(350);
-    }
-  }
-}
 const host = await app.getState({ query: "Settings", include_screenshot: false });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
@@ -67,8 +52,7 @@ await app.waitFor({ role: "textfield", name: "Name", value: "Manual test", timeo
 await app.click({ role: "button", name: "Delete" });
 await app.waitFor({ role: "button", name: "Model", value: "Server default", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Edit OpenAI" });
-await app.click({ role: "button", name: "Remove API key 1" });
-await confirm("Remove");
-await app.click({ role: "button", name: "Back" });
+await app.waitFor({ role: "button", name: "Edit API key 1", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Delete" });
 await app.click({ role: "button", name: "Close Settings" });
 return "ok";

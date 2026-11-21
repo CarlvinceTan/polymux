@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,64 +21,58 @@ func (f providerSecrets) Set(id, key string) error      { f[id] = key; return ni
 func (f providerSecrets) Get(id string) (string, error) { return f[id], nil }
 func (f providerSecrets) Delete(id string) error        { delete(f, id); return nil }
 
-func TestProviderGroupsAPI(t *testing.T) {
+func TestProviderConnectionsAPI(t *testing.T) {
 	t.Parallel()
 	s, reg := loginServer(t)
-	model := providers.Model{ID: "shared", Tags: []string{"text"}, Enabled: true, ContextWindow: 8192}
-	if err := reg.Save([]providers.Provider{
-		{ID: "one", Type: "deepseek", Name: "Work", Enabled: true, Models: []providers.Model{model}},
-		{ID: "two", Type: "deepseek", Name: "Personal", Enabled: true, Models: []providers.Model{model}},
-		{ID: "other", Type: "anthropic", Name: "Other", Enabled: true, Models: []providers.Model{model}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"one", "two"} {
-		if err := reg.SetKey(id, "private-original-key-"+id); err != nil {
-			t.Fatal(err)
+	call := func(method, path, body string, status int) providers.Provider {
+		t.Helper()
+		w := loginCall(s, method, path, body)
+		if w.Code != status || strings.Contains(w.Body.String(), "private-key") {
+			t.Fatalf("%s %s: %d %s", method, path, w.Code, w.Body.String())
 		}
+		var p providers.Provider
+		_ = json.Unmarshal(w.Body.Bytes(), &p)
+		return p
 	}
-	w := loginCall(s, "PATCH", "/providers/groups/deepseek", `{"enabled":false,"models":{"shared":false}}`)
-	if w.Code != 200 || strings.Contains(w.Body.String(), "private-original-key") {
-		t.Fatalf("group update: %d %s", w.Code, w.Body.String())
+	made := call("POST", "/providers", `{"id":"p","type":"custom","name":"Test","baseURL":"https://example.test/v1","enabled":true,"models":[]}`, 200)
+	if len(made.Connections) != 1 || made.Connections[0].ID != "p" || !made.Connections[0].Enabled {
+		t.Fatalf("a new provider should start with its own connection: %+v", made.Connections)
 	}
-	var updated []providers.Provider
-	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil || len(updated) != 2 || updated[0].KeyHint == "" {
-		t.Fatal("missing group or redacted credential metadata")
+	first := call("PUT", "/providers/p/connections/p/key", `{"key":"private-key-one-1111"}`, 200)
+	if first.Connections[0].KeyHint != "priv••••1111" || first.Connections[0].Status != "api_key" {
+		t.Fatalf("missing key metadata: %+v", first.Connections[0])
 	}
-	for _, provider := range reg.Settings.Providers() {
-		want := provider.Type != "deepseek"
-		if provider.Enabled != want || provider.Models[0].Enabled != want || provider.Models[0].ContextWindow != 8192 {
-			t.Fatal("group update changed another provider or model metadata")
-		}
+	added := call("POST", "/providers/p/connections", `{"key":"private-key-two-2222"}`, 200)
+	if len(added.Connections) != 2 || added.Connections[1].Name != "API key 2" || !strings.HasPrefix(added.Connections[1].ID, "p~") {
+		t.Fatalf("second connection not added: %+v", added.Connections)
 	}
-	w = loginCall(s, "PATCH", "/providers/one", `{"name":"Renamed"}`)
-	if w.Code != 200 || reg.Settings.Providers()[0].Models[0].Enabled {
-		t.Fatal("renaming a key changed provider models")
+	second := added.Connections[1].ID
+	if got, _ := reg.Secrets.Get(second); got != "private-key-two-2222" {
+		t.Fatal("second key not stored under its connection")
 	}
-	if w := loginCall(s, "PATCH", "/providers/groups/missing", `{"enabled":true}`); w.Code != 404 {
-		t.Fatal("missing group was accepted")
+	call("PATCH", "/providers/p/connections/"+second, `{"name":"Spare","enabled":false}`, 200)
+	if got := reg.Settings.Providers()[0].Connections[1]; got.Name != "Spare" || got.Enabled {
+		t.Fatalf("connection edit lost: %+v", got)
 	}
-	file := filepath.Join(s.config.DataDir, "settings.json")
-	if err := os.Remove(file); err != nil {
-		t.Fatal(err)
+	call("PATCH", "/providers/p", `{"name":"Renamed","connections":[]}`, 200)
+	if got := reg.Settings.Providers()[0]; got.Name != "Renamed" || len(got.Connections) != 2 {
+		t.Fatal("editing the provider changed its connections")
 	}
-	if err := os.Mkdir(file, 0700); err != nil {
-		t.Fatal(err)
+	// Removing the connection that shares the provider's ID hands that ID to the next one.
+	call("DELETE", "/providers/p/connections/p", "", 200)
+	left := reg.Settings.Providers()[0].Connections
+	if len(left) != 1 || left[0].ID != "p" {
+		t.Fatalf("the remaining connection should take the provider's ID: %+v", left)
 	}
-	if w := loginCall(s, "PATCH", "/providers/groups/deepseek", `{"enabled":true}`); w.Code != 500 {
-		t.Fatal("failed save reported success")
+	if got, _ := reg.Secrets.Get("p"); got != "private-key-two-2222" {
+		t.Fatal("the remaining connection's key did not move with it")
 	}
-	for _, provider := range reg.Settings.Providers() {
-		if provider.Type == "deepseek" {
-			if provider.Enabled {
-				t.Fatal("failed save partially changed provider settings")
-			}
-			key, _ := reg.Secrets.Get(provider.ID)
-			if key != "private-original-key-"+provider.ID {
-				t.Fatal("provider settings changed a saved key")
-			}
-		}
+	if got, _ := reg.Secrets.Get(second); got != "" {
+		t.Fatal("the old key was left behind")
 	}
+	call("DELETE", "/providers/p/connections/p", "", 409)
+	call("PUT", "/providers/p/connections/missing/key", `{"key":"k"}`, 404)
+	call("DELETE", "/providers/p", "", 204)
 }
 
 func TestProvidersAPI(t *testing.T) {
@@ -111,17 +104,17 @@ func TestProvidersAPI(t *testing.T) {
 	defer upstream.Close()
 	body := `{"id":"p","type":"custom","name":"Test","baseURL":"` + upstream.URL + `/v1","headers":{"X-Test":"yes"},"enabled":true}`
 	call("POST", "/providers", body, 200)
-	if got := call("PUT", "/providers/p/key", `{"key":"private-secret-1234"}`, 200); !strings.Contains(got, "priv••••1234") {
+	if got := call("PUT", "/providers/p/connections/p/key", `{"key":"private-secret-1234"}`, 200); !strings.Contains(got, "priv••••1234") {
 		t.Fatal("missing masked key")
 	}
 	if secrets["p"] != "private-secret-1234" {
 		t.Fatal("key not stored")
 	}
-	call("PUT", "/providers/p/key", `{"key":"replacement-secret"}`, 409)
-	call("PUT", "/providers/p/key", `{"key":"private-secret-1234"}`, 200)
-	if secrets["p"] != "private-secret-1234" {
-		t.Fatal("saved key was replaced")
+	call("PUT", "/providers/p/connections/p/key", `{"key":"replacement-secret"}`, 200)
+	if secrets["p"] != "replacement-secret" {
+		t.Fatal("a new key did not replace the old one")
 	}
+	call("PUT", "/providers/p/connections/p/key", `{"key":"private-secret-1234"}`, 200)
 	call("PATCH", "/providers/p", `{"name":"Renamed","enabled":false}`, 200)
 	if got := prefs.Providers()[0]; got.Name != "Renamed" || got.Enabled || got.BaseURL != upstream.URL+"/v1" {
 		t.Fatal("patch lost metadata")
@@ -131,7 +124,7 @@ func TestProvidersAPI(t *testing.T) {
 	if err := json.Unmarshal([]byte(call("GET", "/providers", "", 200)), &list); err != nil {
 		t.Fatal(err)
 	}
-	if list[0].KeyHint != "priv••••1234" || prefs.Providers()[0].KeyHint != "" {
+	if list[0].Connections[0].KeyHint != "priv••••1234" || prefs.Providers()[0].Connections[0].KeyHint != "" {
 		t.Fatal("key hint missing from response or persisted with settings")
 	}
 	if len(list) != 1 || len(list[0].Models) != 1 || list[0].Models[0].ID != "text-model" || len(list[0].Models[0].Tags) != 1 || list[0].Models[0].Tags[0] != "text" {
@@ -141,7 +134,7 @@ func TestProvidersAPI(t *testing.T) {
 		method, path, body, message string
 		status                      int
 	}{
-		{"POST", "/providers", body, "unique IDs", 400},
+		{"POST", "/providers", body, "already exists", 409},
 		{"POST", "/providers", `{"id":"q","type":"custom","name":"Test","baseURL":"https://u:p@host/v1"}`, "without credentials", 400},
 		{"POST", "/providers", `{"id":"q","type":"custom","name":"Test","baseURL":"https://u@host/v1"}`, "without credentials", 400},
 		{"PATCH", "/providers/p", `{"baseURL":"https://u:p@host/v1"}`, "without credentials", 400},
@@ -149,7 +142,7 @@ func TestProvidersAPI(t *testing.T) {
 		{"PATCH", "/providers/p", `{"baseURL":"file:///tmp/models"}`, "HTTP or HTTPS", 400},
 		{"PATCH", "/providers/p", `{"id":"other"}`, "cannot change", 400},
 		{"PATCH", "/providers/p", `{"headers":{"Authorization":"secret"}}`, "credentials out of headers", 400},
-		{"PUT", "/providers/p/key", `{"key":" "}`, "Enter an API key", 400},
+		{"PUT", "/providers/p/connections/p/key", `{"key":" "}`, "Enter an API key", 400},
 		{"POST", "/providers", `{"key":"secret"}`, "Invalid JSON", 400},
 		{"DELETE", "/providers/missing", "", "not found", 404},
 	} {
@@ -191,7 +184,7 @@ func TestBuiltinModelsUsePiG(t *testing.T) {
 			}{
 				{method: "POST", path: "/providers", body: `{"id":"p","type":"` + kind + `","name":"P","baseURL":"https://ignored.test","enabled":true,"models":[]}`, status: 200},
 				{method: "POST", path: "/providers/p/test", status: 502},
-				{method: "PUT", path: "/providers/p/key", body: `{"key":"k"}`, status: 200},
+				{method: "PUT", path: "/providers/p/connections/p/key", body: `{"key":"k"}`, status: 200},
 				{method: "POST", path: "/providers/p/test", status: 200},
 			}
 			for _, step := range steps {
@@ -229,9 +222,9 @@ func TestProviderOrder(t *testing.T) {
 	reg := &providers.Registry{Settings: prefs, Secrets: providerSecrets{}}
 	s.providerRoutes(reg, &sync.Mutex{})
 	if err := reg.Save([]providers.Provider{
-		{ID: "second", Type: "custom", Name: "Second", Order: 8, Enabled: true, Models: []providers.Model{{ID: "image", Enabled: true, Tags: []string{"image-gen"}}, {ID: "chat", Enabled: true, Tags: []string{"text"}}}},
-		{ID: "first", Type: "custom", Name: "First", Order: 1, Enabled: true},
-		{ID: "off", Type: "custom", Name: "Off", Order: 2},
+		{ID: "second", Type: "custom", Name: "Second", Order: 8, Enabled: true, Connections: []providers.Connection{{ID: "second", Enabled: true}}, Models: []providers.Model{{ID: "image", Enabled: true, Tags: []string{"image-gen"}}, {ID: "chat", Enabled: true, Tags: []string{"text"}}}},
+		{ID: "first", Type: "custom", Name: "First", Order: 1, Enabled: true, Connections: []providers.Connection{{ID: "first", Enabled: true}}},
+		{ID: "off", Type: "custom", Name: "Off", Order: 2, Connections: []providers.Connection{{ID: "off", Enabled: true}}},
 	}); err != nil {
 		t.Fatal(err)
 	}

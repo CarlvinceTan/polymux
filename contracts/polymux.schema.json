@@ -2888,7 +2888,8 @@
         "baseURL",
         "enabled",
         "order",
-        "models"
+        "models",
+        "connections"
       ],
       "properties": {
         "id": {
@@ -2915,15 +2916,6 @@
           "type": "string",
           "x-go-value": true
         },
-        "status": {
-          "type": "string",
-          "x-go-value": true,
-          "description": "How the provider is signed in, set by the server: oauth or api_key; empty when it has no credential."
-        },
-        "keyHint": {
-          "type": "string",
-          "x-go-value": true
-        },
         "enabled": {
           "type": "boolean"
         },
@@ -2936,6 +2928,44 @@
           "items": {
             "$ref": "#/$defs/ProviderModel"
           }
+        },
+        "connections": {
+          "type": "array",
+          "description": "The accounts or API keys this provider is used through, in the order they are tried.",
+          "items": {
+            "$ref": "#/$defs/ProviderConnection"
+          }
+        }
+      }
+    },
+    "ProviderConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One API key or signed-in account of a provider.",
+      "required": [
+        "id",
+        "name",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "What the person called it; empty until named."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "x-go-value": true,
+          "description": "How it is signed in, set by the server: oauth or api_key; empty when it has no credential."
+        },
+        "keyHint": {
+          "type": "string",
+          "x-go-value": true
         }
       }
     },

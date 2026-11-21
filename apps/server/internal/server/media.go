@@ -247,7 +247,7 @@ func (t *mediaTool) candidates() ([]mediaChoice, error) {
 	var found []mediaChoice
 	var unsupported error
 	consider := func(provider settings.Provider, model settings.Model) {
-		if !provider.Enabled || !model.Enabled || !slices.Contains(model.Tags, capability) {
+		if !providers.Usable(provider) || !model.Enabled || !slices.Contains(model.Tags, capability) {
 			return
 		}
 		if err := mediaAdapter(provider.Type, t.kind); err != nil {
@@ -291,7 +291,7 @@ func mediaAdapter(provider, kind string) error {
 
 func (t *mediaTool) jobProvider(job mediaJob) (settings.Provider, error) {
 	for _, provider := range t.server.settings.Providers() {
-		if provider.ID == job.Provider && provider.Enabled && provider.Type == job.Type && strings.TrimRight(provider.BaseURL, "/") == job.BaseURL {
+		if provider.ID == job.Provider && providers.Usable(provider) && provider.Type == job.Type && strings.TrimRight(provider.BaseURL, "/") == job.BaseURL {
 			if _, err := credentialOrigin(job.BaseURL); err != nil {
 				return settings.Provider{}, err
 			}
@@ -314,7 +314,7 @@ func (t *mediaTool) headers(ctx context.Context, owner string, provider settings
 	if t.key != nil {
 		key, err = t.key(ctx, owner, provider)
 	} else {
-		key, err = providers.NewKeychain(filepath.Join(t.server.config.DataDir, "provider-keys")).Get(provider.ID)
+		key, err = providers.NewKeychain(filepath.Join(t.server.config.DataDir, "provider-keys")).Get(providers.KeyID(provider))
 		if err != nil || key == "" {
 			key, err = t.server.credential(ctx, owner, provider.ID, provider.BaseURL)
 		}

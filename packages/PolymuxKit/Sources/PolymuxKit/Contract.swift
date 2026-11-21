@@ -2272,11 +2272,10 @@ public struct Provider: Codable, Hashable, Sendable {
     public var baseURL: String
     public var headers: [String: String]?
     public var sessionHeader: String?
-    public var status: String?
-    public var keyHint: String?
     public var enabled: Bool
     public var order: Int64
     public var models: [ProviderModel]
+    public var connections: [ProviderConnection]
 
     public init(
         id: String = "",
@@ -2285,11 +2284,10 @@ public struct Provider: Codable, Hashable, Sendable {
         baseURL: String = "",
         headers: [String: String]? = nil,
         sessionHeader: String? = nil,
-        status: String? = nil,
-        keyHint: String? = nil,
         enabled: Bool = false,
         order: Int64 = 0,
-        models: [ProviderModel] = []
+        models: [ProviderModel] = [],
+        connections: [ProviderConnection] = []
     ) {
         self.id = id
         self.type = type
@@ -2297,11 +2295,32 @@ public struct Provider: Codable, Hashable, Sendable {
         self.baseURL = baseURL
         self.headers = headers
         self.sessionHeader = sessionHeader
-        self.status = status
-        self.keyHint = keyHint
         self.enabled = enabled
         self.order = order
         self.models = models
+        self.connections = connections
+    }
+}
+
+public struct ProviderConnection: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var enabled: Bool
+    public var status: String?
+    public var keyHint: String?
+
+    public init(
+        id: String = "",
+        name: String = "",
+        enabled: Bool = false,
+        status: String? = nil,
+        keyHint: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.enabled = enabled
+        self.status = status
+        self.keyHint = keyHint
     }
 }
 

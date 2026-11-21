@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
 	"io"
 	"net/http"
 	"slices"
@@ -20,7 +21,7 @@ import (
 // enabledModel reports whether a configured, enabled provider offers this enabled model.
 func (s *Server) enabledModel(provider, model string) bool {
 	for _, p := range s.settings.Providers() {
-		if p.ID != provider || !p.Enabled {
+		if p.ID != provider || !providers.Usable(p) {
 			continue
 		}
 		for _, m := range p.Models {
@@ -36,7 +37,7 @@ func (s *Server) enabledModel(provider, model string) bool {
 func (s *Server) hasModels() bool {
 	for _, p := range s.settings.Providers() {
 		for _, m := range p.Models {
-			if p.Enabled && m.Enabled && chatModel(m) {
+			if providers.Usable(p) && m.Enabled && chatModel(m) {
 				return true
 			}
 		}
@@ -158,7 +159,7 @@ func (t *modelTool) Execute(ctx context.Context, _ string, _ json.RawMessage, _ 
 	}
 	models := []modelChoice{}
 	for _, p := range t.server.settings.Providers() {
-		if !p.Enabled {
+		if !providers.Usable(p) {
 			continue
 		}
 		for _, m := range p.Models {

@@ -98,16 +98,12 @@ func TestProviderLoginKey(t *testing.T) {
 	}
 	prompt := state.Prompt.ID
 	state = answerLogin(t, s, state, "private-login-key")
-	if !state.Done || state.Error != "" || state.Provider == nil || state.Provider.Status != "api_key" || len(state.Provider.Models) == 0 {
+	if !state.Done || state.Error != "" || state.Provider == nil || len(state.Provider.Connections) != 1 || state.Provider.Connections[0].Status != "api_key" || len(state.Provider.Models) == 0 {
 		t.Fatalf("login did not publish provider/models: %+v", state)
 	}
 	id := state.Provider.ID
-	if state.Provider.Name != "API key 1" || state.Provider.KeyHint != "priv••••-key" {
-		t.Fatalf("key metadata missing: name=%q hint=%q", state.Provider.Name, state.Provider.KeyHint)
-	}
-	blocked := loginCall(s, "POST", "/providers/logins", `{"provider":"`+id+`","auth":"api_key"}`)
-	if blocked.Code != http.StatusConflict {
-		t.Fatal("saved API key accepted another sign-in")
+	if connection := state.Provider.Connections[0]; state.Provider.Name != providers.Builtin("openai").Name || connection.ID != id || connection.Name != "API key 1" || connection.KeyHint != "priv••••-key" {
+		t.Fatalf("key metadata missing: %+v", state.Provider)
 	}
 	credential, err := reg.Credentials().Read(t.Context(), providers.Prefix+id)
 	if err != nil || credential == nil || credential.Key != "private-login-key" {
@@ -135,33 +131,33 @@ func TestProviderLoginKey(t *testing.T) {
 func TestProviderLoginMultipleConnections(t *testing.T) {
 	t.Parallel()
 	s, reg := loginServer(t)
-	var ids []string
-	for i, key := range []string{"first-private-key", "second-private-key"} {
-		state := startLogin(t, s, `{"type":"openai","auth":"api_key"}`)
-		state = answerLogin(t, s, state, key)
-		if state.Provider == nil || state.Error != "" {
-			t.Fatalf("connection %d failed: %+v", i, state)
-		}
-		ids = append(ids, state.Provider.ID)
-		if state.Provider.Name != []string{"API key 1", "API key 2"}[i] || state.Provider.Order != i {
-			t.Fatalf("connection name/order=%+v", state.Provider)
-		}
+	state := startLogin(t, s, `{"type":"openai","auth":"api_key"}`)
+	state = answerLogin(t, s, state, "first-private-key")
+	if state.Provider == nil || state.Error != "" {
+		t.Fatalf("first connection failed: %+v", state)
 	}
-	if ids[0] == ids[1] || len(reg.Settings.Providers()) != 2 {
-		t.Fatal("connecting a second account replaced the first")
+	id := state.Provider.ID
+	state = startLogin(t, s, `{"provider":"`+id+`","auth":"api_key"}`)
+	state = answerLogin(t, s, state, "second-private-key")
+	if state.Provider == nil || state.Error != "" || len(reg.Settings.Providers()) != 1 || len(state.Provider.Connections) != 2 {
+		t.Fatalf("a second key should be another connection of the same provider: %+v", state)
+	}
+	connections := state.Provider.Connections
+	if connections[0].ID != id || connections[1].ID == id || connections[0].Name != "API key 1" || connections[1].Name != "API key 2" {
+		t.Fatalf("connection names or IDs: %+v", connections)
 	}
 	for i, key := range []string{"first-private-key", "second-private-key"} {
-		credential, err := reg.Credentials().Read(t.Context(), providers.Prefix+ids[i])
+		credential, err := reg.Credentials().Read(t.Context(), providers.Prefix+connections[i].ID)
 		if err != nil || credential == nil || credential.Key != key {
-			t.Fatal("accounts did not retain independent credentials")
+			t.Fatal("connections did not retain independent credentials")
 		}
 	}
-	if w := loginCall(s, "DELETE", "/providers/"+ids[0], ""); w.Code != 204 {
-		t.Fatal("couldn't remove the first connection")
+	if w := loginCall(s, "DELETE", "/providers/"+id+"/connections/"+id, ""); w.Code != 200 {
+		t.Fatalf("couldn't remove the first connection: %s", w.Body.String())
 	}
-	credential, err := reg.Credentials().Read(t.Context(), providers.Prefix+ids[1])
+	credential, err := reg.Credentials().Read(t.Context(), providers.Prefix+id)
 	if err != nil || credential == nil || credential.Key != "second-private-key" {
-		t.Fatal("removing one connection removed the other's credentials")
+		t.Fatal("the remaining connection's key was lost")
 	}
 }
 
@@ -174,19 +170,25 @@ func TestProviderLoginInheritsSettings(t *testing.T) {
 		t.Fatal("first key has no models")
 	}
 	id := first.Provider.Models[0].ID
-	body, err := json.Marshal(map[string]any{"enabled": false, "models": map[string]bool{id: false}})
+	models := slices.Clone(first.Provider.Models)
+	for i := range models {
+		if models[i].ID == id {
+			models[i].Enabled = false
+		}
+	}
+	body, err := json.Marshal(map[string]any{"enabled": false, "models": models})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := loginCall(s, "PATCH", "/providers/groups/openai", string(body)); w.Code != 200 {
+	if w := loginCall(s, "PATCH", "/providers/"+first.Provider.ID, string(body)); w.Code != 200 {
 		t.Fatalf("provider settings: %d %s", w.Code, w.Body.String())
 	}
-	second := startLogin(t, s, `{"type":"openai","auth":"api_key"}`)
+	second := startLogin(t, s, `{"provider":"`+first.Provider.ID+`","auth":"api_key"}`)
 	second = answerLogin(t, s, second, "second-inherited-key")
 	if second.Provider == nil || second.Provider.Enabled || !slices.ContainsFunc(second.Provider.Models, func(model contract.ProviderModel) bool {
 		return model.ID == id && !model.Enabled
 	}) {
-		t.Fatal("new key did not inherit provider settings")
+		t.Fatal("new key changed the provider's settings")
 	}
 }
 

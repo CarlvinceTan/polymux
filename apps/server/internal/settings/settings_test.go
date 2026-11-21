@@ -307,21 +307,21 @@ func TestProviderStatusPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	providers := []Provider{{ID: "one", Status: "ok"}, {ID: "two", Status: "error"}, {ID: "three", Status: "unknown"}}
+	providers := []Provider{{ID: "one", Name: "ok"}, {ID: "two", Name: "error"}, {ID: "three", Name: "unknown"}}
 	if err := s.SetProviders(providers); err != nil {
 		t.Fatal(err)
 	}
-	providers[0].Status = "error"
+	providers[0].Name = "error"
 	copy := s.Providers()
-	copy[0].Status = "unknown"
+	copy[0].Name = "unknown"
 	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := reopened.Providers(); len(got) != 3 || got[0].Status != "ok" || got[1].Status != "error" || got[2].Status != "unknown" {
+	if got := reopened.Providers(); len(got) != 3 || got[0].Name != "ok" || got[1].Name != "error" || got[2].Name != "unknown" {
 		t.Fatalf("provider status lost: %+v", got)
 	}
-	if s.Providers()[0].Status != "ok" {
+	if s.Providers()[0].Name != "ok" {
 		t.Fatal("provider status aliases caller data")
 	}
 }
