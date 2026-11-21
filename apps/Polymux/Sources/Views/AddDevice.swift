@@ -9,8 +9,6 @@ struct AddDevice: View {
     /// Joins another network; nil shows this network's invite.
     var join: ((URL) async throws -> Void)? = nil
     @Environment(\.panelClose) private var close
-    @State private var invite: Invite?
-    @State private var issue: String?
     @State private var pasted = ""
     @State private var pasteIssue: String?
     @State private var joining = false
@@ -35,39 +33,13 @@ struct AddDevice: View {
         }
         #endif
         .onDisappear { joinTask?.cancel() }
-        .task(id: client?.id) {
-            // Tries again on its own until a code is ready.
-            while join == nil, !Task.isCancelled {
-                await load()
-                try? await Task.sleep(for: .seconds(invite == nil ? 5 : 120))
-            }
-        }
     }
 
     private var inviteSection: some View {
                 Section {
-                    if let invite {
-                        VStack(spacing: 16) {
-                            QRCode(text: invite.link.absoluteString)
-                                .frame(width: 220, height: 220)
-                                .accessibilityLabel("Pairing QR code")
-                            HStack(spacing: 10) {
-                                ShareLink(item: invite.shareLink) { Label("Share", systemImage: "square.and.arrow.up") }
-                                Button("Copy link", systemImage: "doc.on.doc") { copy(invite.shareLink) }
-                            }
-                            .buttonStyle(.glass)
-                            Text("Single-use link. Expires in 3 minutes.")
-                                .font(.footnote).foregroundStyle(.muted)
-                        }
+                    InviteCode(client: client)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                    } else if let issue {
-                        Text(issue).font(.footnote).foregroundStyle(.muted).frame(maxWidth: .infinity)
-                    } else if client == nil {
-                        Text("Connect to a server first.").foregroundStyle(.muted).frame(maxWidth: .infinity)
-                    } else {
-                        ProgressView().frame(maxWidth: .infinity)
-                    }
                 }
                 .panelRow()
     }
@@ -101,18 +73,6 @@ struct AddDevice: View {
                 .panelRow()
     }
 
-    private func load() async {
-        guard let client else { return }
-        do { invite = try await client.invite(); issue = nil }
-        catch is CancellationError {}
-        catch let error as URLError where error.code == .cancelled {}
-        catch {
-            var text = error.isOffline ? "Offline" : error.reason(or: "Couldn’t create a pairing code.")
-            if case let .response(status, _)? = error as? ClientError, status >= 500 { text += " (HTTP \(status))" }
-            issue = text
-        }
-    }
-
     private func submit() {
         guard !joining else { return }
         guard let url = URL(string: pasted.trimmingCharacters(in: .whitespacesAndNewlines)), Invite(link: url) != nil else {
@@ -128,6 +88,63 @@ struct AddDevice: View {
             catch {
                 pasteIssue = error.isOffline ? "Can’t reach this server. Check its connection and try the link again." : error.reason(or: "Couldn’t pair with this server.")
             }
+        }
+    }
+}
+
+/// This network's pairing QR code and link, renewed before it expires.
+struct InviteCode: View {
+    let client: APIClient?
+    var size: CGFloat = 220
+    /// Puts the link actions beside the code instead of under it.
+    var beside = false
+    @State private var invite: Invite?
+    @State private var issue: String?
+
+    var body: some View {
+        Group {
+            if let invite {
+                let layout = beside ? AnyLayout(HStackLayout(spacing: 20)) : AnyLayout(VStackLayout(spacing: 16))
+                layout {
+                    QRCode(text: invite.link.absoluteString)
+                        .frame(width: size, height: size)
+                        .accessibilityLabel("Pairing QR code")
+                    VStack(alignment: beside ? .leading : .center, spacing: 12) {
+                        HStack(spacing: 10) {
+                            ShareLink(item: invite.shareLink) { Label("Share", systemImage: "square.and.arrow.up") }
+                            Button("Copy link", systemImage: "doc.on.doc") { copy(invite.shareLink) }
+                        }
+                        .buttonStyle(.glass)
+                        Text("Single-use link. Expires in 3 minutes.")
+                            .font(.footnote).foregroundStyle(.muted)
+                    }
+                }
+            } else if let issue {
+                Text(issue).font(.footnote).foregroundStyle(.muted)
+            } else if client == nil {
+                Text("Connect to a server first.").foregroundStyle(.muted)
+            } else {
+                ProgressView()
+            }
+        }
+        .task(id: client?.id) {
+            // Tries again on its own until a code is ready.
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(invite == nil ? 5 : 120))
+            }
+        }
+    }
+
+    private func load() async {
+        guard let client else { return }
+        do { invite = try await client.invite(); issue = nil }
+        catch is CancellationError {}
+        catch let error as URLError where error.code == .cancelled {}
+        catch {
+            var text = error.isOffline ? "Offline" : error.reason(or: "Couldn’t create a pairing code.")
+            if case let .response(status, _)? = error as? ClientError, status >= 500 { text += " (HTTP \(status))" }
+            issue = text
         }
     }
 

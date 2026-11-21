@@ -12,13 +12,16 @@ struct Onboarding: View {
         #endif
     }
 
-    /// UI checks can open a later step with --onboarding-step=host.
+    /// UI checks can open a later step with --onboarding-step=models.
     private static var firstStep: Step {
         #if DEBUG
         let value = CommandLine.arguments.first { $0.hasPrefix("--onboarding-step=") }?.split(separator: "=").last
-        return [Step.host, .plugins].first { "\($0)" == value.map(String.init) } ?? .welcome
+        if let step = Step.allCases.first(where: { "\($0)" == value.map(String.init) }) { return step }
+        #endif
+        #if os(macOS)
+        return .welcome
         #else
-        .welcome
+        return .host
         #endif
     }
 
@@ -33,11 +36,14 @@ struct Onboarding: View {
     @State private var joining = false
     @State private var joined = false
     @State private var joinIssue: String?
+    @State private var addingProvider = false
+    @State private var choosingModel = false
     #if os(iOS)
     @State private var scanning = false
+    /// Set once pairing shows the server has no provider, so the model step follows.
+    @State private var needsModel = false
     #endif
     @AppStorage("serverAddress") private var address = ServerHost.address
-    @Environment(PluginStore.self) private var plugins: PluginStore?
     @Environment(\.colorScheme) private var scheme
     #if os(iOS)
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -46,26 +52,21 @@ struct Onboarding: View {
     private let permissions = Permissions.shared
     #endif
 
-    /// The Mac's own permissions only apply where the server runs.
+    private var session: AppSession? { pool.sessions[address] }
+    private var providers: [Provider] { session?.providers.providers ?? [] }
+    private var groups: [ProviderGroup] { ProviderGroup.collect(providers, names: session?.providers.names ?? [:]) }
+
+    /// A Mac sets up its own server; an iPhone only pairs, and adds a model when the server has none.
     private var steps: [Step] {
         #if os(macOS)
         Step.allCases
         #else
-        Step.allCases.filter { $0 != .permissions }
+        needsModel || step == .models ? [.host, .models] : [.host]
         #endif
     }
 
     private enum Step: Int, CaseIterable, Hashable {
-        case welcome, host, permissions, plugins
-
-        var title: String {
-            switch self {
-            case .welcome: "Welcome"
-            case .host: "Where Bots Run"
-            case .permissions: "Permissions"
-            case .plugins: "Plugins"
-            }
-        }
+        case welcome, host, models, permissions, plugins, ready
 
         var heading: String {
             switch self {
@@ -76,8 +77,10 @@ struct Onboarding: View {
                 #else
                 "Connect to Your Server"
                 #endif
+            case .models: "Connect a Model"
             case .permissions: "System Permissions"
             case .plugins: "Official Plugins"
+            case .ready: "You’re All Set"
             }
         }
 
@@ -85,17 +88,19 @@ struct Onboarding: View {
             switch self {
             case .welcome: "sparkles"
             case .host: "server.rack"
+            case .models: "cpu.fill"
             case .permissions: "hand.raised.fill"
             case .plugins: "puzzlepiece.extension.fill"
+            case .ready: "checkmark"
             }
         }
 
         var tint: Color {
             switch self {
-            case .welcome: .blue
-            case .host: .blue
-            case .permissions: .blue
+            case .models: .purple
             case .plugins: .orange
+            case .ready: .green
+            default: .blue
             }
         }
     }
@@ -113,12 +118,28 @@ struct Onboarding: View {
                 }
                 .scrollIndicators(.hidden)
             }
+            // The next step stays in reach however long the page is.
+            if step != .welcome {
+                navigationActions
+                    .frame(maxWidth: 700)
+                    .padding(.horizontal, horizontalInset)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+            }
         }
-        .background(PanelSurface.color(scheme))
-        #if os(macOS)
-        .ignoresSafeArea(edges: .top)
-        #endif
+        .background(PanelSurface.color(scheme).ignoresSafeArea())
         .tint(.blue)
+        .environment(session?.providers)
+        .panel(isPresented: $addingProvider) {
+            ProviderEditor(client: session?.client, original: nil, onBack: { addingProvider = false }) { list in
+                session?.providers.accept(list)
+                Task { await session?.settings.refresh() }
+            }
+            .environment(session?.providers)
+        }
+        #if os(iOS)
+        .dropdownHost()
+        #endif
         #if os(macOS)
         .task { await permissions.refresh() }
         #endif
@@ -145,31 +166,35 @@ struct Onboarding: View {
         #endif
     }
 
+    private var horizontalInset: CGFloat {
+        #if os(macOS)
+        40
+        #else
+        24
+        #endif
+    }
+
     private var content: some View {
         VStack(spacing: 18) {
             pageHeader
             pageBody
-            if step == .welcome { welcomeActions } else { navigationActions }
+            if step == .welcome { welcomeActions }
         }
         .frame(maxWidth: 700)
-        #if os(macOS)
-        .padding(.horizontal, 40)
-        #else
-        .padding(.horizontal, 24)
-        #endif
+        .padding(.horizontal, horizontalInset)
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
     }
 
     private var pageHeader: some View {
         VStack(spacing: 14) {
-            if step == .welcome {
-                AppIcon().frame(width: 160, height: 160)
+            if showsIcon {
+                AppIcon().frame(width: iconSize, height: iconSize)
             } else {
                 hero(step.symbol, tint: step.tint)
             }
             Text(step.heading)
-                .font(step == .welcome ? .largeTitle.bold() : .title.bold())
+                .font(showsIcon ? .largeTitle.bold() : .title.bold())
                 .multilineTextAlignment(.center)
             Text(detail)
                 .font(.body)
@@ -180,24 +205,39 @@ struct Onboarding: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// The first page carries the app icon: Welcome on a Mac, pairing on iPhone.
+    private var showsIcon: Bool { step == steps.first && step != .models }
+
+    private var iconSize: CGFloat {
+        #if os(macOS)
+        160
+        #else
+        120
+        #endif
+    }
+
     private var detail: String {
         switch step {
         case .welcome:
-            #if os(macOS)
-            "Choose where bots run, grant them access, and add what you need."
-            #else
-            "Connect to your server and add what you need."
-            #endif
+            "Choose where bots run, connect a model, and add what you need."
         case .host:
             #if os(macOS)
             "Run the server on this device, or connect to one that's already running."
             #else
-            "Bots run on another device. Pair this iPhone with that server."
+            "Bots run on your server. Pair this iPhone with it to chat from anywhere."
             #endif
+        case .models:
+            "Bots need a model to reply. Sign in to a provider or add an API key."
         case .permissions:
             "Bots inherit what Polymux Server is granted."
         case .plugins:
             "Add a chat hub, permission rules, and remote access."
+        case .ready:
+            #if os(macOS)
+            "Start a chat with a bot, or pair your iPhone to chat from anywhere."
+            #else
+            "Start a chat with a bot."
+            #endif
         }
     }
 
@@ -205,11 +245,13 @@ struct Onboarding: View {
         switch step {
         case .welcome: EmptyView()
         case .host: hostPage
+        case .models: modelsPage
         case .permissions:
             #if os(macOS)
             permissionsPage
             #endif
         case .plugins: pluginsPage
+        case .ready: readyPage
         }
     }
 
@@ -227,18 +269,34 @@ struct Onboarding: View {
 
     private var navigationActions: some View {
         HStack(spacing: 12) {
-            Button("Back", action: back)
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+            if step == steps.first {
+                Button("Skip for now", action: finish)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+            } else {
+                Button("Back", action: back)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+            }
             Spacer(minLength: 0)
+            if step == .models && providers.isEmpty {
+                Button("Later", action: advance)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Set up a model later")
+            }
             if !needsPairing {
-                Button(step == .plugins ? "Done" : "Continue", action: advance)
+                Button(primaryTitle, action: advance)
                     .buttonStyle(OnboardingPrimaryButton())
                     .keyboardShortcut(.defaultAction)
-                    .disabled(joining)
+                    .disabled(joining || (step == .models && providers.isEmpty))
             }
         }
-        .padding(.top, 4)
+    }
+
+    private var primaryTitle: String {
+        if step == .ready { return "Start" }
+        return step == steps.last ? "Done" : "Continue"
     }
 
     private var needsPairing: Bool {
@@ -271,8 +329,7 @@ struct Onboarding: View {
                            detail: joined ? "Connected." : "Connect to a server that's already running.",
                            symbol: "server.rack", tint: .purple)
             }
-            .background(PanelSurface.card(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
+            .onboardingCard(scheme)
             if host == .remote {
                 pairing
                     .padding(.top, 16)
@@ -284,23 +341,11 @@ struct Onboarding: View {
         Button {
             host = choice
         } label: {
-            HStack(spacing: 13) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .light))
-                    .foregroundStyle(tint)
-                    .frame(width: 34, height: 34)
-                    .background(.quinary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.headline)
-                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            OnboardingRow(title: title, detail: detail, symbol: symbol, tint: tint) {
                 Image(systemName: host == choice ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(host == choice ? Color.blue : Color.secondary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -328,7 +373,7 @@ struct Onboarding: View {
             if let joinIssue {
                 Text(joinIssue).font(.footnote).foregroundStyle(.secondary)
             } else if !joined {
-                Text("On the other device, choose your network in Settings › Network, then tap +.")
+                Text("On the device running your server, open Settings › Network › Add device.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -398,6 +443,21 @@ struct Onboarding: View {
         link = url.absoluteString
         connect()
     }
+
+    /// A paired iPhone is ready at once, unless its server still needs a model.
+    private func settle() async {
+        for _ in 0..<40 where session == nil {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        guard let store = session?.providers else { return finish() }
+        await store.refreshProviders(force: true)
+        if store.providers?.isEmpty == true {
+            needsModel = true
+            step = .models
+        } else {
+            finish()
+        }
+    }
     #endif
 
     private func connect() {
@@ -414,12 +474,99 @@ struct Onboarding: View {
                 try await join(url)
                 joined = true
                 link = ""
+                #if os(iOS)
+                await settle()
+                #endif
             } catch is CancellationError {
             } catch {
                 joinIssue = error.isOffline ? "Can’t reach this server. Check its connection and try the link again."
                                             : error.reason(or: "Couldn’t pair with this server.")
             }
         }
+    }
+
+    private var modelsPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(spacing: 0) {
+                ForEach(groups) { group in
+                    OnboardingRow(title: group.name, detail: group.summary, symbol: "cloud.fill", tint: .blue) {
+                        Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(.green)
+                            .accessibilityLabel("Connected")
+                    }
+                    Divider().padding(.horizontal, 12)
+                }
+                Button { addingProvider = true } label: {
+                    OnboardingRow(title: groups.isEmpty ? "Add a provider" : "Add another provider",
+                                  detail: "OpenAI, Anthropic, Gemini, Ollama and more.",
+                                  symbol: "plus", tint: .purple) {
+                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(session == nil)
+                .accessibilityLabel(groups.isEmpty ? "Add a provider" : "Add another provider")
+            }
+            .onboardingCard(scheme)
+            if session == nil {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+                    .accessibilityLabel("Starting server")
+            } else if !providers.isEmpty {
+                defaultModel
+            }
+            if let issue = session?.providers.issue {
+                Text(issue).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .task(id: session?.client.id) {
+            guard let store = session?.providers else { return }
+            await store.refresh()
+            // A sign-in finishes on the server, so pick it up without a manual refresh.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                await store.refreshProviders()
+            }
+        }
+    }
+
+    private var defaultModel: some View {
+        Button { choosingModel = true } label: {
+            OnboardingRow(title: "Default model", detail: "New bots start on this model.",
+                          symbol: "sparkles", tint: .purple) {
+                HStack(spacing: 6) {
+                    if model.model.isEmpty {
+                        Text("Server default").foregroundStyle(.secondary)
+                    } else {
+                        ModelLabel(name: model)
+                    }
+                    Image(systemName: "chevron.up.chevron.down").foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Default model")
+        .accessibilityValue(model.model.isEmpty ? "Server default" : model.title)
+        .onboardingCard(scheme)
+        .dropdown(isPresented: $choosingModel, width: .fixed(DropdownStyle.modelWidth)) {
+            ModelPicker(providers: providers, provider: session?.settings.value?.defaultProvider ?? "",
+                        model: session?.settings.value?.defaultModel ?? "", clearable: false) { provider, model in
+                session?.settings.edit(SettingsPatch(defaultProvider: provider, defaultModel: model))
+                choosingModel = false
+            }
+            .environment(session?.providers)
+            .preferredColorScheme(scheme)
+        }
+        .disabled(session?.settings.value == nil)
+    }
+
+    /// The default model as Settings names it.
+    private var model: ModelName {
+        guard let value = session?.settings.value, !value.defaultModel.isEmpty, !value.defaultProvider.isEmpty else {
+            return ModelName(model: "")
+        }
+        let name = groups.first { $0.connections.contains { $0.id == value.defaultProvider } }?.name ?? value.defaultProvider
+        return ModelName(model: value.defaultModel, provider: name)
     }
 
     #if os(macOS)
@@ -430,8 +577,7 @@ struct Onboarding: View {
                 permissionRow(permission)
             }
         }
-        .background(PanelSurface.card(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
+        .onboardingCard(scheme)
         .task {
             while !Task.isCancelled {
                 await permissions.refresh()
@@ -441,18 +587,8 @@ struct Onboarding: View {
     }
 
     private func permissionRow(_ permission: Permission) -> some View {
-        HStack(spacing: 13) {
-            Image(systemName: permission.symbol)
-                .font(.system(size: 15, weight: .light))
-                .foregroundStyle(permission.tint)
-                .frame(width: 34, height: 34)
-                .background(.quinary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(permission.title).font(.headline)
-                Text(permission.detail).font(.subheadline).foregroundStyle(.secondary)
-                    .lineLimit(2, reservesSpace: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        OnboardingRow(title: permission.title, detail: permission.detail, symbol: permission.symbol,
+                      tint: permission.tint, reservesLines: true) {
             if permissions.granted.contains(permission) {
                 Label("Granted", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
@@ -464,14 +600,12 @@ struct Onboarding: View {
                     .accessibilityLabel("Grant \(permission.title)")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
     }
     #endif
 
     private var pluginsPage: some View {
         Group {
-            if let plugins {
+            if let plugins = session?.plugins {
                 OnboardingPlugins(store: plugins)
             } else {
                 Text("Connect to a server to add plugins.")
@@ -480,6 +614,59 @@ struct Onboarding: View {
                     .padding(.vertical, 40)
             }
         }
+    }
+
+    private var readyPage: some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 0) {
+                OnboardingRow(title: "Server", detail: serverName, symbol: "server.rack", tint: .blue) {
+                    status(session != nil)
+                }
+                Divider().padding(.horizontal, 12)
+                Button { step = .models } label: {
+                    OnboardingRow(title: "Model", detail: modelSummary, symbol: "cpu.fill", tint: .purple) {
+                        status(!providers.isEmpty)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Model")
+                .accessibilityValue(modelSummary)
+            }
+            .onboardingCard(scheme)
+            #if os(macOS)
+            VStack(spacing: 12) {
+                Label("Pair your iPhone", systemImage: "iphone")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Open Polymux on your iPhone and scan this code, or send it the link.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                InviteCode(client: session?.client, size: 132, beside: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(14)
+            .onboardingCard(scheme)
+            #endif
+        }
+    }
+
+    private var serverName: String {
+        if address == ServerHost.address { return "This Mac" }
+        return session?.network.value?.server.name ?? "Connected"
+    }
+
+    private var modelSummary: String {
+        if providers.isEmpty { return "Not set. Add one in Settings › Models." }
+        return model.model.isEmpty ? "Server default" : model.title
+    }
+
+    private func status(_ ready: Bool) -> some View {
+        Image(systemName: ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+            .font(.title3)
+            .foregroundStyle(ready ? Color.green : Color.orange)
+            .accessibilityLabel(ready ? "Ready" : "Not set")
     }
 
     private func hero(_ symbol: String, tint: Color) -> some View {
@@ -516,6 +703,43 @@ struct Onboarding: View {
         if let index = steps.firstIndex(of: step), index > 0 {
             step = steps[index - 1]
         }
+    }
+}
+
+/// One line of a setup card: an icon, a title and detail, and its control.
+private struct OnboardingRow<Trailing: View>: View {
+    let title: String
+    let detail: String
+    let symbol: String
+    let tint: Color
+    var reservesLines = false
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(spacing: 13) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .light))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(.quinary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline)
+                Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: reservesLines)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            trailing()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+private extension View {
+    func onboardingCard(_ scheme: ColorScheme) -> some View {
+        background(PanelSurface.card(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
     }
 }
 

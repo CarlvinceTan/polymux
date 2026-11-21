@@ -475,6 +475,7 @@ struct ConnectionView: View {
     private var providers: [Provider] { providerStore?.providers ?? [] }
     @State private var networkPage = SettingsTab.verifiesPage ? UserDefaults.standard.string(forKey: "serverAddress") : nil
     @State private var joining = false
+    @State private var adding = false
     @State private var providerTarget: ProviderTarget?
     @State private var pluginTarget: String?
     @State private var arrangingPlugins = false
@@ -507,6 +508,8 @@ struct ConnectionView: View {
                     try await join(link)
                     if joined == nil { onClose() }
                 }
+            } else if adding {
+                AddDevice(client: client, onBack: { adding = false })
             } else if let target = providerTarget {
                 ProviderEditor(client: client, original: target.provider, onBack: { providerTarget = nil }) {
                     providerStore?.accept($0)
@@ -559,7 +562,8 @@ struct ConnectionView: View {
         switch category {
         case .vault: VaultSettings()
         case .network:
-            NetworkSettings(pool: pool, joinIssue: joinIssue, open: { networkPage = $0 }, join: { joining = true })
+            NetworkSettings(pool: pool, joinIssue: joinIssue, open: { networkPage = $0 }, join: { joining = true },
+                            add: client == nil ? nil : { adding = true })
         case .plugins: PluginSettings(open: { pluginTarget = $0 }, arrange: { arrangingPlugins = true })
         default: settingsForm
         }

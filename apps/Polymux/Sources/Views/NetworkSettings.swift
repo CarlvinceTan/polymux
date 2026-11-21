@@ -60,6 +60,8 @@ struct NetworkSettings: View {
     let joinIssue: String?
     let open: (String) -> Void
     let join: () -> Void
+    /// Pairs another device with the network in use; nil without one.
+    var add: (() -> Void)? = nil
     @State private var deletingCopy = false
 
     private var networks: [ServerDevice] { pool.servers.devices.filter { $0.denied != true } }
@@ -72,6 +74,18 @@ struct NetworkSettings: View {
                 }
                 ForEach(networks) { server in
                     NetworkRow(server: server, store: pool.sessions[server.address]?.network) { open(server.address) }
+                }
+                if let add {
+                    Button(action: add) {
+                        HStack {
+                            Text("Add device")
+                            Spacer()
+                            Image(systemName: "qrcode").foregroundStyle(.muted)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add device")
                 }
             } header: {
                 SectionHeader("Networks", symbol: "network", tint: .blue) {
