@@ -26,7 +26,7 @@ private struct NetworkRow: View {
                 .foregroundStyle(.muted)
                 .accessibilityHidden(true)
                 .overlay(alignment: .bottomTrailing) {
-                    StatusDot(state: state).offset(x: 2, y: 2)
+                    StatusDot(state: state).scaleEffect(0.75).offset(x: 2, y: 2)
                 }
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
