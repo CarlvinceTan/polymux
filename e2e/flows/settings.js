@@ -28,13 +28,21 @@ if ((await app.query({ role: "button", name: "Theme" })).length) throw new Error
 await app.click({ role: "button", name: "Updates" });
 await app.waitFor({ role: "button", name: "Check for updates", timeout_ms: 5000 });
 await app.waitFor({ text: "Version", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "App update channel", value: "Stable", timeout_ms: 5000 });
 await app.waitFor({ role: "button", name: "Server channel", value: "Nightly", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Server channel" });
 await app.click({ role: "button", name: "Stable" });
 await app.waitFor({ role: "button", name: "Server channel", value: "Stable", timeout_ms: 5000 });
+await app.click({ role: "button", name: "App update channel" });
+await app.click({ role: "button", name: "Nightly" });
+await app.waitFor({ role: "button", name: "App update channel", value: "Nightly", timeout_ms: 5000 });
 await app.click({ role: "button", name: "General" });
 await app.click({ role: "button", name: "Updates" });
 await app.waitFor({ role: "button", name: "Server channel", value: "Stable", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "App update channel", value: "Nightly", timeout_ms: 5000 });
+await app.click({ role: "button", name: "App update channel" });
+await app.click({ role: "button", name: "Stable" });
+await app.waitFor({ role: "button", name: "App update channel", value: "Stable", timeout_ms: 5000 });
 const rows = await app.query({ role: "statictext" });
 for (const prefix of ["Client", "Server"]) {
     if (!rows.some(row => (row.value || row.name || "").startsWith(prefix))) throw new Error("Version section is missing the " + prefix + " row");

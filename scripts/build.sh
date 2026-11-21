@@ -1,10 +1,10 @@
 #!/bin/sh
-# Build Polymux targets into dist/. Usage: scripts/build.sh [macos|ios|dmg|server|all]
+# Build Polymux targets into dist/. Usage: scripts/build.sh [macos|macos-stage|macos-sign|ios|dmg|server|all]
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 case ${1:-all} in
   --locked) shift ;;
-  macos|ios|dmg|all)
+  macos|macos-stage|macos-sign|ios|dmg|all)
     exec python3 "$ROOT/scripts/lib/locked.py" "$ROOT/.build/locks/xcode.lock" -- "$0" --locked "$@" ;;
 esac
 IDENTITY=${POLYMUX_SIGN_IDENTITY:-"Developer ID Application: FlareHQ Pty Ltd (23YB4896XA)"}
@@ -35,19 +35,17 @@ symbols() {
     "$DIST/symbols/Polymux-$MARKETING_VERSION-$BUILD_NUMBER-arm64.dSYM.zip"
 }
 
-# Developer ID-signed macOS client. No APNS entitlement is used.
-macos() {
+build_macos() {
   xcodebuild build \
     -project "$PROJECT" -scheme Polymux -configuration Release \
     -destination platform=macOS \
     -derivedDataPath "$ROOT/.build/xcode-release" \
     -jobs 6 \
-    CODE_SIGN_STYLE=Manual \
-    CODE_SIGN_IDENTITY="$IDENTITY" \
-    DEVELOPMENT_TEAM="$TEAM" \
-    CODE_SIGN_ENTITLEMENTS="$ROOT/apps/Polymux/Polymux-local.entitlements" \
     CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-    ENABLE_HARDENED_RUNTIME=YES
+    ENABLE_HARDENED_RUNTIME=YES "$@"
+}
+
+stage_macos() {
   rm -rf "$DIST/macos" && mkdir -p "$DIST/macos"
   ditto "$ROOT/.build/xcode-release/Build/Products/Release/Polymux.app" "$DIST/macos/Polymux.app"
   symbols
@@ -60,7 +58,21 @@ macos() {
     /usr/libexec/PlistBuddy -c 'Add :SUAutomaticallyUpdate bool true' "$plist"
     /usr/libexec/PlistBuddy -c 'Set :SUScheduledCheckInterval 3600' "$plist"
   fi
-  sign_app "$DIST/macos/Polymux.app" "$IDENTITY" "$ROOT/apps/Polymux/Polymux-local.entitlements"
+}
+
+sign_macos() {
+  APP="$DIST/macos/Polymux.app"
+  [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" = "$BUILD_NUMBER" ] ||
+    { echo "The staged app does not match build $BUILD_NUMBER." >&2; exit 1; }
+  sign_app "$APP" "$IDENTITY" "$ROOT/apps/Polymux/Polymux-local.entitlements"
+}
+
+# Developer ID-signed macOS client. No APNS entitlement is used.
+macos() {
+  build_macos CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$IDENTITY" DEVELOPMENT_TEAM="$TEAM" \
+    CODE_SIGN_ENTITLEMENTS="$ROOT/apps/Polymux/Polymux-local.entitlements"
+  stage_macos
+  sign_macos
 }
 
 # Unsigned simulator build.
@@ -77,24 +89,27 @@ ios() {
 }
 
 # Signed disk image for Sparkle and direct downloads. Run after `macos`.
-dmg() {
+dmg() (
   APP="$DIST/macos/Polymux.app"
   [ -d "$APP" ] || { echo "Build the app first: scripts/build.sh macos" >&2; exit 1; }
   VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
   OUT="$DIST/macos/Polymux-$VERSION-arm64.dmg"
   STAGE=$(mktemp -d "${TMPDIR:-/tmp}/polymux-dmg.XXXXXX")
+  trap 'rm -rf "$STAGE"' EXIT
   ditto "$APP" "$STAGE/Polymux.app"
   ln -s /Applications "$STAGE/Applications"
   rm -f "$OUT"
-  hdiutil create -quiet -volname "Polymux $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$OUT"
-  rm -rf "$STAGE"
+  if ! diskutil image create from --volumeName "Polymux $VERSION" --format UDZO "$STAGE" "$OUT"; then
+    rm -f "$OUT"
+    exit 1
+  fi
   if [ "$IDENTITY" = "-" ]; then
     codesign --force --sign - "$OUT"
   else
     codesign --force --sign "$IDENTITY" --timestamp "$OUT"
   fi
   echo "$OUT"
-}
+)
 
 # Host-platform Go server, stamped with its commit for `polymux version`.
 server() {
@@ -105,9 +120,11 @@ server() {
 
 case ${1:-all} in
   macos) macos ;;
+  macos-stage) build_macos CODE_SIGNING_ALLOWED=NO; stage_macos ;;
+  macos-sign) sign_macos ;;
   ios) ios ;;
   dmg) dmg ;;
   server) server ;;
   all) macos; ios; server ;;
-  *) echo "usage: $0 [macos|ios|dmg|server|all]" >&2; exit 2 ;;
+  *) echo "usage: $0 [macos|macos-stage|macos-sign|ios|dmg|server|all]" >&2; exit 2 ;;
 esac

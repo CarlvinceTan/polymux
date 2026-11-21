@@ -19,6 +19,8 @@ Download the macOS disk image from the [Releases page](/releases/). Open it, dra
 
 ## The Mac app
 
+The Mac app uses Stable updates by default. To get newer development builds, choose **Nightly** under **Settings › Updates › App update channel**. Switching back to **Stable** waits for a newer stable build rather than reinstalling an older version. **Server channel** controls server updates separately.
+
 The Mac app carries its own copy of the server. On a Mac with no Polymux yet, it starts that server at login and connects to it, with nothing else to install. Turn it off under **Settings › Network › This Mac**.
 
 If you join a network from a new install, the app retires its own server while it's still empty. If this Mac's server has chats on it, the app asks whether to keep the two networks separate or merge them.
@@ -69,6 +71,31 @@ POLYMUX_SIGN_IDENTITY="-" POLYMUX_TEAM_ID="" \
 ```
 
 Open Polymux, then pair it with your server.
+
+## Terminal
+
+Once a stable Mac release is available, this command installs just the CLI on an Apple silicon Mac. It does not install the app, start a server, or overwrite an existing `polymux` executable:
+
+```sh
+curl -fsSL https://polymux.com/install-cli.sh | sh
+```
+
+To download the same Mac disk image as the website, run:
+
+```sh
+~/.local/bin/polymux app download
+```
+
+The `.dmg` is saved in the current directory. Open it and drag Polymux to Applications.
+
+### Linux
+
+Linux runs the server from the CLI; there is no desktop app. With Go, Git, and a C compiler installed, clone the source as above and run:
+
+```sh
+./scripts/build.sh server
+./dist/server/polymux serve
+```
 
 ## Pair another Mac
 

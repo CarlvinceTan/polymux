@@ -57,7 +57,7 @@ for (const engine of [webkit, chromium]) {
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('**/api/downloads*', (route) => route.fulfill({json: {
-      version: '0.4.0', platforms: {macos: {url: `${origin}/download.dmg`, size: 12_000_000}},
+      version: '0.4.0', platforms: {macos: {name: 'download.dmg', url: `${origin}/download.dmg`, size: 12_000_000}},
     }}));
     try {
       await context.test('every published page fits while folding, rotating, and returning to desktop', async () => {
@@ -126,30 +126,22 @@ for (const engine of [webkit, chromium]) {
         await drawer.getByRole('button', {name: 'Close', exact: true}).click();
       });
 
-      await context.test('demo selection, native-size zoom, and focus survive folding without reloading', async () => {
+      await context.test('app logo groups and capability links stay visible after folding and resizing', async () => {
         await page.setViewportSize(viewports[3]);
         await page.goto(origin);
-        await page.getByRole('button', {name: 'Nova', exact: true}).click();
-        const zoom = page.getByRole('button', {name: 'Zoom', exact: true});
-        await zoom.click();
-        const dialog = page.getByRole('dialog', {name: 'Native app preview', exact: true});
-        for (const viewport of viewports.slice(0, 5)) {
+        await page.getByRole('link', {name: 'Explore'}).click();
+        assert.equal(new URL(page.url()).hash, '#explore');
+        for (const viewport of viewports) {
           await page.setViewportSize(viewport);
-          await contained(dialog, 'Zoom dialog');
-          await contained(dialog.getByRole('button', {name: 'Close', exact: true}), 'Zoom close button');
-          assert.equal(await dialog.locator('img:not([hidden])').getAttribute('data-native-capture'), 'nova');
-          const scroll = await dialog.locator('.zoom-viewport').evaluate((element) => {
-            element.scrollLeft = element.scrollWidth;
-            return {left: element.scrollLeft, width: element.clientWidth, content: element.scrollWidth};
-          });
-          assert.ok(scroll.content <= scroll.width || scroll.left > 0, 'Native capture must pan inside Zoom.');
-          await noOverflow(page, 'Page with Zoom open');
+          for (const group of await page.locator('#explore .connection-group').all()) {
+            await group.scrollIntoViewIfNeeded();
+            await contained(group, 'App group');
+            assert.equal(await group.getByRole('listitem').count(), 3);
+          }
+          await noOverflow(page, 'Apps and capabilities');
         }
-        await dialog.getByRole('button', {name: 'Close', exact: true}).click();
-        assert.equal(await zoom.evaluate((element) => document.activeElement === element), true);
-        assert.equal(await page.getByRole('button', {name: 'Nova', exact: true}).getAttribute('aria-pressed'), 'true');
-        await page.getByText('Transcript', {exact: true}).click();
-        assert.equal(await page.locator('.transcript').getAttribute('open'), '');
+        await page.getByRole('link', {name: 'See the Permissions plugin'}).click();
+        await page.waitForURL('**/plugins/permissions/');
       });
 
       assert.deepEqual(errors, [], 'Browser runtime errors');
@@ -159,25 +151,46 @@ for (const engine of [webkit, chromium]) {
   });
 }
 
-test('the stable disk image is the primary download; Nightly stays optional', async () => {
+test('installation tabs use one stable desktop installer and can copy the CLI command', async () => {
   const browser = await chromium.launch();
   try {
-    const stable = {version: '0.4.0', platforms: {macos: {url: `${origin}/stable.dmg`, size: 12_000_000}}};
-    const nightly = {version: '4000.13.1', macos: {url: `${origin}/Polymux-dev-4000.13.1.zip`, size: 57_000_000}};
-    for (const [hasStable, hasNightly] of [[true, true], [true, false], [false, true], [false, false]]) {
-      const page = await browser.newPage();
-      await page.route('**/api/downloads*', (route) => hasStable ? route.fulfill({json: stable}) : route.fulfill({status: 503, json: {}}));
-      await page.route('**/api/nightly*', (route) => hasNightly ? route.fulfill({json: nightly}) : route.fulfill({status: 503, json: {}}));
-      const checkedNightly = page.waitForResponse('**/api/nightly*');
+    const stable = {version: '0.4.0', platforms: {macos: {name: 'stable.dmg', url: `${origin}/stable.dmg`, size: 12_000_000}}};
+    for (const version of ['0.4.0', '1.0.0', null]) {
+      const page = await browser.newPage({viewport: {width: 320, height: 568}, permissions: ['clipboard-read', 'clipboard-write']});
+      const nightlyRequests = [];
+      await page.route('**/api/downloads*', (route) => version ? route.fulfill({json: {...stable, version}}) : route.fulfill({status: 503, json: {}}));
+      await page.route('**/api/nightly*', (route) => {
+        nightlyRequests.push(route.request().url());
+        return route.abort();
+      });
+      const checkedStable = page.waitForResponse('**/api/downloads*');
       await page.goto(origin);
-      await checkedNightly;
-      const want = hasStable ? stable.platforms.macos.url : '#download';
+      await checkedStable;
+      const want = version ? stable.platforms.macos.url : '#download';
       await page.locator(`.hero a.primary[href="${want}"]`).waitFor();
+      const desktop = page.getByRole('tab', {name: 'Desktop'});
+      assert.equal(await desktop.getAttribute('aria-selected'), 'true');
+      assert.equal(await page.getByRole('tabpanel', {name: 'Desktop'}).count(), 1);
       assert.deepEqual(await page.locator('.download-line a').evaluateAll((links) => links.map((link) => link.href)),
-        hasStable ? [want] : []);
-      const unstable = page.getByRole('link', {name: 'Download Nightly'});
-      if (hasNightly) assert.equal(await unstable.getAttribute('href'), nightly.macos.url);
-      else assert.equal(await unstable.count(), 0);
+        want === '#download' ? [] : [want]);
+      assert.equal(await page.getByRole('link', {name: 'Download Nightly'}).count(), 0);
+      if (want !== '#download') {
+        assert.equal(await page.locator('.download-line a').innerText(), version === '0.4.0' ? 'Download for macOS (Beta)' : 'Download for macOS');
+        assert.ok((await page.locator('.download-line p').textContent()).startsWith(`Version ${version} · DMG`));
+        assert.ok(await page.locator('.download-line').evaluate((element) =>
+          element.querySelector('p').getBoundingClientRect().top >= element.querySelector('a').getBoundingClientRect().bottom));
+      }
+      await desktop.press('ArrowRight');
+      const phone = page.getByRole('tab', {name: 'Phone'});
+      assert.equal(await phone.getAttribute('aria-selected'), 'true');
+      assert.ok(await page.getByRole('button', {name: 'Install TestFlight beta'}).isDisabled());
+      await phone.press('ArrowRight');
+      assert.equal(await page.getByRole('tab', {name: 'Terminal'}).getAttribute('aria-selected'), 'true');
+      await page.getByRole('button', {name: 'Copy Terminal install command'}).click();
+      await page.locator('.terminal-status').getByText('Copied', {exact: true}).waitFor();
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'curl -fsSL https://polymux.com/install-cli.sh | sh');
+      await noOverflow(page, 'Installation and command');
+      assert.deepEqual(nightlyRequests, []);
       await page.close();
     }
   } finally {

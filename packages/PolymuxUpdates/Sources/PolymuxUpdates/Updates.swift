@@ -3,6 +3,17 @@ import Foundation
 import Observation
 import Sparkle
 
+public enum AppUpdateChannel: String {
+    case stable, nightly
+
+    fileprivate var feed: String {
+        switch self {
+        case .stable: "https://polymux.com/appcast.xml"
+        case .nightly: "https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml"
+        }
+    }
+}
+
 /// Holds Sparkle's standard updater. Debug builds stay quiet unless explicitly enabled.
 @Observable @MainActor public final class Updates: NSObject, SPUUpdaterDelegate {
     public static let shared = Updates()
@@ -10,8 +21,21 @@ import Sparkle
     public private(set) var status: String?
     public private(set) var available = false
     @ObservationIgnored private var controller: SPUStandardUpdaterController!
+    private static let channelKey = "PolymuxAppUpdateChannel"
+    public var channel: AppUpdateChannel {
+        didSet {
+            guard channel != oldValue else { return }
+            UserDefaults.standard.set(channel.rawValue, forKey: Self.channelKey)
+            available = false
+            status = nil
+            controller.updater.resetUpdateCycleAfterShortDelay()
+        }
+    }
 
     private override init() {
+        let stored = UserDefaults.standard.string(forKey: Self.channelKey).flatMap(AppUpdateChannel.init(rawValue:))
+        let bundled = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String
+        channel = stored ?? (bundled == AppUpdateChannel.nightly.feed ? .nightly : .stable)
         super.init()
         #if DEBUG
         let start = ProcessInfo.processInfo.environment["POLYMUX_UPDATES"] == "1"
@@ -80,11 +104,13 @@ import Sparkle
         }
     }
 
-    #if DEBUG
     public func feedURLString(for updater: SPUUpdater) -> String? {
-        guard CommandLine.arguments.contains("--verify-updates") else { return nil }
-        return ProcessInfo.processInfo.environment["POLYMUX_VERIFY_UPDATE_FEED"] ?? "http://127.0.0.1:1/appcast.xml"
+        #if DEBUG
+        if CommandLine.arguments.contains("--verify-updates") {
+            return ProcessInfo.processInfo.environment["POLYMUX_VERIFY_UPDATE_FEED"] ?? "http://127.0.0.1:1/appcast.xml"
+        }
+        #endif
+        return channel.feed
     }
-    #endif
 }
 #endif

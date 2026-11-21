@@ -23,10 +23,12 @@ class VersionTests(unittest.TestCase):
                 subprocess.check_call(git + ["commit", "-q", "--allow-empty", "-m", "c"])
             self.assertEqual(ios_build(root), "3")
 
-    def test_mac_dev_build_exceeds_stable(self):
+    def test_mac_dev_build_stays_between_stable_patches(self):
         for version, stable in (("0.4.0", 4000), ("0.4.10", 4010), ("1.0.0", 1000000)):
-            value = tuple(map(int, versions(1, 1, version)["macos"].split(".")))
-            self.assertGreater(value, (stable,))
+            for run in (1, 99, 100, 999899):
+                value = tuple(map(int, versions(run, 99, version)["macos"].split(".")))
+                self.assertGreater(value, (stable,))
+                self.assertLess(value, (stable + 1,))
 
     def test_rejects_invalid_counters(self):
         for run, attempt in ((0, 1), (999900, 1), (1, 0), (1, 100)):

@@ -42,17 +42,19 @@ Manually dispatch `.github/workflows/dev.yml` on `dev` to run the reusable Tests
 - archives and uploads one iOS build to TestFlight for use by both internal and external tester groups;
 - signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease.
 
+The Mac app and bundled server compile beside verification. The compile job uses no signing credentials. Signing, notarization, and publication still require successful verification, as does the iOS upload.
+
 Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac development feed is:
 
 ```
 https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml
 ```
 
-**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch, so it takes effect once on `main`. The homepage's primary download is the stable Mac disk image. It lists the newest `Polymux-dev-*.zip` through `/api/nightly` separately as an unstable download.
+**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch. Nightly publishes a signed ZIP for the Mac app updater, not a separate installer. The site's Desktop tab uses the tagged `main` release; its installer is labelled Beta until `1.0.0`. The Phone tab exposes `VITE_TESTFLIGHT_URL` only when it's a TestFlight join link; set it after Apple approves a build and a public link is enabled.
 
 The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by tester groups. To share the same build externally, add it to a private external group in App Store Connect, submit it for TestFlight App Review when required, and invite testers by email. Builds previously uploaded as internal-only cannot be added to external groups.
 
-All development jobs are serialized. `scripts/dev-version.py` sets the iOS build number to the `dev` commit count (shown as `0.4.0 (190)`), so local and CI uploads never collide; the script defaults to the same number. The Mac build number stays monotonic across workflow runs and reruns. Do not rewrite `dev` history or upload an arbitrary larger iOS build. Build `1.0.1` was the first manual upload; every later iOS build must exceed it.
+Development delivery runs are serialized. `scripts/dev-version.py` sets the iOS build number to the `dev` commit count (shown as `0.4.0 (190)`), so local and CI uploads never collide; the script defaults to the same number. The Mac build number stays monotonic across workflow runs and reruns. Do not rewrite `dev` history or upload an arbitrary larger iOS build. Build `1.0.1` was the first manual upload; every later iOS build must exceed it.
 
 Native validation and delivery use GitHub's [`xcode-27` preview runner](https://github.com/actions/runner-images/issues/14404) and select its latest stable Xcode for the required macOS/iOS 27 SDKs. The `macos-26` image only provides Xcode 26. Do not lower deployment targets or execute public PR code on the server to work around SDK availability.
 
@@ -97,9 +99,7 @@ The iOS build uses automatic signing: with the API key, Xcode creates and manage
 
 ## First Mac installation
 
-A stable-feed app does not automatically switch to the development feed. Install a signed, notarized development-channel build from `dev-updates` once the first workflow succeeds. Thereafter Sparkle uses the dev feed. Development builds default to hourly checks and automatic downloads; saved user preferences and Sparkle's installation rules still apply.
-
-Verify a second build updates the same installed app through Sparkle. Switching back to stable may require an explicit reinstall because development build numbers can exceed stable ones. The stable feed is unchanged.
+Install the signed, notarized Mac app from the website. In **Settings → Updates**, choose **Nightly** under **App update channel** to use the development feed for future checks. Verify a second build updates the same app through Sparkle. Switching back to **Stable** does not downgrade the installed app or cancel an update already in progress.
 
 ## Server deployment
 

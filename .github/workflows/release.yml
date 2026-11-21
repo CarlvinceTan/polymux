@@ -102,6 +102,28 @@ jobs:
       - name: Build signed app
         run: scripts/build.sh macos
 
+      - name: Package and notarize CLI
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          CLI="$RUNNER_TEMP/polymux"
+          ZIP="$PWD/dist/server/polymux-cli-darwin-arm64.zip"
+          cp dist/server/polymux "$CLI"
+          test "$(lipo -archs "$CLI")" = arm64
+          codesign --force --sign "$POLYMUX_SIGN_IDENTITY" --timestamp --options runtime \
+            --identifier com.flarehq.polymux.cli "$CLI"
+          codesign --verify --strict "$CLI"
+          "$CLI" version
+          ditto --norsrc -ck "$CLI" "$ZIP"
+          test "$(unzip -Z1 "$ZIP")" = polymux
+          xcrun notarytool submit "$ZIP" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
       - name: Notarize app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -186,12 +208,13 @@ jobs:
           path: |
             dist/macos/Polymux-${{ env.VERSION }}-arm64.dmg
             dist/macos/Polymux-${{ env.VERSION }}-arm64.dmg.sha256
+            dist/server/polymux-cli-darwin-arm64.zip
             dist/macos/appcast.xml
             dist/symbols/*.dSYM.zip
           if-no-files-found: error
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -201,6 +224,7 @@ jobs:
             gh release upload "$TAG" \
               "dist/macos/Polymux-$VERSION-arm64.dmg" \
               "dist/macos/Polymux-$VERSION-arm64.dmg.sha256" \
+              "dist/server/polymux-cli-darwin-arm64.zip" \
               "dist/macos/appcast.xml" \
               dist/symbols/*.dSYM.zip \
               --clobber
@@ -212,6 +236,7 @@ jobs:
             gh release create "$TAG" \
               "dist/macos/Polymux-$VERSION-arm64.dmg" \
               "dist/macos/Polymux-$VERSION-arm64.dmg.sha256" \
+              "dist/server/polymux-cli-darwin-arm64.zip" \
               "dist/macos/appcast.xml" \
               dist/symbols/*.dSYM.zip \
               --title "Polymux $VERSION" \
@@ -222,7 +247,7 @@ jobs:
 
   feed:
     needs: macos
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

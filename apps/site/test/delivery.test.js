@@ -18,11 +18,31 @@ test('development delivery runs only on dev pushes or manual dispatch, upstream,
   assert.deepEqual(events.push.branches, ['dev']);
   assert.equal(jobs.verify.if, "github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')");
   assert.equal(jobs.verify.uses, './.github/workflows/tests.yml');
-  assert.equal(jobs.version.needs, 'verify');
+  assert.equal(jobs.version.if, jobs.verify.if);
+});
+
+test('Mac compilation can overlap tests but signing and uploads cannot', () => {
+  const {jobs, permissions} = workflow('dev');
+  assert.equal(jobs.version.needs, undefined);
+  const stage = jobs['macos-stage'];
+  assert.equal(stage.needs, 'version');
+  assert.equal(stage.environment, undefined);
+  assert.equal(permissions.contents, 'read');
+  assert.equal(stage.permissions, undefined);
+  assert.ok(!JSON.stringify(stage).includes('secrets.'));
+  assert.ok(stage.steps.some((step) => step.run === 'scripts/build.sh macos-stage'));
+  assert.ok(!stage.steps.some((step) => /codesign|notarytool|gh release/.test(step.run ?? '')));
+  assert.deepEqual(jobs.ios.needs, ['verify', 'version']);
+  assert.deepEqual(jobs.macos.needs, ['verify', 'version', 'macos-stage']);
   for (const name of ['ios', 'macos']) {
-    assert.equal(jobs[name].needs, 'version');
     assert.equal(jobs[name].environment, 'development');
+    assert.doesNotMatch(jobs[name].if ?? '', /always|failure|cancelled/);
   }
+  const handoff = jobs.macos.steps.find((step) => step.uses?.startsWith('actions/download-artifact@'));
+  const sign = jobs.macos.steps.find((step) => step.run === 'scripts/build.sh macos-sign');
+  assert.equal(stage.outputs.artifact, '${{ steps.stage.outputs.artifact-id }}');
+  assert.equal(handoff.with['artifact-ids'], '${{ needs.macos-stage.outputs.artifact }}');
+  assert.ok(jobs.macos.steps.indexOf(handoff) < jobs.macos.steps.indexOf(sign));
 });
 
 test('the app version has published native notes matching the release tag and download allowlist', () => {
@@ -35,6 +55,15 @@ test('the app version has published native notes matching the release tag and do
   assert.equal(current.downloadable, true);
   assert.equal(current.historical, false);
   assert.equal(releases.find((release) => release.downloadable && !release.historical)?.version, version);
+});
+
+test('manually running a native release at a tag never publishes it', () => {
+  const {on: events, jobs} = workflow('release');
+  assert.deepEqual(events.push.tags, ['app-v*']);
+  assert.ok(Object.hasOwn(events, 'workflow_dispatch'));
+  const guard = "github.event_name == 'push' && github.ref_type == 'tag'";
+  assert.equal(jobs.macos.steps.find((step) => step.name === 'Publish release').if, guard);
+  assert.equal(jobs.feed.if, guard);
 });
 
 test('the release preflight accepts prepared notes and rejects missing, draft, or mismatched releases', async (context) => {

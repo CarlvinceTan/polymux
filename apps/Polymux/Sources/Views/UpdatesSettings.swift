@@ -14,6 +14,10 @@ struct UpdatesSettings: View {
         Section {
             Toggle("Check automatically", isOn: Binding(get: { Updates.shared.automaticallyChecks },
                 set: { Updates.shared.automaticallyChecks = $0 }))
+            SettingsPicker("App update channel", selection: Binding(get: { Updates.shared.channel.rawValue },
+                set: { if let channel = AppUpdateChannel(rawValue: $0) { Updates.shared.channel = channel } }),
+                options: [("Stable", AppUpdateChannel.stable.rawValue), ("Nightly", AppUpdateChannel.nightly.rawValue)])
+                .disabled(Updates.shared.checking)
         } header: {
             SectionHeader("Updates", symbol: "arrow.down.circle.fill")
         }

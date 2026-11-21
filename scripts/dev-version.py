@@ -12,8 +12,7 @@ def versions(run, attempt, version):
         raise ValueError("run must be 1..999899 and attempt 1..99")
     major, minor, patch = map(int, version.split("."))
     base = major * 1000000 + minor * 1000 + patch
-    suffix = f"{run % 100}.{attempt}"
-    return {"macos": f"{base + run // 100}.{suffix}"}
+    return {"macos": f"{base}.{run}.{attempt}"}
 
 
 def ios_build(root):

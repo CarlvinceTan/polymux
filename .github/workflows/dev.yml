@@ -25,7 +25,7 @@ jobs:
     uses: ./.github/workflows/tests.yml
 
   version:
-    needs: verify
+    if: github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')
     runs-on: ubuntu-24.04
     outputs:
       ios: ${{ steps.version.outputs.ios }}
@@ -40,7 +40,7 @@ jobs:
   ios:
     # IOS_RUNNER names a self-hosted Mac signed in to Xcode, so no App Store Connect key is needed.
     if: inputs.ios || (github.event_name == 'push' && vars.IOS_RUNNER != '')
-    needs: version
+    needs: [verify, version]
     runs-on: ${{ vars.IOS_RUNNER || 'xcode-27' }}
     environment: development
     env:
@@ -73,8 +73,41 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
-  macos:
+  macos-stage:
     needs: version
+    runs-on: xcode-27
+    outputs:
+      artifact: ${{ steps.stage.outputs.artifact-id }}
+    env:
+      POLYMUX_BUILD_NUMBER: ${{ needs.version.outputs.macos }}
+      POLYMUX_FEED_URL: https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - name: Compile the Mac app and server
+        run: scripts/build.sh macos-stage
+      - name: Archive staged bundle and symbols
+        run: |
+          cp .build/xcode-release/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast dist/macos/
+          tar -cf "$RUNNER_TEMP/macos-stage.tar" dist/macos dist/symbols
+      - uses: actions/upload-artifact@v7
+        id: stage
+        with:
+          name: macos-stage-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-stage.tar
+          if-no-files-found: error
+          retention-days: 3
+
+  macos:
+    needs: [verify, version, macos-stage]
     runs-on: xcode-27
     environment: development
     permissions:
@@ -84,9 +117,25 @@ jobs:
       POLYMUX_FEED_URL: https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+      - name: Require the artifact from the Mac compile job
+        env:
+          ARTIFACT: ${{ needs.macos-stage.outputs.artifact }}
+        run: test -n "$ARTIFACT"
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.macos-stage.outputs.artifact }}
+          path: ${{ runner.temp }}
+      - name: Restore the staged app
+        run: |
+          STAGE=$(mktemp -d "$RUNNER_TEMP/macos-stage.XXXXXX")
+          tar -xf "$RUNNER_TEMP/macos-stage.tar" -C "$STAGE" dist/macos dist/symbols
+          mkdir -p dist
+          mv "$STAGE/dist/macos" "$STAGE/dist/symbols" dist/
       - name: Import Developer ID certificate
         env:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
@@ -109,12 +158,8 @@ jobs:
           test -n "$IDENTITY"
           echo "POLYMUX_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           echo "POLYMUX_TEAM_ID=$TEAM_ID" >> "$GITHUB_ENV"
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: apps/server/go.mod
-          cache-dependency-path: apps/server/go.sum
-      - name: Build signed development app
-        run: scripts/build.sh macos
+      - name: Sign the staged Mac app
+        run: scripts/build.sh macos-sign
       - name: Notarize and staple
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -140,10 +185,9 @@ jobs:
           SPARKLE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           test -n "$SPARKLE_KEY" || { echo 'SPARKLE_PRIVATE_KEY is missing.'; exit 1; }
-          SPARKLE=.build/xcode-release/SourcePackages/artifacts/sparkle/Sparkle/bin
           mkdir -p dist/dev-updates
           mv "dist/macos/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip" dist/dev-updates/
-          printf '%s' "$SPARKLE_KEY" | "$SPARKLE/generate_appcast" --ed-key-file - \
+          printf '%s' "$SPARKLE_KEY" | dist/macos/generate_appcast --ed-key-file - \
             --download-url-prefix 'https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/' \
             dist/dev-updates
           grep -q 'edSignature=' dist/dev-updates/appcast.xml
@@ -156,7 +200,8 @@ jobs:
               --title 'Polymux development updates' --notes 'Development builds from passing dev commits.'
           fi
           # Keep versioned payloads immutable; switch the feed only after the payload is available.
-          gh release upload dev-updates "dist/dev-updates/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip" dist/symbols/*.dSYM.zip
+          gh release upload dev-updates dist/symbols/*.dSYM.zip \
+            "dist/dev-updates/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip"
           gh release upload dev-updates dist/dev-updates/appcast.xml --clobber
           gh release edit dev-updates --prerelease --latest=false \
             --notes "Build $POLYMUX_BUILD_NUMBER from commit $GITHUB_SHA. Internal development channel."
