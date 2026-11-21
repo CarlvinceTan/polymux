@@ -3,11 +3,16 @@ let app = await cua.getApp(APP);
 const host = await app.getState({ query: "Settings", include_screenshot: false });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
+const search = { role: "textfield", name: "Search models" };
+await app.click({ role: "button", name: "Model" });
+await app.waitFor({ ...search, timeout_ms: 5000 });
+const [withoutModels] = await app.query(search);
+await app.pressKey("escape", search);
 await app.click({ role: "button", name: "Add provider" });
 await app.click({ role: "button", name: "Add custom provider" });
 await app.setValue({ role: "textfield", name: "Name" }, "Menu QA");
 await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL" });
-for (const model of ["alpha", "beta"]) {
+for (const model of ["alpha", "beta", "zeta-multilingual-long-context-instruction-following-reasoning-preview"]) {
     await app.typeText(model, { role: "textfield", name: "Model ID" });
     await app.click({ role: "button", name: "Add" });
 }
@@ -15,8 +20,8 @@ await app.click({ role: "button", name: "Save" });
 await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Model" });
 await app.waitFor({ role: "button", name: "Not set", value: "Selected", timeout_ms: 5000 });
-const search = { role: "textfield", name: "Search models" };
 const [full] = await app.query(search);
+if (!withoutModels?.frame || !full?.frame || full.frame.w <= withoutModels.frame.w) throw new Error("Model menu did not grow for its options");
 await app.typeText("no-such-model", search);
 await app.waitFor({ text: "No models found.", timeout_ms: 5000 });
 const [empty] = await app.query(search);
@@ -42,6 +47,16 @@ await app.click({ role: "button", name: "Model" });
 await app.click({ role: "button", name: "Not set" });
 app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
 await app.waitFor({ role: "button", name: "Model", value: "Server default", timeout_ms: 5000 });
+// Removing a short option increases the mean without changing the longest option.
+await app.click({ role: "button", name: "Edit Custom" });
+await app.click({ role: "checkbox", name: "alpha" });
+await app.click({ role: "button", name: "Save" });
+await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Model" });
+await app.waitFor({ ...search, timeout_ms: 5000 });
+const [fewer] = await app.query(search);
+if (!fewer?.frame || fewer.frame.w <= full.frame.w) throw new Error("Model menu did not follow the average option width");
+await app.pressKey("escape", search);
 await app.click({ role: "button", name: "Edit Custom" });
 await app.click({ role: "button", name: "Delete" });
 await app.click({ role: "button", name: "Close Settings" });

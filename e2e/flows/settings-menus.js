@@ -7,7 +7,7 @@ async function choose(name, value) {
     const [control] = await app.query(trigger);
     await app.click(trigger);
     await app.waitFor({ role: "button", name: value, timeout_ms: 3000 });
-    const firstName = { Theme: "Light", "Voice fallbacks": "Off" }[name];
+    const firstName = { Theme: "Light", "Voice fallbacks": "Off", "Voice provider": "Gemini Live" }[name];
     const [first] = await app.query({ role: "button", name: firstName });
     if (!control?.frame || !first?.frame) throw new Error(name + " menu has no bounds");
     // A menu opens below its row, or above when that's where the room is; it never covers the row.
@@ -26,7 +26,10 @@ for (const value of ["Dark", "System"]) {
     if (await choose("Theme", value) !== theme) throw new Error("Theme menu changed width");
 }
 await app.click({ role: "button", name: "Voice" });
-if (await choose("Voice fallbacks", "Off") !== theme) throw new Error("Settings menus have different widths");
-await choose("Voice fallbacks", "Auto");
+const fallback = await choose("Voice fallbacks", "Off");
+if (await choose("Voice fallbacks", "Auto") !== fallback) throw new Error("Fallbacks menu changed width");
+const provider = await choose("Voice provider", "OpenAI Realtime");
+if (provider <= fallback) throw new Error("Settings menus did not fit their options");
+await choose("Voice provider", "Gemini Live");
 await app.click({ role: "button", name: "Close Settings" });
 return "ok";

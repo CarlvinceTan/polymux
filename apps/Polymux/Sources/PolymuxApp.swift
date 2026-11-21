@@ -510,7 +510,6 @@ struct ConnectionView: View {
                 settingsPanel
             }
         }
-        .environment(\.dropdownWidth, .fixed(DropdownStyle.settingsWidth))
         .task(id: client?.id) { await networkStore?.refresh() }
     }
 

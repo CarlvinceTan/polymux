@@ -40,10 +40,10 @@ struct SettingsPicker: View {
     let title: String
     @Binding var selection: String
     let options: [(String, String)]
-    let width: DropdownWidth?
+    let width: DropdownWidth
     @State private var choosing = false
 
-    init(_ title: String, selection: Binding<String>, options: [(String, String)], width: DropdownWidth? = nil) {
+    init(_ title: String, selection: Binding<String>, options: [(String, String)], width: DropdownWidth = .content) {
         self.title = title
         _selection = selection
         self.options = options

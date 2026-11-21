@@ -1,11 +1,20 @@
+import CoreText
 import SwiftUI
 
 enum DropdownStyle {
     static let maximumHeight: CGFloat = 400
     /// Searchable lists keep one width while their matches change.
     static let listWidth: CGFloat = 320
-    static let settingsWidth: CGFloat = 240
-    static let modelWidth: CGFloat = 192
+    static func textWidth(_ text: String, font: CTFont) -> CGFloat {
+        let run = NSAttributedString(string: text, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+        return CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(run), nil, nil, nil))
+    }
+
+    static func modelWidth(_ labels: [String], font: CTFont) -> CGFloat {
+        let average = labels.reduce(CGFloat.zero) { $0 + textWidth($1, font: font) } / CGFloat(max(labels.count, 1))
+        let chrome = PanelStyle.contentInset + PanelStyle.rowInset * 3 + PanelStyle.cardInset * 2
+        return (average + chrome).rounded(.up)
+    }
     static var rowHeight: CGFloat {
         #if os(macOS)
         PanelStyle.contentInset + PanelStyle.rowInset
@@ -36,8 +45,6 @@ private struct DropdownState: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    @Entry var dropdownWidth: DropdownWidth = .content
-
     var dropdownClose: PanelAction {
         get { self[DropdownScope.self] }
         set { self[DropdownScope.self] = newValue }
@@ -51,7 +58,7 @@ extension EnvironmentValues {
 
 extension View {
     func dropdown<Presented: View>(isPresented: Binding<Bool>, alignment: HorizontalAlignment = .trailing,
-                                   width: DropdownWidth? = nil,
+                                   width: DropdownWidth = .content,
                                    @ViewBuilder content: @escaping () -> Presented) -> some View {
         modifier(Dropdown(isPresented: isPresented, alignment: alignment, width: width, presented: content))
     }
@@ -83,9 +90,8 @@ private struct DropdownIDs: PreferenceKey {
 private struct Dropdown<Presented: View>: ViewModifier {
     @Binding var isPresented: Bool
     let alignment: HorizontalAlignment
-    let width: DropdownWidth?
+    let width: DropdownWidth
     @ViewBuilder let presented: () -> Presented
-    @Environment(\.dropdownWidth) private var defaultWidth
     @State private var id = UUID()
 
     func body(content: Content) -> some View {
@@ -96,7 +102,7 @@ private struct Dropdown<Presented: View>: ViewModifier {
                 let view = presented()
                     .environment(\.dropdownClose, close)
                     .environment(\.isEnabled, true)
-                return [DropdownEntry(id: id, anchor: anchor, alignment: alignment, width: width ?? defaultWidth,
+                return [DropdownEntry(id: id, anchor: anchor, alignment: alignment, width: width,
                                       view: AnyView(view), close: close)]
             }
             .preference(key: DropdownIDs.self, value: isPresented ? [id] : [])
