@@ -688,13 +688,13 @@ private struct ProviderTarget {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, voice, models, network, vault, plugins, updates, shortcuts
+    case general, models, voice, network, vault, plugins, updates, shortcuts
 
     static var allCases: [SettingsTab] {
         #if os(macOS)
-        [.general, .voice, .models, .network, .vault, .plugins, .updates, .shortcuts]
+        [.general, .models, .voice, .network, .vault, .plugins, .updates, .shortcuts]
         #else
-        [.general, .voice, .models, .network, .vault, .plugins, .updates]
+        [.general, .models, .voice, .network, .vault, .plugins, .updates]
         #endif
     }
 
@@ -735,13 +735,11 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The icon's tile colour: gray for system settings, blue for services,
-    /// pink for voice, orange for plugins.
     var tint: Color {
         switch self {
-        case .general, .updates, .shortcuts: .gray
+        case .general, .models, .updates, .shortcuts: .gray
         case .voice: .pink
-        case .models, .network, .vault: .blue
+        case .network, .vault: .blue
         case .plugins: .orange
         }
     }
