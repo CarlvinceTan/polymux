@@ -153,6 +153,7 @@ private final class DictationFixture: SpeechInput {
     private var task: Task<Void, Never>?
 
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
+        if CommandLine.arguments.contains("--verify-dictation-unavailable") { throw SpeechFailure.unavailable }
         try await Task.sleep(for: .seconds(3))
         let stream = AsyncThrowingStream<VoiceEvent, Error>.makeStream()
         events = stream.continuation

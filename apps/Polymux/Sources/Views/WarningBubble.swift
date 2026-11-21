@@ -3,23 +3,9 @@ import SwiftUI
 struct WarningBubble: View {
     let text: String
     var symbol = "exclamationmark.triangle"
-    let visible: Bool
     let dismiss: () -> Void
 
     var body: some View {
-        bubble
-            .hidden()
-            .accessibilityHidden(true)
-            .overlay {
-                ZStack {
-                    if visible { bubble.transition(.opacity) }
-                }
-                .motion(Motion.fade, value: visible)
-            }
-            .frame(maxWidth: BubbleStyle.width)
-    }
-
-    private var bubble: some View {
         HStack(spacing: 10) {
             Label(text, systemImage: symbol)
             Button("Dismiss", systemImage: "xmark", action: dismiss)
@@ -27,6 +13,7 @@ struct WarningBubble: View {
                 .buttonStyle(.plain)
                 .tapArea(14)
                 .accessibilityLabel("Dismiss warning")
+                .accessibilityValue(text)
                 .help("Dismiss")
         }
         .font(.footnote)
@@ -34,6 +21,7 @@ struct WarningBubble: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: BubbleStyle.radius))
+        .frame(maxWidth: BubbleStyle.width)
     }
 }
 

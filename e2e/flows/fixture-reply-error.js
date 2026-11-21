@@ -1,4 +1,4 @@
-// @fixture --verify-fixture --verify-settings --verify-reply-error -serverAddress http://127.0.0.1:1
+// @fixture --verify-fixture --verify-settings --verify-reply-error --verify-still -serverAddress http://127.0.0.1:1
 // Error metadata is a dismissible notice, never a fabricated assistant message.
 const app = await cua.getApp(APP);
 for (let i = 0; ; i++) {

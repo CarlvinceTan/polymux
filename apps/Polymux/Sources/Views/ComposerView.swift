@@ -55,6 +55,7 @@ struct ComposerView: View {
     var drops: Binding<[DroppedFile]> = .constant([])
     var members: [Agent] = []
     var drafting: (Bool) -> Void = { _ in }
+    let warn: (String) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -82,7 +83,6 @@ struct ComposerView: View {
     @State private var camera = false
     @State private var imports = 0
     private var loadingPhotos: Bool { imports > 0 }
-    @State private var error: String?
     @State private var draftTask: Task<Void, Never>?
     @FocusState private var focused: Bool
 
@@ -106,14 +106,8 @@ struct ComposerView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            controls
-            if let error = error ?? draft.issue {
-                Text(error).font(.caption2).foregroundStyle(.muted).padding(.leading, controlSize + 12)
-            }
-        }
+        controls
         .animation(motion, value: recording)
-        .animation(motion, value: error)
         .task { await dictation.refresh() }
         #if os(macOS)
         // A phone keeps the keyboard down until asked: raising it hides half of the chat just opened.
@@ -130,6 +124,9 @@ struct ComposerView: View {
             if scenePhase != .background { await draft.watch() }
         }
         .onChange(of: draft.value) { _, _ in applyDraft() }
+        .onChange(of: draft.issue, initial: true) { _, issue in
+            if let issue { warn(issue) }
+        }
         .onChange(of: currentDraft) { _, value in
             draft.edit(value, after: value.text.isEmpty ? .zero : .milliseconds(400))
         }
@@ -205,14 +202,13 @@ struct ComposerView: View {
         .onChange(of: drops.wrappedValue, initial: true) { _, items in
             guard !items.isEmpty else { return }
             drops.wrappedValue = []
-            error = nil
             for item in items {
                 switch item {
                 case let .file(url):
                     let kind = UTType(filenameExtension: url.pathExtension) ?? .data
                     withAnimation(motion) { files.append(DraftFile(url: url, kind: kind)) }
                 case .failed:
-                    error = "Couldn’t attach that file."
+                    warn("Couldn’t attach that file.")
                 }
             }
             focused = true
@@ -223,7 +219,7 @@ struct ComposerView: View {
                 defer { imports -= 1 }
                 do {
                     for url in try result.get() { try await addFile(url) }
-                } catch { self.error = "Couldn’t attach that file." }
+                } catch { warn("Couldn’t attach that file.") }
             }
         }
         .photosPicker(isPresented: $pickingPhotos, selection: $photos, maxSelectionCount: 8, matching: .any(of: [.images, .videos]))
@@ -245,7 +241,7 @@ struct ComposerView: View {
                         }
                     }
                     photos = []
-                } catch { self.error = "Couldn’t attach that photo." }
+                } catch { warn("Couldn’t attach that photo.") }
                 imports -= 1
             }
         }
@@ -597,7 +593,6 @@ struct ComposerView: View {
             Task { await stopDictation(polish: true) }
             return
         }
-        error = nil
         if case let .selection(bounds) = selection?.indices,
            bounds.lowerBound >= text.startIndex, bounds.upperBound <= text.endIndex {
             insertion = NSRange(bounds, in: text)
@@ -622,7 +617,7 @@ struct ComposerView: View {
                 selection = TextSelection(insertionPoint: cursor)
             }
         } failure: { _ in
-            error = dictation.denied ? "Allow microphone and speech recognition in Settings." : "Dictation isn’t available right now."
+            warn(dictation.denied ? "Allow microphone and speech recognition in Settings." : "Dictation isn’t available right now.")
         }
     }
 
@@ -699,12 +694,11 @@ struct ComposerView: View {
         let pending = files
         let quote = reply
         guard let targets = MentionToken.targets(mentions, in: draft, members: Set(members.map(\.id))) else {
-            error = "A mentioned agent left this chat. Remove or reselect the mention before sending."
+            warn("A mentioned agent left this chat. Remove or reselect the mention before sending.")
             return
         }
         // The bubble appears at once and uploads run behind it, so the composer is free straight away.
         withAnimation(motion) {
-            error = nil
             text = ""
             mentions = []
             files.removeAll { file in pending.contains { $0.id == file.id } }

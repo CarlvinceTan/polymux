@@ -25,8 +25,8 @@ struct ChatPane: View {
     @State private var showVoice = false
     @State private var voiceStore: (any VoiceSession)?
     @State private var openingVoice = false
-    @State private var voiceIssue: String?
-    @State private var dismissedIssue: String?
+    @State private var notices: [Notice] = []
+    @State private var shownReply: ReplyIssue?
     /// Whether the profile panel (or a group's editor) is open; it stays open across chats.
     @Binding var showProfile: Bool
     @Binding var pluginPanel: String?
@@ -471,57 +471,80 @@ struct ChatPane: View {
 
     private var topInset: CGFloat { showSearch ? 8 : max(0, headerHeight - headerInset) + 8 }
 
+    private struct Notice: Identifiable {
+        let id = UUID()
+        let message: String
+        var fromReply = false
+    }
+
+    private struct ReplyIssue: Equatable {
+        let id: String
+        let message: String
+    }
+
+    private struct ReplyStatus: Equatable {
+        let issue: ReplyIssue?
+        let visible: Bool
+    }
+
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // A voice start that failed needs no action, so its note fades on its own.
-            if let voiceIssue {
-                Text(voiceIssue).font(.caption2).foregroundStyle(.muted)
-                    .task(id: voiceIssue) {
-                        try? await Task.sleep(for: .seconds(6))
-                        self.voiceIssue = nil
-                    }
-            }
-            composerField
-                .overlay(alignment: .top) {
-                    // Status and the latest button float above the input without changing the chat inset.
-                    VStack(spacing: 8) {
-                        ZStack(alignment: .bottom) {
-                            ConnectionStatus(connected: connected, dismissed: connectionDismissed)
-                            WarningBubble(text: serverIssue?.message ?? "", visible: issueVisible) {
-                                dismissedIssue = serverIssue?.id
+        composerField
+            .overlay(alignment: .top) {
+                // The stack floats above the input without changing the chat inset.
+                VStack(spacing: 0) {
+                    ConnectionStatus(connected: connected, dismissed: connectionDismissed, collapses: true)
+                    ForEach(notices) { notice in
+                        WarningBubble(text: notice.message) { dismiss(notice.id) }
+                            .padding(.top, 8)
+                            .transition(.opacity)
+                            .task {
+                                do { try await Task.sleep(for: .seconds(6)) } catch { return }
+                                dismiss(notice.id)
                             }
-                        }
-                        .frame(height: statusVisible ? nil : 0)
-                        if showLatest && !latestVisible && !showSearch && !showVoice {
-                            latestButton
-                        }
                     }
-                    .alignmentGuide(.top) { $0[.bottom] + 8 }
+                    if showLatest && !latestVisible && !showSearch && !showVoice {
+                        latestButton.padding(.top, 8)
+                    }
                 }
-        }
-        .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge).padding(.top, 10)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+                .fixedSize(horizontal: false, vertical: true)
+                .motion(Motion.fade, value: notices.map(\.id))
+                .alignmentGuide(.top) { $0[.bottom] + 8 }
+            }
+            .onChange(of: replyStatus, initial: true) { previous, status in
+                if previous.issue != status.issue { notices.removeAll(where: \.fromReply) }
+                if status.visible, let issue = status.issue, issue != shownReply {
+                    shownReply = issue
+                    notices.append(Notice(message: issue.message, fromReply: true))
+                }
+            }
+            .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge).padding(.top, 10)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+    }
+
+    private func warn(_ message: String) {
+        guard !notices.contains(where: { $0.message == message }) else { return }
+        notices.append(Notice(message: message))
+    }
+
+    private func dismiss(_ id: UUID) {
+        notices.removeAll { $0.id == id }
     }
 
     private var connected: Bool { store.isConnected && session.sidebar.isConnected }
 
-    private var serverIssue: (id: String, message: String)? {
-        if let message = store.messages.last, let notice = store.activity.notice(for: message) {
-            return (message.id, notice)
+    private var replyStatus: ReplyStatus {
+        ReplyStatus(issue: serverIssue, visible: connected && !showSearch && !showVoice)
+    }
+
+    private var serverIssue: ReplyIssue? {
+        guard let message = store.messages.last else { return nil }
+        if let notice = store.activity.notice(for: message) {
+            return ReplyIssue(id: message.id, message: notice)
         }
-        guard let message = store.messages.last(where: { $0.role == MessageRole.assistant && $0.status == MessageStatus.error }),
+        guard message.role == MessageRole.assistant, message.status == MessageStatus.error,
               let error = store.activity.issue(for: message),
               !error.message.isEmpty else { return nil }
-        return (message.id, error.message)
-    }
-
-    private var issueVisible: Bool {
-        serverIssue != nil && dismissedIssue != serverIssue?.id
-            && connected && store.messages.last?.id == serverIssue?.id
-    }
-
-    private var statusVisible: Bool {
-        (!connected && !connectionDismissed.wrappedValue) || issueVisible
+        return ReplyIssue(id: message.id, message: error.message)
     }
 
     private var latestButton: some View {
@@ -556,7 +579,7 @@ struct ChatPane: View {
                              store.activity.setListening(active, conversationID: thread.id, agentID: member.id)
                          }
                      },
-                     files: files)
+                     warn: warn, files: files)
             .frame(height: showVoice ? 0 : nil)
             .opacity(showVoice ? 0 : 1)
             .allowsHitTesting(!showVoice)
@@ -579,7 +602,7 @@ struct ChatPane: View {
         Task {
             defer { openingVoice = false }
             guard await session.settings.synchronize(), let settings = session.settings.value else {
-                voiceIssue = session.settings.error ?? "Connect to the agent server and wait for settings to save."
+                warn(session.settings.error ?? "Connect to the agent server and wait for settings to save.")
                 return
             }
             startVoice(settings)
