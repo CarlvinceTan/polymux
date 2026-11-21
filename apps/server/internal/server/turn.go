@@ -85,7 +85,7 @@ func (s *Server) turnTools(a *actor, work store.Work, state *turnState) []agent.
 		state.external["install_plugin"] = true
 	}
 	if work.Trigger != contract.RunTriggerChild {
-		tools = append(tools, &workTool{store: s.Store}, &taskTool{server: s}, &historyTool{store: s.Store},
+		tools = append(tools, &workTool{store: s.Store}, &taskTool{server: s}, s.historyTool(),
 			&taskThreadTool{server: s, action: "read"}, &taskThreadTool{server: s, action: "update"})
 		for _, action := range []string{"save", "recall", "forget"} {
 			tools = append(tools, &memoryTool{store: s.Store, provider: s.memory, action: action})

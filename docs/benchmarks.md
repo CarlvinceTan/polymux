@@ -14,6 +14,17 @@ A score that becomes a goal stops measuring what it was meant to, and some of th
 - **Every number has a spread.** Run at least three reps, show the spread, and don't read a gap inside it as a difference. Two reps once showed a responsiveness drop that disappeared at four.
 - **Read what users saw.** Every comparison comes with a sample of transcripts from `run.json`; numbers alone have hidden overclaims before.
 
+### History recall
+
+The 21 November 2026 replay indexed the text and photo captions from the ten public [LoCoMo](https://github.com/snap-research/locomo) chats into an isolated Polymux store. It compared the actual `recall_history` tool on the same first eight questions per answerable category per chat, with labelled evidence. These are retrieval counts, not answer accuracy.
+
+| Comparison | Found a labelled message | Returned the complete text of at least one labelled message |
+| --- | --- | --- |
+| Recency first → BM25, all ten chats | 6 → 182 of 308 | 6 → 177 of 308 |
+| BM25 → BM25 + local EmbeddingGemma 2, five chats outside the original lab | 90 → 108 of 156 | 87 → 104 of 156 |
+
+The hybrid query took about 11 ms at p95 versus 2 ms for BM25 on the pre-indexed corpus on one Mac, with one query at a time. It stays opt-in. An exact-word gate on non-profile facts reduced the same-chat memory block by about 12% on the five cached lab chats but lost four of 85 questions with a fact from an evidence session. It also dropped “Use three concise paragraphs” for “How should I format it?” The automatic memory policy stays unchanged. The earlier fact-keyed benchmark did not test linked wiki pages, and neither proposal is part of this change.
+
 ## What it reports
 
 - **Quality** (0–100): the weighted average of category scores.

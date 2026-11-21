@@ -276,6 +276,8 @@ func runServer(args []string) error {
 		Ticket:      ticket,
 		PublicURL:   *publicURL,
 		Publish:     plugins.Publish{API: publicSocket.Addr().String(), Device: loopbackAddress(deviceSocket.Addr())},
+
+		HistoryEmbedder: backend.LocalEmbedder(),
 	})
 	if err != nil {
 		return err

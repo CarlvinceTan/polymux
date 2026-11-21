@@ -172,6 +172,8 @@ An autonomy stress test (see [Experiments so far](#experiments-so-far)) found wa
 | One-pass ranking, habituation, anticipation | Experimental; habituation spread references, ranking unproven, anticipation from commit history failed |
 | Intake from a catalogue of sources | Design only ([Intake sources](intake-sources.md)) |
 
+The positive replay results justify testing a suggestion-only dry run first. They do not show that waking, interruption timing, delivery or real actions work, or that users want the suggestions. Dreaming and ambient intake stay experimental until those questions are tested.
+
 ## Open questions
 
 1. Idle threshold: a fixed 45 to 60 minutes, or scaled to how quickly the user usually replies to that bot?

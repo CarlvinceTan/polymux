@@ -46,6 +46,8 @@ See [`ExampleNew`](../packages/memory/example_test.go) for saving, reopening and
 
 Bots use `recall_memory` for saved facts and `recall_history` for original messages from the current conversation. History browses newest first without a query, or ranks matches by BM25 with a query. Only browsing returns a page cursor; `before` limits a ranked query to older messages.
 
+When the server starts a local embedding process, `recall_history` also offers `semantic: true` for paraphrases. It combines keyword and semantic rankings over the same eligible messages. If embeddings are unavailable or exceed their 250 ms budget, it returns keyword matches. Bot recall queries never go to the app's configured remote embedding endpoint.
+
 ### Vault
 
 [`vault`](../packages/vault/) owns its domain types, the KeePass (KDBX 4) file it stores them in, revision checks, merging, the optional sync location, imports, TOTP and origin-bound credential operations. It is pure Go and needs no database. Future format changes belong to this module, not the HTTP adapter.

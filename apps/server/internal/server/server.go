@@ -44,6 +44,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/CarlvinceTan/polymux/packages/memory"
+	engine "github.com/CarlvinceTan/polymux/packages/search"
 	vaultstore "github.com/CarlvinceTan/polymux/packages/vault"
 )
 
@@ -69,6 +70,8 @@ type Config struct {
 	Log         *slog.Logger
 	Push        PushSender
 	Devices     *device.Broker
+	// HistoryEmbedder must be local; bot recall queries never go to the app's remote embedder.
+	HistoryEmbedder engine.Embedder
 	// Ticket returns this server's tunnel ticket, waiting at most the given time; nil disables it.
 	Ticket    func(time.Duration) string
 	PublicURL string

@@ -18,31 +18,34 @@ type HistoryMessage struct {
 	Snippet string
 }
 
-func (s *Store) History(ctx context.Context, agent, thread, query string, before int64, limit int) ([]HistoryMessage, error) {
+const historyScope = `m.thread_id=? AND m.seq<?
+AND m.status='done' AND m.role IN('user','assistant')
+AND EXISTS(SELECT 1 FROM thread_members tm WHERE tm.thread_id=m.thread_id AND tm.agent_id=?)`
+
+const historySnippet = `snippet(messages_fts,2,char(1),char(2),'…',64)`
+const historyMatches = ` FROM messages m JOIN messages_fts ON m.id=messages_fts.message_id
+WHERE ` + historyScope + ` AND messages_fts MATCH ? AND messages_fts.thread_id=?
+ORDER BY bm25(messages_fts), m.seq DESC LIMIT ?`
+
+func historyBounds(before int64, limit int) (int64, int) {
 	if before <= 0 {
 		before = 1 << 62
 	}
 	if limit <= 0 || limit > 24 {
 		limit = 24
 	}
-	statement := `SELECT m.data,'' FROM messages m`
+	return before, limit
+}
+
+func (s *Store) History(ctx context.Context, agent, thread, query string, before int64, limit int) ([]HistoryMessage, error) {
+	before, limit = historyBounds(before, limit)
 	if query != "" {
-		statement = `SELECT m.data,snippet(messages_fts,2,char(1),char(2),'…',64)
-FROM messages m JOIN messages_fts ON m.id=messages_fts.message_id`
+		return s.historyRows(ctx, `SELECT m.data,`+historySnippet+historyMatches, thread, before, agent, query, thread, limit)
 	}
-	statement += ` WHERE m.thread_id=? AND m.seq<?
-AND m.status='done' AND m.role IN('user','assistant')
-AND EXISTS(SELECT 1 FROM thread_members tm WHERE tm.thread_id=m.thread_id AND tm.agent_id=?)`
-	args := []any{thread, before, agent}
-	if query != "" {
-		statement += ` AND messages_fts MATCH ? AND messages_fts.thread_id=?
-ORDER BY bm25(messages_fts), m.seq DESC`
-		args = append(args, query, thread)
-	} else {
-		statement += ` ORDER BY m.seq DESC`
-	}
-	statement += ` LIMIT ?`
-	args = append(args, limit)
+	return s.historyRows(ctx, `SELECT m.data,'' FROM messages m WHERE `+historyScope+` ORDER BY m.seq DESC LIMIT ?`, thread, before, agent, limit)
+}
+
+func (s *Store) historyRows(ctx context.Context, statement string, args ...any) ([]HistoryMessage, error) {
 	rows, err := s.DB.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err

@@ -144,7 +144,7 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	d.AfterInner = afterInner
 	d.ExtraTools = append(slices.Clone(d.ExtraTools), &htmlTool{store: v.server.Store, dir: filepath.Join(v.server.config.DataDir, "attachments")},
 		&peerTool{server: v.server, private: true}, &voicePublish{work: v, agentID: task.target},
-		&historyTool{store: v.server.Store}, &workTool{store: v.server.Store}, &routineTool{server: v.server})
+		v.server.historyTool(), &workTool{store: v.server.Store}, &routineTool{server: v.server})
 	for _, action := range []string{"save", "recall", "forget"} {
 		d.ExtraTools = append(d.ExtraTools, &memoryTool{store: v.server.Store, provider: v.server.memory, action: action})
 	}
