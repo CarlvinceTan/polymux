@@ -158,3 +158,23 @@ for (const engine of [webkit, chromium]) {
     }
   });
 }
+
+test('the default download is the newest Nightly, with stable as the fallback', async () => {
+  const browser = await chromium.launch();
+  try {
+    const stable = {version: '0.4.0', platforms: {macos: {url: `${origin}/stable.dmg`, size: 12_000_000}}};
+    const nightly = {version: '4000.13.1', macos: {url: `${origin}/Polymux-dev-4000.13.1.zip`, size: 57_000_000}};
+    for (const [hasNightly, want] of [[true, nightly.macos.url], [false, stable.platforms.macos.url]]) {
+      const page = await browser.newPage();
+      await page.route('**/api/downloads*', (route) => route.fulfill({json: stable}));
+      await page.route('**/api/nightly*', (route) => hasNightly ? route.fulfill({json: nightly}) : route.fulfill({status: 503, json: {}}));
+      await page.goto(origin);
+      await page.locator(`.hero a.primary[href="${want}"]`).waitFor();
+      assert.equal(await page.locator('.download-line a').getAttribute('href'), want);
+      assert.equal(await page.locator(`.together a[href="${stable.platforms.macos.url}"]`).count(), hasNightly ? 1 : 0);
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});

@@ -25,6 +25,10 @@
   let downloads = $state.raw<ReleaseDownloads | null>(null);
   const client = $derived(downloads?.platforms.macos ?? null);
   let nightly = $state.raw<{version: string; macos: {url: string; size: number}} | null>(null);
+  // The default download is the newest Nightly build; the stable release is the fallback.
+  const primary = $derived(nightly
+    ? {url: nightly.macos.url, size: nightly.macos.size, label: `Download Nightly ${nightly.version} for macOS`}
+    : client ? {url: client.url, size: client.size, label: `Download Polymux ${downloads?.version} for macOS`} : null);
 
   onMount(() => {
     if (!window.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -61,8 +65,8 @@
       </h1>
       <p class="lede">A planning partner. A fresh pair of eyes. An agent that remembers how you like things. All running on your own Mac.</p>
       <div class="actions">
-        {#if client}
-          <a class="primary" href={client.url}><DownloadIcon />Download for macOS</a>
+        {#if primary}
+          <a class="primary" href={primary.url}><DownloadIcon />Download for macOS</a>
         {:else}
           <a class="primary" href="#download"><DownloadIcon />Install</a>
         {/if}
@@ -110,12 +114,12 @@
     <div class="section-heading">
       <p class="eyebrow">Install Polymux</p>
       <h2 id="install-title">Start with <span class="glow">your Mac.</span></h2>
-      <p>{client ? 'Download the macOS client, then install the server from source.' : 'Both parts are currently for macOS. Native downloads aren’t published yet; install from source using the setup guide.'}</p>
+      <p>{primary ? 'Download the macOS client, then install the server from source.' : 'Both parts are currently for macOS. Native downloads aren’t published yet; install from source using the setup guide.'}</p>
     </div>
-    {#if client}
+    {#if primary}
       <p class="download-line">
-        <a class="primary" href={client.url}><DownloadIcon />Download Polymux {downloads?.version} for macOS</a>
-        <span>{formatFileSize(client.size)}</span>
+        <a class="primary" href={primary.url}><DownloadIcon />{primary.label}</a>
+        <span>{nightly ? 'Unstable, rebuilt from dev · ' : ''}{formatFileSize(primary.size)}</span>
       </p>
     {/if}
     <div class="install-grid">
@@ -130,8 +134,8 @@
       {/each}
     </div>
     <p class="install-note">Commands run from a source checkout. <a href="/docs/installation/#requirements">Requirements</a>: macOS 27, Go 1.27.1; Xcode 27 and signing for the client.</p>
-    {#if nightly}
-      <p class="together">Want the latest? <a href={nightly.macos.url}>Download Nightly {nightly.version} <span aria-hidden="true">↓</span></a> · unstable, rebuilt from <code>dev</code> · {formatFileSize(nightly.macos.size)}</p>
+    {#if nightly && client}
+      <p class="together">Prefer stable? <a href={client.url}>Download Polymux {downloads?.version} <span aria-hidden="true">↓</span></a> · {formatFileSize(client.size)}</p>
     {/if}
     <p class="together">Using one Mac? <a href="/docs/installation/#one-mac">Install both together <span aria-hidden="true">↗</span></a></p>
   </section>

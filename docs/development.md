@@ -48,7 +48,7 @@ Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac deve
 https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml
 ```
 
-**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch, so it takes effect once on `main`. The site's home page links the newest `Polymux-dev-*.zip` through `/api/nightly`, labelled unstable.
+**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch, so it takes effect once on `main`. The site's home page offers the newest `Polymux-dev-*.zip` through `/api/nightly` as its default download, labelled unstable, and falls back to the newest stable release when there's no Nightly.
 
 The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by the internal tester group. Internal-only iOS builds cannot later be submitted to external TestFlight or the App Store.
 
