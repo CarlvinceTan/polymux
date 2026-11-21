@@ -96,6 +96,11 @@ func TestWithdrawRemovesOnlyTheRoute(t *testing.T) {
 	if calls := logged(t, dir); !slices.Contains(calls, "--profile polymux route remove polymux") {
 		t.Fatalf("calls %v", calls)
 	}
+	cli, dir = fakeCLI(t, "")
+	newService(cli, settings{Profile: "work", Route: "api", Server: "https://tunnel.example", CA: "/tmp/ca.pem"}).withdraw()
+	if calls := logged(t, dir); !slices.Contains(calls, "--profile work --api https://tunnel.example --ca-cert /tmp/ca.pem route remove api") {
+		t.Fatalf("calls %v", calls)
+	}
 }
 
 func TestTransportNeedsTheToken(t *testing.T) {

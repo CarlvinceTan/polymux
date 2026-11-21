@@ -167,14 +167,7 @@ func (s *service) reconcile(ctx context.Context) report {
 	if cli == "" {
 		return report{State: "error", Message: "OpenTunnel isn't installed."}
 	}
-	args := []string{"--profile", s.options.Profile}
-	if s.options.Server != "" {
-		args = append(args, "--api", s.options.Server)
-	}
-	if s.options.CA != "" {
-		args = append(args, "--ca-cert", s.options.CA)
-	}
-	args = append(args, "route", "add", s.api, "--name", s.options.Route)
+	args := append(s.routeFlags(), "route", "add", s.api, "--name", s.options.Route)
 	out, err := s.runCommand(ctx, cli, routeWait, args...)
 	if err != nil {
 		return report{State: "error", Message: reason(out, err)}
@@ -191,11 +184,22 @@ func (s *service) withdraw() {
 	if cli == "" {
 		return
 	}
-	out, err := s.runCommand(context.Background(), cli, commandWait,
-		"--profile", s.options.Profile, "route", "remove", s.options.Route)
+	args := append(s.routeFlags(), "route", "remove", s.options.Route)
+	out, err := s.runCommand(context.Background(), cli, commandWait, args...)
 	if err != nil {
 		s.log.Warn("remove route", "error", reason(out, err))
 	}
+}
+
+func (s *service) routeFlags() []string {
+	args := []string{"--profile", s.options.Profile}
+	if s.options.Server != "" {
+		args = append(args, "--api", s.options.Server)
+	}
+	if s.options.CA != "" {
+		args = append(args, "--ca-cert", s.options.CA)
+	}
+	return args
 }
 
 // command resolves the CLI again, so installing OpenTunnel after the plugin starts works.

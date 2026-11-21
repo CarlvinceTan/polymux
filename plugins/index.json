@@ -40,6 +40,43 @@
       ]
     },
     {
+      "name": "opentunnel",
+      "title": "OpenTunnel",
+      "description": "Reach this server through an OpenTunnel route.",
+      "symbol": "",
+      "kind": "global",
+      "surface": "",
+      "author": "Polymux",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1795232984,
+          "engines": {
+            "plugins": 1
+          },
+          "source": {
+            "repository": "CarlvinceTan/polymux",
+            "commit": "47e968f2e9331f980f5e4be9e6d19c47ecbfa7b5",
+            "artifacts": {
+              "darwin-arm64": {
+                "url": "https://github.com/CarlvinceTan/polymux/releases/download/opentunnel-v0.1.0/opentunnel-0.1.0-darwin-arm64.tgz",
+                "sha256": "7aee862bb0d3646c4c27fac8734ac38b29cb1c7fa996086b5e885413bf6ffe69"
+              },
+              "linux-amd64": {
+                "url": "https://github.com/CarlvinceTan/polymux/releases/download/opentunnel-v0.1.0/opentunnel-0.1.0-linux-amd64.tgz",
+                "sha256": "4168b9e92787a9b43db5e87b819e47da727abefd1623d0a2279dbec39d80f979"
+              },
+              "linux-arm64": {
+                "url": "https://github.com/CarlvinceTan/polymux/releases/download/opentunnel-v0.1.0/opentunnel-0.1.0-linux-arm64.tgz",
+                "sha256": "a6f13f9c2a2e4ffd56d1f5bebc2bc2215be1ecd6f5bc20e4bbd7bb3f7698a501"
+              }
+            }
+          }
+        }
+      ],
+      "homepage": "https://github.com/CarlvinceTan/polymux"
+    },
+    {
       "name": "permissions",
       "title": "Permissions",
       "description": "Set rules a chat's bots can't break: what they may read, write, run and use.",
