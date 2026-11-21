@@ -129,7 +129,7 @@
       {/each}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Desktop" aria-labelledby="install-tab-Desktop" tabindex="0" hidden={selectedTab !== 'Desktop'}>
-      <p>The Mac app includes the server.</p>
+      <p>The Mac app runs the client and server by default. When you join a network, it switches to that network’s server automatically if your local server is empty.</p>
       {#if client}
         <div class="download-line">
           <a class="primary" href={client.url}><DownloadIcon />{downloadLabel}</a>
@@ -141,7 +141,7 @@
       {/if}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Phone" aria-labelledby="install-tab-Phone" tabindex="0" hidden={selectedTab !== 'Phone'}>
-      <p>The iPhone app is a client. Pair it with a Polymux server on another device.</p>
+      <p>The iPhone app is client-only. Set up a Polymux server first.</p>
       {#if phoneDownload}
         <a class="primary" href={phoneDownload}><DownloadIcon />Install TestFlight beta</a>
       {:else}
@@ -150,7 +150,7 @@
       {/if}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Terminal" aria-labelledby="install-tab-Terminal" tabindex="0" hidden={selectedTab !== 'Terminal'}>
-      <p>Run the server from the terminal on macOS or Linux. The Mac CLI can also download the desktop app.</p>
+      <p>Use the CLI to set up the server or download the Mac app. On Linux, the CLI runs the server only.</p>
       <p class="install-note">Install on Apple silicon Macs:</p>
       <div class="terminal-command">
         <code>{installCommand}</code>
