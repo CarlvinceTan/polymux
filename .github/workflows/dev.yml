@@ -203,6 +203,11 @@ jobs:
           gh release upload dev-updates dist/symbols/*.dSYM.zip \
             "dist/dev-updates/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip"
           gh release upload dev-updates dist/dev-updates/appcast.xml --clobber
+          # Each build gets its own nightly tag; dev-updates stays the rolling feed and follows the newest commit.
+          VERSION=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' apps/Polymux/Polymux.xcodeproj/project.pbxproj | head -1)
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/nightly-$VERSION-$POLYMUX_BUILD_NUMBER" -f sha="$GITHUB_SHA" ||
+            echo "nightly-$VERSION-$POLYMUX_BUILD_NUMBER already exists."
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/dev-updates" -f sha="$GITHUB_SHA" -F force=true
           gh release edit dev-updates --prerelease --latest=false \
             --notes "Build $POLYMUX_BUILD_NUMBER from commit $GITHUB_SHA. Internal development channel."
       - name: Remove signing credentials
