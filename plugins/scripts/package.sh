@@ -16,6 +16,15 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/$(dirname "$SERVICE")" "$OUT"
 cp "$ROOT/$NAME/plugin.json" "$STAGE/"
+PAGE=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('page', ''))" "$ROOT/$NAME/plugin.json")
+if [ -n "$PAGE" ]; then
+  case "$PAGE" in /*|../*|*/../*|*/..) echo 'The page must stay inside the plugin.' >&2; exit 2 ;; esac
+  UI=$(dirname "$PAGE")
+  [ "$UI" != "." ] || { echo 'Put the plugin page and its assets in a folder.' >&2; exit 2; }
+  [ -f "$ROOT/$NAME/$PAGE" ] || { echo 'The plugin page is missing.' >&2; exit 2; }
+  mkdir -p "$STAGE/$UI"
+  cp -R "$ROOT/$NAME/$UI/." "$STAGE/$UI/"
+fi
 python3 -c "import json,sys;print('\n'.join(json.load(open(sys.argv[1])).get('skills',[])))" "$ROOT/$NAME/plugin.json" | while read -r skill; do
   [ -n "$skill" ] || continue
   mkdir -p "$STAGE/$(dirname "$skill")"

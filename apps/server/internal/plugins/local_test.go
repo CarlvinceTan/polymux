@@ -135,10 +135,14 @@ func TestLocalPluginRefusals(t *testing.T) {
 		"surface":   edit(func(v *Manifest) { v.Surface, v.Page = "hub", "" }),
 		"no page":   edit(func(v *Manifest) { v.Page = "" }),
 		"global":    edit(func(v *Manifest) { v.Kind = KindGlobal }),
-		"outside":   edit(func(v *Manifest) { v.Page = "../index.html" }),
-		"missing":   edit(func(v *Manifest) { v.Page = "ui/nothing.html" }),
-		"no run":    edit(func(v *Manifest) { v.Service = "ui/app.js" }),
-		"official":  edit(func(v *Manifest) { v.Name = "hub" }),
+		"workspace": edit(func(v *Manifest) {
+			v.Kind, v.Surface, v.Activity = KindBoth, SurfaceWebWorkspace, true
+		}),
+		"activity": edit(func(v *Manifest) { v.Activity = true }),
+		"outside":  edit(func(v *Manifest) { v.Page = "../index.html" }),
+		"missing":  edit(func(v *Manifest) { v.Page = "ui/nothing.html" }),
+		"no run":   edit(func(v *Manifest) { v.Service = "ui/app.js" }),
+		"official": edit(func(v *Manifest) { v.Name = "hub" }),
 	} {
 		if _, err := m.Stage(t.Context(), folder(t, value)); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -150,5 +154,29 @@ func TestLocalPluginRefusals(t *testing.T) {
 	}
 	if _, err := m.Stage(t.Context(), linked); err == nil {
 		t.Error("a symlink was accepted")
+	}
+}
+
+func TestWorkspaceActivityRequiresInstalledOptIn(t *testing.T) {
+	m, _ := manager(t, newMarket(t))
+	value := webPlugin()
+	value.Kind, value.Surface = KindBoth, SurfaceWebWorkspace
+	for _, candidate := range []struct {
+		state   string
+		optIn   bool
+		allowed bool
+	}{
+		{contract.PluginStateReady, false, false},
+		{contract.PluginStateFailed, true, false},
+		{contract.PluginStateReady, true, true},
+	} {
+		value.Activity = candidate.optIn
+		saved := record{Manifest: value, State: candidate.state}
+		if err := m.save(t.Context(), value.Name, saved); err != nil {
+			t.Fatal(err)
+		}
+		if got := m.ActivityAllowed(t.Context(), value.Name); got != candidate.allowed {
+			t.Errorf("%s with opt-in %t: activity allowed = %t", candidate.state, candidate.optIn, got)
+		}
 	}
 }

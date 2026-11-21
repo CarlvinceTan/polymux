@@ -1,0 +1,60 @@
+:root {
+  color-scheme: light dark;
+  font: 14px -apple-system, BlinkMacSystemFont, sans-serif;
+  --paper: light-dark(#f3f3f6, #1f2023);
+  --card: light-dark(#fff, #2b2d32);
+  --line: light-dark(#767783, #a2a4af);
+  --accent: light-dark(#145cc9, #8dbaff);
+}
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--paper); color: CanvasText; }
+main { position: relative; height: 100dvh; }
+#status { display: grid; height: 100%; margin: 0; place-items: center; text-align: center; }
+#viewport { height: 100%; overflow: auto; }
+#map { position: relative; margin: auto; min-height: 100%; }
+#wires, #nodes { position: absolute; inset: 0; }
+#wires { width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+#wires path { fill: none; stroke: var(--line); stroke-width: 1.5; }
+#wires .active { stroke: var(--accent); stroke-width: 2.5; }
+#wires .dashed { stroke-dasharray: 6 4; }
+#wires .dotted { stroke-dasharray: 2 4; }
+#wires .arrow { fill: var(--line); stroke: none; }
+.node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  box-sizing: border-box;
+  width: 192px;
+  height: 70px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.node :is(strong, span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
+.node span { font-size: 12px; }
+.node:is(:hover, :focus-visible, [aria-pressed="true"]) { outline: 2px solid var(--accent); outline-offset: 2px; }
+#inspector {
+  position: absolute;
+  inset: auto 12px 12px auto;
+  box-sizing: border-box;
+  width: min(320px, calc(100% - 24px));
+  max-height: 50%;
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  overflow-wrap: anywhere;
+}
+#dismiss { float: right; min-height: 44px; font: inherit; }
+#details h1 { font-size: 18px; }
+#details img { max-width: 100%; border-radius: 8px; }
+#details dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; }
+#details dd { margin: 0; }

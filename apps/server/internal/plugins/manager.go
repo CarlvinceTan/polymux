@@ -106,6 +106,11 @@ func New(ctx context.Context, config Config) (*Manager, error) {
 
 func (m *Manager) staging() string { return filepath.Join(m.config.Dir, ".staging") }
 
+func (m *Manager) ActivityAllowed(ctx context.Context, name string) bool {
+	value, ok := m.record(ctx, name)
+	return ok && value.State == contract.PluginStateReady && value.Manifest.Surface == SurfaceWebWorkspace && value.Manifest.Activity
+}
+
 func (m *Manager) home(name string) string { return filepath.Join(m.config.Dir, name) }
 
 func (m *Manager) save(ctx context.Context, name string, value record) error {
@@ -148,7 +153,7 @@ func present(saved store.PluginRecord) (contract.Plugin, error) {
 	if value.Issue != "" {
 		plugin.Issue = &value.Issue
 	}
-	if value.Manifest.Surface == SurfaceWeb {
+	if value.Manifest.hasPage() {
 		page, hide := filepath.Base(value.Manifest.Page), value.Manifest.HideClose
 		plugin.Page, plugin.HideClose = &page, &hide
 	}

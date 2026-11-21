@@ -42,6 +42,8 @@ type Manifest struct {
 	Surface        string `json:"surface,omitempty"`
 	// Page is a web plugin's first page, in a folder that holds everything it loads.
 	Page string `json:"page,omitempty"`
+	// Activity lets a workspace page read summaries of recent bot activity.
+	Activity bool `json:"activity,omitempty"`
 	// HideClose takes away the side panel's close button; the page closes it with polymux.close().
 	HideClose bool     `json:"hideClose,omitempty"`
 	Engines   Engines  `json:"engines"`
@@ -54,8 +56,14 @@ type Manifest struct {
 	Tools []Tool `json:"tools,omitempty"`
 }
 
-// SurfaceWeb is the one surface a package draws itself: its own page fills the side panel.
-const SurfaceWeb = "web"
+const (
+	SurfaceWeb          = "web"
+	SurfaceWebWorkspace = "web-workspace"
+)
+
+func (m Manifest) hasPage() bool {
+	return m.Surface == SurfaceWeb || m.Surface == SurfaceWebWorkspace
+}
 
 // Capabilities a plugin may provide.
 const (
@@ -99,8 +107,15 @@ func readManifest(dir string) (Manifest, error) {
 	if manifest.Surface != "" && (manifest.Symbol == "" || manifest.SelectedSymbol == "" || manifest.SelectedSymbol == manifest.Symbol) {
 		return Manifest{}, errors.New("The package needs an unfilled and a filled icon.")
 	}
-	if (manifest.Surface == SurfaceWeb) != (manifest.Page != "") || manifest.Surface == SurfaceWeb && manifest.Kind != KindScoped {
-		return Manifest{}, errors.New("A web plugin has to be Scoped and name its page.")
+	if manifest.hasPage() != (manifest.Page != "") {
+		return Manifest{}, errors.New("A web plugin has to name its page.")
+	}
+	if manifest.Surface == SurfaceWeb && manifest.Kind != KindScoped ||
+		manifest.Surface == SurfaceWebWorkspace && manifest.Kind != KindBoth {
+		return Manifest{}, errors.New("The plugin's kind doesn't match its web surface.")
+	}
+	if manifest.Activity && manifest.Surface != SurfaceWebWorkspace {
+		return Manifest{}, errors.New("Only a workspace plugin can read activity.")
 	}
 	if manifest.Engines.Plugins > APIVersion {
 		return Manifest{}, errors.New("This plugin needs a newer Polymux server.")

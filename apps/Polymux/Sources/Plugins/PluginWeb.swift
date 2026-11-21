@@ -2,7 +2,7 @@ import SwiftUI
 import WebKit
 import PolymuxKit
 
-/// A web plugin's own page, which fills the side panel.
+/// A web plugin's own page, in a workspace or a side panel.
 struct PluginWeb: View {
     let plugin: Plugin
     let chat: String
@@ -86,6 +86,12 @@ private final class PluginFiles: NSObject, WKURLSchemeHandler {
         }
         let id = ObjectIdentifier(task)
         let path = String(url.path.dropFirst())
+        guard path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({
+            !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\\")
+        }) else {
+            task.didFailWithError(URLError(.resourceUnavailable))
+            return
+        }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let method = task.request.httpMethod ?? "GET"
         let body = Self.body(task.request)

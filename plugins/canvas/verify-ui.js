@@ -1,0 +1,25 @@
+// Run against a throwaway app and server whose Marketplace contains the packaged Canvas.
+let app = await cua.getApp(APP);
+const bot = "Map sample bot";
+await app.click({ role: "button", name: "New chat" });
+app = await pick(app, "New Bot");
+await app.waitFor({ role: "textfield", name: "Name" });
+await app.typeText(bot, { role: "textfield", name: "Name" });
+await app.click({ role: "button", name: "Create" });
+await app.waitFor({ role: "button", name: "Close New Bot", gone: true });
+await app.click({ role: "button", name: "Settings" });
+await app.click({ role: "button", name: "Plugins" });
+await app.click({ role: "button", name: "Marketplace" });
+await app.click({ role: "button", name: "Install Canvas" });
+await app.click({ role: "button", name: "Install" });
+await app.waitFor({ text: "Installed" });
+await app.click({ role: "button", name: "Close Settings" });
+await app.waitFor({ role: "button", name: "Canvas" });
+await app.click({ role: "button", name: "Canvas" });
+const node = { role: "checkbox", name: bot };
+await app.waitFor(node);
+await app.click(node);
+await app.waitFor({ role: "heading", name: bot });
+await app.click({ role: "button", name: "Close details" });
+await app.waitFor({ role: "heading", name: bot, gone: true });
+return "Canvas installed and displayed live bot data from its packaged page";

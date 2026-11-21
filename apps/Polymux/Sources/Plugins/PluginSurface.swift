@@ -5,19 +5,20 @@ import PolymuxKit
 @MainActor enum PluginSurface {
     /// A package's own page, the one surface that doesn't ship with the app.
     static let web = "web"
+    static let workspace = "web-workspace"
 
     static var available: Set<String> {
         #if DEBUG
-        if VerifyFixture.enabled { return ["hub", "permissions", web, SampleSurface.name] }
+        if VerifyFixture.enabled { return ["hub", "permissions", web, workspace, SampleSurface.name] }
         #endif
-        return ["hub", "permissions", web]
+        return ["hub", "permissions", web, workspace]
     }
 
     /// A Scoped plugin's content in the side panel. The panel itself stays the app's.
     @ViewBuilder static func panel(_ plugin: Plugin, thread: PolymuxKit.Thread, session: AppSession,
                                    close: @escaping () -> Void) -> some View {
         if plugin.surface == "permissions" { PermissionsPanel(plugin: plugin, thread: thread, session: session) }
-        if plugin.surface == web {
+        if plugin.surface == web || plugin.surface == workspace {
             let chat = thread.isTask ? thread.agentID : thread.id
             PluginWeb(plugin: plugin, chat: chat, client: session.client, close: close).id(plugin.name + chat)
         }
@@ -28,6 +29,9 @@ import PolymuxKit
 
     /// A both plugin's global view, which fills the content beside the chats.
     @ViewBuilder static func view(_ plugin: Plugin, session: AppSession, openChat: @escaping (String) -> Void) -> some View {
+        if plugin.surface == workspace {
+            PluginWeb(plugin: plugin, chat: "", client: session.client, close: {}).id(plugin.name)
+        }
     }
 
     /// The switcher's count for a tab.

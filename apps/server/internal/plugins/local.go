@@ -131,7 +131,7 @@ func (m *Manager) Adopt(ctx context.Context, name, chat, maker string) (contract
 // ServePage answers from the folder holding a web plugin's page, and from nowhere else.
 func (m *Manager) ServePage(w http.ResponseWriter, r *http.Request, name, path string) bool {
 	value, ok := m.record(r.Context(), name)
-	if !ok || value.State != contract.PluginStateReady || value.Manifest.Surface != SurfaceWeb {
+	if !ok || value.State != contract.PluginStateReady || !value.Manifest.hasPage() {
 		return false
 	}
 	root, err := os.OpenRoot(filepath.Join(m.home(name), "package", filepath.Dir(value.Manifest.Page)))

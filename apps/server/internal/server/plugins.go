@@ -112,9 +112,27 @@ func (s *Server) savePluginLayout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) forwardPlugin(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("path") == "_host/activity" {
+		s.pluginActivity(w, r)
+		return
+	}
 	if !s.plugins.Forward(w, r, r.PathValue("name"), r.PathValue("path")) {
 		fail(w, 503, "unavailable", "This plugin isn't running.")
 	}
+}
+
+func (s *Server) pluginActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet || !s.plugins.ActivityAllowed(r.Context(), r.PathValue("name")) {
+		fail(w, 404, "not_found", "This plugin cannot read activity.")
+		return
+	}
+	value, err := s.Store.PluginActivity(r.Context())
+	if err != nil {
+		fail(w, 500, "plugins", "Activity could not be loaded.")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	write(w, 200, value)
 }
 
 func (s *Server) pluginPage(w http.ResponseWriter, r *http.Request) {

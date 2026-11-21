@@ -8,7 +8,7 @@ The app and server ship no plugin code. A plugin is a versioned package listed i
 | --- | --- | --- | --- |
 | Applies to | Everything | The chats it's active in, direct or group | Everything, with a button in the chats it's active in |
 | UI | A switcher entry that replaces the sidebar and content | A button left of the call button, opening the side panel; optional | A row above the chats that fills the content beside them, plus the Scoped button |
-| Example | Hub | A chat's notes | None yet |
+| Example | Hub | A chat's notes | Canvas |
 
 The switcher only appears once a Global plugin can be shown or a second server is known, and always keeps Chats. With more than one server it lists each server's Chats, named after the server, and its Global plugins, and picking one moves the app to that server. iPhone's icons show the server's initial instead, or a number when initials clash. It's the native tab bar on iPhone and sits at the foot of the sidebar elsewhere. The sidebar's Search and + buttons stay in place and act on the plugin on show. Unread badges on the switcher can be turned off in Settings. Scoped buttons share one layout, and each chat shows only those active in it. On iPhone they collapse into a menu. The call button, the sidebar button and the side panel's close button belong to the app.
 
@@ -27,7 +27,7 @@ The server has no permission policy, no approval prompts, no usage limits and no
 - **Package**: a `.tgz` with a `plugin.json` at its root. The package decides what a plugin is, not its index row. Downloads are checked against the index's SHA-256 before unpacking.
 - **Install state and layout**: on the server (`internal/plugins`, `plugins` tables), shared by every client.
 - **Service**: a package may run one process. The server supervises it, gives it a port and token, and forwards `/plugins/{name}/api/*` to it through the normal device authentication. It gets its own folder for data, and uninstalling removes that folder.
-- **Screens**: plugin UI ships in the app, because iOS can't load native code. A package names a `surface`, and `PluginSurface.swift` maps that name to views. An app without that surface shows Needs update. The exception is `web`: a Scoped package ships its own page, which fills the side panel; see [Web pages](#web-pages).
+- **Screens**: a plugin can name a native `surface` the app already ships or package a web page. An app without the requested surface shows Needs update. See [Web pages](#web-pages).
 - **Skills**: `skills` in `plugin.json` lists Markdown skill files, and `plugins/scripts/package.sh` ships them. A Global or both plugin's apply to every chat, and a Scoped plugin's to its active chats. They reach an agent when its session next opens.
 
 ## Capabilities and settings
@@ -87,11 +87,12 @@ Bash runs unsandboxed as the server's user, so path rules only bind the file too
 
 ## Web pages
 
-A Scoped plugin can set `"surface": "web"` and `"page": "ui/index.html"` instead of a surface built into the app. Its page fills the whole side panel, and whatever is inside is the plugin's business.
+A Scoped plugin can set `"surface": "web"` and `"page": "ui/index.html"` instead of using a built-in screen. A Both plugin can use `"surface": "web-workspace"` with plugin API 6 to open the same page above the chats and in a chat's side panel. In the workspace, `polymux.chat` is empty. Only Marketplace plugins can use this surface.
 
 - **What the app keeps**: the panel's edge, which resizes it and collapses it past half its minimum width, and the close button. `"hideClose": true` removes the button, and the page closes the panel with `polymux.close()`. On iPhone the panel is a page, so the system's Back stays.
 - **Reaching the server**: the page loads from `polymux-plugin://<name>/`, a scheme the app answers itself (`PluginWeb.swift`). Files come from `GET /plugins/{name}/ui/*`, only out of the folder holding the page, and `api/*` goes to the plugin's service. The page never holds the device's credential and can't reach other plugins or the rest of the API. Responses arrive whole, so streaming doesn't work.
-- **In the page**: `polymux.chat`, `?chat=`, and `document.documentElement.dataset.theme` with a `polymux:theme` event. Storage is thrown away with the panel. Other sites can be loaded inside the page; following a link to one opens the browser.
+- **In the page**: `polymux.chat`, `?chat=`, and `document.documentElement.dataset.theme` with a `polymux:theme` event. Storage is thrown away with the view. Other sites can be loaded inside the page; following a link to one opens the browser.
+- **Activity**: a web workspace can declare `"activity": true` to read bot names, run states and handoffs at `api/_host/activity`. It does not receive messages, tool input or output, run summaries, or credentials.
 
 ## Plugins made by bots
 
@@ -127,7 +128,7 @@ A transport adds `"provides": ["transport"]` and, if it has options, `"settings"
 
 ## Activity
 
-`GET /work` lists the newest runs and handoffs across every chat, leaving out tool output. It only reads, so a plugin's screens can follow what's happening without marking anything read or waking a bot.
+The [Canvas plugin](../plugins/canvas) owns its map UI, repository scans, and agent reports. Its page combines the host's read-only activity summaries with its own graph. Opening it in a chat filters the view, not who can read a report.
 
 ## Official plugins
 
