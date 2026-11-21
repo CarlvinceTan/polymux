@@ -30,7 +30,7 @@ struct ProviderEditor: View {
         if let client {
             switch page {
             case .picker:
-                ProviderPicker(client: client, onBack: onBack, choose: { page = .login($0, nil) }, manual: { page = .form(.custom) })
+                ProviderPicker(client: client, onBack: onBack, choose: { page = .login($0, nil) }, manual: { page = .form($0) })
             case .provider:
                 let type = original?.type ?? selection?.type ?? ""
                 ProviderPage(client: client, type: type, connections: providers.filter { sibling($0, of: selection ?? original, type: type) }, onBack: onBack,
@@ -85,7 +85,8 @@ struct ProviderPicker: View {
     let client: APIClient
     let onBack: () -> Void
     let choose: (ProviderOption) -> Void
-    let manual: () -> Void
+    /// Opens the form for a provider set up by address, such as Ollama.
+    let manual: (ProviderPreset) -> Void
     @Environment(\.panelClose) private var close
     @Environment(ProviderStore.self) private var store: ProviderStore?
     private var options: [ProviderOption] { store?.options ?? [] }
@@ -117,13 +118,35 @@ struct ProviderPicker: View {
     var body: some View {
         PanelView("Add provider", onClose: { close() }, onBack: onBack,
                   header: AnyView(pickerHeader),
-                  accessory: PanelAccessory(symbol: "plus", label: "Add custom provider", action: manual),
+                  accessory: PanelAccessory(symbol: "plus", label: "Add custom provider", action: { manual(.custom) }),
                   scrollUnder: false, height: PanelSize.maximumHeight) {
             Form {
+                if showsPopular {
+                    Section {
+                        ForEach(popular, id: \.self) { option in
+                            optionRow(option)
+                        }
+                        Button { manual(.ollama) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ProviderPreset.ollama.label)
+                                Text("Models on this computer").font(.caption).foregroundStyle(.primary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Ollama · Models on this computer")
+                    } header: {
+                        Text("Popular").foregroundStyle(Color.primary)
+                    }
+                    .panelRow()
+                }
                 Section {
-                    ForEach(matches, id: \.self) { option in
+                    ForEach(rest, id: \.self) { option in
                         optionRow(option)
                     }
+                } header: {
+                    if showsPopular { Text("All providers").foregroundStyle(Color.primary) }
                 }
                 .panelRow()
                 if let issue {
@@ -177,6 +200,25 @@ struct ProviderPicker: View {
             let text = "\(option.name) \(option.label)"
             return terms.allSatisfy { text.localizedStandardContains(String($0)) }
         }
+    }
+
+    /// Subscriptions first, then the most used API keys.
+    private static let favourites: [(type: String, auth: String)] = [
+        ("openai", ProviderOptionAuth.oauth), ("anthropic", ProviderOptionAuth.oauth),
+        ("openai", ProviderOptionAuth.apiKey), ("anthropic", ProviderOptionAuth.apiKey),
+        ("gemini", ProviderOptionAuth.apiKey), ("openrouter", ProviderOptionAuth.apiKey),
+    ]
+
+    private var showsPopular: Bool { category == .all && query.isEmpty && !popular.isEmpty }
+
+    private var popular: [ProviderOption] {
+        Self.favourites.compactMap { item in options.first { $0.type == item.type && $0.auth == item.auth } }
+    }
+
+    private var rest: [ProviderOption] {
+        guard showsPopular else { return matches }
+        let shown = Set(popular)
+        return matches.filter { !shown.contains($0) }
     }
 
     private func optionRow(_ option: ProviderOption) -> some View {

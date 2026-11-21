@@ -19,7 +19,13 @@ const host = await app.getState({ query: "Settings", include_screenshot: false }
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
 await app.click({ role: "button", name: "Add provider" });
+// The usual choices come first, including a local Ollama; searching shows one list.
+await app.waitFor({ text: "Popular", timeout_ms: 10000 });
+await app.waitFor({ role: "button", name: "Ollama · Models on this computer", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Anthropic · Anthropic (Claude Pro/Max)", timeout_ms: 5000 });
 await app.typeText("OpenAI", { role: "textfield", name: "Search providers" });
+for (let i = 0; i < 20 && (await app.query({ text: "Popular" })).length; i++) await cua.sleep(150);
+if ((await app.query({ text: "Popular" })).length) throw new Error("Popular stayed while searching");
 await app.click({ role: "button", name: "OpenAI · OpenAI (ChatGPT subscription)" });
 await app.waitFor({ role: "textfield", name: "http://127.0.0.1:1455/auth/callback", timeout_ms: 10000 });
 await app.waitFor({ role: "button", name: "Copy link", timeout_ms: 5000 });
@@ -28,6 +34,7 @@ await app.typeText("OpenAI", { role: "textfield", name: "Search providers" });
 await app.waitFor({ role: "button", name: "OpenAI · OpenAI API key", timeout_ms: 10000 });
 await app.click({ role: "button", name: "OpenAI · OpenAI API key" });
 await app.waitFor({ role: "textfield", name: "API key", timeout_ms: 10000 });
+await app.waitFor({ name: "Get an API key from OpenAI", timeout_ms: 5000 });
 await app.typeText("polymux-test-key", { role: "textfield", name: "API key" });
 await app.click({ role: "button", name: "Continue" });
 await app.waitFor({ role: "button", name: "Edit OpenAI", timeout_ms: 10000 });

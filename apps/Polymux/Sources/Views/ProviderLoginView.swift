@@ -66,6 +66,12 @@ struct ProviderLoginView: View {
                             .autocorrectionDisabled()
                             .onSubmit(submit)
                             .disabled(signIn.sending)
+                            if prompt.type == LoginPromptType.secret, let page = KeyPage.url(for: option.type) {
+                                Link(destination: page) {
+                                    Label("Get a key", systemImage: "arrow.up.right.square")
+                                }
+                                .accessibilityLabel("Get an API key from \(option.name)")
+                            }
                         }
                     }
                     .panelRow()
@@ -111,4 +117,24 @@ struct ProviderLoginView: View {
         UIPasteboard.general.string = text
         #endif
     }
+}
+
+/// Where each provider hands out API keys.
+enum KeyPage {
+    private static let pages: [String: String] = [
+        "openai": "https://platform.openai.com/api-keys",
+        "anthropic": "https://console.anthropic.com/settings/keys",
+        "gemini": "https://aistudio.google.com/apikey",
+        "openrouter": "https://openrouter.ai/keys",
+        "xai": "https://console.x.ai",
+        "deepseek": "https://platform.deepseek.com/api_keys",
+        "mistral": "https://console.mistral.ai/api-keys",
+        "groq": "https://console.groq.com/keys",
+        "together": "https://api.together.ai/settings/api-keys",
+        "fireworks": "https://app.fireworks.ai/settings/users/api-keys",
+        "cerebras": "https://cloud.cerebras.ai",
+        "huggingface": "https://huggingface.co/settings/tokens",
+    ]
+
+    static func url(for type: String) -> URL? { pages[type].flatMap(URL.init(string:)) }
 }
