@@ -96,10 +96,12 @@ if [ "$ahead" -eq 0 ]; then
 fi
 
 old=$(git -C "$main" rev-parse --short HEAD)
-echo "Rebasing $source onto dev ($old)..."
-if ! GIT_EDITOR=true git -C "$source" rebase dev; then
-	echo "Rebase stopped. Resolve it in $source, run git -C \"$source\" rebase --continue, then rerun this script." >&2
-	exit 1
+if ! git -C "$source" merge-base --is-ancestor dev HEAD; then
+	echo "Rebasing $source onto dev ($old)..."
+	if ! GIT_EDITOR=true git -C "$source" rebase dev; then
+		echo "Rebase stopped. Resolve it in $source, run git -C \"$source\" rebase --continue, then rerun this script." >&2
+		exit 1
+	fi
 fi
 
 echo "Running checks in $source..."
