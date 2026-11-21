@@ -3,6 +3,12 @@
 The development channel follows `dev`; it is separate from public `stable-v*` releases.
 Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac Nightly and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
 
+## Promote to main
+
+Promote through a `dev` → `main` pull request using a merge commit. The **Verified dev promotion** check requires the exact `dev` push's Tests, Site and Skills runs to pass. It also checks that the PR merge tree matches the tested tree and that `dev` includes `main`. Enable auto-merge on the PR to merge when its required checks pass. Website promotion does not wait for TestFlight or Mac signing and notarization.
+
+After a promotion, CI fast-forwards `dev` to the merge commit if no new work arrived. If `dev` moved, update it with `main` before the next promotion; do not force-push. For an automated `dev` update that had no push checks, a regular push must trigger verification before it can be promoted.
+
 To turn it on:
 
 1. Register a self-hosted runner on the Mac signed in to Xcode with the FlareHQ account (Settings → Actions → Runners → New self-hosted runner), and give it a label such as `polymux-ios`. This replaces the App Store Connect API key until the Account Holder enables one.
@@ -42,7 +48,9 @@ Manually dispatch `.github/workflows/dev.yml` on `dev` to run the reusable Tests
 - archives and uploads one iOS build to TestFlight for use by both internal and external tester groups;
 - signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease, a rolling feed whose tag follows the newest build. Each build also gets a `nightly-v<version>-<build>` tag; stable releases from `main` use `stable-v<version>`, and plugins keep `<plugin>-v<version>`.
 
-The Mac app and bundled server compile beside verification. The compile job uses no signing credentials. Signing, notarization, and publication still require successful verification, as does the iOS upload.
+The Mac app and bundled server compile beside verification. The compile job uses no signing credentials. Signing, notarization, and publication still require successful verification, as does the iOS upload. Delivery reuses the exact commit's Tests run on a `dev` push; scheduled delivery does the same when a push run exists. Manual delivery runs the full suite by default.
+
+`dev` checks select components from both the previous push and `main`, so a small follow-up cannot hide earlier changes. Swift unit tests, macOS native checks and the iOS simulator build run in parallel. The Mac checks reuse one Debug build.
 
 Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac development feed is:
 

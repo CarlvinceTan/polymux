@@ -16,9 +16,17 @@ test('development delivery runs only on dev pushes or manual dispatch, upstream,
   const {on: events, jobs} = workflow('dev');
   assert.deepEqual(Object.keys(events), ['push', 'workflow_dispatch']);
   assert.deepEqual(events.push.branches, ['dev']);
-  assert.equal(jobs.verify.if, "github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')");
+  for (const job of [jobs.verify, jobs['verify-push'], jobs.version]) {
+    assert.match(job.if, /github\.ref == 'refs\/heads\/dev' && github\.repository == 'CarlvinceTan\/polymux'/);
+  }
   assert.equal(jobs.verify.uses, './.github/workflows/tests.yml');
-  assert.equal(jobs.version.if, jobs.verify.if);
+  assert.equal(jobs.verify.needs, 'verify-push');
+  assert.equal(events.workflow_dispatch.inputs.reuse_checks.default, false);
+  const push = jobs['verify-push'];
+  assert.equal(push.permissions.actions, 'read');
+  assert.match(push.steps.at(-1).run, /--tests-if-present[\s\S]+--tests-only/);
+  assert.deepEqual(jobs.verified.needs, ['verify', 'verify-push']);
+  assert.equal(jobs.verified.if, "!cancelled() && (needs.verify.result == 'success' || (needs.verify-push.result == 'success' && needs.verify-push.outputs.missing != 'true'))");
 });
 
 test('Mac compilation can overlap tests but signing and uploads cannot', () => {
@@ -32,8 +40,8 @@ test('Mac compilation can overlap tests but signing and uploads cannot', () => {
   assert.ok(!JSON.stringify(stage).includes('secrets.'));
   assert.ok(stage.steps.some((step) => step.run === 'scripts/build.sh macos-stage'));
   assert.ok(!stage.steps.some((step) => /codesign|notarytool|gh release/.test(step.run ?? '')));
-  assert.deepEqual(jobs.ios.needs, ['verify', 'version']);
-  assert.deepEqual(jobs.macos.needs, ['verify', 'version', 'macos-stage']);
+  assert.deepEqual(jobs.ios.needs, ['verified', 'version']);
+  assert.deepEqual(jobs.macos.needs, ['verified', 'version', 'macos-stage']);
   for (const name of ['ios', 'macos']) {
     assert.equal(jobs[name].environment, 'development');
     assert.doesNotMatch(jobs[name].if ?? '', /always|failure|cancelled/);
@@ -43,6 +51,23 @@ test('Mac compilation can overlap tests but signing and uploads cannot', () => {
   assert.equal(stage.outputs.artifact, '${{ steps.stage.outputs.artifact-id }}');
   assert.equal(handoff.with['artifact-ids'], '${{ needs.macos-stage.outputs.artifact }}');
   assert.ok(jobs.macos.steps.indexOf(handoff) < jobs.macos.steps.indexOf(sign));
+});
+
+test('promotion does not wait for either delivery job or rerun its component suites', () => {
+  const {jobs} = workflow('branch-topology');
+  const gate = jobs.validate;
+  assert.equal(gate.needs, undefined);
+  assert.match(gate.steps.at(-1).run, /merge-base --is-ancestor[\s\S]+python3 scripts\/promotion\.py/);
+  for (const workflowName of ['tests', 'site', 'skills']) {
+    const {on: events} = workflow(workflowName);
+    assert.deepEqual(events.push.branches, ['main', 'dev']);
+    assert.equal(events.pull_request, undefined);
+  }
+  const tests = workflow('tests').jobs;
+  for (const name of ['swift', 'macos', 'ios']) {
+    assert.equal(tests[name].needs, 'changes');
+    assert.equal(tests[name].if, "needs.changes.outputs.swift == 'true'");
+  }
 });
 
 test('the app version has published native notes matching the release tag and download allowlist', () => {

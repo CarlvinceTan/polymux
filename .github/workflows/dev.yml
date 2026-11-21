@@ -11,6 +11,10 @@ on:
         description: Upload an iOS build to TestFlight
         type: boolean
         default: true
+      reuse_checks:
+        description: Reuse native checks for this exact dev commit if it already has a push run
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,8 +25,40 @@ concurrency:
 
 jobs:
   verify:
-    if: github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')
+    needs: verify-push
+    if: "!cancelled() && github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && github.event_name == 'workflow_dispatch' && (!inputs.reuse_checks || (needs.verify-push.result == 'success' && needs.verify-push.outputs.missing == 'true'))"
     uses: ./.github/workflows/tests.yml
+
+  verify-push:
+    if: github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && ((github.event_name == 'push' && vars.DEV_DELIVERY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.reuse_checks))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      missing: ${{ steps.checks.outputs.missing }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            python3 scripts/promotion.py --tests-if-present
+          else
+            python3 scripts/promotion.py --tests-only
+          fi
+
+  verified:
+    needs: [verify, verify-push]
+    if: "!cancelled() && (needs.verify.result == 'success' || (needs.verify-push.result == 'success' && needs.verify-push.outputs.missing != 'true'))"
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo 'Native checks passed.'
 
   version:
     if: github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')
@@ -40,7 +76,7 @@ jobs:
   ios:
     # IOS_RUNNER names a self-hosted Mac signed in to Xcode, so no App Store Connect key is needed.
     if: inputs.ios || (github.event_name == 'push' && vars.IOS_RUNNER != '')
-    needs: [verify, version]
+    needs: [verified, version]
     runs-on: ${{ vars.IOS_RUNNER || 'xcode-27' }}
     environment: development
     env:
@@ -107,7 +143,7 @@ jobs:
           retention-days: 3
 
   macos:
-    needs: [verify, version, macos-stage]
+    needs: [verified, version, macos-stage]
     runs-on: xcode-27
     environment: development
     permissions:
