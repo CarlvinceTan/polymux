@@ -40,7 +40,7 @@ Direct development signing still depends on a valid Apple development profile an
 Manually dispatch `.github/workflows/dev.yml` on `dev` to run the reusable Tests workflow, then independently:
 
 - archives and uploads one iOS build to TestFlight for use by both internal and external tester groups;
-- signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease, a rolling feed whose tag follows the newest build. Each build also gets a `nightly-<version>-<build>` tag; `app-v*` tags are for stable releases from `main`.
+- signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease, a rolling feed whose tag follows the newest build. Each build also gets a `v<version>-nightly.<build>` tag; `app-v*` tags are for stable releases from `main`.
 
 The Mac app and bundled server compile beside verification. The compile job uses no signing credentials. Signing, notarization, and publication still require successful verification, as does the iOS upload.
 
