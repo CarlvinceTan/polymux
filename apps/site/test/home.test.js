@@ -21,7 +21,13 @@ test('installation offers a guide before the native download resolves', () => {
   const document = home.window.document;
   const installation = document.querySelector('#download');
   assert.equal(installation.querySelector('a[href="/docs/installation/"]').textContent.trim(), 'Installation guide');
-  assert.doesNotMatch(installation.querySelector('#install-panel-Desktop').textContent, /drag Polymux/);
+  const desktop = installation.querySelector('#install-panel-Desktop');
+  assert.doesNotMatch(desktop.textContent, /drag Polymux/);
+  const button = desktop.querySelector('button.primary');
+  assert.equal(button.textContent.trim(), 'Download for macOS (Beta)');
+  assert.ok(button.disabled, 'The Desktop download stays visible but disabled until a real installer resolves.');
+  assert.equal(desktop.querySelectorAll('a.primary').length, 0);
+  assert.match(desktop.querySelector('.install-note').textContent, /isn’t available yet/);
   assert.equal(document.querySelectorAll('a[href*="releases/download"], a[href="/install.sh"]').length, 0);
   assert.equal(document.querySelector('.mobile-menu-download').textContent.trim(), 'Install');
   const guide = content.docs.find((page) => page.slug === 'installation').body;
@@ -81,13 +87,28 @@ test('recursive source checks cover nested pages and components rather than sile
   for (const style of ['tokens', 'base', 'layout', 'prose']) assert.ok(bootstrap.includes(`../styles/${style}.css`));
 });
 
-test('the homepage presents example app connections and capabilities instead of a scripted demo', () => {
+test('the hero keeps the voxel island and sample window with nothing supplemental under the window', () => {
   const document = home.window.document;
-  assert.equal(document.querySelector('.availability, .agent-demo, .app-preview, .world'), null);
-  const map = document.querySelector('#explore .connection-map');
+  const hero = document.querySelector('.hero');
+  assert.ok(hero.querySelector('.world[role="img"]'));
+  assert.ok(hero.querySelector('.agent-demo .native-preview img[data-native-capture="atlas"]'));
+  assert.equal(document.querySelector('.availability, .app-preview, .zoom-button, .capture-dialog, .transcript, .demo-caption, .agent-choices'), null);
+  assert.equal(hero.querySelector('.native-preview').nextElementSibling, null);
+});
+
+test('the connection map shows wide example breadth and marks Hub groups as an optional plugin', () => {
+  const document = home.window.document;
+  const section = document.querySelector('#connections');
+  const map = section.querySelector('.connection-map');
   assert.match(map.querySelector('.connection-core').textContent, /Polymux/);
-  assert.deepEqual([...map.querySelectorAll('h3')].map((heading) => heading.textContent), ['Browser', 'Mac apps', 'Messaging via Hub']);
-  assert.match(document.querySelector('#explore').textContent, /optional Hub plugin/);
+  const groups = [...map.querySelectorAll('.connection-group')].map((group) => [group.querySelector('h3').textContent, group.querySelectorAll('li').length]);
+  assert.deepEqual(groups, [['Browser', 6], ['Mac apps', 6], ['Messaging via Hub', 8], ['Email via Hub', 4]]);
+  assert.equal(map.querySelectorAll('.hub .connection-group').length, 2, 'Only Hub groups sit behind the optional plugin.');
+  assert.match(map.querySelector('.connection-plugin').textContent, /Optional Hub plugin/);
+  assert.match(section.textContent, /optional Hub plugin/);
+  // The service count must match the bridges Hub ships, plus WeChat through its relay.
+  const bridges = readFileSync(resolve(siteRoot, '../../plugins/hub/internal/hub/bridges.go'), 'utf8').match(/\{platform: [^,]+, name: "([^"]+)"/g);
+  assert.match(map.querySelector('.hub .connection-group header span').textContent, new RegExp(`^${bridges.length + 1} services$`));
   const setup = document.querySelector('#how-it-works');
   assert.match(setup.textContent, /own server.*local model.*recurring work.*optional Permissions plugin/s);
 });

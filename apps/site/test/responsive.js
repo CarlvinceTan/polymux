@@ -126,21 +126,31 @@ for (const engine of [webkit, chromium]) {
         await drawer.getByRole('button', {name: 'Close', exact: true}).click();
       });
 
-      await context.test('app logo groups and capability links stay visible after folding and resizing', async () => {
+      await context.test('island, sample window, app logo groups and capability links stay visible after folding and resizing', async () => {
         await page.setViewportSize(viewports[3]);
         await page.goto(origin);
         await page.getByRole('link', {name: 'Explore'}).click();
         assert.equal(new URL(page.url()).hash, '#explore');
         for (const viewport of viewports) {
           await page.setViewportSize(viewport);
-          for (const group of await page.locator('#explore .connection-group').all()) {
+          for (const [selector, label] of [['.hero .world', 'Island'], ['.hero .native-preview', 'Sample window']]) {
+            const box = await page.locator(selector).boundingBox();
+            assert.ok(box.x >= -1 && box.x + box.width <= viewport.width + 1 && box.height > 100, `${label} at ${viewport.width}px: ${JSON.stringify(box)}`);
+          }
+          const groups = await page.locator('#connections .connection-group').all();
+          assert.equal(groups.length, 4);
+          for (const [index, group] of groups.entries()) {
             await group.scrollIntoViewIfNeeded();
             await contained(group, 'App group');
-            assert.equal(await group.getByRole('listitem').count(), 3);
+            assert.equal(await group.getByRole('listitem').count(), [6, 6, 8, 4][index]);
           }
           await noOverflow(page, 'Apps and capabilities');
         }
-        await page.getByRole('link', {name: 'See the Permissions plugin'}).click();
+        // The page scrolls smoothly, so let the scroll settle before tapping the link.
+        const permissions = page.getByRole('link', {name: 'See the Permissions plugin'});
+        await permissions.scrollIntoViewIfNeeded();
+        await page.waitForFunction(() => new Promise((done) => { const y = scrollY; requestAnimationFrame(() => requestAnimationFrame(() => done(scrollY === y))); }));
+        await permissions.click();
         await page.waitForURL('**/plugins/permissions/');
       });
 
@@ -158,13 +168,21 @@ test('installation tabs use one stable desktop installer and can copy the CLI co
     for (const version of ['0.4.0', '1.0.0', null]) {
       const page = await browser.newPage({viewport: {width: 320, height: 568}, permissions: ['clipboard-read', 'clipboard-write']});
       const nightlyRequests = [];
-      await page.route('**/api/downloads*', (route) => version ? route.fulfill({json: {...stable, version}}) : route.fulfill({status: 503, json: {}}));
+      let release;
+      const held = new Promise((resolve) => release = resolve);
+      await page.route('**/api/downloads*', async (route) => {
+        await held;
+        return version ? route.fulfill({json: {...stable, version}}) : route.fulfill({status: 503, json: {}});
+      });
       await page.route('**/api/nightly*', (route) => {
         nightlyRequests.push(route.request().url());
         return route.abort();
       });
       const checkedStable = page.waitForResponse('**/api/downloads*');
       await page.goto(origin);
+      const pending = page.getByRole('tabpanel', {name: 'Desktop'}).getByRole('button', {name: 'Download for macOS (Beta)'});
+      assert.ok(await pending.isVisible() && await pending.isDisabled(), 'The download button shows, disabled, before the release resolves.');
+      release();
       await checkedStable;
       const want = version ? stable.platforms.macos.url : '#download';
       await page.locator(`.hero a.primary[href="${want}"]`).waitFor();
@@ -174,6 +192,14 @@ test('installation tabs use one stable desktop installer and can copy the CLI co
       assert.deepEqual(await page.locator('.download-line a').evaluateAll((links) => links.map((link) => link.href)),
         want === '#download' ? [] : [want]);
       assert.equal(await page.getByRole('link', {name: 'Download Nightly'}).count(), 0);
+      const disabled = page.getByRole('tabpanel', {name: 'Desktop'}).getByRole('button', {name: 'Download for macOS (Beta)'});
+      if (want === '#download') {
+        assert.ok(await disabled.isVisible() && await disabled.isDisabled(), 'An unavailable release keeps the disabled download button.');
+        await page.getByRole('tabpanel', {name: 'Desktop'}).getByText('The Mac installer isn’t available yet.').waitFor();
+        assert.equal(await page.getByRole('tabpanel', {name: 'Desktop'}).getByRole('link', {name: 'Installation guide'}).count(), 1);
+      } else {
+        assert.equal(await disabled.count(), 0);
+      }
       if (want !== '#download') {
         assert.equal(await page.locator('.download-line a').innerText(), version === '0.4.0' ? 'Download for macOS (Beta)' : 'Download for macOS');
         assert.ok((await page.locator('.download-line p').textContent()).startsWith(`Version ${version} · DMG`));

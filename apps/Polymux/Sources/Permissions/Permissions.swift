@@ -115,7 +115,9 @@ final class Permissions {
         }
         opened = permission
         NSApp.yieldActivation(toApplicationWithBundleIdentifier: SystemSettings.id)
-        NSWorkspace.shared.open(permission.pane)
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.open(permission.pane, configuration: config)
         GrantWindow.shared.follow()
     }
 

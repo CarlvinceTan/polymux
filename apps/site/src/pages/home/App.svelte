@@ -1,6 +1,9 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import DownloadIcon from '../../components/DownloadIcon.svelte';
+  import AgentDemo from '../../components/AgentDemo.svelte';
+  import AgentWorld from '../../components/AgentWorld.svelte';
+  import type {Agent} from '../../lib/agents';
   import Connections from './Connections.svelte';
   import SiteHeader from '../../components/SiteHeader.svelte';
   import SiteFooter from '../../components/SiteFooter.svelte';
@@ -16,12 +19,12 @@
   const installTabs = ['Desktop', 'Phone', 'Terminal'] as const;
   const betaLink = import.meta.env.VITE_TESTFLIGHT_URL?.trim() ?? '';
   const phoneDownload = /^https:\/\/testflight\.apple\.com\/join\/[a-z\d]+$/i.test(betaLink) ? betaLink : '';
-  const phrases = [
-    {text: 'On your devices.', colors: '#8fd0ff, #a98bff 50%, #ff8ad8'},
-    {text: 'Planning your day.', colors: '#8fd0ff, #3c97ff'},
-    {text: 'Learning your ways.', colors: '#d2b2ff, #ff7ad9'},
-    {text: 'Checking your work.', colors: '#8ff5c0, #19c6b8'},
-    {text: 'Using your tools.', colors: '#ffd27a, #ff7a59'},
+  const phrases: {text: string; agent: Agent['id']; colors: string}[] = [
+    {text: 'On your devices.', agent: 'whale', colors: '#8fd0ff, #a98bff 50%, #ff8ad8'},
+    {text: 'Planning your day.', agent: 'atlas', colors: '#8fd0ff, #3c97ff'},
+    {text: 'Learning your ways.', agent: 'nova', colors: '#d2b2ff, #ff7ad9'},
+    {text: 'Checking your work.', agent: 'fern', colors: '#8ff5c0, #19c6b8'},
+    {text: 'Using your tools.', agent: 'fox', colors: '#ffd27a, #ff7a59'},
   ];
   let phrase = $state(0);
   let downloads = $state.raw<ReleaseDownloads | null>(null);
@@ -29,7 +32,8 @@
   let selectedTab = $state<(typeof installTabs)[number]>('Desktop');
   const client = $derived(downloads?.platforms.macos);
   const version = $derived(downloads?.version);
-  const downloadLabel = $derived(version?.startsWith('0.') ? 'Download for macOS (Beta)' : 'Download for macOS');
+  // Beta until a resolved release reaches 1.0, including while the release is unknown.
+  const downloadLabel = $derived(version && !version.startsWith('0.') ? 'Download for macOS' : 'Download for macOS (Beta)');
 
   function selectTab(event: KeyboardEvent, index: number) {
     const last = installTabs.length - 1;
@@ -92,9 +96,11 @@
         <a class="secondary" href="#explore">Explore <span aria-hidden="true">↓</span></a>
       </div>
     </div>
+    <AgentWorld active={phrases[phrase].agent} />
+    <AgentDemo />
   </section>
 
-  <section class="connections" id="explore" aria-labelledby="connections-title">
+  <section class="connections" id="connections" aria-labelledby="connections-title">
     <div class="section-heading">
       <h2 id="connections-title">Work with the apps you already use.</h2>
       <p>Give your agents access to the browser and Mac apps you choose. Connect messaging accounts separately with the optional Hub plugin.</p>
@@ -137,7 +143,8 @@
         </div>
         <p class="install-note">Apple silicon · macOS 27 or later</p>
       {:else}
-        <p class="install-note"><a href="/docs/installation/">Installation guide</a></p>
+        <button class="primary" type="button" disabled><DownloadIcon />{downloadLabel}</button>
+        <p class="install-note">The Mac installer isn’t available yet. <a href="/docs/installation/">Installation guide</a></p>
       {/if}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Phone" aria-labelledby="install-tab-Phone" tabindex="0" hidden={selectedTab !== 'Phone'}>

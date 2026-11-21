@@ -53,6 +53,8 @@ final class GrantWindow: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 if Permissions.shared.opened == nil { break }
                 if let frame = SystemSettings.frame() {
+                    // Raise Settings once, in case it opened behind Polymux's windows.
+                    if !seen { NSRunningApplication.runningApplications(withBundleIdentifier: SystemSettings.id).first?.activate() }
                     seen = true
                     place(frame)
                 } else if seen || Date.now > deadline {
