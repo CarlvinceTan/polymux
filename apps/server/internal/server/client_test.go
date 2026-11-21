@@ -158,3 +158,56 @@ func TestClientPresenceNeedsCheckIns(t *testing.T) {
 		t.Fatal("picked a device that stopped checking in")
 	}
 }
+
+func TestComputerControlNeverFallsBackToAnotherDevice(t *testing.T) {
+	var hub clientHub
+	allowed := []string{"computer"}
+	hub.report("studio", contract.ClientState{Platform: "macos", Timezone: "Asia/Manila", Capabilities: allowed})
+	hub.report("laptop", contract.ClientState{Platform: "macos", Timezone: "Asia/Manila", Capabilities: allowed})
+	studio, _ := hub.attach("studio")
+	laptop, _ := hub.attach("laptop")
+	defer hub.detach("studio", studio)
+	defer hub.detach("laptop", laptop)
+
+	if id, err := hub.pick("studio", "computer"); err != nil || id != "studio" {
+		t.Fatalf("named device = %q, %v", id, err)
+	}
+	if _, err := hub.pick("", "computer"); err == nil {
+		t.Fatal("computer control picked a device nobody named")
+	}
+	if _, err := hub.pick("phone", "computer"); err == nil {
+		t.Fatal("computer control fell back to another device when the named one was unknown")
+	}
+	// A named device that turned it off is refused, even though another one allows it.
+	hub.report("studio", contract.ClientState{Platform: "macos", Timezone: "Asia/Manila", Capabilities: []string{}})
+	if id, err := hub.pick("studio", "computer"); err == nil {
+		t.Fatalf("control went to %q after the named device turned it off", id)
+	}
+}
+
+func TestComputerControlIsMacOnlyAndNeedsKnownPermissions(t *testing.T) {
+	base := contract.ClientState{Platform: "macos", Timezone: "Asia/Manila", Capabilities: []string{"computer"}}
+	if !validClient(base) {
+		t.Fatal("a Mac can allow computer control")
+	}
+	phone := base
+	phone.Platform = "ios"
+	if validClient(phone) {
+		t.Fatal("a phone claimed computer control")
+	}
+	granted := base
+	granted.Permissions = []string{"accessibility", "screenRecording"}
+	if !validClient(granted) {
+		t.Fatal("known permissions were refused")
+	}
+	granted.Permissions = []string{"fullDisk"}
+	if validClient(granted) {
+		t.Fatal("an unknown permission was accepted")
+	}
+}
+
+func TestComputerControlGetsLongerThanASensorRead(t *testing.T) {
+	if timeoutFor("computer") <= timeoutFor("location") {
+		t.Fatal("computer control should wait longer than a location read")
+	}
+}

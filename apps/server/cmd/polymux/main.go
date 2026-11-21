@@ -17,7 +17,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Println("usage: polymux serve [server flags] | app download | pair [--url URL] [--no-qr] | drain [--status | --id ID [--cancel]] | host install|remove|update|forget | move --to SERVER_ID | export FILE | import FILE [--force] | version")
+		fmt.Println("usage: polymux serve [server flags] | app download | pair [--url URL] [--no-qr] | drain [--status | --id ID [--cancel]] | host install|remove|update|forget | permissions [grant] | move --to SERVER_ID | export FILE | import FILE [--force] | version")
 		return nil
 	}
 	if args[0] == "version" {
@@ -30,6 +30,9 @@ func run(args []string) error {
 	// The server's /privacy runs this, so each answer comes from a fresh process.
 	if args[0] == "privacy" {
 		return json.NewEncoder(os.Stdout).Encode(privacy.Check())
+	}
+	if args[0] == "permissions" {
+		return permissions(args[1:])
 	}
 	if args[0] == "drain" {
 		return drain(args[1:])

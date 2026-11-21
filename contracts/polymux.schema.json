@@ -140,10 +140,22 @@
             "enum": [
               "location",
               "home",
-              "alarms"
+              "alarms",
+              "computer"
             ]
           },
           "description": "Connections the user allowed on this device."
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "accessibility",
+              "screenRecording"
+            ]
+          },
+          "description": "What this device's Polymux app has been granted in System Settings, which decides what the server can control on it."
         }
       },
       "required": [

@@ -24,6 +24,8 @@ import (
 const (
 	clientDelivery = 5 * time.Second
 	clientTimeout  = 30 * time.Second
+	// Driving a Mac can mean launching an app or waiting on a page, so it gets longer than a sensor read.
+	computerTimeout = 3 * time.Minute
 	// A dropped network can leave a stream looking open, so presence also needs a recent check-in.
 	clientPresence = 30 * time.Second
 )
@@ -167,7 +169,8 @@ func (h *clientHub) detach(id string, stream chan contract.ClientRequest) {
 }
 
 // pick prefers the device the user sent from, then the most recently seen connected one.
-// Location never falls back: it must describe the device the user is on.
+// Location and computer control never fall back: location must describe the device the user is on,
+// and control must act on the device it was aimed at, never on another one that also allows it.
 func (h *clientHub) pick(preferred, capability string) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -177,11 +180,14 @@ func (h *clientHub) pick(preferred, capability string) (string, error) {
 	if ready(h.devices[preferred]) {
 		return preferred, nil
 	}
-	if sender := h.devices[preferred]; sender != nil && capability == "location" {
+	if sender := h.devices[preferred]; sender != nil && (capability == "location" || capability == "computer") {
 		if !slices.Contains(sender.state.Capabilities, capability) {
-			return "", errors.New("the device the user is on hasn't allowed location; ask them to turn on Location under Settings > Connections on it")
+			return "", fmt.Errorf("that device hasn't allowed %s; ask its user to turn it on under Settings > Connections on it", capability)
 		}
-		return "", errors.New("the device the user is on isn't connected; ask them to open Polymux on it")
+		return "", errors.New("that device isn't connected; ask its user to open Polymux on it")
+	}
+	if capability == "computer" {
+		return "", errors.New("name the device to control; computer control never falls back to another one")
 	}
 	best := ""
 	for id, d := range h.devices {
@@ -225,7 +231,7 @@ func (h *clientHub) call(ctx context.Context, id string, request contract.Client
 	select {
 	case result := <-done:
 		return result, nil
-	case <-time.After(clientTimeout):
+	case <-time.After(timeoutFor(request.Capability)):
 		return contract.ClientResult{}, errors.New("the device did not answer in time; it may be asleep or offline")
 	case <-ctx.Done():
 		return contract.ClientResult{}, ctx.Err()
@@ -247,6 +253,14 @@ func (h *clientHub) answer(id, request string, result contract.ClientResult) boo
 	return true
 }
 
+// timeoutFor is how long a device gets to answer a capability's request.
+func timeoutFor(capability string) time.Duration {
+	if capability == "computer" {
+		return computerTimeout
+	}
+	return clientTimeout
+}
+
 func validClient(state contract.ClientState) bool {
 	if state.Platform != contract.ClientStatePlatformIos && state.Platform != contract.ClientStatePlatformMacos {
 		return false
@@ -258,7 +272,22 @@ func validClient(state contract.ClientState) bool {
 		return false
 	}
 	for _, c := range state.Capabilities {
-		if c != "location" && c != "home" && c != "alarms" {
+		switch c {
+		case "location", "home", "alarms":
+		case "computer":
+			// Only a Mac can be driven here.
+			if state.Platform != contract.ClientStatePlatformMacos {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	if len(state.Permissions) > 2 {
+		return false
+	}
+	for _, p := range state.Permissions {
+		if p != "accessibility" && p != "screenRecording" {
 			return false
 		}
 	}
@@ -278,6 +307,7 @@ func (s *Server) reportClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state.Capabilities = slices.Compact(append([]string{}, slices.Sorted(slices.Values(state.Capabilities))...))
+	state.Permissions = slices.Compact(slices.Sorted(slices.Values(state.Permissions)))
 	s.clients.report(clientID(r.Context()), state)
 	write(w, 200, state)
 }

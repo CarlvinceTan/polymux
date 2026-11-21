@@ -35,6 +35,7 @@ type ClientState struct {
 	Platform     string   `json:"platform"`
 	Timezone     string   `json:"timezone"`
 	Capabilities []string `json:"capabilities"`
+	Permissions  []string `json:"permissions,omitempty"`
 }
 
 const (

@@ -87,15 +87,18 @@ public struct ClientState: Codable, Hashable, Sendable {
     public var platform: String
     public var timezone: String
     public var capabilities: [String]
+    public var permissions: [String]?
 
     public init(
         platform: String = "",
         timezone: String = "",
-        capabilities: [String] = []
+        capabilities: [String] = [],
+        permissions: [String]? = nil
     ) {
         self.platform = platform
         self.timezone = timezone
         self.capabilities = capabilities
+        self.permissions = permissions
     }
 }
 
