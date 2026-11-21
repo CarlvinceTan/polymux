@@ -35,6 +35,15 @@ type Task struct {
 	Checkpoint
 }
 
+// stageLimit bounds continuations: a task that waits a minute or more between checks (a monitor) gets many more
+// stages than one that continues straight away, so watching long work doesn't stop after eight checks.
+func (c Checkpoint) stageLimit() int {
+	if c.After >= 60 {
+		return 288
+	}
+	return 8
+}
+
 func (c Checkpoint) Valid() bool {
 	return strings.TrimSpace(c.Goal) != "" && len(c.Goal) <= 4096 && strings.TrimSpace(c.Next) != "" && len(c.Next) <= 8192 && len(c.Evidence) <= 8192 && c.After >= 0 && c.After <= 604800
 }
@@ -117,7 +126,7 @@ func sealTask(ctx context.Context, tx *sql.Tx, run *contract.Run, checkpoint *Ch
 		task.Status = "completed"
 		return saveTask(ctx, tx, task, nil)
 	}
-	if !checkpoint.Valid() || task.Generation >= 8 || task.Output > 256<<10 {
+	if !checkpoint.Valid() || task.Generation >= checkpoint.stageLimit() || task.Output > 256<<10 {
 		return ErrTask
 	}
 	var unresolved int
@@ -232,7 +241,7 @@ func (s *Store) ResumeTask(ctx context.Context, owner, thread, id string, checkp
 	if task.Status != "parked" && task.Status != "needs_review" {
 		return ErrTask
 	}
-	if task.Generation >= 8 || task.Output >= 256<<10 {
+	if task.Generation >= checkpoint.stageLimit() || task.Output >= 256<<10 {
 		return ErrTask
 	}
 	task.Checkpoint = checkpoint

@@ -201,3 +201,10 @@ func TestTaskInterruptCancelAndPark(t *testing.T) {
 		})
 	}
 }
+
+func TestMonitorStageLimit(t *testing.T) {
+	quick, monitor := Checkpoint{After: 5}, Checkpoint{After: 120}
+	if quick.stageLimit() != 8 || monitor.stageLimit() <= 8 {
+		t.Fatalf("limits %d %d", quick.stageLimit(), monitor.stageLimit())
+	}
+}
