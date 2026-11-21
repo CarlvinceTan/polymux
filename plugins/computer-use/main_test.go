@@ -76,7 +76,7 @@ func fakeDriver() {
 	}
 }
 
-func testDriver(t *testing.T) *driver {
+func testDriver(t *testing.T) *cuaDriver {
 	binary, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func testDriver(t *testing.T) *driver {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nFAKE_CUA=1 exec "+binary+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	d := &driver{command: script}
+	d := &cuaDriver{command: script}
 	t.Cleanup(d.close)
 	return d
 }
@@ -216,7 +216,7 @@ func TestBrowserPolicy(t *testing.T) {
 		if err := json.Unmarshal([]byte(tc.raw), &args); err != nil {
 			t.Fatal(err)
 		}
-		if reason := args.check(); (reason == "") != tc.ok {
+		if reason := cuaSpec.check(args); (reason == "") != tc.ok {
 			t.Errorf("%s: %q", tc.raw, reason)
 		}
 	}

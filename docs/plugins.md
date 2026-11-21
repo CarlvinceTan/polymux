@@ -135,7 +135,7 @@ The [Canvas plugin](../plugins/canvas) owns its editor, repository scans, and ag
 
 Both are Scoped tools plugins for the computer the server runs on, so they're turned on per chat under Settings → Plugins.
 
-- [`computer-use`](../plugins/computer-use) keeps one `cua-driver mcp` session open, which drives apps and the browser using CuaDriver.app's own Accessibility and Screen Recording grants. It exposes a restricted list of desktop and browser tools and asks for approval before each action. It does not expose driver scripts, nested steps or file transfer.
+- [`computer-use`](../plugins/computer-use) drives apps and the browser through a `Driver` (`driver.go`), which holds the allowlist of tools a driver may be asked for. The default is `cua-driver`, with one `mcp` session open, using CuaDriver.app's own Accessibility and Screen Recording grants. `POLYMUX_COMPUTER_DRIVER=agent-desktop` runs apps through [agent-desktop](https://github.com/vercel-labs/agent-desktop) instead, which reads accessibility trees and never takes focus; it has no browser tools. A new driver is one file implementing `Driver`. It exposes a restricted list of tools and asks for approval before each action. It does not expose driver scripts, nested steps or file transfer.
 - [`context`](../plugins/context) is cstack's `context` tool ported to Go: the front app and window, input idle time, prompts on screen, apps, windows, every browser tab, devices and the network. It only reads. Tabs need the Polymux app's Automation consent for each browser, and the prompt check needs cua-driver. On Linux it reads only Tailscale peers.
 
 ## Official plugins

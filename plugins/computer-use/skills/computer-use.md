@@ -5,7 +5,7 @@ description: See and operate apps and web pages on this server's computer with C
 
 # Computer Use
 
-`computer_use__call` runs one cua-driver tool on the computer this Polymux server runs on. `computer_use__describe` lists supported tools and their arguments. Each action asks for approval.
+`computer_use__call` runs one driver tool on the computer this Polymux server runs on. `computer_use__describe` lists the supported tools and their arguments; the tool names below are cua-driver's, so another driver's differ, and `describe` is the source of truth. Each action asks for approval.
 
 Both are reached through codemode: `await tools.computer_use__call({tool: "list_windows", args: {app: "Safari"}})`. A screenshot comes back as an image block in `content`; pass it to `image()` to see it. The text block is a summary written for you; `structuredContent` holds the same answer as data (such as `windows[].pid` and `window_id`) for the script to use. Chain a read, an action and a re-read in one script when you don't need to look in between.
 
@@ -17,4 +17,4 @@ Both are reached through codemode: `await tools.computer_use__call({tool: "list_
 - **Stay out of the way.** Act in the background. Don't bring apps to the front, quit apps or close windows you didn't open unless the user asks.
 - **Ask first** before sending, buying, deleting or anything that leaves the computer. Screenshots can show private content: capture only what the task needs.
 
-If a call says cua-driver isn't running or lacks permission, tell the user to open CuaDriver.app on that computer and grant Accessibility and Screen Recording.
+If a call says the driver isn't running or lacks permission, relay its message to the user.

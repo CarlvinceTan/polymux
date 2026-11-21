@@ -1,7 +1,7 @@
 {
   "name": "computer-use",
   "title": "Computer Use",
-  "description": "Let a chat's bots see and use apps and the browser on this server's computer, through cua-driver.",
+  "description": "Let a chat's bots see and use apps and the browser on this server's computer, through a swappable desktop driver (cua-driver by default).",
   "symbol": "cursorarrow.rays",
   "version": "0.1.0",
   "kind": "scoped",
@@ -23,12 +23,12 @@
     },
     {
       "name": "call",
-      "description": "Run one cua-driver tool on the server's desktop or an exact browser tab. Use describe to discover supported calls. Screenshots come back as images. Actions require approval.",
+      "description": "Run one driver tool on the server's desktop or an exact browser tab. Use describe to discover supported calls. Screenshots come back as images. Actions require approval.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "tool": { "type": "string", "description": "The cua-driver tool to run." },
+          "tool": { "type": "string", "description": "The driver tool to run." },
           "args": { "type": "object", "description": "Its arguments, as describe lists them." }
         },
         "required": ["tool"]
