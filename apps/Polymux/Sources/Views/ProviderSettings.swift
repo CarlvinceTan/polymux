@@ -427,6 +427,44 @@ struct ModelPicker: View {
     }
 }
 
+/// The reasoning levels a model takes, set where its provider is added.
+struct ReasoningLevelsMenu: View {
+    @Binding var levels: [String]?
+    @State private var choosing = false
+    private let all = [("Off", SettingsDefaultReasoning.off), ("Low", SettingsDefaultReasoning.low),
+                       ("Medium", SettingsDefaultReasoning.medium), ("High", SettingsDefaultReasoning.high),
+                       ("Xhigh", SettingsDefaultReasoning.xhigh), ("Max", SettingsDefaultReasoning.max)]
+
+    /// The highest level the model takes, which bounds the levels below it.
+    private var level: String {
+        all.last { levels?.contains($0.1) ?? false }?.1 ?? SettingsDefaultReasoning.off
+    }
+
+    private var title: String { all.first { $0.1 == level }?.0 ?? "Off" }
+
+    var body: some View {
+        Button { choosing = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "brain")
+                Text(title).lineLimit(1)
+            }
+            .foregroundStyle(.muted)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reasoning levels")
+        .accessibilityValue(title)
+        .dropdown(isPresented: $choosing) {
+            DropdownOptions(selection: Binding(get: { level }, set: { reset(upTo: $0) }), options: all)
+        }
+    }
+
+    private func reset(upTo level: String) {
+        let index = all.firstIndex { $0.1 == level } ?? 0
+        levels = Array(all[..<index].map(\.1)) + [level]
+    }
+}
+
 struct ReasoningPicker: View {
     @Binding var selection: String
     var inset = false
@@ -528,6 +566,9 @@ struct ProviderForm: View {
     private var options: [ProviderOption] { store?.options ?? [] }
     @State private var query = ""
     @State private var modelID = ""
+    @State private var newLevels: [String]?
+    /// The custom model loaded into the add row for editing.
+    @State private var editing: String?
     @State private var saving = false
     @State private var issue: String?
 
@@ -612,8 +653,21 @@ struct ProviderForm: View {
                             .accessibilityLabel("All models")
                             ForEach($models, id: \.id) { $model in
                                 if query.isEmpty || model.id.localizedStandardContains(query) {
-                                    Toggle(isOn: $model.enabled) { Text(model.id).lineLimit(1) }
-                                        .accessibilityLabel(model.id)
+                                    HStack {
+                                        Toggle(isOn: $model.enabled) { Text(model.id).lineLimit(1) }
+                                            .accessibilityLabel(model.id)
+                                        if preset == .custom {
+                                            Button("Edit", systemImage: "pencil") {
+                                                editing = model.id
+                                                modelID = model.id
+                                                newLevels = model.reasoning
+                                            }
+                                            .labelStyle(.iconOnly)
+                                            .buttonStyle(.borderless)
+                                            .foregroundStyle(.muted)
+                                            .accessibilityLabel("Edit \(model.id)")
+                                        }
+                                    }
                                 }
                             }
                             if !query.isEmpty && !models.contains(where: { $0.id.localizedStandardContains(query) }) {
@@ -623,7 +677,8 @@ struct ProviderForm: View {
                         if preset != .elevenlabs {
                             HStack {
                                 SettingsField(title: "Model ID", text: $modelID, prompt: "Enter model ID")
-                                Button("Add") { addModel() }.disabled(modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                ReasoningLevelsMenu(levels: $newLevels)
+                                Button(editing == nil ? "Add" : "Save") { addModel() }.disabled(modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
                         }
                     } header: {
@@ -674,8 +729,16 @@ struct ProviderForm: View {
     private func addModel() {
         let id = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
-        if !models.contains(where: { $0.id == id }) { models.append(ProviderModel(id: id, tags: ["text"], enabled: true)) }
+        if let editing, let index = models.firstIndex(where: { $0.id == editing }) {
+            let taken = models.contains { $0.id == id && $0.id != editing }
+            if !taken { models[index].id = id }
+            models[index].reasoning = newLevels
+        } else if !models.contains(where: { $0.id == id }) {
+            models.append(ProviderModel(id: id, tags: ["text"], enabled: true, reasoning: newLevels))
+        }
+        editing = nil
         modelID = ""
+        newLevels = nil
     }
 
     private func save() async {
