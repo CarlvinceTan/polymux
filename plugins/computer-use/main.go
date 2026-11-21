@@ -20,9 +20,6 @@ import (
 
 const callWait = 3 * time.Minute
 
-// blocked tools change the driver itself rather than drive an app.
-var blocked = []string{"set_config", "install_extension", "install_ffmpeg"}
-
 type toolCall struct {
 	Chat  string          `json:"chat"`
 	Agent string          `json:"agent"`
@@ -38,6 +35,7 @@ type toolResult struct {
 	Text       string          `json:"text"`
 	Images     []image         `json:"images,omitempty"`
 	Structured json.RawMessage `json:"structured,omitempty"`
+	IsError    bool            `json:"isError,omitempty"`
 }
 
 type service struct {
@@ -68,16 +66,18 @@ func (s *service) run(ctx context.Context, port, token string) error {
 		return err
 	case <-ctx.Done():
 	}
+	_ = server.Close()
 	s.driver.close()
-	return server.Shutdown(context.Background())
+	return nil
 }
 
 func (s *service) handler(token string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("POST /gate", gate)
 	mux.HandleFunc("POST /tools/{name}", func(w http.ResponseWriter, r *http.Request) {
 		var call toolCall
-		if json.NewDecoder(r.Body).Decode(&call) != nil {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&call) != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
@@ -132,19 +132,24 @@ func (s *service) describe(ctx context.Context, raw json.RawMessage) toolResult 
 	if err := json.Unmarshal(answer, &listed); err != nil {
 		return toolResult{Text: "cua-driver sent a tool list that can't be read."}
 	}
-	listed.Tools = slices.DeleteFunc(listed.Tools, func(tool driverTool) bool { return slices.Contains(blocked, tool.Name) })
+	listed.Tools = slices.DeleteFunc(listed.Tools, func(tool driverTool) bool {
+		_, read := reads[tool.Name]
+		_, action := actions[tool.Name]
+		return !read && !action
+	})
 	if args.Tool != "" {
 		for _, tool := range listed.Tools {
 			if tool.Name == args.Tool {
-				return toolResult{Text: fmt.Sprintf("%s\n\n%s\n\nInput schema:\n%s", tool.Name, tool.Description, tool.InputSchema)}
+				keys, ok := reads[tool.Name]
+				if !ok {
+					keys = actions[tool.Name]
+				}
+				return toolResult{Text: fmt.Sprintf("%s\n\n%s\n\nAccepted arguments: %s\nDriver input schema:\n%s", tool.Name, tool.Description, keys, tool.InputSchema)}
 			}
 		}
 		return toolResult{Text: "No tool named " + args.Tool + ". Call describe without a tool to list them."}
 	}
 	var out strings.Builder
-	if guide, err := s.driver.guide(ctx); err == nil && guide != "" {
-		out.WriteString(guide + "\n\n")
-	}
 	out.WriteString("Tools (call describe with a name for its arguments):\n")
 	for _, tool := range listed.Tools {
 		fmt.Fprintf(&out, "- %s: %s\n", tool.Name, firstSentence(tool.Description))
@@ -154,22 +159,22 @@ func (s *service) describe(ctx context.Context, raw json.RawMessage) toolResult 
 
 // call runs one driver tool and returns its text and pictures.
 func (s *service) call(ctx context.Context, raw json.RawMessage) toolResult {
-	var args struct {
-		Tool string         `json:"tool"`
-		Args map[string]any `json:"args"`
-	}
+	var args input
 	if json.Unmarshal(raw, &args) != nil || args.Tool == "" {
 		return toolResult{Text: "Name a cua-driver tool in `tool`, with its arguments in `args`."}
 	}
-	if slices.Contains(blocked, args.Tool) {
-		return toolResult{Text: args.Tool + " changes cua-driver itself, so Computer Use doesn't offer it."}
+	if reason := args.check(); reason != "" {
+		return toolResult{Text: reason}
 	}
 	if args.Args == nil {
 		args.Args = map[string]any{}
 	}
+	if args.Tool == "browser_prepare" && args.Args["allow_launch"] == true {
+		args.Args["profile"] = map[string]string{"mode": "isolated_new"}
+	}
 	answer, err := s.driver.request(ctx, "tools/call", map[string]any{"name": args.Tool, "arguments": args.Args})
 	if err != nil {
-		return toolResult{Text: args.Tool + " failed: " + err.Error()}
+		return toolResult{Text: args.Tool + " failed: " + err.Error(), IsError: true}
 	}
 	return render(answer)
 }
@@ -187,7 +192,7 @@ func render(answer json.RawMessage) toolResult {
 		IsError    bool            `json:"isError"`
 	}
 	if err := json.Unmarshal(answer, &result); err != nil {
-		return toolResult{Text: "cua-driver sent an answer that can't be read."}
+		return toolResult{Text: "cua-driver sent an answer that can't be read.", IsError: true}
 	}
 	var texts []string
 	var images []image
@@ -212,7 +217,7 @@ func render(answer json.RawMessage) toolResult {
 	if string(result.Structured) == "null" {
 		result.Structured = nil
 	}
-	return toolResult{Text: text, Images: images, Structured: result.Structured}
+	return toolResult{Text: text, Images: images, Structured: result.Structured, IsError: result.IsError}
 }
 
 func firstSentence(text string) string {

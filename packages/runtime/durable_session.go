@@ -437,6 +437,11 @@ func newSpecRegistry(spec ProviderSpec) *modelRegistry {
 		config := ai.OpenAIConfig{BaseURL: spec.BaseURL, APIKey: spec.Key, Model: model.ID, ProviderID: r.id, ExtraHeaders: spec.Headers}
 		// The provider reads image support from its own metadata, not the catalogue's model.
 		if slices.Contains(model.Input, "image") {
+			if known, ok := ai.LookupModel(r.id + "/" + model.ID); ok {
+				model.ThinkingLevelMap = known.ToModel().ThinkingLevelMap
+			} else if known, ok := ai.LookupModel(model.ID); ok {
+				model.ThinkingLevelMap = known.ToModel().ThinkingLevelMap
+			}
 			config.ModelMetadata = model
 		}
 		return ai.NewOpenAIProvider(config)

@@ -103,6 +103,7 @@ type tabWindow struct {
 	WindowID    string `json:"window_id"`
 	Tabs        []tab  `json:"tabs"`
 	Unavailable bool   `json:"unavailable,omitempty"`
+	Warning     string `json:"warning,omitempty"`
 }
 
 func (r reader) tabs(ctx context.Context, s state, query string) []tabWindow {
@@ -120,7 +121,8 @@ func (r reader) tabs(ctx context.Context, s state, query string) []tabWindow {
 		}
 		raw := r.run(ctx, 20*time.Second, "osascript", "-l", "JavaScript", "-e", tabsScript, a.AppID, schema)
 		var read struct {
-			Windows []struct {
+			Warnings []string `json:"warnings"`
+			Windows  []struct {
 				WindowID string `json:"window_id"`
 				Tabs     []tab  `json:"tabs"`
 			} `json:"windows"`
@@ -128,6 +130,9 @@ func (r reader) tabs(ctx context.Context, s state, query string) []tabWindow {
 		if json.Unmarshal([]byte(raw), &read) != nil {
 			out = append(out, tabWindow{Browser: a.Name, Tabs: []tab{}, Unavailable: true})
 			continue
+		}
+		if len(read.Warnings) != 0 {
+			out = append(out, tabWindow{Browser: a.Name, Warning: strings.Join(read.Warnings, "; ")})
 		}
 		for _, w := range read.Windows {
 			rows := []tab{}
@@ -400,7 +405,7 @@ func (r reader) driverCall(ctx context.Context, tool string, params any, deadlin
 	}
 	data, _ := json.Marshal(params)
 	var value map[string]any
-	if json.Unmarshal([]byte(r.run(ctx, min(2*time.Second, remaining), r.driver, "call", tool, string(data))), &value) != nil {
+	if json.Unmarshal([]byte(r.run(ctx, min(2*time.Second, remaining), r.driver, "call", tool, string(data), "--json")), &value) != nil {
 		return map[string]any{}
 	}
 	return value

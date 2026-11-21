@@ -214,6 +214,10 @@ func showTabs(out *strings.Builder, windows []tabWindow, ids bool) {
 		out.WriteString("No browser windows open.\n")
 	}
 	for _, w := range windows {
+		if w.Warning != "" {
+			fmt.Fprintf(out, "%s: tab inventory may be incomplete: %s\n", w.Browser, w.Warning)
+			continue
+		}
 		if w.Unavailable {
 			fmt.Fprintf(out, "%s: tabs unavailable (allow this app to control %s in System Settings → Privacy & Security → Automation)\n", w.Browser, w.Browser)
 			continue

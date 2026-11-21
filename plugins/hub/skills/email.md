@@ -5,7 +5,7 @@ description: Search, read, draft and send the user's email through Hub's mailbox
 
 # Email
 
-Hub's `hub__email_*` tools reach every mailbox the user has connected.
+Hub's `hub__email_*` tools reach every mailbox the user has connected. Call them through codemode, for example `await tools.hub__email_accounts({})`.
 
 ## Proactive evidence search
 

@@ -1972,6 +1972,19 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 	if scopeErr != nil {
 		err = errors.Join(err, scopeErr)
 	}
+	chat := a.threadID
+	if chat == "" {
+		chat = a.id
+	}
+	state.external = externalTools(d)
+	if work.Trigger != contract.RunTriggerCreated && work.Trigger != contract.RunTriggerReview {
+		d.CodeTools = append(slices.Clone(d.CodeTools), s.pluginTools(runCtx, chat, a.id, state)...)
+	}
+	for _, tool := range d.CodeTools {
+		schema, schemaErr := json.Marshal(tool.Schema())
+		err = errors.Join(err, schemaErr)
+		configJSON = append(append(configJSON, '\n'), schema...)
+	}
 	scopeHash := sha256.Sum256(configJSON)
 	a.mu.Lock()
 	sess := a.session
@@ -1994,7 +2007,6 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 		d.Worktree = a.sessionDir
 	}
 	a.mu.Unlock()
-	state.external = externalTools(d)
 	for _, server := range d.MCP {
 		state.prefixes = append(state.prefixes, server.Name+"__")
 	}
@@ -2038,14 +2050,7 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 				d.ExtraTools = append(d.ExtraTools[:0:0], &chatTool{store: s.Store, question: true})
 			} else {
 				d.ExtraTools = append(slices.Clone(d.ExtraTools), s.turnTools(a, work, state)...)
-				chat := a.threadID
-				if chat == "" {
-					chat = a.id
-				}
 				d.Skills = append(slices.Clone(d.Skills), s.plugins.SkillFiles(runCtx, chat)...)
-				if work.Trigger != contract.RunTriggerReview {
-					d.CodeTools = append(slices.Clone(d.CodeTools), s.pluginTools(runCtx, chat, a.id, state)...)
-				}
 			}
 			if err == nil && !d.Intro && d.Workspace != "" {
 				// Prepare the conversation's checkout before a session opens; a

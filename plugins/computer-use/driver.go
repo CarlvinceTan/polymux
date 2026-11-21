@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,37 +12,26 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
-const protocolVersion = "2025-06-18"
-
-// driver is one long-lived `cua-driver mcp` session. Element tokens and sessions live as long as
-// it does, so every call shares it; it restarts on the next call after it exits.
+// One lane owns the connection, including initialization. No action is retried.
 type driver struct {
 	command string
-
-	mu           sync.Mutex
-	stdin        io.WriteCloser
-	process      *exec.Cmd
-	next         int64
-	pending      map[int64]chan reply
-	instructions string
+	once    sync.Once
+	lane    chan struct{}
+	child   *connection
 }
 
-type reply struct {
-	Result json.RawMessage `json:"result"`
-	Error  *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+type connection struct {
+	cmd     *exec.Cmd
+	in      io.WriteCloser
+	out     io.ReadCloser
+	lines   *bufio.Scanner
+	next    int64
+	session string
 }
 
-type message struct {
-	ID     *json.RawMessage `json:"id"`
-	Method string           `json:"method"`
-	reply
-}
-
-// driverPath finds cua-driver: an override, the PATH, then the usual install places.
 func driverPath() string {
 	if path := os.Getenv("POLYMUX_CUA_DRIVER"); path != "" {
 		return path
@@ -63,157 +53,152 @@ func driverPath() string {
 	return "cua-driver"
 }
 
-// start launches the MCP process and completes the handshake. Called with mu held.
-func (d *driver) start(ctx context.Context) error {
-	cmd := exec.Command(d.command, "mcp")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("cua-driver isn't installed or can't start (%v). Install it from https://github.com/trycua/cua and grant CuaDriver Accessibility and Screen Recording", err)
-	}
-	d.stdin, d.process, d.pending = stdin, cmd, map[int64]chan reply{}
-	go d.read(cmd, stdout)
-	result, err := d.send(ctx, "initialize", map[string]any{
-		"protocolVersion": protocolVersion,
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "polymux-computer-use", "version": "1"},
-	})
-	if err != nil {
-		d.stop()
-		return err
-	}
-	var hello struct {
-		Instructions string `json:"instructions"`
-	}
-	_ = json.Unmarshal(result, &hello)
-	d.instructions = hello.Instructions
-	return d.write(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
-}
-
-// read routes each answer to its caller until the process exits, then fails what's still waiting.
-func (d *driver) read(cmd *exec.Cmd, stdout io.Reader) {
-	lines := bufio.NewScanner(stdout)
-	lines.Buffer(make([]byte, 1<<20), 64<<20)
-	for lines.Scan() {
-		var m message
-		if json.Unmarshal(lines.Bytes(), &m) != nil || m.ID == nil {
-			continue
+func (d *driver) acquire(ctx context.Context) error {
+	d.once.Do(func() { d.lane = make(chan struct{}, 1) })
+	select {
+	case d.lane <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-d.lane
+			return err
 		}
-		if m.Method != "" {
-			// The driver asking us something: we offer nothing back.
-			_ = d.writeLocked(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32601, "message": "not supported"}})
-			continue
-		}
-		var id int64
-		if json.Unmarshal(*m.ID, &id) != nil {
-			continue
-		}
-		d.mu.Lock()
-		waiting := d.pending[id]
-		delete(d.pending, id)
-		d.mu.Unlock()
-		if waiting != nil {
-			waiting <- m.reply
-		}
-	}
-	_ = cmd.Wait()
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.process == cmd {
-		for id, waiting := range d.pending {
-			waiting <- reply{Error: &struct {
-				Message string `json:"message"`
-			}{Message: "cua-driver stopped"}}
-			delete(d.pending, id)
-		}
-		d.process, d.stdin = nil, nil
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
-// send writes one request and waits for its answer. Called with mu held; it's released while waiting.
-func (d *driver) send(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	d.next++
-	id := d.next
-	waiting := make(chan reply, 1)
-	d.pending[id] = waiting
-	if err := d.write(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
-		delete(d.pending, id)
+func launch(command string) (*connection, error) {
+	cmd := exec.Command(command, "mcp")
+	in, err := cmd.StdinPipe()
+	if err != nil {
 		return nil, err
 	}
-	d.mu.Unlock()
-	defer d.mu.Lock()
-	select {
-	case answer := <-waiting:
-		if answer.Error != nil {
-			return nil, errors.New(answer.Error.Message)
-		}
-		return answer.Result, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = in.Close()
+		return nil, err
 	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("can't start cua-driver: %w", err)
+	}
+	lines := bufio.NewScanner(out)
+	lines.Buffer(make([]byte, 64<<10), 16<<20)
+	return &connection{cmd: cmd, in: in, out: out, lines: lines, session: "polymux-" + rand.Text()}, nil
 }
 
-func (d *driver) write(value any) error {
-	if d.stdin == nil {
-		return errors.New("cua-driver stopped")
+func (c *connection) send(method string, params any) (json.RawMessage, error) {
+	c.next++
+	id := c.next
+	writer := json.NewEncoder(c.in)
+	if err := writer.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+		return nil, err
 	}
-	data, err := json.Marshal(value)
+	for c.lines.Scan() {
+		var response struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Result json.RawMessage `json:"result"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(c.lines.Bytes(), &response); err != nil {
+			return nil, err
+		}
+		if response.Method != "" {
+			if len(response.ID) != 0 {
+				err := writer.Encode(map[string]any{"jsonrpc": "2.0", "id": response.ID, "error": map[string]any{
+					"code": -32601, "message": "Not supported",
+				}})
+				if err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		if string(response.ID) != fmt.Sprint(id) {
+			continue
+		}
+		if response.Error != nil {
+			return nil, errors.New(response.Error.Message)
+		}
+		return response.Result, nil
+	}
+	if err := c.lines.Err(); err != nil {
+		return nil, err
+	}
+	return nil, errors.New("cua-driver stopped")
+}
+
+func (c *connection) initialize() error {
+	_, err := c.send("initialize", map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]string{"name": "polymux-computer-use", "version": "1"},
+	})
 	if err != nil {
 		return err
 	}
-	_, err = d.stdin.Write(append(data, '\n'))
-	return err
+	return json.NewEncoder(c.in).Encode(map[string]string{"jsonrpc": "2.0", "method": "notifications/initialized"})
 }
 
-func (d *driver) writeLocked(value any) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.write(value)
+func (c *connection) interrupt() {
+	_ = c.cmd.Process.Kill()
+	_ = c.in.Close()
+	_ = c.out.Close()
 }
 
-func (d *driver) stop() {
-	if d.stdin != nil {
-		_ = d.stdin.Close()
-	}
-	if d.process != nil && d.process.Process != nil {
-		_ = d.process.Process.Kill()
-	}
-	d.process, d.stdin = nil, nil
-}
-
-// request runs one MCP method, starting the driver first if it isn't running.
 func (d *driver) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.process == nil {
-		if err := d.start(ctx); err != nil {
+	if err := d.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-d.lane }()
+	fresh := d.child == nil
+	if fresh {
+		child, err := launch(d.command)
+		if err != nil {
 			return nil, err
 		}
+		d.child = child
 	}
-	return d.send(ctx, method, params)
-}
-
-// guide is the driver's own instructions from the handshake.
-func (d *driver) guide(ctx context.Context) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.process == nil {
-		if err := d.start(ctx); err != nil {
-			return "", err
+	c := d.child
+	stop := context.AfterFunc(ctx, c.interrupt)
+	var err error
+	if fresh {
+		err = c.initialize()
+	}
+	var result json.RawMessage
+	if err == nil && ctx.Err() == nil {
+		if call, ok := params.(map[string]any); method == "tools/call" && ok {
+			if args, ok := call["arguments"].(map[string]any); ok {
+				args["session"] = c.session
+			}
 		}
+		result, err = c.send(method, params)
 	}
-	return d.instructions, nil
+	if !stop() || err != nil || ctx.Err() != nil {
+		c.interrupt()
+		_ = c.cmd.Wait()
+		d.child = nil
+		if ctx.Err() != nil {
+			err = fmt.Errorf("driver call canceled; a dispatched action may already have run: %w", ctx.Err())
+		}
+		return nil, err
+	}
+	return result, nil
 }
 
 func (d *driver) close() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.stop()
+	_ = d.acquire(context.Background())
+	defer func() { <-d.lane }()
+	if c := d.child; c != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		stop := context.AfterFunc(ctx, c.interrupt)
+		_, _ = c.send("tools/call", map[string]any{"name": "end_session", "arguments": map[string]any{"session": c.session}})
+		stop()
+		cancel()
+		c.interrupt()
+		_ = c.cmd.Wait()
+		d.child = nil
+	}
 }

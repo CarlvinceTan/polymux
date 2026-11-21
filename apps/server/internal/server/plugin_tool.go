@@ -35,6 +35,9 @@ func (t *pluginTool) Execute(ctx context.Context, _ string, args json.RawMessage
 		t.server.config.Log.Warn("plugin tool", "plugin", t.tool.Plugin, "tool", t.tool.Name, "error", err)
 		return agent.AgentToolResult{}, errors.New(t.tool.Title + " couldn't answer.")
 	}
+	if result.IsError {
+		return agent.AgentToolResult{}, errors.New(untrusted.Wrap(t.tool.Title, result.Text))
+	}
 	content := []ai.ToolResultMessageContent{ai.TextContent{Text: untrusted.Wrap(t.tool.Title, result.Text)}}
 	for _, image := range result.Images {
 		content = append(content, ai.ImageContent{Data: image.Data, MimeType: image.MimeType})

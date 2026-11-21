@@ -49,6 +49,7 @@ type gate struct {
 
 // gates lists each gate plugin active in the chats, whatever its health: a stopped gate still binds them.
 func (m *Manager) gates(ctx context.Context, chats []string) ([]gate, error) {
+	chats = slices.Compact(slices.Sorted(slices.Values(chats)))
 	records, err := m.config.Store.Plugins(ctx)
 	if err != nil {
 		return nil, err
@@ -97,9 +98,10 @@ func (m *Manager) Check(ctx context.Context, chats []string, call Call) Decision
 			return Decision{Reason: gate.title + " isn't running, so the call was blocked."}
 		}
 		if decision.Ask != nil {
-			if ask == nil {
-				ask = decision.Ask
+			if ask != nil {
+				return Decision{Reason: "More than one plugin asked for approval. The call was blocked."}
 			}
+			ask = decision.Ask
 			continue
 		}
 		if !decision.Allow {

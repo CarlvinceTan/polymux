@@ -5,7 +5,7 @@ description: Keep Canvas true when you start outside workers, control apps, work
 
 # Reporting work
 
-Polymux already shows bots, handoffs, delegated tasks and tool use. Report only what it can't see, with `canvas__report_work`.
+Polymux already shows bots, handoffs, delegated tasks and tool use. Report only what it can't see, with `tools.canvas__report_work(args)` inside codemode.
 
 - Report a Claude Code, Codex or similar worker when you start it, as kind `worker` with `parent` set to `me`, and a wire from `me` labelled with the task. Set its `state` to `done` or `failed` when it ends.
 - Report an app you control, such as Safari, as a node under `me`, and its tabs or documents as nodes under that app.

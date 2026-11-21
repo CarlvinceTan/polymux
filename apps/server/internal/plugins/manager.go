@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -559,11 +560,16 @@ func (m *Manager) SetChats(ctx context.Context, name string, chats []string) (co
 }
 
 // Forward sends a request to a plugin's service.
-func (m *Manager) Forward(w http.ResponseWriter, r *http.Request, name, path string) bool {
+func (m *Manager) Forward(w http.ResponseWriter, r *http.Request, name, route string) bool {
+	clean := path.Clean("/" + route)
+	if clean == "/tools" || strings.HasPrefix(clean, "/tools/") || clean == "/gate" {
+		http.NotFound(w, r)
+		return true
+	}
 	m.mu.Lock()
 	unit := m.services[name]
 	m.mu.Unlock()
-	return unit != nil && unit.forward(w, r, path)
+	return unit != nil && unit.forward(w, r, clean)
 }
 
 // SkillFiles lists the skill files that apply to a chat: every global plugin's, and those of Scoped plugins active in it.

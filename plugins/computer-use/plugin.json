@@ -8,11 +8,11 @@
   "engines": { "plugins": 7 },
   "service": "bin/polymux-computer-use",
   "skills": ["skills/computer-use.md"],
-  "provides": ["tools"],
+  "provides": ["tools", "gate"],
   "tools": [
     {
       "name": "describe",
-      "description": "List the desktop and browser tools Computer Use offers, with cua-driver's guide to using them, or pass a tool's name for its full description and arguments. Read a tool's arguments here before its first call.",
+      "description": "List the desktop and browser tools Computer Use offers, or pass a tool name to inspect its schema. Computer Use restricts the accepted arguments.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -23,7 +23,7 @@
     },
     {
       "name": "call",
-      "description": "Run one cua-driver tool on this computer's desktop or browser. Common ones: list_windows, launch_app, get_window_state (accessibility tree and screenshot), run_steps (act and observe in one call), click, type_text, press_key, hotkey, scroll, get_browser_state, browser_navigate, browser_click, browser_type. Screenshots come back as images. Acting happens in the background without taking focus unless a tool says otherwise.",
+      "description": "Run one cua-driver tool on the server's desktop or an exact browser tab. Use describe to discover supported calls. Screenshots come back as images. Actions require approval.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,

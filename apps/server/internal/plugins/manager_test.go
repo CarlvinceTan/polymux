@@ -37,6 +37,8 @@ func TestMain(m *testing.M) {
 				var call Call
 				_ = json.NewDecoder(r.Body).Decode(&call)
 				switch call.Tool {
+				case "ask":
+					fmt.Fprint(w, `{"ask":{"title":"Ask once"}}`)
 				case "denied":
 					fmt.Fprint(w, `{"allow":false,"reason":"Denied in `+call.Chat+`"}`)
 				case "silent":
@@ -310,6 +312,9 @@ func TestGateDecidesItsChats(t *testing.T) {
 		}
 	}
 	waitFor(true)
+	if decision := check("ask", "bound", "bound"); decision.Ask == nil || decision.Ask.Title != "Ask once" {
+		t.Fatalf("a duplicated ancestor must not count as two approval requests: %+v", decision)
+	}
 	if m.Gated(t.Context(), []string{"free"}) || !m.Gated(t.Context(), []string{"free", "bound"}) {
 		t.Fatal("gate bound the wrong chats")
 	}
@@ -396,9 +401,10 @@ func TestBothKeepsChatsAndOffersTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	tool := Tool{Name: "report", Description: "Report work", Parameters: map[string]any{"type": "object"}}
+	slow := Tool{Name: "slow", Description: "Slow work", Parameters: tool.Parameters}
 	body := archive(t, []file{
 		{name: "plugin.json", body: manifest(t, Manifest{Name: "graph", Title: "Graph", Version: "1.0.0", Kind: KindBoth, Surface: "graph", Symbol: "a", SelectedSymbol: "a.fill",
-			Service: "bin/run", Provides: []string{CapabilityTools}, Tools: []Tool{tool}})},
+			Service: "bin/run", Provides: []string{CapabilityTools}, Tools: []Tool{tool, slow}, Engines: Engines{Plugins: 7}})},
 		{name: "bin/run", body: "#!/bin/sh\nexec " + binary + "\n", mode: 0o755},
 	})
 	value := newMarket(t)
@@ -417,7 +423,7 @@ func TestBothKeepsChatsAndOffersTools(t *testing.T) {
 		t.Fatalf("chats %v %v", plugin.Chats, err)
 	}
 	tools := m.Tools(t.Context(), "another chat")
-	if len(tools) != 1 || tools[0].Plugin != "graph" || tools[0].Name != "report" {
+	if len(tools) != 2 || tools[0].Plugin != "graph" || tools[0].Name != "report" {
 		t.Fatalf("tools %v", tools)
 	}
 	var answer ToolResult
@@ -463,6 +469,12 @@ func TestToolsFollowScopedChats(t *testing.T) {
 	}
 	if tools := m.Tools(t.Context(), "chat"); len(tools) != 1 {
 		t.Fatalf("active chat: %v", tools)
+	}
+	if _, err := m.SetChats(t.Context(), "scoped", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.CallTool(t.Context(), "scoped", "report", ToolCall{Chat: "chat"}); err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("revoked call: %v", err)
 	}
 }
 

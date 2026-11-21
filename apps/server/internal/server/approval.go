@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +20,13 @@ const approvalTimeout = 10 * time.Minute
 
 type approvalWait struct{ answer chan string }
 
-func approvalID(run, call string) string { return "approval:" + run + ":" + call }
+func approvalID(run, call string) string {
+	// Nested calls use slash-separated IDs; approval IDs are one URL segment.
+	if strings.Contains(call, "/") {
+		call = fmt.Sprintf("nested:%x", sha256.Sum256([]byte(call)))
+	}
+	return "approval:" + run + ":" + call
+}
 
 // askApproval carries a gate's question to the chat and waits for an answer. The
 // question, its options and what an answer means belong to the plugin.

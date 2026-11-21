@@ -14,6 +14,7 @@ import (
 type AgentTool struct {
 	Plugin string
 	Title  string
+	api    int
 	Tool
 }
 
@@ -26,8 +27,9 @@ type ToolCall struct {
 
 // ToolResult is a service's answer, which goes back to the model.
 type ToolResult struct {
-	Text   string      `json:"text"`
-	Images []ToolImage `json:"images,omitempty"`
+	Text    string      `json:"text"`
+	Images  []ToolImage `json:"images,omitempty"`
+	IsError bool        `json:"isError,omitempty"`
 	// Structured is machine-readable output a codemode script reads as structuredContent (plugin API 7).
 	Structured json.RawMessage `json:"structured,omitempty"`
 }
@@ -60,7 +62,7 @@ func (m *Manager) Tools(ctx context.Context, chat string) []AgentTool {
 			continue
 		}
 		for _, tool := range value.Manifest.Tools {
-			out = append(out, AgentTool{Plugin: saved.Name, Title: value.Title, Tool: tool})
+			out = append(out, AgentTool{Plugin: saved.Name, Title: value.Title, api: value.Manifest.Engines.Plugins, Tool: tool})
 		}
 	}
 	return out
@@ -68,6 +70,17 @@ func (m *Manager) Tools(ctx context.Context, chat string) []AgentTool {
 
 // CallTool asks a plugin's service to run one of its tools.
 func (m *Manager) CallTool(ctx context.Context, plugin, tool string, call ToolCall) (ToolResult, error) {
+	listed := m.Tools(ctx, call.Chat)
+	index := slices.IndexFunc(listed, func(t AgentTool) bool {
+		return t.Plugin == plugin && t.Name == tool
+	})
+	if index < 0 {
+		return ToolResult{}, errors.New("this plugin tool is not available in this chat")
+	}
+	bound := quick
+	if listed[index].api >= 7 {
+		bound = toolLimits
+	}
 	m.mu.Lock()
 	unit := m.services[plugin]
 	m.mu.Unlock()
@@ -75,7 +88,7 @@ func (m *Manager) CallTool(ctx context.Context, plugin, tool string, call ToolCa
 		return ToolResult{}, errors.New("this plugin isn't running")
 	}
 	var result ToolResult
-	if err := unit.post(ctx, "/tools/"+tool, call, &result, toolLimits); err != nil {
+	if err := unit.post(ctx, "/tools/"+tool, call, &result, bound); err != nil {
 		return ToolResult{}, err
 	}
 	result.Images = slices.DeleteFunc(result.Images, func(image ToolImage) bool {

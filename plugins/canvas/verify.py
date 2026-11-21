@@ -91,6 +91,9 @@ class Fake(BaseHTTPRequestHandler):
                     break
                 consumed.add(key)
                 tool, args = scripts[key]
+                if tool in (REPORT, READ):
+                    args = {"code": f"text((await tools.{tool}({json.dumps(args)})).content[0].text)"}
+                    tool = "codemode"
                 call = {"index": 0, "id": "call_" + key, "type": "function", "function": {"name": tool, "arguments": json.dumps(args)}}
                 return self.stream({"role": "assistant", "tool_calls": [call]}, "tool_calls")
         self.stream({"role": "assistant", "content": "done"}, "stop")
