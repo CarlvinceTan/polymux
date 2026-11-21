@@ -108,7 +108,8 @@ test('the actual production entry hydrates prerendered markup and the installati
     await new Promise(setImmediate);
     const document = page.window.document;
     assert.equal(document.querySelectorAll('header.site-header').length, 1);
-    assert.equal(document.querySelectorAll('#explore .connection-map').length, 1);
+    assert.equal(document.querySelectorAll('#connections .connection-map').length, 1);
+    assert.equal(document.querySelectorAll('.hero .world, .hero .native-preview').length, 2);
     document.getElementById('install-tab-Terminal').click();
     await new Promise(setImmediate);
     assert.equal(document.getElementById('install-panel-Terminal').hidden, false);
