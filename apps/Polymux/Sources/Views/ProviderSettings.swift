@@ -68,9 +68,9 @@ struct ProviderSettings: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Model")
             .accessibilityValue(selection.model.isEmpty ? "Server default" : selection.title)
-            .dropdown(isPresented: $choosing) {
+            .dropdown(isPresented: $choosing, width: .fixed(DropdownStyle.modelWidth)) {
                 ModelPicker(providers: providers, provider: settings?.value?.defaultProvider ?? "",
-                            model: settings?.value?.defaultModel ?? "", fitsModels: true) { provider, model in
+                            model: settings?.value?.defaultModel ?? "") { provider, model in
                     settings?.edit(SettingsPatch(defaultProvider: provider, defaultModel: model))
                     choosing = false
                 }
@@ -272,20 +272,16 @@ struct ModelPicker: View {
     let model: String
     /// Offers Not set.
     var clearable = true
-    var fitsModels = false
     let choose: (String, String) -> Void
     @State private var query = ""
     @State private var highlighted: String?
     @State private var keyed: String?
     @Environment(\.dropdownClose) private var dismiss
     @Environment(ProviderStore.self) private var store: ProviderStore?
-    @Environment(\.fontResolutionContext) private var fontContext
-    @Environment(\.font) private var font
-    private let searchTitle = "Search models"
 
     var body: some View {
         VStack(spacing: 0) {
-            PanelSearch(searchTitle, text: $query, autofocus: true)
+            PanelSearch("Search models", text: $query, autofocus: true)
                 .padding(PanelStyle.headingInset)
                 .onSubmit { select() }
             Divider()
@@ -333,25 +329,13 @@ struct ModelPicker: View {
                 }
             }
         }
-        .frame(idealWidth: width, idealHeight: height, maxHeight: height)
+        .frame(idealWidth: DropdownStyle.listWidth, idealHeight: height, maxHeight: height)
         .onChange(of: query) { highlighted = nil }
         #if os(macOS)
         .onKeyPress(.downArrow) { move(1); return .handled }
         .onKeyPress(.upArrow) { move(-1); return .handled }
         .onExitCommand { dismiss() }
         #endif
-    }
-
-    private var width: CGFloat {
-        guard fitsModels else { return DropdownStyle.listWidth }
-        let bodyFont = (font ?? .body).resolve(in: fontContext).ctFont
-        let labels = groups.flatMap { group in
-            group.models.filter(isSelectable).map { ModelName.format($0.id) }
-        }
-        let entries = labels.isEmpty && !model.isEmpty ? [ModelName.format(model)] : labels
-        let search = DropdownStyle.textWidth(searchTitle, font: bodyFont)
-            + PanelStyle.headingInset * 2 + PanelStyle.contentInset + PanelStyle.rowInset
-        return max(search.rounded(.up), DropdownStyle.modelWidth(entries, font: bodyFont))
     }
 
     private var height: CGFloat {
@@ -417,14 +401,10 @@ struct ModelPicker: View {
     }
 
     private var available: [ProviderGroup] {
-        groups.filter { !matches($0).isEmpty }
-    }
-
-    private var groups: [ProviderGroup] {
         let connected = providers.filter {
             $0.enabled && (ProviderPreset(rawValue: $0.type) != nil || !($0.status ?? "").isEmpty)
         }
-        return ProviderGroup.collect(connected, names: store?.names ?? [:])
+        return ProviderGroup.collect(connected, names: store?.names ?? [:]).filter { !matches($0).isEmpty }
     }
 
     private var currentTitle: String {
@@ -436,12 +416,9 @@ struct ModelPicker: View {
         let terms = query.split(whereSeparator: \.isWhitespace)
         return group.models.filter { model in
             let text = "\(group.name) \(model.id) \(ModelName(model: model.id, provider: group.name).title)"
-            return isSelectable(model) && terms.allSatisfy { text.localizedStandardContains(String($0)) }
+            return model.enabled && (model.tags.isEmpty || model.tags.contains("text"))
+                && terms.allSatisfy { text.localizedStandardContains(String($0)) }
         }
-    }
-
-    private func isSelectable(_ model: ProviderModel) -> Bool {
-        model.enabled && (model.tags.isEmpty || model.tags.contains("text"))
     }
 
     private func source(_ group: ProviderGroup, model: String) -> String {

@@ -5,12 +5,9 @@ import PolymuxVoice
 struct VoiceSettings: View {
     let store: SettingsStore
     let providers: [Provider]
-    @Environment(\.fontResolutionContext) private var fontContext
-    @Environment(\.font) private var font
 
     var body: some View {
         if let settings = store.value {
-            let models = models(settings)
             Section {
                 // Each provider starts from its own model and voice.
                 SettingsPicker("Provider", selection: binding(\.liveProvider) { provider in
@@ -19,8 +16,7 @@ struct VoiceSettings: View {
                 }, options: [("Gemini Live", "gemini"), ("OpenAI Realtime", "openai")])
                 .accessibilityLabel("Voice provider")
                 SettingsPicker("Model", selection: binding(\.liveModel) { SettingsPatch(liveModel: $0) },
-                               options: models.map { ($0, $0) },
-                               width: .fixed(DropdownStyle.modelWidth(models, font: (font ?? .body).resolve(in: fontContext).ctFont)))
+                               options: models(settings).map { ($0, $0) }, width: .fixed(DropdownStyle.voiceModelWidth))
                 .accessibilityLabel("Voice model")
                 SettingsPicker("Voice name", selection: binding(\.liveVoice) { SettingsPatch(liveVoice: $0) },
                                options: (Self.voices[settings.liveProvider] ?? []).map { ($0.capitalized, $0) })

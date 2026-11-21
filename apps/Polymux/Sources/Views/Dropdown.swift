@@ -1,20 +1,11 @@
-import CoreText
 import SwiftUI
 
 enum DropdownStyle {
     static let maximumHeight: CGFloat = 400
     /// Searchable lists keep one width while their matches change.
     static let listWidth: CGFloat = 320
-    static func textWidth(_ text: String, font: CTFont) -> CGFloat {
-        let run = NSAttributedString(string: text, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
-        return CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(run), nil, nil, nil))
-    }
-
-    static func modelWidth(_ labels: [String], font: CTFont) -> CGFloat {
-        let average = labels.reduce(CGFloat.zero) { $0 + textWidth($1, font: font) } / CGFloat(max(labels.count, 1))
-        let chrome = PanelStyle.contentInset + PanelStyle.rowInset * 3 + PanelStyle.cardInset * 2
-        return (average + chrome).rounded(.up)
-    }
+    static let modelWidth: CGFloat = 288
+    static let voiceModelWidth: CGFloat = 192
     static var rowHeight: CGFloat {
         #if os(macOS)
         PanelStyle.contentInset + PanelStyle.rowInset
