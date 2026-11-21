@@ -150,23 +150,15 @@ struct VoicePane: View {
 
     private func settingToggle(_ title: String, _ detail: String, isOn: Binding<Bool>,
                                enabled: Bool = true) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 12) {
-            GridRow(alignment: .center) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                    Text(detail)
-                        .font(.footnote)
-                        .foregroundStyle(.muted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityHidden(true)
-                Toggle("", isOn: isOn)
-                    .labelsHidden()
-                    .disabled(!enabled)
-                    .accessibilityLabel(title)
-                    .accessibilityHint(detail)
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.footnote).foregroundStyle(.muted)
             }
         }
+        .disabled(!enabled)
+        .accessibilityLabel(title)
+        .accessibilityHint(detail)
     }
 }
 
