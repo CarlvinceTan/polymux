@@ -25,13 +25,11 @@
   ];
   let phrase = $state(0);
   let downloads = $state.raw<ReleaseDownloads | null>(null);
-  let nightly = $state.raw<{version: string | null; build: string; macos: {name: string; url: string; size: number}} | null>(null);
-  let resolved = $state(false);
   let copyStatus = $state('');
   let selectedTab = $state<(typeof installTabs)[number]>('Desktop');
-  const client = $derived(resolved ? nightly?.macos ?? downloads?.platforms.macos ?? null : null);
-  const version = $derived(nightly ? nightly.version : downloads?.version);
-  const archive = $derived(client?.name.endsWith('.zip') ?? false);
+  const client = $derived(downloads?.platforms.macos);
+  const version = $derived(downloads?.version);
+  const downloadLabel = $derived(version?.startsWith('0.') ? 'Download for macOS (Beta)' : 'Download for macOS');
 
   function selectTab(event: KeyboardEvent, index: number) {
     const last = installTabs.length - 1;
@@ -61,14 +59,10 @@
 
   onMount(() => {
     const controller = new AbortController();
-    const result = (path: string) => fetch(path, {signal: controller.signal})
-      .then((response) => response.ok ? response.json() : null).catch(() => null);
-    void Promise.all([result('/api/nightly'), result('/api/downloads')]).then(([preview, stable]) => {
-      if (controller.signal.aborted) return;
-      nightly = preview;
-      downloads = stable;
-      resolved = true;
-    });
+    void fetch('/api/downloads', {signal: controller.signal})
+      .then((response) => response.ok ? response.json() : null)
+      .then((release) => { if (!controller.signal.aborted) downloads = release; })
+      .catch(() => {});
     return () => controller.abort();
   });
 </script>
@@ -91,7 +85,7 @@
       <p class="lede">A planning partner. A fresh pair of eyes. An agent that remembers how you like things. All running on your own Mac.</p>
       <div class="actions">
         {#if client}
-          <a class="primary" href={client.url} title={nightly ? 'Nightly build' : undefined}><DownloadIcon />Download for macOS</a>
+          <a class="primary" href={client.url}><DownloadIcon />{downloadLabel}</a>
         {:else}
           <a class="primary" href="#download"><DownloadIcon />Install</a>
         {/if}
@@ -135,11 +129,11 @@
       {/each}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Desktop" aria-labelledby="install-tab-Desktop" tabindex="0" hidden={selectedTab !== 'Desktop'}>
-      <p>{archive ? 'Unzip the download, then drag Polymux to Applications and open it to start setup.' : 'Open the disk image, drag Polymux to Applications, then open it to start setup.'} The Mac app includes the server.</p>
+      <p>Open the disk image, drag Polymux to Applications, then open it to start setup. The Mac app includes the server.</p>
       {#if client}
         <div class="download-line">
-          <a class="primary" href={client.url}><DownloadIcon />Download for macOS</a>
-          <p>{version ? `Version ${version}` : `Build ${nightly?.build}`} · {nightly ? 'Nightly · ' : ''}{archive ? 'ZIP' : 'DMG'} · {formatFileSize(client.size)}</p>
+          <a class="primary" href={client.url}><DownloadIcon />{downloadLabel}</a>
+          <p>Version {version} · DMG · {formatFileSize(client.size)}</p>
         </div>
         <p class="install-note">Apple silicon · macOS 27 or later</p>
       {:else}

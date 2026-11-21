@@ -50,7 +50,7 @@ Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac deve
 https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml
 ```
 
-**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch, so it takes effect once on `main`. The site's Desktop tab prefers the latest Nightly through `/api/nightly`, using its notarized disk image when available and its ZIP otherwise. Sparkle continues to use the ZIP. The Phone tab exposes the `VITE_TESTFLIGHT_URL` production build variable only when it's a TestFlight join link; set it after Apple approves a build and a public link is enabled.
+**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch. Nightly publishes a signed ZIP for the Mac app updater, not a separate installer. The site's Desktop tab uses the tagged `main` release; its installer is labelled Beta until `1.0.0`. The Phone tab exposes `VITE_TESTFLIGHT_URL` only when it's a TestFlight join link; set it after Apple approves a build and a public link is enabled.
 
 The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by tester groups. To share the same build externally, add it to a private external group in App Store Connect, submit it for TestFlight App Review when required, and invite testers by email. Builds previously uploaded as internal-only cannot be added to external groups.
 
