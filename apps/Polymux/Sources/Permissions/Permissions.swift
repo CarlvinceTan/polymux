@@ -61,6 +61,7 @@ final class Permissions {
     static let shared = Permissions()
 
     private(set) var granted: Set<Permission> = []
+    @ObservationIgnored private var refreshID = 0
     /// The pane being granted by dragging, while its hint shows beside System Settings.
     private(set) var opened: Permission?
     /// This Mac's own server, which reports what it has been granted.
@@ -78,16 +79,9 @@ final class Permissions {
         return ServerHost.shared.running && ServerHost.shared.managed ? Permission.allCases : [.notifications]
     }
 
-    var summary: String {
-        let count = all.filter(granted.contains).count
-        switch count {
-        case 0: return "None granted yet"
-        case all.count: return "All granted"
-        default: return "\(count) of \(all.count) granted"
-        }
-    }
-
     func refresh() async {
+        refreshID += 1
+        let id = refreshID
         var next = granted
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         if settings.authorizationStatus == .authorized && Notifications.shared.enabled {
@@ -101,6 +95,7 @@ final class Permissions {
                 if on { next.insert(permission) } else { next.remove(permission) }
             }
         }
+        guard !Task.isCancelled, id == refreshID else { return }
         granted = next
         if let opened, granted.contains(opened) { self.opened = nil }
     }

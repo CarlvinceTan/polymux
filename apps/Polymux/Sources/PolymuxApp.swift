@@ -596,7 +596,14 @@ struct ConnectionView: View {
         }
         Section {
             Toggle("Allow notifications", isOn: Binding(get: { Notifications.shared.enabled },
-                set: { enabled in Task { await Notifications.shared.allow(enabled) } }))
+                set: { enabled in
+                    Task {
+                        await Notifications.shared.allow(enabled)
+                        #if os(macOS)
+                        await Permissions.shared.refresh()
+                        #endif
+                    }
+                }))
                 .accessibilityLabel("Allow notifications")
             if let issue = Notifications.shared.issue {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
@@ -606,12 +613,8 @@ struct ConnectionView: View {
         }
         .panelRow()
         #if os(macOS)
+        permissionSection
         Section {
-            LabeledContent("System permissions") {
-                Button("Manage") { GrantWindow.shared.show() }
-                    .accessibilityLabel("Manage permissions")
-            }
-            .task { await Permissions.shared.refresh() }
             Button {
                 UserDefaults.standard.set(true, forKey: "onboarding.pending")
             } label: {
@@ -639,10 +642,44 @@ struct ConnectionView: View {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
             }
         } header: {
-            SectionHeader("Connections", symbol: "link", tint: .blue)
+            SectionHeader("Device Access", symbol: "laptopcomputer.and.iphone", tint: .blue)
         }
         .panelRow()
     }
+
+    #if os(macOS)
+    private var permissionSection: some View {
+        let permissions = Permissions.shared
+        return Section {
+            ForEach(permissions.all) { permission in
+                HStack(spacing: 8) {
+                    Text(permission.title)
+                    Spacer()
+                    if permissions.granted.contains(permission) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill").accessibilityHidden(true)
+                            Text("Granted").accessibilityLabel("\(permission.title): Granted")
+                        }
+                    } else {
+                        Button("Grant") { permissions.grant(permission) }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Grant \(permission.title)")
+                    }
+                }
+            }
+        } header: {
+            SectionHeader("Permissions", symbol: "hand.raised.fill") {
+                Button("Manage") { GrantWindow.shared.show() }
+                    .accessibilityLabel("Manage permissions")
+            }
+        }
+        .panelRow()
+        .task(id: permissions.client?.id) { await permissions.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await permissions.refresh() }
+        }
+    }
+    #endif
 }
 
 /// The provider being added (nil) or edited.

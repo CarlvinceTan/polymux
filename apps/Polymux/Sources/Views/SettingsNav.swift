@@ -199,9 +199,10 @@ struct SettingsEntry: Identifiable {
             add("Appearance", ["Theme", "Light", "Dark", "Switcher badges"])
             add("Notifications", ["Allow notifications"])
             #if os(macOS)
-            add("Onboarding", ["System permissions", "Manage permissions", "Run Setup Again"])
+            add("Permissions", ["System permissions", "Manage permissions"] + Permissions.shared.all.map(\.title))
+            add("Onboarding", ["Run Setup Again"])
             #endif
-            add("Connections", Connections.available.map(Connections.title))
+            add("Device Access", Connections.available.map(Connections.title))
         case .voice:
             add("Live voice", ["Provider", "Model", "Voice name", "Fallbacks", "Voice language"])
             add("Dictation", ["Dictation language", "Filler words", "Smart spacing", "Spoken symbols", "Spoken formatting", "Output fixes", "On-device polish"])
