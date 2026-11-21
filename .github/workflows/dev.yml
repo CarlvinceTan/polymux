@@ -27,6 +27,11 @@ jobs:
   verify:
     needs: verify-push
     if: "!cancelled() && github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && github.event_name == 'workflow_dispatch' && (!inputs.reuse_checks || (needs.verify-push.result == 'success' && needs.verify-push.outputs.missing == 'true'))"
+    # The called changes jobs look up the verified dev runs.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     uses: ./.github/workflows/tests.yml
 
   verify-push:

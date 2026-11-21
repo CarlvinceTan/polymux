@@ -70,6 +70,24 @@ test('promotion does not wait for either delivery job or rerun its component sui
   }
 });
 
+test('callers grant every permission their reusable workflows request', () => {
+  const levels = {none: 0, read: 1, write: 2};
+  for (const caller of ['dev', 'release']) {
+    const {jobs, permissions: top = {}} = workflow(caller);
+    for (const [name, job] of Object.entries(jobs)) {
+      const called = job.uses?.match(/^\.\/\.github\/workflows\/(.+)\.yml$/)?.[1];
+      if (!called) continue;
+      const granted = job.permissions ?? top;
+      for (const [nested, step] of Object.entries(workflow(called).jobs)) {
+        for (const [scope, level] of Object.entries(step.permissions ?? {})) {
+          assert.ok((levels[granted[scope]] ?? 0) >= levels[level],
+            `${caller}.${name} must grant ${scope}: ${level} for ${called}.${nested}`);
+        }
+      }
+    }
+  }
+});
+
 test('the app version has published native notes matching the release tag and download allowlist', () => {
   assert.ok(version);
   assert.equal(new Set(versions).size, 1, 'Debug and Release versions differ');

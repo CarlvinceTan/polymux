@@ -19,9 +19,19 @@ concurrency:
 
 jobs:
   verify:
+    # The called changes jobs look up the verified dev runs.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     uses: ./.github/workflows/tests.yml
 
   site:
+    # The called changes jobs look up the verified dev runs.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     uses: ./.github/workflows/site.yml
 
   macos:
