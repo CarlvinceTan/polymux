@@ -89,24 +89,27 @@ ios() {
 }
 
 # Signed disk image for Sparkle and direct downloads. Run after `macos`.
-dmg() {
+dmg() (
   APP="$DIST/macos/Polymux.app"
   [ -d "$APP" ] || { echo "Build the app first: scripts/build.sh macos" >&2; exit 1; }
   VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
   OUT="$DIST/macos/Polymux-$VERSION-arm64.dmg"
   STAGE=$(mktemp -d "${TMPDIR:-/tmp}/polymux-dmg.XXXXXX")
+  trap 'rm -rf "$STAGE"' EXIT
   ditto "$APP" "$STAGE/Polymux.app"
   ln -s /Applications "$STAGE/Applications"
   rm -f "$OUT"
-  hdiutil create -quiet -volname "Polymux $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$OUT"
-  rm -rf "$STAGE"
+  if ! diskutil image create from --volumeName "Polymux $VERSION" --format UDZO "$STAGE" "$OUT"; then
+    rm -f "$OUT"
+    exit 1
+  fi
   if [ "$IDENTITY" = "-" ]; then
     codesign --force --sign - "$OUT"
   else
     codesign --force --sign "$IDENTITY" --timestamp "$OUT"
   fi
   echo "$OUT"
-}
+)
 
 # Host-platform Go server, stamped with its commit for `polymux version`.
 server() {
