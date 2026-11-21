@@ -16,25 +16,21 @@ const [before] = await app.query(input);
 await cua.sleep(2000);
 await app.click({ role: "button", name: "Start dictation" });
 await app.waitFor({ ...dictation, timeout_ms: 3000 });
+await app.waitFor({ ...reply, gone: true, timeout_ms: 3000 });
 const buttons = await app.query(dismiss);
-if (buttons.length !== 2) throw new Error(`Expected two dismiss buttons, got ${buttons.length}`);
-const older = buttons.find(button => button.value === reply.name);
-const newer = buttons.find(button => button.value === dictation.name);
+const [front] = buttons;
 const [after] = await app.query(input);
-if (!older?.frame || !newer?.frame || !before?.frame ||
-    older.frame.y + older.frame.h >= newer.frame.y ||
-    newer.frame.y + newer.frame.h >= after?.frame?.y ||
+if (buttons.length !== 1 || front?.value !== `${dictation.name}, 1 more` ||
+    !front?.frame || !before?.frame ||
+    front.frame.y + front.frame.h >= after?.frame?.y ||
     JSON.stringify(before.frame) !== JSON.stringify(after?.frame)) {
-    throw new Error("Warnings did not stack above the unmoved message input");
+    throw new Error("Expected one front warning and one behind, above the unmoved input");
 }
 
 for (let i = 0; ; i++) {
-    const active = (await app.query(dismiss)).map(button => button.value);
-    if (!active.includes(reply.name)) {
-        if (!active.includes(dictation.name)) throw new Error("Warnings did not expire independently");
-        break;
-    }
-    if (i >= 40) throw new Error("The reply warning did not expire");
+    const [active] = await app.query(dismiss);
+    if (active?.value === dictation.name) break;
+    if (!active || i >= 40) throw new Error("The rear warning did not expire before the front");
     await cua.sleep(150);
 }
 await app.waitFor({ ...dictation, gone: true, timeout_ms: 5000 });

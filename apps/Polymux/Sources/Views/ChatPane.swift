@@ -493,15 +493,7 @@ struct ChatPane: View {
                 // The stack floats above the input without changing the chat inset.
                 VStack(spacing: 0) {
                     ConnectionStatus(connected: connected, dismissed: connectionDismissed, collapses: true)
-                    ForEach(notices) { notice in
-                        WarningBubble(text: notice.message) { dismiss(notice.id) }
-                            .padding(.top, 8)
-                            .transition(.opacity)
-                            .task {
-                                do { try await Task.sleep(for: .seconds(6)) } catch { return }
-                                dismiss(notice.id)
-                            }
-                    }
+                    if !notices.isEmpty { warningStack.padding(.top, 8) }
                     if showLatest && !latestVisible && !showSearch && !showVoice {
                         latestButton.padding(.top, 8)
                     }
@@ -519,6 +511,25 @@ struct ChatPane: View {
             }
             .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge).padding(.top, 10)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+    }
+
+    private var warningStack: some View {
+        ZStack {
+            // Rear cards keep aging while only the front card exposes its contents.
+            ForEach(notices) { notice in
+                Color.clear.frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+                    .task {
+                        do { try await Task.sleep(for: .seconds(6)) } catch { return }
+                        dismiss(notice.id)
+                    }
+            }
+            if let front = notices.last {
+                WarningBubble(text: front.message, behind: notices.count - 1) { dismiss(front.id) }
+                    .id(front.id)
+                    .transition(.opacity)
+            }
+        }
     }
 
     private func warn(_ message: String) {
