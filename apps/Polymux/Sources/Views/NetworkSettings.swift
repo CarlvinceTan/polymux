@@ -24,14 +24,14 @@ private struct NetworkRow: View {
             Image(systemName: local ? "laptopcomputer" : "server.rack")
                 .font(.title3)
                 .foregroundStyle(.muted)
-                .frame(width: 28)
                 .accessibilityHidden(true)
+                .overlay(alignment: .bottomTrailing) {
+                    StatusDot(state: state).offset(x: 2, y: 2)
+                }
+                .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.title).lineLimit(1)
-                HStack(spacing: 6) {
-                    StatusDot(state: state)
-                    Text(place).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
-                }
+                Text(place).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
             }
             .layoutPriority(1)
             Spacer(minLength: PanelStyle.rowInset)
@@ -47,7 +47,7 @@ private struct NetworkRow: View {
             Button(action: action) { content }
                 .buttonStyle(.plain)
                 .accessibilityLabel(server.title)
-                .accessibilityValue([place, count].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityValue([place, state.label, count].compactMap { $0 }.joined(separator: ", "))
         } else {
             content
         }
