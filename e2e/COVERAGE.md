@@ -57,7 +57,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Streaming reply | Sidebar preview stable | flow | `fixture-sidebar-preview.js` |
 | Failed reply warning | One quiet bubble | flow | `fixture-reply-error.js`, `fixture-reply-recovered.js` |
 | Replaced model warning | Says why another model replied | flow | `fixture-reply-notice.js` |
-| Concurrent composer warnings | Overlap like cards above the input, expire independently, keep the input still | flow | `fixture-reply-stack.js` |
+| Concurrent composer warnings | Show the latest with a count of the rest, expire independently, keep the input still | flow | `fixture-reply-stack.js` |
 | Reasoning levels | Picker offers only the model's levels | flow | `fixture-model-levels.js` |
 | Unsent and not sent | Inline, delete works | flow | `fixture-unsent.js` |
 | Images load | Space reserved, nothing jumps | done | New uploads record their size and the bubble holds that space; older images still size on load |

@@ -24,13 +24,18 @@ if (buttons.length !== 1 || front?.value !== `${dictation.name}, 1 more` ||
     !front?.frame || !before?.frame ||
     front.frame.y + front.frame.h >= after?.frame?.y ||
     JSON.stringify(before.frame) !== JSON.stringify(after?.frame)) {
-    throw new Error("Expected one front warning and one behind, above the unmoved input");
+    throw new Error("Expected one warning with a count of one more, above the unmoved input");
 }
 
 for (let i = 0; ; i++) {
     const [active] = await app.query(dismiss);
-    if (active?.value === dictation.name) break;
-    if (!active || i >= 40) throw new Error("The rear warning did not expire before the front");
+    if (active?.value === dictation.name) {
+        if (JSON.stringify(active.frame) !== JSON.stringify(front.frame)) {
+            throw new Error("Clearing the count moved the warning");
+        }
+        break;
+    }
+    if (!active || i >= 40) throw new Error("The count did not clear when the older warning expired");
     await cua.sleep(150);
 }
 await app.waitFor({ ...dictation, gone: true, timeout_ms: 5000 });

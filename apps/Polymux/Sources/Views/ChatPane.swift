@@ -490,10 +490,12 @@ struct ChatPane: View {
     private var composer: some View {
         composerField
             .overlay(alignment: .top) {
-                // The stack floats above the input without changing the chat inset.
+                // Warnings float above the input without changing the chat inset.
                 VStack(spacing: 0) {
                     ConnectionStatus(connected: connected, dismissed: connectionDismissed, collapses: true)
-                    if !notices.isEmpty { warningStack.padding(.top, 8) }
+                    if !notices.isEmpty {
+                        warnings.padding(.horizontal, WarningBubble.countInset).padding(.top, 8)
+                    }
                     if showLatest && !latestVisible && !showSearch && !showVoice {
                         latestButton.padding(.top, 8)
                     }
@@ -513,9 +515,9 @@ struct ChatPane: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
     }
 
-    private var warningStack: some View {
+    private var warnings: some View {
         ZStack {
-            // Rear cards keep aging while only the front card exposes its contents.
+            // Queued warnings keep aging while only the latest is shown.
             ForEach(notices) { notice in
                 Color.clear.frame(width: 0, height: 0)
                     .accessibilityHidden(true)
@@ -524,9 +526,9 @@ struct ChatPane: View {
                         dismiss(notice.id)
                     }
             }
-            if let front = notices.last {
-                WarningBubble(text: front.message, behind: notices.count - 1) { dismiss(front.id) }
-                    .id(front.id)
+            if let latest = notices.last {
+                WarningBubble(text: latest.message, more: notices.count - 1) { dismiss(latest.id) }
+                    .id(latest.id)
                     .transition(.opacity)
             }
         }
