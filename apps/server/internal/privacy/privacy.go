@@ -14,11 +14,12 @@ import (
 type Status struct {
 	FullDiskAccess  bool `json:"fullDiskAccess"`
 	ScreenRecording bool `json:"screenRecording"`
+	Accessibility   bool `json:"accessibility"`
 }
 
 // Check reads this process's own permissions.
 func Check() Status {
-	return Status{FullDiskAccess: fullDiskAccess(), ScreenRecording: screenRecording()}
+	return Status{FullDiskAccess: fullDiskAccess(), ScreenRecording: screenRecording(), Accessibility: accessibility()}
 }
 
 // Probe asks a fresh `polymux privacy` child, which shares this server's permissions but not its

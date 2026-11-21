@@ -6,7 +6,7 @@ import PolymuxKit
 
 /// A macOS permission the Grant window asks for.
 enum Permission: String, CaseIterable, Identifiable {
-    case fullDisk, screen, notifications
+    case fullDisk, screen, accessibility, notifications
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum Permission: String, CaseIterable, Identifiable {
         switch self {
         case .fullDisk: "Full Disk Access"
         case .screen: "Screen & System Audio Recording"
+        case .accessibility: "Accessibility"
         case .notifications: "Notifications"
         }
     }
@@ -22,6 +23,7 @@ enum Permission: String, CaseIterable, Identifiable {
         switch self {
         case .fullDisk: "Allows bots running in Polymux to open files in protected folders and sandboxed containers."
         case .screen: "Allows bots running in Polymux to capture the screen, windows, and system audio."
+        case .accessibility: "Allows bots and plugins such as Computer Use to read and control apps on this Mac."
         case .notifications: "Allow Polymux to notify you when bots reply or need your attention."
         }
     }
@@ -30,6 +32,7 @@ enum Permission: String, CaseIterable, Identifiable {
         switch self {
         case .fullDisk: "internaldrive"
         case .screen: "rectangle.inset.filled.badge.record"
+        case .accessibility: "accessibility"
         case .notifications: "bell.badge"
         }
     }
@@ -38,6 +41,7 @@ enum Permission: String, CaseIterable, Identifiable {
         switch self {
         case .fullDisk: .blue
         case .screen: .purple
+        case .accessibility: .green
         case .notifications: .orange
         }
     }
@@ -49,6 +53,7 @@ enum Permission: String, CaseIterable, Identifiable {
         switch self {
         case .fullDisk: URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")!
         case .screen: URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture")!
+        case .accessibility: URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility")!
         case .notifications:
             URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(Bundle.main.bundleIdentifier ?? "")")!
         }
@@ -91,7 +96,8 @@ final class Permissions {
         }
         // A failed check keeps the last answer.
         if all.contains(.fullDisk), let status = try? await client?.privacy() {
-            for (permission, on) in [(Permission.fullDisk, status.fullDiskAccess), (.screen, status.screenRecording)] {
+            for (permission, on) in [(Permission.fullDisk, status.fullDiskAccess), (.screen, status.screenRecording),
+                                     (.accessibility, status.accessibility)] {
                 if on { next.insert(permission) } else { next.remove(permission) }
             }
         }

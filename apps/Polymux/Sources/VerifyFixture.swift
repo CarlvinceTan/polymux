@@ -502,7 +502,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                     }
                     data = try JSONEncoder().encode(SidebarSnapshot(cursor: 0, sections: [Section(id: SidebarLayout.unassignedID, name: "Unassigned", order: 0)], placements: placements))
                 case "privacy":
-                    data = try JSONEncoder().encode(PrivacyStatus(fullDiskAccess: false, screenRecording: true))
+                    data = try JSONEncoder().encode(PrivacyStatus(fullDiskAccess: false, screenRecording: true, accessibility: false))
                 case "settings":
                     let theme = CommandLine.arguments.contains("--verify-tools")
                         ? (CommandLine.arguments.contains("--tools-dark") ? "dark" : "light") : Self.appearance
