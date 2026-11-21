@@ -1,4 +1,4 @@
-// @fixture --verify-fixture --verify-tools --verify-profile
+// @fixture --verify-fixture --verify-tools --verify-profile --verify-call-ready
 // The side panel closes without losing the chat window or displacing its phone button; group chats have no phone button.
 const app = await cua.getApp(APP);
 const main = await app.getState({ include_screenshot: false, max_elements: 50 });

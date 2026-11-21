@@ -307,7 +307,7 @@ struct ChatPane: View {
         .task { dropFolder = try? await DroppedFile.prepare() }
         #endif
         #if os(macOS)
-        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice,
+        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice, canCall: canCall,
                                       plugins: pluginGroups, panel: pluginPanel)) {
             if showSearch {
                 HStack(spacing: 8) {
@@ -327,7 +327,7 @@ struct ChatPane: View {
                         }
                         Spacer(minLength: 0)
                         PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
-                        if !thread.isGroup {
+                        if canCall {
                             PanelNavButton(symbol: "phone", label: "Speech conversation",
                                            enabled: !openingVoice && !showVoice, action: openVoice)
                         }
@@ -359,7 +359,7 @@ struct ChatPane: View {
                     }
                 }
             }
-            if showSearch || !thread.isGroup {
+            if showSearch || canCall {
                 ToolbarItem(placement: .primaryAction) {
                     if showSearch {
                         Button("Close search", systemImage: "xmark", action: closeSearch)
@@ -603,11 +603,21 @@ struct ChatPane: View {
         withAnimation(Motion.quick.unless(reduceMotion)) { reply = value }
     }
 
-    /// Opens at once from the settings already loaded; only a first launch waits for them.
+    private var canCall: Bool {
+        guard !thread.isGroup, let settings = session.settings.value else { return false }
+        return VoiceConfig(settings: settings).canStart
+    }
+
     private func openVoice() {
-        // Speech conversations are one to one.
         guard !thread.isGroup, !openingVoice, !showVoice else { return }
-        if let settings = session.settings.value {
+        #if DEBUG
+        if CallFixture.enabled {
+            startVoice(session.settings.value ?? PolymuxKit.Settings())
+            return
+        }
+        #endif
+        guard canCall, let settings = session.settings.value else { return }
+        if !session.settings.isSaving {
             startVoice(settings)
             return
         }
@@ -618,7 +628,7 @@ struct ChatPane: View {
                 warn(session.settings.error ?? "Connect to the agent server and wait for settings to save.")
                 return
             }
-            startVoice(settings)
+            if VoiceConfig(settings: settings).canStart { startVoice(settings) }
         }
     }
 
@@ -895,6 +905,7 @@ private struct ChatBarState: Hashable {
     let search: Bool
     let opening: Bool
     let voice: Bool
+    let canCall: Bool
     let plugins: [[Plugin]]
     let panel: String?
 }

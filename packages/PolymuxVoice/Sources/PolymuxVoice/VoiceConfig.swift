@@ -11,6 +11,12 @@ public struct VoiceConfig: Equatable {
     /// The primary, then the fallbacks that have a key, in the order tried.
     let steps: [LiveStep]
 
+    public var canStart: Bool {
+        hasKey && Self.defaults.contains { $0.provider == provider }
+            && !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !voice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     public init(settings: Settings) {
         provider = settings.liveProvider
         model = settings.liveModel

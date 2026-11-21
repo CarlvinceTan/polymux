@@ -1,4 +1,4 @@
-// @fixture --verify-fixture --verify-plugins
+// @fixture --verify-fixture --verify-plugins --verify-call-ready
 // Scoped buttons follow the chat, keep the shared layout, and swap the side panel at its width.
 const app = await cua.getApp(APP);
 async function chat(name) {

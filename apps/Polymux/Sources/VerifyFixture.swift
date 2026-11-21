@@ -379,7 +379,8 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             reply((try? JSONEncoder().encode([provider])) ?? Data())
             return
         }
-        if CommandLine.arguments.contains("--verify-providers"), path.hasPrefix("/providers") || path == "/settings" {
+        if (CommandLine.arguments.contains("--verify-providers") && (path.hasPrefix("/providers") || path == "/settings"))
+            || (CommandLine.arguments.contains("--verify-call-ready") && path == "/settings") {
             let task = Task { @Sendable [self] in
                 do {
                     let slow = CommandLine.arguments.contains("--verify-providers-slow") && path == "/providers" && request.httpMethod == "GET"

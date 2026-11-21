@@ -1,4 +1,4 @@
-// @fixture --verify-fixture --verify-plugins
+// @fixture --verify-fixture --verify-plugins --verify-call-ready
 // Arranging keeps Chats in the switcher and the call button last, and reaches the sidebar and chat.
 const app = await cua.getApp(APP);
 await app.waitFor({ role: "button", name: "Settings", timeout_ms: 10000 });
