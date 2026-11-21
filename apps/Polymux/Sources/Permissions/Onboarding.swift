@@ -59,7 +59,11 @@ struct Onboarding: View {
     /// A Mac sets up its own server; an iPhone only pairs, and adds a model when the server has none.
     private var steps: [Step] {
         #if os(macOS)
-        Step.allCases
+        Step.allCases.filter { step in
+            guard host == .remote, joined else { return true }
+            // A server that's already running has its own permissions, and usually a model.
+            return step != .permissions && (step != .models || providers.isEmpty)
+        }
         #else
         needsModel || step == .models ? [.host, .models] : [.host]
         #endif
@@ -119,13 +123,13 @@ struct Onboarding: View {
                 .scrollIndicators(.hidden)
             }
             // The next step stays in reach however long the page is.
-            if step != .welcome {
-                navigationActions
-                    .frame(maxWidth: 700)
-                    .padding(.horizontal, horizontalInset)
-                    .padding(.vertical, 16)
-                    .frame(maxWidth: .infinity)
+            Group {
+                if step == .welcome { welcomeActions } else { navigationActions }
             }
+            .frame(maxWidth: 700)
+            .padding(.horizontal, horizontalInset)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
         }
         .background(PanelSurface.color(scheme).ignoresSafeArea())
         .tint(.blue)
@@ -178,7 +182,6 @@ struct Onboarding: View {
         VStack(spacing: 18) {
             pageHeader
             pageBody
-            if step == .welcome { welcomeActions }
         }
         .frame(maxWidth: 700)
         .padding(.horizontal, horizontalInset)
@@ -188,7 +191,9 @@ struct Onboarding: View {
 
     private var pageHeader: some View {
         VStack(spacing: 14) {
-            if showsIcon {
+            if step == .welcome {
+                SetupIsland().frame(maxHeight: 340)
+            } else if showsIcon {
                 AppIcon().frame(width: iconSize, height: iconSize)
             } else {
                 hero(step.symbol, tint: step.tint)
@@ -256,15 +261,15 @@ struct Onboarding: View {
     }
 
     private var welcomeActions: some View {
-        VStack(spacing: 12) {
-            Button("Continue", action: advance)
-                .buttonStyle(OnboardingPrimaryButton())
-                .keyboardShortcut(.defaultAction)
+        HStack(spacing: 12) {
             Button("Skip for now", action: finish)
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("Continue", action: advance)
+                .buttonStyle(OnboardingPrimaryButton())
+                .keyboardShortcut(.defaultAction)
         }
-        .padding(.top, 4)
     }
 
     private var navigationActions: some View {
@@ -279,6 +284,10 @@ struct Onboarding: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            if steps.count > 1, let index = steps.firstIndex(of: step) {
+                SetupProgress(count: steps.count, index: index)
+                Spacer(minLength: 0)
+            }
             if step == .models && providers.isEmpty {
                 Button("Later", action: advance)
                     .buttonStyle(.plain)
@@ -318,18 +327,16 @@ struct Onboarding: View {
 
     private var hostChoice: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(spacing: 0) {
+            HStack(spacing: 14) {
                 if ServerHost.shared.available {
-                    hostOption(.local, title: "On this device",
-                               detail: ServerHost.shared.running ? "This device is running the server." : "Starts a server and its bots here.",
-                               symbol: "laptopcomputer", tint: .blue)
-                    Divider().padding(.horizontal, 12)
+                    hostOption(.local, title: "On this Mac",
+                               detail: ServerHost.shared.running ? "This Mac is running the server." : "Starts a server and its bots here.",
+                               tint: .blue) { SetupMock.local(.blue) }
                 }
                 hostOption(.remote, title: "On another device",
                            detail: joined ? "Connected." : "Connect to a server that's already running.",
-                           symbol: "server.rack", tint: .purple)
+                           tint: .purple) { SetupMock.remote(.purple) }
             }
-            .onboardingCard(scheme)
             if host == .remote {
                 pairing
                     .padding(.top, 16)
@@ -337,20 +344,37 @@ struct Onboarding: View {
         }
     }
 
-    private func hostOption(_ choice: Host, title: String, detail: String, symbol: String, tint: Color) -> some View {
-        Button {
+    private func hostOption<Mock: View>(_ choice: Host, title: String, detail: String, tint: Color,
+                                        @ViewBuilder mock: @escaping () -> Mock) -> some View {
+        let selected = host == choice
+        return Button {
             host = choice
         } label: {
-            OnboardingRow(title: title, detail: detail, symbol: symbol, tint: tint) {
-                Image(systemName: host == choice ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(host == choice ? Color.blue : Color.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                SetupBanner(tint: tint, width: 150, height: 72, mock: mock)
+                    .frame(height: 104)
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.headline)
+                        Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                            .lineLimit(2, reservesSpace: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(selected ? tint : Color.secondary)
+                }
+                .padding(12)
             }
+            .background(PanelSurface.card(scheme), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(selected ? AnyShapeStyle(tint) : AnyShapeStyle(.separator), lineWidth: selected ? 2 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
-        .accessibilityValue(host == choice ? "Selected" : "")
+        .accessibilityValue(selected ? "Selected" : "")
         .accessibilityHint(detail)
     }
 
@@ -476,6 +500,9 @@ struct Onboarding: View {
                 link = ""
                 #if os(iOS)
                 await settle()
+                #else
+                for _ in 0..<40 where session == nil { try? await Task.sleep(for: .milliseconds(250)) }
+                await session?.providers.refreshProviders(force: true)
                 #endif
             } catch is CancellationError {
             } catch {
@@ -635,18 +662,19 @@ struct Onboarding: View {
             }
             .onboardingCard(scheme)
             #if os(macOS)
-            VStack(spacing: 12) {
-                Label("Pair your iPhone", systemImage: "iphone")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Open Polymux on your iPhone and scan this code, or send it the link.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 14) {
+                VStack(spacing: 4) {
+                    Label("Pair your iPhone", systemImage: "iphone")
+                        .font(.headline)
+                    Text("Open Polymux on your iPhone and scan this code, or send it the link.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
                 InviteCode(client: session?.client, size: 132, beside: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(14)
+            .frame(maxWidth: .infinity)
+            .padding(16)
             .onboardingCard(scheme)
             #endif
         }
