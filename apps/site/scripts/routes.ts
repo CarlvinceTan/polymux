@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {JSDOM} from 'jsdom';
-import {site, docsPath, releasePath, githubUrl} from '../lib/site.ts';
+import {site, docsPath, pluginPath, releasePath, githubUrl} from '../lib/site.ts';
 import {date, text, unique} from '../lib/content/documents.ts';
 import {renderSafeMarkdown} from '../lib/content/markdown.js';
 import type {BlogPost, Guide, GuideSection, PostSummary, Release, ReleaseSummary, Route, PageKind} from '../lib/content/types.ts';
@@ -9,13 +9,13 @@ import {loadContent, siteRoot} from './content.ts';
 
 export const entries: Record<PageKind, string> = {
   home: '/src/pages/home/main.ts', blog: '/src/pages/blog/main.ts', post: '/src/pages/blog/post.ts',
-  docs: '/src/pages/docs/main.ts',
+  docs: '/src/pages/docs/main.ts', plugins: '/src/pages/plugins/main.ts',
   releases: '/src/pages/releases/main.ts', legal: '/src/pages/legal/main.ts',
 };
 export const components: Record<PageKind, string> = {
   home: '/src/pages/home/App.svelte', blog: '/src/pages/blog/BlogIndex.svelte', post: '/src/pages/blog/BlogPost.svelte',
   docs: '/src/pages/docs/DocsPage.svelte', releases: '/src/pages/releases/Releases.svelte',
-  legal: '/src/pages/legal/LegalPage.svelte',
+  plugins: '/src/pages/plugins/PluginsPage.svelte', legal: '/src/pages/legal/LegalPage.svelte',
 };
 
 export function postSummary(post: BlogPost): PostSummary {
@@ -71,6 +71,12 @@ export function createRoutes(content: ReturnType<typeof loadContent>, root = sit
       },
     }, page.updated));
   }
+  routes.push(route('/plugins/', 'plugins', staticPage('plugins').title, metadata.plugins.description,
+    {plugin: null, plugins: content.plugins}, metadata.plugins.updated));
+  for (const plugin of content.plugins) {
+    routes.push(route(pluginPath(plugin.name), 'plugins', `${plugin.title} — Polymux Plugins`, plugin.description,
+      {plugin, plugins: content.plugins}));
+  }
   for (const [index, release] of content.releases.entries()) {
     const {body, ...rendered} = release;
     const props = {release: rendered, releases: content.releases.map(releaseSummary)};
@@ -118,7 +124,7 @@ export function pageHead(route: Route): string {
     <meta name="description" content="${description}" />
     <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />
     <link rel="canonical" href="${canonical}" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=e5adb39a2c" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=c954321e3e" />
     <link rel="sitemap" type="application/xml" href="${site.origin}/sitemap.xml" />
     <meta property="og:type" content="${route.kind === 'post' ? 'article' : 'website'}" />
     <meta property="og:site_name" content="${site.name}" />

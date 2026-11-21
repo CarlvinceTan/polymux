@@ -91,7 +91,7 @@ public struct Invite: Codable, Sendable, Equatable {
         self.ticket = ticket
     }
 
-    /// The `polymux://connect` link a QR code or message carries.
+    /// The app link carried by pairing QR codes.
     public var link: URL {
         var parts = URLComponents()
         parts.scheme = "polymux"
@@ -101,13 +101,29 @@ public struct Invite: Codable, Sendable, Equatable {
         return parts.url!
     }
 
+    /// The browser-compatible link. The fragment keeps the invite out of HTTP requests.
+    public var shareLink: URL {
+        var parts = URLComponents(string: "https://polymux.com/connect")!
+        parts.percentEncodedFragment = URLComponents(url: link, resolvingAgainstBaseURL: false)?.percentEncodedQuery
+        return parts.url!
+    }
+
     /// Reads a pairing link back; nil for anything that is not one.
     public init?(link: URL) {
-        guard link.scheme == "polymux", link.host == "connect",
-              link.user == nil, link.password == nil, link.port == nil,
-              link.path.isEmpty, link.fragment == nil,
-              let items = URLComponents(url: link, resolvingAgainstBaseURL: false)?.queryItems,
-              items.filter({ $0.name == "url" }).count == 1,
+        guard let parts = URLComponents(url: link, resolvingAgainstBaseURL: false),
+              parts.user == nil, parts.password == nil, parts.port == nil else { return nil }
+        let items: [URLQueryItem]
+        switch (parts.scheme, parts.host, parts.percentEncodedPath) {
+        case ("polymux", "connect", "") where parts.fragment == nil:
+            items = parts.queryItems ?? []
+        case ("https", "polymux.com", "/connect") where parts.query == nil:
+            var payload = URLComponents()
+            payload.percentEncodedQuery = parts.percentEncodedFragment
+            items = payload.queryItems ?? []
+        default:
+            return nil
+        }
+        guard items.filter({ $0.name == "url" }).count == 1,
               items.filter({ $0.name == "token" }).count == 1,
               items.filter({ $0.name == "ticket" }).count <= 1,
               let url = items.first(where: { $0.name == "url" })?.value,

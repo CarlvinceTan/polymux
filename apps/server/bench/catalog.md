@@ -295,7 +295,7 @@ These scenarios exist mainly to stress responsiveness:
 
 ## Conversational quality
 
-The agent should talk like a thoughtful person, including when it reports results: as long as the content needs and no longer, no filler, in the user's register. No standard benchmark measures this, so it is scored by a rubric judge in the style of [LLM-Rubric](https://arxiv.org/html/2501.00274v1): separate questions for naturalness, directness, length fit, information density, register match and honesty, calibrated against hand-rated replies. The judge is a different pinned model, so the agent's model doesn't grade itself, and it is controlled for length so longer isn't rated better. Automatic checks back it up: filler openers and closers ("Great question!", "I hope this helps"), restating the question, Markdown in chat, walls of text where several short messages fit, and repeated content.
+The agent should talk like a thoughtful person, including when it reports results: as long as the content needs and no longer, no filler, in the user's register. No standard benchmark measures this, so it is scored by a rubric judge in the style of [LLM-Rubric](https://arxiv.org/html/2501.00274v1): separate questions for naturalness, directness, length fit, information density, register match and honesty, calibrated against hand-rated replies. The judge is a different pinned model, so the agent's model doesn't grade itself, and it is controlled for length so longer isn't rated better. Automatic checks back it up: filler openers and closers ("Great question!", "I hope this helps"), the assistant tells the runtime itself bounces (`chatstyle.Tell`: em dashes, stock phrases, assistant words, "not just X, but Y"), restating the question, Markdown in chat, walls of text (over 45 words in one bubble), and parroted openers (the same start three messages in a row).
 
 | ID | Scenario | Domain | Checks | Tier | Needs | From |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -305,7 +305,7 @@ The agent should talk like a thoughtful person, including when it reports result
 | CV04 | Leo texts in fragments | work | Matches his register, no corporate tone | 2 | | U |
 | CV05 | The booking failed, or a parcel is lost | dining | Plain, kind, says what happens next | 2 | | U |
 | CV06 | Sam asks for a detailed comparison of two methods | research | Longer, but every sentence carries information | 2 | | U |
-| CV07 | A result with three distinct points | mixed | Two to four short messages, not one block | 1 | | X |
+| CV07 | A result with three distinct points | mixed | Usually one short message; a second only for a genuinely separate idea, never one block | 1 | | X |
 | CV08 | Any run | mixed | No filler openers or closers, no restating the question | 1 | | X |
 | CV09 | "how's it going?" mid-task | mixed | Specific, honest progress in a line or two | 1 | steer | U |
 | CV10 | A voice call | mixed | Speakable replies: short turns, no lists or URLs | 2 | | X |

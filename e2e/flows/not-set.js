@@ -21,11 +21,11 @@ if (state.truncated || buttons.length !== 1) throw new Error("Custom provider ac
 await app.click(buttons[0].element_token);
 await app.setValue({ role: "textfield", name: "Name" }, "");
 await app.typeText("Routing QA", { role: "textfield", name: "Name" });
-await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL" });
+await app.typeText(`${ADDRESS}/v1`, { role: "textfield", name: "Base URL" });
 await app.typeText("qa-model", { role: "textfield", name: "Model ID" });
 await app.click({ role: "button", name: "Add" });
 await app.click({ role: "button", name: "Save" });
-await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 10000 });
+await app.waitFor({ role: "button", name: "Edit Routing QA", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Close Settings" });
 // The unreachable provider takes the next reply with no profile change.
 await app.typeText("Routed to the provider", { role: "textfield", name: "Message" });
@@ -35,7 +35,7 @@ await app.click({ role: "button", name: "Dismiss warning" });
 await app.click({ role: "button", name: "Edit Auto QA’s profile" });
 await app.click({ role: "button", name: "Capabilities" });
 await app.click({ role: "button", name: "Model" });
-await app.click({ role: "button", name: "Qa Model Custom" });
+await app.click({ role: "button", name: "Qa Model Routing QA" });
 app = await cua.getApp({ pid: host.pid, windowId: host.window_id });
 await app.waitFor({ role: "button", name: "Model", value: "Qa Model Routing QA", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Model" });
@@ -45,7 +45,7 @@ await app.waitFor({ role: "button", name: "Model", value: "Not set", timeout_ms:
 await app.click({ role: "button", name: "Close side panel" });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
-await app.click({ role: "button", name: "Edit Custom" });
+await app.click({ role: "button", name: "Edit Routing QA" });
 await app.waitFor({ role: "textfield", name: "Name", value: "Routing QA" });
 await app.click({ role: "button", name: "Delete" });
 await app.waitFor({ role: "button", name: "Select Routing QA", gone: true, timeout_ms: 5000 });

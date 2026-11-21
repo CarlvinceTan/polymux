@@ -1,0 +1,17 @@
+{
+  "name": "opentunnel",
+  "title": "OpenTunnel",
+  "description": "Reach this server through an OpenTunnel route.",
+  "version": "0.1.0",
+  "symbol": "brand-anomaly",
+  "kind": "global",
+  "engines": { "plugins": 1 },
+  "service": "bin/polymux-opentunnel",
+  "provides": ["transport"],
+  "settings": [
+    { "key": "profile", "title": "Profile", "type": "text", "default": "polymux" },
+    { "key": "route", "title": "Route", "type": "text", "default": "polymux" },
+    { "key": "server", "title": "API server", "type": "text", "default": "" },
+    { "key": "ca-cert", "title": "CA certificate", "type": "text", "default": "" }
+  ]
+}

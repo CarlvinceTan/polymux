@@ -10,16 +10,16 @@ if (create && !create.display_only && create.enabled !== false) throw new Error(
 await app.typeText("Milo", { role: "textfield", name: "To" });
 await app.click({ role: "button", name: "Select Milo" });
 await app.waitFor({ role: "button", name: "Remove Milo" });
-await app.typeText("Crash Group", { role: "textfield", name: "Chat name (optional)" });
+await app.typeText("Crash Group", { role: "textfield", name: "Chat name" });
 await app.click({ role: "button", name: "Remove Aria" });
 await app.waitFor({ role: "button", name: "Select Aria" });
 await app.click({ role: "button", name: "Select Aria" });
-await app.waitFor({ role: "textfield", name: "Chat name (optional)", value: "Crash Group" });
+await app.waitFor({ role: "textfield", name: "Chat name", value: "Crash Group" });
 await cua.sleep(800);
 return "ok";
 // @crash
 const app = await cua.getApp(APP);
-await app.waitFor({ role: "textfield", name: "Chat name (optional)", value: "Crash Group", timeout_ms: 10000 });
+await app.waitFor({ role: "textfield", name: "Chat name", value: "Crash Group", timeout_ms: 10000 });
 for (const name of ["Aria", "Milo"]) {
   await app.waitFor({ role: "button", name: "Remove " + name });
   if ((await app.query({ role: "button", name: "Select " + name })).length) throw new Error(name + " is still in the available list");

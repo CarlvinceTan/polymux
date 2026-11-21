@@ -1,6 +1,6 @@
 // Package acp runs a conversation on an external Agent Client Protocol process.
 //
-// Polymux stays the orchestrator: a bot delegates bounded work to an attached ACP
+// Polymux stays the orchestrator: a bot delegates bounded work to an ACP
 // agent (Claude Code, opencode, ...) by launching it over stdio and driving one
 // session. The external agent owns its own tools and model; this package only
 // relays the prompt, streams its activity back as runtime deltas, and returns its
@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -31,6 +32,8 @@ const protocolVersion = 1
 type Config struct {
 	Command string
 	Args    []string
+	// Env adds variables to the server's environment, as KEY=VALUE.
+	Env []string
 	// Cwd is the absolute working directory the agent runs in. It must be stable
 	// across reopens so agents that persist sessions can load them again.
 	Cwd string
@@ -61,6 +64,8 @@ type Session struct {
 	emit    func(core.Delta) error
 	text    strings.Builder
 	tracked map[string]string
+	// broken is set by a tool call, so the text that follows starts a new paragraph.
+	broken bool
 
 	done     chan struct{}
 	exitErr  error
@@ -92,6 +97,9 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	// group lets Close stop whatever it spawned, such as the agent behind an npx wrapper.
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.Cwd
+	if len(cfg.Env) > 0 {
+		cmd.Env = append(os.Environ(), cfg.Env...)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -165,6 +173,7 @@ func (s *Session) Send(ctx context.Context, m core.Message, emit func(core.Delta
 	s.turnMu.Lock()
 	s.emit = emit
 	s.text.Reset()
+	s.broken = false
 	s.turnMu.Unlock()
 	defer func() {
 		s.turnMu.Lock()
@@ -420,10 +429,15 @@ func (s *Session) applyUpdate(u sessionUpdate) {
 	case "agent_message_chunk":
 		var block contentBlock
 		if json.Unmarshal(u.Content, &block) == nil && block.Type == "text" && block.Text != "" {
+			text := block.Text
 			s.turnMu.Lock()
-			s.text.WriteString(block.Text)
+			if s.broken && s.text.Len() > 0 && !strings.HasSuffix(s.text.String(), "\n\n") {
+				text = "\n\n" + strings.TrimLeft(text, "\n")
+			}
+			s.broken = false
+			s.text.WriteString(text)
 			s.turnMu.Unlock()
-			_ = emit(core.Delta{Text: block.Text})
+			_ = emit(core.Delta{Text: text})
 		}
 	case "tool_call":
 		name := u.Title
@@ -435,6 +449,7 @@ func (s *Session) applyUpdate(u sessionUpdate) {
 		}
 		s.turnMu.Lock()
 		s.tracked[u.ToolCallID] = name
+		s.broken = true
 		s.turnMu.Unlock()
 		_ = emit(core.Delta{Kind: "tool.start", Tool: name, ToolID: u.ToolCallID, Brief: brief(u.RawInput)})
 	case "tool_call_update":

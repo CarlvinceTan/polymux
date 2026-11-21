@@ -1,4 +1,3 @@
-// @cua
 // Four sidebar tabs stay in sync, and reopening returns to General.
 const app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });
@@ -10,8 +9,18 @@ for (const name of ["Vault", "Updates"]) {
 if ((await app.query({ role: "button", name: "Connections" })).length) throw new Error("Old Connections tab remains");
 await app.click({ role: "button", name: "Models" });
 await app.waitFor({ role: "button", name: "Model", timeout_ms: 5000 });
-await app.waitFor({ role: "button", name: "Voice provider", timeout_ms: 5000 });
+if ((await app.query({ role: "button", name: "Voice provider" })).length) throw new Error("Models includes voice settings");
 if ((await app.query({ role: "button", name: "Theme" })).length) throw new Error("Models includes appearance settings");
+await app.click({ role: "button", name: "Voice" });
+await app.waitFor({ role: "button", name: "Voice provider", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Dictation language", timeout_ms: 5000 });
+await app.waitFor({ role: "checkbox", name: "Filler words", timeout_ms: 5000 });
+await app.waitFor({ role: "checkbox", name: "Smart spacing", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Add dictionary word" });
+await app.waitFor({ role: "textfield", name: "Dictionary word", timeout_ms: 5000 });
+await app.waitFor({ role: "textfield", name: "Sounds like", timeout_ms: 5000 });
+await app.click({ role: "button", name: "Remove word" });
+if ((await app.query({ role: "button", name: "Reasoning" })).length) throw new Error("Voice includes the default model");
 await app.click({ role: "button", name: "Vault" });
 await app.waitFor({ role: "textfield", name: "Search vault", timeout_ms: 5000 });
 if ((await app.query({ role: "textfield", name: "Vault master password" })).length) throw new Error("Vault browsing is gated by a password");

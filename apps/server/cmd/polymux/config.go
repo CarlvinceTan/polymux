@@ -87,7 +87,7 @@ func loadModel(dir string) (modelConfig, error) {
 		config.Model = value
 	}
 	if config.Model == "" {
-		config.Model = "openai/gpt-5.5"
+		config.Model = "openai/gpt-6.1-sol"
 	}
 	if value, present := os.LookupEnv("POLYMUX_MODELS"); present {
 		config.Models = strings.Split(value, ",")

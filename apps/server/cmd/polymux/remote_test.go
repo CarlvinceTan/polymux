@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,6 +44,22 @@ func TestRemoteListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	listener.Close()
+}
+
+func TestPublicListenerFallback(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	listener, err := listenerOrFree(held.Addr().String(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if listener.Addr().String() == held.Addr().String() {
+		t.Fatal("public listener reused a busy address")
+	}
 }
 
 func TestRemoteBoundary(t *testing.T) {

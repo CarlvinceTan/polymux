@@ -108,6 +108,51 @@ struct TabIcon: View {
     }
 }
 
+/// A pane section's glyph on a coloured tile, like System Settings' page rows.
+struct SectionTile: View {
+    let symbol: String
+    var tint: Color = .gray
+
+    var body: some View {
+        Image(systemName: symbol)
+            .resizable().scaledToFit()
+            .fontWeight(.medium)
+            .frame(width: 14, height: 14)
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(tint.gradient, in: .rect(cornerRadius: 6, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// A pane section's title with its tile; the trailing view holds the section's button.
+struct SectionHeader<Trailing: View>: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    var trailing: Trailing
+
+    init(_ title: String, symbol: String, tint: Color = .gray, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.symbol = symbol
+        self.tint = tint
+        self.trailing = trailing()
+    }
+
+    init(_ title: String, symbol: String, tint: Color = .gray) where Trailing == EmptyView {
+        self.init(title, symbol: symbol, tint: tint) { EmptyView() }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SectionTile(symbol: symbol, tint: tint)
+            Text(title).foregroundStyle(Color.primary)
+            Spacer(minLength: 8)
+            trailing
+        }
+    }
+}
+
 /// A tab or one of its sections, found by its title or the rows inside it.
 struct SettingsEntry: Identifiable {
     let tab: SettingsTab
@@ -138,6 +183,7 @@ struct SettingsEntry: Identifiable {
     private static func terms(_ tab: SettingsTab) -> [String] {
         switch tab {
         case .vault: VaultCategory.allCases.filter { $0 != .all }.map(\.title) + ["Import"]
+        case .plugins: ["Installed", "Marketplace", "Arrange"]
         default: []
         }
     }
@@ -153,9 +199,15 @@ struct SettingsEntry: Identifiable {
             add("Appearance", ["Theme", "Light", "Dark", "Switcher badges"])
             add("Notifications", ["Allow notifications"])
             #if os(macOS)
-            add("Permissions", ["System permissions"])
+            add("Permissions", ["System permissions", "Manage permissions"] + Permissions.shared.all.map(\.title))
+            add("Onboarding", ["Run Setup Again"])
             #endif
-            add("Connections", Connections.available.map(Connections.title))
+            add("Device Access", Connections.available.map(Connections.title))
+        case .voice:
+            add("Live voice", ["Provider", "Model", "Voice name", "Fallbacks", "Voice language"])
+            add("Dictation", ["Dictation language", "Filler words", "Smart spacing", "Spoken symbols", "Spoken formatting", "Output fixes", "On-device polish"])
+            add("Dictionary", ["Sounds like", "Add dictionary word"])
+            add("Recognition", ["Engine", "Apple Speech", "Listening for", "Multilingual"])
         case .network:
             add("Networks", ["Join network"])
             if ServerHost.shared.available { add("This Mac", ["Run a server here"]) }
@@ -163,13 +215,14 @@ struct SettingsEntry: Identifiable {
             add("Default model", ["Model", "Reasoning"])
             add("Providers")
             add("Generation", ["Image", "Video"])
-            add("Voice", ["Provider", "Model", "Fallbacks", "Language"])
         case .updates:
             #if os(macOS)
             add("Updates", ["Check automatically"])
             #endif
             add("Version", ["Server channel", "Nightly", "Stable"])
-        case .vault: break
+        case .shortcuts:
+            add("Shortcuts", AppShortcutAction.allCases.map(\.title))
+        case .vault, .plugins: break
         }
         return list
     }

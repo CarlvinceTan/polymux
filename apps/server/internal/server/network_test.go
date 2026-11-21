@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 )
 
 func TestNetworkDescribesServer(t *testing.T) {
@@ -91,6 +93,52 @@ func TestPublicInvite(t *testing.T) {
 	value := api.invite(request, "one-time-code")
 	if value["url"] != api.config.PublicURL || value["token"] != "one-time-code" || value["ticket"] != "" {
 		t.Fatalf("public invitation = %v", value)
+	}
+}
+
+func TestPickInvite(t *testing.T) {
+	ready := func(name, url string) plugins.Transport {
+		return plugins.Transport{Plugin: name, State: contract.PluginStateReady, API: url}
+	}
+	transports := []plugins.Transport{
+		{Plugin: "broken", State: "error", API: "https://broken.example"},
+		ready("opentunnel", "https://opentunnel.example"),
+		ready("tailscale", "https://tailscale.example"),
+	}
+	for name, test := range map[string]struct {
+		preference, public string
+		url                string
+		found              bool
+	}{
+		"automatic prefers public":            {public: "https://public.example", url: "https://public.example", found: true},
+		"automatic skips an unready plugin":   {url: "https://opentunnel.example", found: true},
+		"iroh ignores public and plugins":     {preference: "iroh", public: "https://public.example"},
+		"preferred plugin outranks the first": {preference: "tailscale", public: "https://public.example", url: "https://tailscale.example", found: true},
+		"preferred public":                    {preference: "public", public: "https://public.example", url: "https://public.example", found: true},
+		"preferred public without a URL":      {preference: "public", url: "https://opentunnel.example", found: true},
+		"missing plugin falls back to public": {preference: "missing", public: "https://public.example", url: "https://public.example", found: true},
+		"unready plugin falls back":           {preference: "broken", url: "https://opentunnel.example", found: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			url, found := pickInvite(test.preference, test.public, transports)
+			if url != test.url || found != test.found {
+				t.Fatalf("pickInvite = %q, %v; want %q, %v", url, found, test.url, test.found)
+			}
+		})
+	}
+}
+
+func TestIrohPreferredInvite(t *testing.T) {
+	api := settingsAPI(t)
+	api.config.PublicURL = "https://server.connect.example.com"
+	transport := "iroh"
+	if _, err := api.settings.Update(contract.SettingsPatch{Transport: &transport}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://server.local/network/invite", nil)
+	value := api.invite(request, "one-time-code")
+	if value["url"] != "http://server.local" || value["token"] != "one-time-code" || value["ticket"] != "" {
+		t.Fatalf("iroh invitation = %v", value)
 	}
 }
 

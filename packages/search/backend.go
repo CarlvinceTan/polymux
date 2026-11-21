@@ -17,7 +17,11 @@ const (
 type Backend struct {
 	Embedder  Embedder
 	Extractor Extractor
+	local     Embedder
 }
+
+// LocalEmbedder returns only an embedder spawned on this server, never a configured remote URL.
+func (b Backend) LocalEmbedder() Embedder { return b.local }
 
 // Config selects the optional search pieces. Empty fields stay off.
 type Config struct {
@@ -45,7 +49,12 @@ func Start(ctx context.Context, cfg Config) (Backend, func(), error) {
 			return Backend{}, nil, err
 		}
 		stop = process.Close
-		client := &http.Client{Timeout: 2 * time.Minute}
+		client := &http.Client{
+			Timeout: 2 * time.Minute,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 		embedder := &HTTPEmbedder{URL: process.URL(), Model: gemmaModel, Dims: gemmaDims, Client: client,
 			Media: cfg.Projector != ""}
 		if embedder.Media {
@@ -56,7 +65,7 @@ func Start(ctx context.Context, cfg Config) (Backend, func(), error) {
 				embedder.Media = false
 			}
 		}
-		backend.Embedder = embedder
+		backend.Embedder, backend.local = embedder, embedder
 	} else if cfg.URL != "" {
 		backend.Embedder = &HTTPEmbedder{URL: cfg.URL, Model: gemmaModel, Dims: gemmaDims,
 			Client: &http.Client{Timeout: 2 * time.Minute}}

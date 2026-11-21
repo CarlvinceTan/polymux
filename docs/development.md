@@ -1,7 +1,15 @@
 # Development delivery
 
 The development channel follows `dev`; it is separate from public `app-v*` releases.
-Client delivery is manual-only while TestFlight setup is paused. Pushing `dev` runs validation, not client uploads or development-feed publishing. Configure credentials and complete the first-install checks before dispatching delivery.
+Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac Nightly and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
+
+To turn it on:
+
+1. Register a self-hosted runner on the Mac signed in to Xcode with the FlareHQ account (Settings → Actions → Runners → New self-hosted runner), and give it a label such as `polymux-ios`. This replaces the App Store Connect API key until the Account Holder enables one.
+2. In Settings → Secrets and variables → Actions → Variables, set `IOS_RUNNER` to that label and `DEV_DELIVERY` to `true`.
+3. Keep `scripts/local/testflight-job.sh` stopped (`launchctl bootout gui/$(id -u)/com.flarehq.polymux.testflight`) so the poller and the runner don't upload the same commit twice.
+
+The server follows `dev` through `scripts/deploy.sh`, which checks every 30 seconds and applies a passing commit through the safe drain below. Clients check for updates when the app opens, in addition to their scheduled checks.
 
 Progress — November 1, 2026: build 1.0.1 was uploaded to internal TestFlight from the local Mac using the Xcode account (no API key). CI still needs the Account Holder to enable App Store Connect API access.
 
@@ -31,7 +39,7 @@ Direct development signing still depends on a valid Apple development profile an
 
 Manually dispatch `.github/workflows/dev.yml` on `dev` to run the reusable Tests workflow, then independently:
 
-- archives and uploads an **internal-only** iOS build to TestFlight;
+- archives and uploads one iOS build to TestFlight for use by both internal and external tester groups;
 - signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease.
 
 Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac development feed is:
@@ -40,9 +48,9 @@ Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac deve
 https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml
 ```
 
-**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch, so it takes effect once on `main`. The site's home page links the newest `Polymux-dev-*.zip` through `/api/nightly`, labelled unstable.
+**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch, so it takes effect once on `main`. The homepage's primary download is the stable Mac disk image. It lists the newest `Polymux-dev-*.zip` through `/api/nightly` separately as an unstable download.
 
-The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by the internal tester group. Internal-only iOS builds cannot later be submitted to external TestFlight or the App Store.
+The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by tester groups. To share the same build externally, add it to a private external group in App Store Connect, submit it for TestFlight App Review when required, and invite testers by email. Builds previously uploaded as internal-only cannot be added to external groups.
 
 All development jobs are serialized. `scripts/dev-version.py` sets the iOS build number to the `dev` commit count (shown as `0.4.0 (190)`), so local and CI uploads never collide; the script defaults to the same number. The Mac build number stays monotonic across workflow runs and reruns. Do not rewrite `dev` history or upload an arbitrary larger iOS build. Build `1.0.1` was the first manual upload; every later iOS build must exceed it.
 
@@ -85,7 +93,7 @@ The iOS build uses automatic signing: with the API key, Xcode creates and manage
    ```
 
 5. Wait for processing. The owner must resolve encryption compliance based on the app's actual cryptography; no exemption is assumed. Audit privacy-manifest requirements before treating the build as upload-ready.
-6. Install **from TestFlight**, enable Automatic Updates, pair with the server, and verify a real request/reply and relaunch. A USB development install is not proof of the TestFlight path.
+6. Install **from TestFlight**, enable Automatic Updates, pair with the server, and verify a real request/reply and relaunch. A USB development install is not proof of the TestFlight path. iOS applies TestFlight updates opportunistically, so a new build can wait hours on a phone nobody is using; opening TestFlight picks it up at once.
 
 ## First Mac installation
 
@@ -107,14 +115,18 @@ polymux serve --public-url https://YOUR-HOST \
 ```
 
 Route the tunnel to `http://127.0.0.1:7341`. This dedicated listener excludes local
-proof endpoints. It must stay on loopback, and runs only with `--public-url`. `POLYMUX_PUBLIC_URL` and
+proof endpoints. It must stay on loopback. Without `--public-url` it still runs,
+preferring `127.0.0.1:7341` so a fixed tunnel route keeps working across restarts and
+falling back to a free port if it is taken, for
+[transport plugins](plugins.md#transports) such as Tailscale. `POLYMUX_PUBLIC_URL` and
 `POLYMUX_PUBLIC_LISTEN` provide the same settings for a service manager.
 New pairing links advertise the HTTPS address without an Iroh ticket. Existing
 Iroh pairings remain usable until migrated; `--no-tunnel` disables that transport
 once no paired clients need it.
 
-- [OpenTunnel](https://github.com/anomalyco/opentunnel): use its native service
-  with a dedicated profile and a persistent route. TLS terminates on the server
+- [OpenTunnel](https://github.com/anomalyco/opentunnel): install the OpenTunnel
+  transport plugin from Settings → Plugins, or use its native service with a
+  dedicated profile and a persistent route. TLS terminates on the server
   machine, so its relay cannot read requests. The CLI manages reconnection and
   certificate renewal.
 - [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/): use a named
@@ -135,13 +147,13 @@ POLYMUX_TEST_TOKEN_FILE=/path/to/test/data/devices/local-token \
 Several comma-separated test addresses exercise the same server through multiple
 providers. Never point these checks at a personal installation.
 
-On the server Mac, run `scripts/deploy.sh setup` from a checkout once. The launch agent polls `dev` every five minutes from its own `~/.polymux/src` checkout. The **Server channel** in Settings → Updates picks what it follows: Nightly is `dev`, and Stable is the latest published release. Stable never moves a server backwards, so switching to it waits for the next release newer than the running build. Nightly requires a successful `server` check on the candidate commit and does not run pull-request code on the server.
+On the server Mac, run `scripts/deploy.sh setup` from a checkout once. The launch agent polls `dev` every 30 seconds from its own `~/.polymux/src` checkout. The **Server channel** in Settings → Updates picks what it follows: Nightly is `dev`, and Stable is the latest published release. Stable never moves a server backwards, so switching to it waits for the next release newer than the running build. Nightly requires a successful `server` check on the candidate commit and does not run pull-request code on the server.
 
 - `~/.polymux/deploy/sha` records the last successfully applied commit, not failed CI candidates.
 - If there are no server/build-script changes, it advances that marker without restarting.
 - Build first, then acquire the server's owner-authenticated drain protocol. New messages stay queued, while admitted work finishes. `seal` closes mutations atomically before restart; a busy server waits rather than being force-stopped. Unsupported or cancelled drains defer installation without quarantining the commit.
 - The candidate starts with admission still paused. Health requires an authenticated maintenance response with the expected build identity and the same PID across five samples; only then does the installer release queued work.
-- A failed candidate is quarantined in `~/.polymux/deploy/failed-sha`; it is not retried every five minutes. Binary rollback requires another successful safe-drain handshake, compatible data, and verified rollback health. If the candidate cannot answer or safety cannot be established, admission remains paused and recovery is manual.
+- A failed candidate is quarantined in `~/.polymux/deploy/failed-sha`; it is not retried on every pass. Binary rollback requires another successful safe-drain handshake, compatible data, and verified rollback health. If the candidate cannot answer or safety cannot be established, admission remains paused and recovery is manual.
 - To retry a quarantined commit after diagnosing it, remove that marker deliberately and run `~/.local/bin/polymux-deploy`. Prefer pushing a fixed commit.
 - Logs: `~/.polymux/logs/deploy.log` and `~/.polymux/logs/launchd.log`.
 
@@ -209,6 +221,8 @@ Keep SSH or another independent coding route available if the app/server fails. 
 
 ## Local checks
 
+Enable the repository's Git hooks once per clone with `git config core.hooksPath .githooks`. The pre-commit hook allows commits only on `dev` (or a detached worktree) and runs `scripts/docs_check.py`, which fails when `README.md`, `AGENTS.md`, `DESIGN.md` or `docs/` link to or name files that no longer exist, or when `docs/README.md` omits a guide. The pre-push hook allows pushing only `dev`. Hooks are local, so CI repeats the docs check on every push and pull request.
+
 Use the shared entrypoints rather than duplicating build commands:
 
 | Command | Purpose |
@@ -222,15 +236,11 @@ Use the shared entrypoints rather than duplicating build commands:
 | `scripts/run.sh --server` | A server with throwaway data; also used by `make run` in `apps/server`. |
 | `scripts/run.sh --fixture <flags>` | An isolated fixture app without building or launching the Go server. |
 | `scripts/run.sh --fresh` | The app as a new install: no server is started, so it runs its own under a launchd job of that instance's. |
-| `scripts/run-e2e.sh [--driver cua\|control] [flows...]` | Shared UI flows; Cua is the default, Control is opt-in. Fixture-only selections skip the Go server. A `// @fresh` line runs the flow on `run.sh --fresh`, which opens on the first-run welcome once its server is up. A `// @second-server` line starts another live server and gives the flow `SECOND_LINK`, a pairing link to it; `// @linked-job` links that server with the first and runs it under launchd. |
+| `scripts/run-e2e.sh [flows...]` | Shared UI flows, driven by Cua. Fixture-only selections skip the Go server. A `// @fresh` line runs the flow on `run.sh --fresh`, which opens on the first-run welcome once its server is up. A `// @second-server` line starts another live server and gives the flow `SECOND_LINK`, a pairing link to it; `// @linked-job` links that server with the first and runs it under launchd. Every flow gets `ADDRESS`, the instance's own server, which works as a provider that refuses every model request. |
 | `scripts/e2e.py [--changed [base]] [--jobs n] [--dry-run] [flows...]` | The fast way to run flows: builds once, starts the Cua daemon if it's down, gives each real-server flow a fresh server, and retries failures alone. It paces itself for throughput: it starts from the last run's pace, adds jobs while flows stay close to their best times, holds when they slow, drops after a failure and waits while the machine is busy. If nothing passes it stops early. `--jobs n` holds it at n. `--changed` picks flows from `e2e/areas.json`. |
 | `scripts/sim.sh out.png [flags...]` | A fresh simulator and renamed app, deleted after capture. |
 
 `scripts/run.sh --fixture --verify-load --verify-renders` seeds 72 chats and writes view update counts to `<data>/renders.txt`, to check that a gesture stays local to what it touches.
-
-`e2e/intents.json` records behaviour that looks like a defect to Argus but is meant. Each entry names the sources behind it and goes stale when they change, at which point Argus reports the finding again. Update it in the same commit as the behaviour, with `argus intent` from the Argus repository.
-
-`e2e/baselines/` holds the approved state of each screen in each Argus journey, one line per element, so a changed screen reads as a plain diff in review. Argus compares against it and fails on anything that appeared, vanished or moved. Runs never write it: after a wanted UI change, `argus baseline approve` records it with a reason, in the same commit as the change.
 
 Build locks are held by the OS and survive until the owning build processes exit; an abandoned lock file does not block later builds. Keep the shared `.build/` caches. Stop owned runs by their recorded runner PID so their processes and data are cleaned up.
 
@@ -240,7 +250,7 @@ Outstanding manual checks include live theme-switch colour refresh, the scroll-t
 
 CI selects native jobs from changed inputs, including shared scripts/contracts. Site-only changes skip native compilation, while the server job still reports a successful check for the deployer's exact-commit requirement. Manual and release validation runs the full selection. Releases reuse the test and site workflows, and Sparkle signing uses the package resolved by the app build. Title validation has one workflow.
 
-The remaining tooling work is targeted: add client-facing maintenance status; generator inputs should be pinned before regenerating reference assets; and the polling watcher should be replaced only if measured overhead warrants another dependency. Control's current capability and migration gates are in [Control](control.md).
+The remaining tooling work is targeted: add client-facing maintenance status; generator inputs should be pinned before regenerating reference assets; and the polling watcher should be replaced only if measured overhead warrants another dependency.
 
 ```sh
 python3 -B scripts/dev-version_test.py
@@ -249,4 +259,4 @@ python3 -B scripts/testflight_test.py  # macOS
 scripts/check.sh all
 ```
 
-The deployment tests use temporary HOME directories, fake CI/launchd, and disposable databases. They never install a crashing binary on the real server. TestFlight tests check the signing guards and internal-only export options without contacting Apple. Neither test suite proves real store delivery, notarization, or an installed update.
+The deployment tests use temporary HOME directories, fake CI/launchd, and disposable databases. They never install a crashing binary on the real server. TestFlight tests check the signing guards and export options without contacting Apple. Neither test suite proves real store delivery, notarization, or an installed update.

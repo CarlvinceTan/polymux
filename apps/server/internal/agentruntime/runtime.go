@@ -32,8 +32,10 @@ type Definition struct {
 	// Keep an explicit clear from inheriting the startup default again.
 	WorkspaceSet bool `json:"workspaceSet,omitempty"`
 	// Worktree is the conversation's prepared checkout, resolved per session.
-	Worktree   string                   `json:"-"`
-	ExtraTools []agent.AgentTool        `json:"-"`
+	Worktree   string            `json:"-"`
+	ExtraTools []agent.AgentTool `json:"-"`
+	// CodeTools are reached through codemode, as MCP tools are.
+	CodeTools  []agent.AgentTool        `json:"-"`
 	Scope      string                   `json:"-"`
 	Intro      bool                     `json:"-"`
 	Ephemeral  bool                     `json:"-"`
@@ -45,6 +47,8 @@ type Definition struct {
 	// executes tools on its own task line, so the caller's context values do not reach
 	// them. The runtime calls it only for the conversation this session opened.
 	TurnContext func() (context.Context, bool) `json:"-"`
+	// External runs this session on an Agent Client Protocol process instead of a model.
+	External *acp.Launch `json:"-"`
 }
 
 // SystemPrompt is the bot's instructions, or the default ones when it has none of its own.
@@ -126,8 +130,12 @@ func NewDurable(ctx context.Context, dir, baseURL, model, key string, client Cli
 	return &DurableRuntime{DurableRuntime: runtime, dir: dir}, nil
 }
 func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (Session, error) {
-	if d.Agent.ACP != nil {
+	if d.External != nil {
 		return r.openACP(ctx, d, path)
+	}
+	// A conversation saved by an external agent can't continue on a model.
+	if acpSessionID(path) != "" {
+		path = ""
 	}
 	opened, err := r.DurableRuntime.Open(ctx, runtimeDefinition(d), path)
 	if err != nil {
@@ -149,19 +157,20 @@ func acpSessionID(path string) string {
 	return id
 }
 
-// openACP attaches the conversation to an external Agent Client Protocol process.
+// openACP runs the conversation on an external Agent Client Protocol process.
 // The external agent owns its tools and model; Polymux only relays the turn.
 func (r *DurableRuntime) openACP(ctx context.Context, d Definition, path string) (Session, error) {
 	cwd := d.Worktree
 	if cwd == "" {
-		cwd = filepath.Join(r.dir, "acp", d.Agent.ID)
+		cwd = filepath.Join(r.dir, "acp", d.Agent.ID, d.Scope)
 		if err := os.MkdirAll(cwd, 0700); err != nil {
 			return nil, err
 		}
 	}
 	opened, err := acp.Open(ctx, acp.Config{
-		Command:   d.Agent.ACP.Command,
-		Args:      d.Agent.ACP.Args,
+		Command:   d.External.Command,
+		Args:      d.External.Args,
+		Env:       d.External.Env,
 		Cwd:       cwd,
 		SessionID: acpSessionID(path),
 		Log:       slog.Default(),
@@ -198,6 +207,7 @@ func runtimeDefinition(d Definition) core.Definition {
 		WorkspaceSet:       d.WorkspaceSet,
 		Worktree:           d.Worktree,
 		ExtraTools:         extra,
+		CodeTools:          d.CodeTools,
 		Scope:              d.Scope,
 		Intro:              d.Intro,
 		Ephemeral:          d.Ephemeral,
@@ -230,6 +240,7 @@ func productDefinition(d core.Definition) Definition {
 		WorkspaceSet:       d.WorkspaceSet,
 		Worktree:           d.Worktree,
 		ExtraTools:         d.ExtraTools,
+		CodeTools:          d.CodeTools,
 		Scope:              d.Scope,
 		Intro:              d.Intro,
 		Ephemeral:          d.Ephemeral,

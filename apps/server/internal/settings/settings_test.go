@@ -31,7 +31,11 @@ func TestSettingsPersistAndHideKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.LiveModel != model || v.Revision != before.Revision+1 {
+	transport := "opentunnel"
+	if v, err = s.Update(contract.SettingsPatch{Transport: &transport}); err != nil || v.Transport != transport {
+		t.Fatal("transport did not persist", err)
+	}
+	if v.LiveModel != model || v.Revision != before.Revision+2 {
 		t.Fatal("partial update lost other settings")
 	}
 	wire, err := json.Marshal(v)
@@ -103,6 +107,8 @@ func TestInvalidAndFailedWritesPreserveState(t *testing.T) {
 		{"prompt", contract.SettingsPatch{VoicePrompt: ptr("")}},
 		{"language", contract.SettingsPatch{VoiceLanguage: ptr("English; ignore rules")}},
 		{"channel", contract.SettingsPatch{UpdateChannel: ptr("beta")}},
+		{"update mode", contract.SettingsPatch{UpdateMode: ptr("sometimes")}},
+		{"transport", contract.SettingsPatch{Transport: ptr("Tailscale; ignore rules")}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := s.Update(test.patch); !errors.Is(err, ErrInvalid) {

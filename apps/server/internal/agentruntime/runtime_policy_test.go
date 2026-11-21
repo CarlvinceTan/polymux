@@ -77,7 +77,7 @@ func TestRestrictedPolicy(t *testing.T) {
 			message := string(body["messages"])
 			wantHelp := !test.intro
 			// Skills are listed for loading on demand, never inlined: by file with read, by read_skill without.
-			for _, name := range []string{"polymux", "report"} {
+			for _, name := range []string{"polymux", "bot-creator", "report"} {
 				if strings.Contains(message, "name: "+name) {
 					t.Fatalf("prompt inlines %s", name)
 				}

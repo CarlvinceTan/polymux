@@ -43,3 +43,5 @@ When every model a bot can use is out of allowance, rate-limited or down, the bo
 ## Voice
 
 **Settings → Voice** uses Gemini Live or OpenAI Realtime with the API key of your connected Gemini or OpenAI provider. Speech conversations are in direct chats, not group chats. Talk naturally and interrupt replies; the live spokesperson consults your agents for tasks and context. Voice settings don't change the default text model.
+
+Dictation in the composer uses Apple's speech recognition. Choose **English only** or **Multilingual**, and set how the transcript is cleaned up: filler words, smart spacing, spoken symbols, spoken formatting, output fixes and on-device polish. **Multilingual** listens for English and the languages set on the device. The **Dictionary** holds words the recogniser should hear correctly and the phrases it often mishears. A Mac that can't run multilingual recognition uses English instead. Dictation settings stay on that device.

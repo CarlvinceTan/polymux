@@ -69,7 +69,9 @@ type Settings struct {
 	DefaultModel     string       `json:"defaultModel"`
 	DefaultReasoning string       `json:"defaultReasoning"`
 	UpdateChannel    string       `json:"updateChannel,omitempty"`
+	UpdateMode       string       `json:"updateMode,omitempty"`
 	SwitcherBadges   *bool        `json:"switcherBadges,omitempty"`
+	Transport        string       `json:"transport,omitempty"`
 }
 
 const (
@@ -82,6 +84,8 @@ const (
 	SettingsDefaultReasoningMax     = "max"
 	SettingsUpdateChannelNightly    = "nightly"
 	SettingsUpdateChannelStable     = "stable"
+	SettingsUpdateModeAutomatic     = "automatic"
+	SettingsUpdateModeManual        = "manual"
 )
 
 type SettingsPatch struct {
@@ -98,7 +102,9 @@ type SettingsPatch struct {
 	DefaultModel     *string       `json:"defaultModel,omitempty"`
 	DefaultReasoning *string       `json:"defaultReasoning,omitempty"`
 	UpdateChannel    *string       `json:"updateChannel,omitempty"`
+	UpdateMode       *string       `json:"updateMode,omitempty"`
 	SwitcherBadges   *bool         `json:"switcherBadges,omitempty"`
+	Transport        *string       `json:"transport,omitempty"`
 }
 
 const (
@@ -111,6 +117,8 @@ const (
 	SettingsPatchDefaultReasoningMax     = "max"
 	SettingsPatchUpdateChannelNightly    = "nightly"
 	SettingsPatchUpdateChannelStable     = "stable"
+	SettingsPatchUpdateModeAutomatic     = "automatic"
+	SettingsPatchUpdateModeManual        = "manual"
 )
 
 type AgentFallback struct {
@@ -172,11 +180,6 @@ const (
 	FallbackModelReasoningMax     = "max"
 )
 
-type AgentACP struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-}
-
 type Agent struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
@@ -187,7 +190,6 @@ type Agent struct {
 	Provider  string         `json:"provider,omitempty"`
 	Reasoning string         `json:"reasoning,omitempty"`
 	Fallback  *AgentFallback `json:"fallback,omitempty"`
-	ACP       *AgentACP      `json:"acp,omitempty"`
 	CreatedBy string         `json:"createdBy,omitempty"`
 }
 
@@ -279,6 +281,7 @@ type Part struct {
 	AllowText  *bool              `json:"allowText,omitempty"`
 	Credential *CredentialRequest `json:"credential,omitempty"`
 	Vault      *VaultCard         `json:"vault,omitempty"`
+	Approval   *Approval          `json:"approval,omitempty"`
 }
 
 const (
@@ -288,6 +291,7 @@ const (
 	PartKindChoice     = "choice"
 	PartKindCredential = "credential"
 	PartKindVault      = "vault"
+	PartKindApproval   = "approval"
 )
 
 type ReplyContext struct {
@@ -477,6 +481,13 @@ type Proactivity struct {
 	NextAt          *string `json:"nextAt,omitempty"`
 }
 
+type ExternalAgent struct {
+	Agent   string   `json:"agent,omitempty"`
+	Name    string   `json:"name"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+}
+
 type Run struct {
 	JobID           string         `json:"jobID"`
 	ID              string         `json:"id"`
@@ -503,6 +514,7 @@ type Run struct {
 	Summary         string         `json:"summary"`
 	StatusText      *string        `json:"statusText,omitempty"`
 	Notice          *string        `json:"notice,omitempty"`
+	External        *ExternalAgent `json:"external,omitempty"`
 }
 
 const (
@@ -578,6 +590,32 @@ const (
 	PeerDeliveryStatusInterrupted = "interrupted"
 )
 
+type Approval struct {
+	Title    string           `json:"title"`
+	Detail   *string          `json:"detail,omitempty"`
+	Status   string           `json:"status"`
+	AnswerID *string          `json:"answerID,omitempty"`
+	Options  []ApprovalOption `json:"options,omitempty"`
+}
+
+const (
+	ApprovalStatusPending = "pending"
+	ApprovalStatusAllowed = "allowed"
+	ApprovalStatusDenied  = "denied"
+	ApprovalStatusExpired = "expired"
+)
+
+type ApprovalOption struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Outcome string `json:"outcome"`
+}
+
+const (
+	ApprovalOptionOutcomeAllow = "allow"
+	ApprovalOptionOutcomeDeny  = "deny"
+)
+
 type ChoiceOption struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
@@ -592,7 +630,6 @@ type CreateAgentRequest struct {
 	Provider    *string       `json:"provider,omitempty"`
 	Avatar      *AvatarDesign `json:"avatar,omitempty"`
 	SectionID   *string       `json:"sectionID,omitempty"`
-	ACP         *AgentACP     `json:"acp,omitempty"`
 }
 
 type AgentProfile struct {
@@ -608,7 +645,6 @@ type UpdateAgentRequest struct {
 	Model     *string        `json:"model,omitempty"`
 	Reasoning *string        `json:"reasoning,omitempty"`
 	Fallback  *AgentFallback `json:"fallback,omitempty"`
-	ACP       *AgentACP      `json:"acp,omitempty"`
 }
 
 const (
@@ -911,6 +947,10 @@ type Activity struct {
 	AgentIDs      []string `json:"agentIDs,omitempty"`
 }
 
+type ApprovalAnswer struct {
+	OptionID string `json:"optionID"`
+}
+
 type ChoiceAnswer struct {
 	OptionID string  `json:"optionID"`
 	Text     *string `json:"text,omitempty"`
@@ -1012,6 +1052,25 @@ type VaultBrowser struct {
 	Endpoint string `json:"endpoint"`
 }
 
+type VaultSync struct {
+	Location string `json:"location"`
+	State    string `json:"state"`
+	SyncedAt int64  `json:"syncedAt"`
+}
+
+const (
+	VaultSyncStateOff         = "off"
+	VaultSyncStateSynced      = "synced"
+	VaultSyncStatePending     = "pending"
+	VaultSyncStateUnavailable = "unavailable"
+	VaultSyncStateLocked      = "locked"
+)
+
+type VaultSyncChange struct {
+	Location string  `json:"location"`
+	Password *string `json:"password,omitempty"`
+}
+
 type RoutineWatch struct {
 	URL          string   `json:"url"`
 	JsonPointers []string `json:"jsonPointers,omitempty"`
@@ -1103,4 +1162,484 @@ type MCPStatus struct {
 	Name      string   `json:"name"`
 	Connected bool     `json:"connected"`
 	Tools     []string `json:"tools"`
+}
+
+type Plugin struct {
+	Name           string   `json:"name"`
+	Title          string   `json:"title"`
+	Description    string   `json:"description"`
+	Symbol         string   `json:"symbol"`
+	SelectedSymbol string   `json:"selectedSymbol"`
+	Version        string   `json:"version"`
+	Kind           string   `json:"kind"`
+	Surface        string   `json:"surface"`
+	Page           *string  `json:"page,omitempty"`
+	HideClose      *bool    `json:"hideClose,omitempty"`
+	State          string   `json:"state"`
+	Issue          *string  `json:"issue,omitempty"`
+	Source         string   `json:"source"`
+	Chats          []string `json:"chats"`
+}
+
+const (
+	PluginKindGlobal      = "global"
+	PluginKindScoped      = "scoped"
+	PluginKindBoth        = "both"
+	PluginStateInstalling = "installing"
+	PluginStateReady      = "ready"
+	PluginStateFailed     = "failed"
+)
+
+type MarketPlugin struct {
+	Name        string  `json:"name"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Symbol      string  `json:"symbol"`
+	Author      string  `json:"author"`
+	Homepage    string  `json:"homepage"`
+	Kind        string  `json:"kind"`
+	Surface     string  `json:"surface"`
+	Version     string  `json:"version"`
+	Source      string  `json:"source"`
+	Compatible  bool    `json:"compatible"`
+	Installed   *string `json:"installed,omitempty"`
+}
+
+type PluginLayout struct {
+	Switcher []string   `json:"switcher"`
+	Buttons  [][]string `json:"buttons"`
+}
+
+type PluginList struct {
+	Installed []Plugin     `json:"installed"`
+	Layout    PluginLayout `json:"layout"`
+}
+
+type InstallPlugin struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type UpdatePlugin struct {
+	Chats []string `json:"chats"`
+}
+
+type HubField struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Secret bool   `json:"secret"`
+}
+
+type HubFlow struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type HubAccount struct {
+	ID    string  `json:"id"`
+	Name  string  `json:"name"`
+	Issue *string `json:"issue,omitempty"`
+}
+
+type HubPlatform struct {
+	ID       string       `json:"id"`
+	Name     string       `json:"name"`
+	State    string       `json:"state"`
+	Issue    *string      `json:"issue,omitempty"`
+	Accounts []HubAccount `json:"accounts"`
+	Flows    []HubFlow    `json:"flows"`
+	Setup    []HubField   `json:"setup"`
+}
+
+const (
+	HubPlatformStateStopped = "stopped"
+	HubPlatformStateRunning = "running"
+	HubPlatformStateFailed  = "failed"
+)
+
+type HubMailAccount struct {
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Email            string             `json:"email"`
+	Issue            *string            `json:"issue,omitempty"`
+	Imap             *string            `json:"imap,omitempty"`
+	Smtp             *string            `json:"smtp,omitempty"`
+	Auth             *string            `json:"auth,omitempty"`
+	Signatures       []HubMailSignature `json:"signatures,omitempty"`
+	DefaultSignature *string            `json:"defaultSignature,omitempty"`
+}
+
+type HubStatus struct {
+	State         string            `json:"state"`
+	Issue         *string           `json:"issue,omitempty"`
+	Revision      int64             `json:"revision"`
+	Platforms     []HubPlatform     `json:"platforms"`
+	Mail          []HubMailAccount  `json:"mail"`
+	Incognito     bool              `json:"incognito"`
+	MailProviders []HubMailProvider `json:"mailProviders"`
+	Selector      *string           `json:"selector,omitempty"`
+	TextOnly      []string          `json:"textOnly"`
+	WechatRename  bool              `json:"wechatRename"`
+	MailPresets   []HubMailPreset   `json:"mailPresets,omitempty"`
+}
+
+const (
+	HubStatusStateStarting = "starting"
+	HubStatusStateReady    = "ready"
+	HubStatusStateFailed   = "failed"
+	HubStatusSelectorText  = "text"
+	HubStatusSelectorBoth  = "both"
+	HubStatusSelectorLogo  = "logo"
+)
+
+type HubLoginStep struct {
+	Login        string     `json:"login"`
+	Step         string     `json:"step"`
+	Kind         string     `json:"kind"`
+	Instructions string     `json:"instructions"`
+	Display      string     `json:"display"`
+	Code         string     `json:"code"`
+	Fields       []HubField `json:"fields"`
+}
+
+const (
+	HubLoginStepKindDisplay = "display"
+	HubLoginStepKindInput   = "input"
+	HubLoginStepKindCookies = "cookies"
+	HubLoginStepKindDone    = "done"
+)
+
+type HubLoginStart struct {
+	Flow string `json:"flow"`
+}
+
+type HubLoginAnswer struct {
+	Values map[string]string `json:"values"`
+}
+
+type HubReaction struct {
+	Key    string      `json:"key"`
+	Count  int64       `json:"count"`
+	Mine   bool        `json:"mine"`
+	People []HubMember `json:"people"`
+}
+
+type HubAttachment struct {
+	Uri      string `json:"uri"`
+	Name     string `json:"name"`
+	Mime     string `json:"mime"`
+	Size     int64  `json:"size"`
+	Width    int64  `json:"width"`
+	Height   int64  `json:"height"`
+	Voice    bool   `json:"voice"`
+	Duration int64  `json:"duration"`
+}
+
+type HubMessage struct {
+	ID          string         `json:"id"`
+	Chat        string         `json:"chat"`
+	Sender      string         `json:"sender"`
+	SenderName  string         `json:"senderName"`
+	Mine        bool           `json:"mine"`
+	Text        string         `json:"text"`
+	At          int64          `json:"at"`
+	Kind        string         `json:"kind"`
+	Attachment  *HubAttachment `json:"attachment,omitempty"`
+	ReplyTo     *string        `json:"replyTo,omitempty"`
+	ReplyText   *string        `json:"replyText,omitempty"`
+	ReplySender *string        `json:"replySender,omitempty"`
+	Reactions   []HubReaction  `json:"reactions"`
+	Edited      bool           `json:"edited"`
+	Readers     []HubMember    `json:"readers"`
+}
+
+const (
+	HubMessageKindText    = "text"
+	HubMessageKindImage   = "image"
+	HubMessageKindVideo   = "video"
+	HubMessageKindAudio   = "audio"
+	HubMessageKindFile    = "file"
+	HubMessageKindSticker = "sticker"
+	HubMessageKindNotice  = "notice"
+)
+
+type HubPage struct {
+	Messages []HubMessage `json:"messages"`
+	Before   *string      `json:"before,omitempty"`
+}
+
+type HubChat struct {
+	ID       string   `json:"id"`
+	Platform string   `json:"platform"`
+	Name     string   `json:"name"`
+	Avatar   string   `json:"avatar"`
+	Group    bool     `json:"group"`
+	Space    bool     `json:"space"`
+	Parents  []string `json:"parents"`
+	Preview  string   `json:"preview"`
+	At       int64    `json:"at"`
+	Unread   int64    `json:"unread"`
+	Accounts []string `json:"accounts,omitempty"`
+}
+
+type HubChanges struct {
+	Revision int64     `json:"revision"`
+	Chats    []HubChat `json:"chats"`
+}
+
+type HubSend struct {
+	ID         string         `json:"id"`
+	Text       string         `json:"text"`
+	ReplyTo    *string        `json:"replyTo,omitempty"`
+	Attachment *HubAttachment `json:"attachment,omitempty"`
+	Mentions   *HubMentions   `json:"mentions,omitempty"`
+	Sticker    bool           `json:"sticker,omitempty"`
+}
+
+type HubReact struct {
+	Key string `json:"key"`
+}
+
+type HubPerson struct {
+	ID       string `json:"id"`
+	Platform string `json:"platform"`
+	Account  string `json:"account"`
+	Name     string `json:"name"`
+	Avatar   string `json:"avatar"`
+	Chat     string `json:"chat"`
+}
+
+type HubChatCreate struct {
+	Platform string   `json:"platform"`
+	Account  string   `json:"account"`
+	People   []string `json:"people"`
+	Name     string   `json:"name"`
+}
+
+type HubLinkMember struct {
+	Platform string `json:"platform"`
+	Chat     string `json:"chat"`
+	Name     string `json:"name"`
+}
+
+type HubLink struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Members []HubLinkMember `json:"members"`
+}
+
+type HubLinkEdit struct {
+	Name    string          `json:"name"`
+	Members []HubLinkMember `json:"members"`
+}
+
+type HubDelivery struct {
+	Chat string `json:"chat"`
+	Name string `json:"name"`
+	Ok   bool   `json:"ok"`
+}
+
+type HubBroadcastMessage struct {
+	ID         string        `json:"id"`
+	Text       string        `json:"text"`
+	At         int64         `json:"at"`
+	Deliveries []HubDelivery `json:"deliveries"`
+}
+
+type HubBroadcast struct {
+	ID         string                `json:"id"`
+	Name       string                `json:"name"`
+	Recipients []HubLinkMember       `json:"recipients"`
+	Messages   []HubBroadcastMessage `json:"messages"`
+}
+
+type HubBroadcastEdit struct {
+	Name       string          `json:"name"`
+	Recipients []HubLinkMember `json:"recipients"`
+}
+
+type HubMailSetup struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	ImapHost string `json:"imapHost"`
+	ImapPort int64  `json:"imapPort"`
+	SmtpHost string `json:"smtpHost"`
+	SmtpPort int64  `json:"smtpPort"`
+}
+
+type HubMailFolder struct {
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Unread int64  `json:"unread"`
+	Label  string `json:"label"`
+}
+
+type HubMailEnvelope struct {
+	ID          int64  `json:"id"`
+	Account     string `json:"account"`
+	Folder      string `json:"folder"`
+	From        string `json:"from"`
+	Address     string `json:"address"`
+	Subject     string `json:"subject"`
+	Preview     string `json:"preview"`
+	At          int64  `json:"at"`
+	Seen        bool   `json:"seen"`
+	Flagged     bool   `json:"flagged"`
+	Attachments int64  `json:"attachments"`
+	Answered    bool   `json:"answered"`
+	Draft       bool   `json:"draft"`
+	Importance  string `json:"importance"`
+}
+
+const (
+	HubMailEnvelopeImportanceHigh   = "high"
+	HubMailEnvelopeImportanceNormal = "normal"
+	HubMailEnvelopeImportanceLow    = "low"
+)
+
+type HubMailFile struct {
+	Part      string `json:"part"`
+	Name      string `json:"name"`
+	Mime      string `json:"mime"`
+	Size      int64  `json:"size"`
+	ContentId string `json:"contentId"`
+	Inline    bool   `json:"inline"`
+}
+
+type HubMailMessage struct {
+	Envelope   HubMailEnvelope  `json:"envelope"`
+	To         []HubMailAddress `json:"to"`
+	Cc         []HubMailAddress `json:"cc"`
+	Bcc        []HubMailAddress `json:"bcc"`
+	Text       string           `json:"text"`
+	Html       string           `json:"html"`
+	Files      []HubMailFile    `json:"files"`
+	MessageId  string           `json:"messageId"`
+	References []string         `json:"references"`
+}
+
+type HubMailSend struct {
+	Account    string          `json:"account"`
+	To         []string        `json:"to"`
+	Cc         []string        `json:"cc"`
+	Bcc        []string        `json:"bcc"`
+	Subject    string          `json:"subject"`
+	Text       string          `json:"text"`
+	Html       *string         `json:"html,omitempty"`
+	Draft      *bool           `json:"draft,omitempty"`
+	Importance *string         `json:"importance,omitempty"`
+	InReplyTo  *string         `json:"inReplyTo,omitempty"`
+	References []string        `json:"references,omitempty"`
+	Files      []HubMailAttach `json:"files,omitempty"`
+	Replaces   *HubMailDraft   `json:"replaces,omitempty"`
+}
+
+type HubMailChange struct {
+	Ids     []int64 `json:"ids"`
+	Seen    *bool   `json:"seen,omitempty"`
+	Flagged *bool   `json:"flagged,omitempty"`
+	Folder  *string `json:"folder,omitempty"`
+	Erase   *bool   `json:"erase,omitempty"`
+}
+
+type HubMention struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type HubMentions struct {
+	Users    []HubMention `json:"users"`
+	Everyone bool         `json:"everyone"`
+}
+
+type HubMember struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
+}
+
+type HubRename struct {
+	Name string `json:"name"`
+}
+
+type HubSettings struct {
+	Incognito bool    `json:"incognito"`
+	Selector  *string `json:"selector,omitempty"`
+}
+
+const (
+	HubSettingsSelectorText = "text"
+	HubSettingsSelectorBoth = "both"
+	HubSettingsSelectorLogo = "logo"
+)
+
+type HubMailProvider struct {
+	ID    string     `json:"id"`
+	Name  string     `json:"name"`
+	Setup []HubField `json:"setup"`
+}
+
+type HubMailClient struct {
+	ClientId     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret"`
+}
+
+type HubMailSignIn struct {
+	ID  string `json:"id"`
+	URL string `json:"url"`
+}
+
+type HubMailCallback struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+	Error string `json:"error"`
+}
+
+type HubMailUpload struct {
+	Name string `json:"name"`
+	Mime string `json:"mime"`
+	Data string `json:"data"`
+}
+
+type HubMailAddress struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+type HubMailSignature struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Text string `json:"text"`
+	Html string `json:"html"`
+}
+
+type HubMailSignatures struct {
+	Signatures       []HubMailSignature `json:"signatures"`
+	DefaultSignature *string            `json:"defaultSignature,omitempty"`
+}
+
+type HubMailPreset struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ImapHost string `json:"imapHost"`
+	ImapPort int64  `json:"imapPort"`
+	SmtpHost string `json:"smtpHost"`
+	SmtpPort int64  `json:"smtpPort"`
+	Hint     string `json:"hint"`
+	Hidden   bool   `json:"hidden"`
+}
+
+type HubMailAttach struct {
+	ID        string  `json:"id"`
+	ContentId *string `json:"contentId,omitempty"`
+}
+
+type HubMailDraft struct {
+	ID     int64  `json:"id"`
+	Folder string `json:"folder"`
+}
+
+type HubMailSent struct {
+	Draft *HubMailDraft `json:"draft,omitempty"`
 }

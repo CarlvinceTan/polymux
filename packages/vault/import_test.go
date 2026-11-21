@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"database/sql"
 	"errors"
 	"os"
 	"strings"
@@ -19,7 +18,7 @@ func TestImportAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed := func(*sql.Tx) error { return errors.New("injected completion failure") }
+	failed := func() error { return errors.New("injected completion failure") }
 	if _, err := s.Import(t.Context(), items, failed); err == nil {
 		t.Fatal("failed acknowledgement was committed")
 	}
@@ -129,7 +128,7 @@ func TestSaveAcknowledgementRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := testItem()
-	if _, err := s.SaveWith(t.Context(), item, func(*sql.Tx) error { return errors.New("failed receipt") }); err == nil {
+	if _, err := s.SaveWith(t.Context(), item, func() error { return errors.New("failed receipt") }); err == nil {
 		t.Fatal("failure hidden")
 	}
 	if _, err := s.Get(t.Context(), item.ID); !errors.Is(err, ErrMissing) {

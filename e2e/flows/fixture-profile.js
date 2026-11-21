@@ -1,4 +1,4 @@
-// @fixture --verify-fixture --verify-profile --verify-profile-media
+// @fixture --verify-fixture --verify-profile --verify-profile-media --verify-call-ready
 // The chat profile stays beside the chat; its previews expand without hiding the avatar editor.
 const app = await cua.getApp(APP);
 async function callInChat(name = "Chief") {

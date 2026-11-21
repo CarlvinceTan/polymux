@@ -28,9 +28,6 @@ struct PolymuxApp: App {
         WindowGroup {
             AppRoot()
                 .tint(Color("AccentColor"))
-                #if os(macOS)
-                .frame(minWidth: PaneWidth.window, minHeight: 720)
-                #endif
         }
         #if os(macOS)
         .defaultSize(width: 1060, height: 760)
@@ -54,6 +51,8 @@ final class AppSession {
     let settings: SettingsStore
     let avatars: AvatarStore
     let vault: VaultLibrary
+    let plugins: PluginStore
+    let hub: HubStore
     let providers: ProviderStore
     let network: NetworkStore
     /// Recent chats stay in memory, so reopening one draws its messages in the first frame.
@@ -103,6 +102,10 @@ final class AppSession {
         await settings.restore()
         avatars = AvatarStore(sidebar: sidebar)
         vault = VaultLibrary(client: client.vaultClient())
+        plugins = PluginStore(client: client, cache: sidebar.cacheActor, surfaces: PluginSurface.available)
+        await plugins.restore()
+        hub = HubStore(client: client, cache: sidebar.cacheActor)
+        await hub.restore()
         providers = ProviderStore(client: client, cache: sidebar.cacheActor)
         network = NetworkStore(client: client, cache: sidebar.cacheActor)
         async let providerCache: () = providers.restore()
@@ -144,6 +147,7 @@ final class AppSession {
     /// Warms what's likely to be opened after cached content appears.
     func prepare() async {
         EmojiCatalogue.warm()
+        Task { await prepareHub() }
         await sidebar.refresh()
         await layout.refresh()
         let placed = sidebar.chats.map(layout.applying)
@@ -166,6 +170,21 @@ final class AppSession {
             for image in images.suffix(8) {
                 group.addTask { await DecodedImages.warm(image, client: self.client) }
             }
+        }
+    }
+
+    /// Hub's recent chats, faces and images, so opening it shows them at once. Nothing here marks a chat read.
+    private func prepareHub() async {
+        await plugins.refresh()
+        guard plugins.plugin(named: HubStore.plugin)?.state == PluginState.ready else { return }
+        let recent = await hub.preload()
+        for chat in hub.chats.filter({ !$0.avatar.isEmpty }).sorted(by: { $0.at > $1.at }).prefix(40) {
+            await DecodedImages.warm(HubAvatar.address(chat.avatar, client: client), name: HubAvatar.file(chat.name), client: client)
+        }
+        for chat in recent.prefix(3) {
+            let messages = (hub.messages[chat.id] ?? []).suffix(30).map(\.bubble)
+            let images = messages.flatMap(\.attachments).filter { $0.kind == AttachmentKind.image }
+            for image in images.suffix(8) { await DecodedImages.warm(image, client: client) }
         }
     }
 
@@ -202,9 +221,10 @@ struct AppRoot: View {
     @State private var settingsTab = SettingsTab.verifying ?? .general
     @State private var pairingTask: Task<Void, Error>?
     @State private var pairingIssue: String?
-    #if os(macOS)
-    /// Set when a new install starts its own server.
-    @AppStorage("onboarding.pending") private var onboarding = Onboarding.verifying
+    /// Set when a new install starts its own server, or on a fresh iPhone install.
+    @AppStorage("onboarding.pending") private var onboarding = Onboarding.verifying || SetupDefaults.pending
+    #if os(iOS)
+    @State private var onboardingLink: URL?
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
@@ -284,20 +304,17 @@ struct AppRoot: View {
             // Closing Settings answers the join question with the default: keep separate.
             joinChoice = nil
         }
-        .panel(isPresented: $showSettings, page: true) {
+        .panel(isPresented: settingsShown, page: true, animatesResize: false) {
             ConnectionView(pool: pool, settings: activeSession?.settings,
-                            client: activeSession?.client,
-                            join: join,
-                            joinIssue: pairingIssue,
-                            joined: $joinChoice,
-                            category: $settingsTab,
+                           client: activeSession?.client,
+                           join: join,
+                           joinIssue: pairingIssue,
+                           joined: $joinChoice,
+                           category: $settingsTab,
                            onClose: { showSettings = false })
                 .id(activeSession?.client.id)
         }
         #if os(macOS)
-        .panel(isPresented: $onboarding) {
-            Onboarding { onboarding = false }
-        }
         .task(id: localSession?.client.id) { Permissions.shared.client = localSession?.client }
         .onChange(of: appearance, initial: true) { Permissions.shared.appearance = $1 }
         #endif
@@ -307,13 +324,15 @@ struct AppRoot: View {
         #endif
         .environment((activeSession ?? pool.latest)?.avatars)
         .environment(activeSession?.vault)
+        .environment(activeSession?.plugins)
+        .environment(activeSession?.hub)
         .environment(activeSession?.sidebar)
         .environment(activeSession?.providers)
         .environment(activeSession?.network)
         .appAppearance(appearance)
         #if os(macOS)
         .background {
-            WindowFill().frame(width: 0, height: 0).accessibilityHidden(true)
+            WindowFill(setup: onboarding).frame(width: 0, height: 0).accessibilityHidden(true)
             InputFocus().frame(width: 0, height: 0).accessibilityHidden(true)
         }
         #endif
@@ -324,11 +343,19 @@ struct AppRoot: View {
             showSettings = true
             return
         }
+        guard Invite(link: url) != nil else { return }
+        #if os(iOS)
+        if onboarding {
+            onboardingLink = url
+            return
+        }
+        #endif
         Task {
             do { try await join(url) }
             catch is CancellationError {}
             catch {
                 pairingIssue = error.isOffline ? "Can’t reach this server. Check its connection and create a new link." : error.reason(or: "Couldn’t pair with this server.")
+                settingsTab = .network
                 showSettings = true
             }
         }
@@ -362,6 +389,11 @@ struct AppRoot: View {
     private var activeSession: AppSession? { pool.sessions[address] }
     private var error: String? { pool.issues[address] }
 
+    /// Settings closes while setup is on screen, then returns when setup finishes.
+    private var settingsShown: Binding<Bool> {
+        Binding(get: { showSettings && !onboarding }, set: { showSettings = $0 })
+    }
+
     /// This Mac's own server, which reports its permissions to the Grant window.
     private var localSession: AppSession? {
         #if DEBUG
@@ -382,7 +414,31 @@ struct AppRoot: View {
         return activeSession?.settings.value?.appearance ?? "system"
     }
 
-    private var content: some View {
+    @ViewBuilder private var content: some View {
+        #if os(macOS)
+        if onboarding {
+            Onboarding(pool: pool, join: join) {
+                UserDefaults.standard.set(true, forKey: "onboarding.completed")
+                onboarding = false
+            }
+        } else {
+            mainContent
+        }
+        #else
+        // iPhone has no window to fill, so setup covers the whole screen.
+        mainContent
+            .fullScreenCover(isPresented: $onboarding) {
+                Onboarding(pool: pool, join: join, incoming: $onboardingLink) {
+                    UserDefaults.standard.set(true, forKey: "onboarding.completed")
+                    onboarding = false
+                }
+                .environment(activeSession?.plugins)
+                .interactiveDismissDisabled()
+            }
+        #endif
+    }
+
+    private var mainContent: some View {
         Group {
             if let session = activeSession {
                 ShellView(session: session, pool: pool, showSettings: $showSettings)
@@ -396,8 +452,8 @@ struct AppRoot: View {
                     Button("Connection settings") { showSettings = true }
                 }
             } else {
-                Text("Connecting…").foregroundStyle(.muted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Opening the saved session is local and takes milliseconds, so nothing is drawn meanwhile.
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -414,12 +470,14 @@ struct ConnectionView: View {
     let onClose: () -> Void
     @Environment(NetworkStore.self) private var networkStore: NetworkStore?
     @Environment(ProviderStore.self) private var providerStore: ProviderStore?
+    @Environment(PluginStore.self) private var plugins: PluginStore?
     private var network: NetworkInfo? { networkStore?.value }
     private var providers: [Provider] { providerStore?.providers ?? [] }
     @State private var networkPage = SettingsTab.verifiesPage ? UserDefaults.standard.string(forKey: "serverAddress") : nil
     @State private var joining = false
     @State private var providerTarget: ProviderTarget?
-    @State private var editingVoice = false
+    @State private var pluginTarget: String?
+    @State private var arrangingPlugins = false
     @State private var editingMedia: MediaKind?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -454,10 +512,12 @@ struct ConnectionView: View {
                     providerStore?.accept($0)
                     Task { await settings?.refresh() }
                 }
+            } else if let pluginTarget {
+                PluginDetail(name: pluginTarget) { self.pluginTarget = nil }
+            } else if arrangingPlugins, let plugins {
+                PluginLayoutEditor(store: plugins) { arrangingPlugins = false }
             } else if let kind = editingMedia, let settings {
                 MediaOrderView(kind: kind, store: settings, providers: providers, onBack: { editingMedia = nil })
-            } else if editingVoice, let settings {
-                VoiceFallback(store: settings, providers: providers, onBack: { editingVoice = false })
             } else if let networkPage, let server = pool.servers.devices.first(where: { $0.address == networkPage }) {
                 NetworkPage(pool: pool, server: server) { self.networkPage = nil }
             } else {
@@ -500,6 +560,7 @@ struct ConnectionView: View {
         case .vault: VaultSettings()
         case .network:
             NetworkSettings(pool: pool, joinIssue: joinIssue, open: { networkPage = $0 }, join: { joining = true })
+        case .plugins: PluginSettings(open: { pluginTarget = $0 }, arrange: { arrangingPlugins = true })
         default: settingsForm
         }
     }
@@ -508,12 +569,16 @@ struct ConnectionView: View {
         Form {
             switch category {
             case .general: generalSections
+            case .voice:
+                if let settings {
+                    VoicePane(store: settings, providers: providers)
+                }
             case .models:
                 ProviderSettings(client: client, settings: settings) { providerTarget = ProviderTarget(provider: $0) }
                 if let settings { MediaSettings(store: settings) { editingMedia = $0 } }
-                if let settings { VoiceSettings(store: settings, providers: providers) { editingVoice = true } }
-            case .vault, .network: EmptyView()
+            case .vault, .plugins, .network: EmptyView()
             case .updates: UpdatesSettings(network: network, settings: settings)
+            case .shortcuts: ShortcutsSettings()
             }
         }
         .settingsForm()
@@ -521,42 +586,60 @@ struct ConnectionView: View {
     }
 
     @ViewBuilder private var generalSections: some View {
-        Section("Appearance") {
+        Section {
             SettingsPicker("Theme", selection: Binding(get: { settings?.value?.appearance ?? "system" },
                                                       set: { settings?.edit(SettingsPatch(appearance: $0)) }),
                            options: [("Light", "light"), ("Dark", "dark"), ("System", "system")])
             .disabled(settings?.value == nil)
-            if !pool.tabs.isEmpty {
+            if plugins?.tabs.isEmpty == false || !pool.tabs.isEmpty {
                 Toggle("Switcher badges", isOn: Binding(get: { settings?.value?.switcherBadges ?? true },
                                                         set: { settings?.edit(SettingsPatch(switcherBadges: $0)) }))
                     .accessibilityLabel("Switcher badges")
                     .disabled(settings?.value == nil)
             }
+        } header: {
+            SectionHeader("Appearance", symbol: "circle.lefthalf.filled")
         }
         .panelRow()
         if let issue = settings?.error {
             Section { Text(issue).font(.footnote).foregroundStyle(.muted) }
                 .panelRow()
         }
-        Section("Notifications") {
+        Section {
             Toggle("Allow notifications", isOn: Binding(get: { Notifications.shared.enabled },
-                set: { enabled in Task { await Notifications.shared.allow(enabled) } }))
+                set: { enabled in
+                    Task {
+                        await Notifications.shared.allow(enabled)
+                        #if os(macOS)
+                        await Permissions.shared.refresh()
+                        #endif
+                    }
+                }))
                 .accessibilityLabel("Allow notifications")
             if let issue = Notifications.shared.issue {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
             }
+        } header: {
+            SectionHeader("Notifications", symbol: "bell.fill", tint: .red)
         }
         .panelRow()
         #if os(macOS)
-        Section("Permissions") {
-            LabeledContent("System permissions") {
+        permissionSection
+        Section {
+            Button {
+                UserDefaults.standard.set(true, forKey: "onboarding.pending")
+            } label: {
                 HStack {
-                    Text(Permissions.shared.summary).foregroundStyle(.muted)
-                    Button("Grant…") { GrantWindow.shared.show() }
-                        .accessibilityLabel("Grant permissions")
+                    Text("Run Setup Again")
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.muted)
                 }
+                .contentShape(Rectangle())
             }
-            .task { await Permissions.shared.refresh() }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Run setup again")
+        } header: {
+            SectionHeader("Onboarding", symbol: "sparkles")
         }
         .panelRow()
         #endif
@@ -570,10 +653,44 @@ struct ConnectionView: View {
                 Text(issue).font(.footnote).foregroundStyle(.muted)
             }
         } header: {
-            Text("Connections").foregroundStyle(Color.primary)
+            SectionHeader("Device Access", symbol: "laptopcomputer.and.iphone", tint: .blue)
         }
         .panelRow()
     }
+
+    #if os(macOS)
+    private var permissionSection: some View {
+        let permissions = Permissions.shared
+        return Section {
+            ForEach(permissions.all) { permission in
+                HStack(spacing: 8) {
+                    Text(permission.title)
+                    Spacer()
+                    if permissions.granted.contains(permission) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill").accessibilityHidden(true)
+                            Text("Granted").accessibilityLabel("\(permission.title): Granted")
+                        }
+                    } else {
+                        Button("Grant") { permissions.grant(permission) }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Grant \(permission.title)")
+                    }
+                }
+            }
+        } header: {
+            SectionHeader("Permissions", symbol: "hand.raised.fill") {
+                Button("Manage") { GrantWindow.shared.show() }
+                    .accessibilityLabel("Manage permissions")
+            }
+        }
+        .panelRow()
+        .task(id: permissions.client?.id) { await permissions.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await permissions.refresh() }
+        }
+    }
+    #endif
 }
 
 /// The provider being added (nil) or edited.
@@ -582,16 +699,26 @@ private struct ProviderTarget {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, network, models, vault, updates
+    case general, models, voice, network, vault, plugins, updates, shortcuts
+
+    static var allCases: [SettingsTab] {
+        #if os(macOS)
+        [.general, .models, .voice, .network, .vault, .plugins, .updates, .shortcuts]
+        #else
+        [.general, .models, .voice, .network, .vault, .plugins, .updates]
+        #endif
+    }
 
     var id: String { rawValue }
 
     var title: String { rawValue.capitalized }
 
-    /// UI checks open Settings at launch: --verify-network, or its page with --verify-network-page.
+    /// UI checks open Settings at launch: --verify-network, or its page with --verify-network-page;
+    /// --verify-voice opens the Voice tab.
     static var verifying: SettingsTab? {
         #if DEBUG
-        CommandLine.arguments.contains("--verify-network") || verifiesPage ? .network : nil
+        if CommandLine.arguments.contains("--verify-voice") { return .voice }
+        return CommandLine.arguments.contains("--verify-network") || verifiesPage ? .network : nil
         #else
         nil
         #endif
@@ -605,24 +732,26 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         #endif
     }
 
+    /// Plugins draws its own plug, because SF Symbols has none at this angle.
     var icon: Image {
         switch self {
         case .general: Image(systemName: "gearshape.fill")
+        case .voice: Image(systemName: "waveform")
         case .network: Image(systemName: "network")
         case .models: Image(systemName: "cpu.fill")
         case .vault: Image(systemName: "lock.fill")
+        case .plugins: Image("plug")
         case .updates: Image(systemName: "arrow.down.circle.fill")
+        case .shortcuts: Image(systemName: "keyboard")
         }
     }
 
-    /// The icon's tile colour, like System Settings.
     var tint: Color {
         switch self {
-        case .general: .gray
-        case .network: .blue
-        case .models: .purple
-        case .vault: .green
-        case .updates: .red
+        case .general, .models, .updates, .shortcuts: .gray
+        case .voice: .pink
+        case .network, .vault: .blue
+        case .plugins: .orange
         }
     }
 }
@@ -656,24 +785,29 @@ private struct SettingsCommands: Commands {
     @FocusedValue(\.searchPanel) private var search
     @FocusedValue(\.findInChat) private var find
     @FocusedValue(\.toggleSidebar) private var sidebar
+    @State private var shortcuts = ShortcutStore.shared
 
     var body: some Commands {
         CommandGroup(replacing: .sidebar) {
             Button("Toggle Sidebar") { sidebar?() }
-                .keyboardShortcut("s", modifiers: [.control, .command])
+                .keyboardShortcut(shortcuts.key(.toggleSidebar).keyEquivalent,
+                                  modifiers: shortcuts.key(.toggleSidebar).eventModifiers)
                 .disabled(sidebar == nil)
         }
         CommandGroup(after: .textEditing) {
             Button("Search…") { search?.wrappedValue = true }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut(shortcuts.key(.search).keyEquivalent,
+                                  modifiers: shortcuts.key(.search).eventModifiers)
                 .disabled(search == nil)
             Button("Find in Chat") { find?() }
-                .keyboardShortcut("f", modifiers: .command)
+                .keyboardShortcut(shortcuts.key(.find).keyEquivalent,
+                                  modifiers: shortcuts.key(.find).eventModifiers)
                 .disabled(find == nil)
         }
         CommandGroup(replacing: .appSettings) {
             Button("Settings…") { settings?.wrappedValue = true }
-                .keyboardShortcut(",", modifiers: .command)
+                .keyboardShortcut(shortcuts.key(.settings).keyEquivalent,
+                                  modifiers: shortcuts.key(.settings).eventModifiers)
                 .disabled(settings == nil)
         }
     }

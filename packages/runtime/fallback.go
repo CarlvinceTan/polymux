@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/MichaelKinsy/PiG/ai"
 )
@@ -413,19 +414,24 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 			}
 			attempts++
 			if model.ID != original.ID {
-				if err := notifySwitch(markerID(transcript), switchNotice(original.ID, model.ID, f.limited(own))); err != nil {
+				if err := notifySwitch(markerID(transcript), f.switchNotice(original, model, f.limited(own))); err != nil {
 					f.release(id, epoch)
 					endFallback(target, model, err.Error(), ai.StopReasonAborted)
 					return
 				}
 			}
 			failure := &providerFailure{now: f.now()}
-			client := http.Client{}
-			if params.Fetch != nil {
-				client = *params.Fetch
+			// Google's adapters refuse a custom client, so their status comes from the error text instead.
+			if ownsClient(model) {
+				params.Fetch = nil
+			} else {
+				client := http.Client{}
+				if params.Fetch != nil {
+					client = *params.Fetch
+				}
+				client.Transport = statusRetry{base: client.Transport, failure: failure, fallback: len(chain) > 1}
+				params.Fetch = &client
 			}
-			client.Transport = statusRetry{base: client.Transport, failure: failure, fallback: len(chain) > 1}
-			params.Fetch = &client
 			attemptCtx, cancel := context.WithCancel(ctx)
 			timeout := f.timeout
 			if timeout <= 0 {
@@ -463,6 +469,9 @@ func (f *fallbackModels) stream(ctx context.Context, target *ai.AssistantMessage
 			if failed {
 				reason := failureReason(result, err)
 				failure.note(reason)
+				if failure.status == 0 && ownsClient(model) {
+					failure.status = leadingStatus(reason)
+				}
 				slog.Warn("model attempt failed", "model", id, "status", failure.status, "error", reason)
 			}
 			// A rejected request says nothing about the provider's health, so it stays available.
@@ -534,11 +543,45 @@ func failureReason(result *ai.AssistantMessage, err error) string {
 	return reason[:min(len(reason), 300)]
 }
 
-func switchNotice(from, to string, limited bool) string {
+func (f *fallbackModels) switchNotice(original, replacement *ai.Model, limited bool) string {
+	from, to := modelLabel(original), modelLabel(replacement)
+	if strings.EqualFold(from, to) && original.ProviderID() != replacement.ProviderID() {
+		from += " on " + f.providerLabel(original.ProviderID())
+		to = f.providerLabel(replacement.ProviderID())
+	}
 	if limited {
 		return from + " hit its usage limit, so " + to + " replied instead."
 	}
 	return from + " is unavailable, so " + to + " replied instead."
+}
+
+func modelLabel(model *ai.Model) string {
+	if name := strings.TrimSpace(model.DisplayName); name != "" {
+		return name
+	}
+	if strings.ContainsRune(model.ID, '/') {
+		return model.ID
+	}
+	id := []rune(model.ID)
+	for i := 1; i+1 < len(id); i++ {
+		if id[i] == '-' && unicode.IsDigit(id[i-1]) && unicode.IsDigit(id[i+1]) {
+			id[i] = '.'
+		}
+	}
+	words := strings.Fields(strings.ReplaceAll(string(id), "-", " "))
+	for i, word := range words {
+		label := []rune(word)
+		label[0] = unicode.ToUpper(label[0])
+		words[i] = string(label)
+	}
+	return strings.Join(words, " ")
+}
+
+func (f *fallbackModels) providerLabel(id string) string {
+	if provider := f.Models.GetProvider(id); provider != nil && provider.Name != "" {
+		return provider.Name
+	}
+	return strings.TrimPrefix(id, "settings:")
 }
 
 func endFallback(target *ai.AssistantMessageEventStream, model *ai.Model, message string, reason ai.StopReason) {
@@ -546,6 +589,25 @@ func endFallback(target *ai.AssistantMessageEventStream, model *ai.Model, messag
 		Content: []ai.AssistantContentBlock{}, StopReason: reason, ErrorMessage: message, Timestamp: time.Now().UnixMilli()}
 	_ = target.Push(ai.ErrorEvent{Reason: reason, Error: result})
 	target.End(result)
+}
+
+// ownsClient reports a provider adapter that makes its own HTTP requests and rejects a custom client.
+func ownsClient(model *ai.Model) bool {
+	api := model.ProviderMeta.API
+	return api == ai.APIGoogleGenerativeAI || api == ai.APIGoogleVertex
+}
+
+// leadingStatus reads the HTTP status an adapter puts at the start of its error, such as "429 [{...}]".
+func leadingStatus(reason string) int {
+	reason = strings.TrimSpace(reason)
+	if len(reason) < 3 {
+		return 0
+	}
+	status, err := strconv.Atoi(reason[:3])
+	if err != nil || status < 400 || status > 599 || (len(reason) > 3 && reason[3] >= '0' && reason[3] <= '9') {
+		return 0
+	}
+	return status
 }
 
 type providerFailure struct {

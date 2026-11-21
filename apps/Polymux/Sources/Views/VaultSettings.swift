@@ -26,10 +26,16 @@ private struct VaultBrowser: View {
             } else if let draft = store.draft { editor(draft) }
             else {
                 toolbar
-                Text(summary).font(.subheadline).foregroundStyle(.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel("Vault item count").accessibilityValue(summary)
                 entries
+                    // The count floats at the pane's foot, clear of the scrolling rows.
+                    .overlay(alignment: .bottomTrailing) {
+                        if !results.isEmpty {
+                            Text(summary).font(.subheadline).foregroundStyle(.muted)
+                                .padding(.horizontal, PanelStyle.headingInset)
+                                .padding(.bottom, PanelStyle.rowInset)
+                                .accessibilityLabel("Vault item count").accessibilityValue(summary)
+                        }
+                    }
             }
             if let imported = store.imported {
                 Text("\(imported.added) imported · \(imported.skipped) already present")
@@ -40,7 +46,10 @@ private struct VaultBrowser: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(PanelStyle.contentInset)
+        // The search bar tops the pane's first row, like the settings search beside it.
+        .padding(.top, 4)
+        .padding(.horizontal, PanelStyle.contentInset)
+        .padding(.bottom, PanelStyle.contentInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .privacySensitive()
         .task {
@@ -69,7 +78,7 @@ private struct VaultBrowser: View {
                 .glassEffect(.regular, in: Capsule())
                 PanelMenu("Add vault item", symbol: "plus") {
                     ForEach(VaultCategory.allCases.filter { $0 != .all }) { kind in
-                        Button(kind.entry, systemImage: kind.symbol) {
+                        Button(kind.entry, systemImage: VaultCategory.symbol(forKind: kind.rawValue)) {
                             query = ""; category = .all
                             store.add(kind.rawValue)
                         }
@@ -105,7 +114,7 @@ private struct VaultBrowser: View {
                         ForEach(results, id: \.id) { item in
                             Button { store.open(item.id) } label: {
                                 HStack(spacing: PanelStyle.contentInset) {
-                                    Image(systemName: VaultCategory(rawValue: item.kind)?.symbol ?? "lock")
+                                    Image(systemName: VaultCategory.symbol(forKind: item.kind))
                                         .font(.title3).foregroundStyle(.muted)
                                         .frame(width: PanelStyle.actionHeight, height: PanelStyle.actionHeight)
                                     VStack(alignment: .leading, spacing: PanelStyle.cardInset) {
@@ -158,7 +167,7 @@ private struct VaultBrowser: View {
     private var results: [VaultSummary] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return store.items.filter {
-            (category == .all || $0.kind == category.rawValue) &&
+            (category == .all || category.contains($0)) &&
             (query.isEmpty || $0.title.localizedStandardContains(query) || $0.origin.localizedStandardContains(query))
         }
     }
@@ -172,45 +181,49 @@ private struct VaultBrowser: View {
 }
 
 enum VaultCategory: String, CaseIterable, Identifiable {
-    case all, login, card, api, totp, note, recovery, wifi, passkey
+    case all, login, card, totp, passkey, wifi, note
     var id: String { rawValue }
     var title: String {
         switch self {
         case .all: "All"
         case .login: "Logins"
-        case .card: "Cards"
-        case .api: "Secrets"
         case .totp: "TOTP"
-        case .note: "Notes"
-        case .recovery: "Recovery codes"
-        case .wifi: "Wi-Fi"
         case .passkey: "Passkeys"
+        case .card: "Cards"
+        case .note: "Notes"
+        case .wifi: "Wi-Fi"
         }
     }
     var entry: String {
         switch self {
         case .all: "All"
         case .login: "Login"
-        case .card: "Card"
-        case .api: "Secret"
         case .totp: "TOTP"
-        case .note: "Note"
-        case .recovery: "Recovery codes"
-        case .wifi: "Wi-Fi"
         case .passkey: "Passkey"
+        case .card: "Card"
+        case .note: "Note"
+        case .wifi: "Wi-Fi"
         }
     }
-    var symbol: String {
+    func contains(_ item: VaultSummary) -> Bool {
         switch self {
-        case .all: "lock"
-        case .login: "key"
-        case .card: "creditcard"
-        case .api: "curlybraces"
-        case .totp: "timer"
-        case .note: "note.text"
-        case .recovery: "list.bullet.rectangle"
-        case .wifi: "wifi"
-        case .passkey: "person.badge.key"
+        case .all: true
+        case .note: ["note", "api", "recovery"].contains(item.kind)
+        case .totp: item.kind == rawValue || item.fields.contains("totp")
+        default: item.kind == rawValue
+        }
+    }
+    static func symbol(forKind kind: String) -> String {
+        switch kind {
+        case "login": "key"
+        case "api": "curlybraces"
+        case "card": "creditcard"
+        case "totp": "timer"
+        case "note": "note.text"
+        case "recovery": "list.bullet.rectangle"
+        case "wifi": "wifi"
+        case "passkey": "person.badge.key"
+        default: "lock"
         }
     }
 }

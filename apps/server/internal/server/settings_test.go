@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -105,6 +106,21 @@ func TestBrowserCannotChangeSettingsOrUseSpeech(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDefaultModelAcceptsLocalServerNames(t *testing.T) {
+	t.Parallel()
+	s := settingsAPI(t)
+	const id = "Qwen3.8-Flash-Next UD-Q4_K_XL (Dynamic V3.1, BF16 engram, tuned MTP)"
+	if err := s.settings.SetProviders([]contract.Provider{{ID: "aorus", Type: "custom", Name: "Aorus", BaseURL: "http://127.0.0.1:11000/v1", Enabled: true,
+		Models: []contract.ProviderModel{{ID: id, Tags: []string{"text"}, Enabled: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"defaultProvider":"aorus","defaultModel":` + strconv.Quote(id) + `}`
+	if v := settingsRequest(t, s, "PATCH", "/settings", body, 200); v.DefaultProvider != "aorus" || v.DefaultModel != id {
+		t.Fatalf("default model = %q", v.DefaultModel)
+	}
+	settingsRequest(t, s, "PATCH", "/settings", `{"defaultProvider":"aorus","defaultModel":"bad\u0000model"}`, 400)
 }
 
 func TestNewBotsStartOnTheSettingsDefault(t *testing.T) {

@@ -150,8 +150,10 @@ test('zoom controls do not paint over or stretch native captures', () => {
     assert.equal(style.paddingTop, '0px');
     assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)');
   }
-  const expanded = page.window.getComputedStyle(document.querySelector('.capture.expanded'));
-  assert.equal(expanded.width, 'var(--native-width)');
+  const capture = document.querySelector('.capture.expanded');
+  const expanded = page.window.getComputedStyle(capture);
+  // jsdom 31 resolves the custom property, so compare against its value rather than the raw var().
+  assert.equal(expanded.width, expanded.getPropertyValue('--native-width').trim());
   assert.notEqual(expanded.minWidth, '100%', 'Zoom must not upscale a native capture to fill the dialog.');
 });
 

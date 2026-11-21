@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -172,7 +171,7 @@ func (s *Server) saveVaultCard(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	saved, err := s.vault.EditWith(r.Context(), vaultItem(item), item.Removed, func(tx *sql.Tx) error { return s.Store.FinishVault(r.Context(), tx, card.ID) })
+	saved, err := s.vault.EditWith(r.Context(), vaultItem(item), item.Removed, s.finishVault(r.Context(), card.ID))
 	if !vaultError(w, err) {
 		write(w, 200, wireItem(saved))
 	}
@@ -196,8 +195,24 @@ func (s *Server) importVaultCard(w http.ResponseWriter, r *http.Request) {
 		importFailure(w, err)
 		return
 	}
-	result, err := s.vault.Import(r.Context(), items, func(tx *sql.Tx) error { return s.Store.FinishVault(r.Context(), tx, card.ID) })
+	result, err := s.vault.Import(r.Context(), items, s.finishVault(r.Context(), card.ID))
 	if !vaultError(w, err) {
 		write(w, 200, result)
+	}
+}
+
+// finishVault acknowledges a private card once the vault has saved its result. FinishVault
+// ignores a card that is already done, so a repeat is harmless.
+func (s *Server) finishVault(ctx context.Context, id string) func() error {
+	return func() error {
+		tx, err := s.Store.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := s.Store.FinishVault(ctx, tx, id); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 }

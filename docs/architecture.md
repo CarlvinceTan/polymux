@@ -25,34 +25,45 @@ Code: `internal/network`, `internal/device/network.go`, `internal/server/peers.g
 
 ## Bot prompts
 
-A bot's prompt is built in layers, in this order. A layer only adds to the ones before it.
+A bot's prompt is built in layers. The layer decides where a rule belongs, not who wrote it. A layer only adds to the ones before it.
 
-| Layer | Holds | Where | Editable |
-| --- | --- | --- | --- |
-| Core | Identity and how to treat data, for any host of the library | `CorePrompt` in `packages/runtime` | No |
-| System | Polymux policy and required features, such as HTML cards. Tools add their own rules, so a rule only appears when its tool does | `buildPrompt` in `internal/agentruntime` | No |
-| Everything else | Skills, and notes for the current turn | `skillPrompt`, and the turn input | By adding skills |
-| Instructions | How the bot talks and any custom behaviour | The Instructions field, or `DefaultPrompt` when blank | Yes, by the user or a bot |
+| Layer | Scope | Holds | Where | Editable |
+| --- | --- | --- | --- | --- |
+| Core | Package | Identity, handling of quoted and external data, the tool contract, and verification. No Polymux product features. Reusable by any host. | `CorePrompt` in `packages/runtime` | No |
+| System | App | Polymux policy and features: autonomy, tasks, HTML cards, credentials, workspace, routing, tool rules, and the default voice and decision behaviour. | `buildPrompt` in `internal/agentruntime` | No |
+| Global | Network | Additions or overrides for every bot on a network. Different networks may differ. | Network/settings prompt (target; not yet separate) | By the network owner |
+| Instructions | Bot | The bot's role and its own behaviour. Not the default voice and not app or network policy. | Instructions field | Yes, by the user or a bot |
+| Skills | Bot, on demand | Extra procedures, listed by name and loaded only when a task needs them. | `skillPrompt` | By adding skills |
+| Turn context | One turn | Group, peer, task, review and voice notes for the current turn. | Turn assembly | Situational |
 
-- Instructions go last so they have the final say.
-- Skills load on demand: the prompt lists each by name and description, and a bot reads one from its file, or with `read_skill` when it has no file access, only when a task needs it. The card reference is the exception for bots without file access: cards are frequent, and a cached prompt costs less than a load per card.
-- In a direct chat `send_to_user` is the bot's voice, and each message is one bubble. A reminder goes with every model request. Text written after the last message stays private, so a bot ends with `NO_RESPONSE`. A bot that skips the tool, or does more work and ends in plain text, still reaches the user: its text is delivered with one bubble per paragraph, including what it wrote beside its tool calls, such as a quick answer given mid-run.
-- A message sent while a bot is working steers its run: it joins the bot's next model request with a note to answer and carry on, and the run keeps its place. A message from another bot stays its own queued turn, because its answer returns as a receipt.
+Order: Core → System → Global → Instructions → Skills → turn context. The voice is applied last, after instructions, so a bot's role cannot accidentally replace how Polymux speaks.
+
+- **Core stays host-neutral.** Do not put Polymux names, cards, tasks, credentials or product policy there. It is the part another host can reuse.
+- **System is the app-wide Polymux layer.** A rule that applies to every Polymux bot belongs here, not in a bot's instructions.
+- **Global is for network-wide differences.** Use it when every bot on a network should follow the same addition; do not use it for per-bot roles.
+- **Instructions are per bot.** Do not put the default voice, app policy or network policy there.
+- **Skills are extra procedures**, not a policy layer. They load on demand: the prompt lists each by name and description, and a bot reads one from its file, or with `read_skill` when it has no file access, only when a task needs it. The card reference is the exception for bots without file access: cards are frequent, and a cached prompt costs less than a load per card.
+- **Turn context is one turn only.** Group, peer, task, review and voice notes must not become a second system prompt.
+
+The current tree has Core and System in place. `DefaultVoice` and `DefaultBehavior` still live in `DefaultPrompt`, which is the Instructions default, and there is no separate Global prompt yet. Moving those into System/Global is the next prompt refactor; until then, a custom Instructions value replaces the default voice and decision rule.
+- In a direct chat `send_to_user` is the bot's voice, and each message is one bubble. A reply is usually one bubble: a blank line starts a second for a genuinely separate idea, a caveat stays with its result, and the runtime bounces walls of text (over 45 words), caps a reply at two bubbles until real work intervenes, and flags parroted openers. Group chats keep their own output budget instead.
+- Every message to the user, in direct and group chats, question cards, voice consultations and plain-text replies, goes through [`chatstyle`](../apps/server/internal/chatstyle/chatstyle.go); [Chat style](chat-style.md) covers what the style is modelled on. `Tidy` straightens curly quotes and `Tell` finds what marks text as an assistant's: em dashes, stock phrases such as "Happy to help", assistant words such as "delve", and "not just X, but Y". `send_to_user` and `ask_user` bounce a message with a tell once per turn; plain-text replies are only tidied, since the turn is over. How a bot should sound lives in `DefaultVoice`, which covers only what the user reads: task prompts, messages to other bots and tool input stay complete. A reminder goes with every model request. Text written after the last message stays private, so a bot ends with `NO_RESPONSE`. A bot that skips the tool, or does more work and ends in plain text, still reaches the user: its text is delivered with one bubble per paragraph, including what it wrote beside its tool calls, such as a quick answer given mid-run.
+- A message sent while a bot is working steers its run: it joins the bot's next model request with a note to answer and carry on, and the run keeps its place. A message from another bot stays its own queued turn, because its answer returns as a receipt. Queued turns keep their arrival order, and steered messages are answered at the current run's next step rather than waiting behind the queue.
 - In a group chat, a message addressed to nobody first goes to a router: one short model call that picks the member whose role fits it, so the others skip a turn. When the router can't tell, every member takes a turn and speaks only if its role fits best. Either way one bot answers each request, not every bot that could.
-- A bot takes one turn at a time in each conversation. Its task threads, delegated tasks and voice consultations have sessions of their own, so they run alongside its main chat, and there's no limit on how many run at once. When a model provider says it's busy or rate-limited, calls to it wait as long as it asks, back off and run fewer at a time, then speed up again as calls succeed, so work slows down rather than fails. When every model a bot can use is out of allowance or down, its turn waits and carries on as soon as one is back: at the provider's reset time, on a retry at most two minutes apart, or straight away when the user sends something, in case they've just topped up. Models are tracked one at a time, since a limit can apply to one model and not another on the same account. Switching costs the next model an uncached request, so a bot only switches when it must: it waits out a blip of up to 5 seconds on its own model, and a turn that switched stays on that model, going back to the bot's own model on its next turn.
+- A bot takes one turn at a time in each conversation. Its task threads, delegated tasks and voice consultations have sessions of their own, so they run alongside its main chat. A delegated task starts as soon as it's queued, even while the turn that started it is still waiting for it, and each bot runs up to four at once. When a model provider says it's busy or rate-limited, calls to it wait as long as it asks, back off and run fewer at a time, then speed up again as calls succeed, so work slows down rather than fails. When every model a bot can use is out of allowance or down, its turn waits and carries on as soon as one is back: at the provider's reset time, on a retry at most two minutes apart, or straight away when the user sends something, in case they've just topped up. Models are tracked one at a time, since a limit can apply to one model and not another on the same account. Switching costs the next model an uncached request, so a bot only switches when it must: it waits out a blip of up to 5 seconds on its own model, and a turn that switched stays on that model, going back to the bot's own model on its next turn.
 - A long command or codemode script steps aside when a message is waiting: it keeps running in the background and its result arrives as a new message. A script that has run a few seconds also stops at its next tool call, handing back what finished, so a change of mind lands before more tools run.
-- A blank field follows `DefaultPrompt`, and clients are shown that text. Saving it unchanged keeps the field blank, so a bot only stops following the default once its instructions are edited.
+- Until the prompt refactor above, a blank Instructions field follows `DefaultPrompt`, and clients are shown that text. Saving it unchanged keeps the field blank, so a bot only stops following the default once its instructions are edited.
 
 ## External agents
 
-- A bot can run its turns on an external Agent Client Protocol (ACP) process instead of a model, such as Claude Code or opencode. PiG stays the default runtime; an attached agent is a worker for that bot, reachable through delegation like any other bot.
-- The server launches the process over stdio for the bot's conversation and relays its text and tool activity into the chat. The external agent brings its own model, tools and sandbox; Polymux passes no tools into it and adds no filesystem or terminal capability to the protocol.
-- Only a client can attach a bot or change its command; a bot's own edit tool can't. An agent that exits is started again on the next turn, and closing asks it to exit before its process group is stopped.
-- The agent's session ID is saved with an `acp:` prefix, so the next turn loads that external conversation when the agent supports `session/load`; otherwise it starts fresh. A saved path is only passed to the runtime that owns its prefix: a durable conversation ID never reaches the external agent, and its ID never reaches `durable.db`. Detaching therefore starts a fresh model conversation.
-- Delegation is unchanged: the `task` tool's `agent_id` chooses the bot, and a child task on a bot attached to an external agent runs on that process. Children still cannot delegate.
-- An attached bot runs no model, provider, reasoning or fallback of its own; detaching returns it to a model, keeping the one it had before if it was edited rather than created with an agent. Permissions: Polymux answers `session/request_permission` with the least-privilege allow option (allow once before allow always) and declines reject-only prompts. The external agent's own sandbox is the boundary for what it may do.
+- A delegated task can run on an external Agent Client Protocol (ACP) process, such as Claude Code, Codex or opencode, instead of a Polymux bot. Nothing is set up in the app: the `task` tool's `external` names a registry agent (`agent`) or any ACP command (`command`, `args`).
+- Polymux is for operational automation, so bots keep that work and hand specialised work, above all coding, to an installed external agent unless the user or the bot's instructions say otherwise. The `task` tool tells the bot which agents are installed.
+- `internal/acp/registry.go` reads the [ACP registry](https://agentclientprotocol.com/get-started/registry) once a day into `external-agents/` in the data folder. An agent is installed when one of its commands is on `PATH`. It launches from that command, then through `npx` or `uvx`, then from a download whose checksum the registry publishes.
+- The server launches the process over stdio in the bot's worktree, or a folder of its own, and relays its text and tool activity. The external agent brings its own model, tools and sandbox; Polymux passes no tools into it and adds no filesystem or terminal capability to the protocol. Polymux answers `session/request_permission` with the least-privilege allow option (allow once before allow always) and declines reject-only prompts.
+- The task's run carries `external`, so the app shows "Handled by" and the agent's name under the task, with its logo. `scripts/acp-icons.py` puts each logo in `Assets.xcassets/agent-<id>`: the brand's coloured logo from Lobe Icons where it has one that renders in an asset catalog, otherwise the registry's monochrome icon as a template. An agent without either shows a generic symbol.
+- A model conversation never loads an external agent's session: a saved `acp:` path is dropped rather than handed to the durable runtime.
 
-Code: `internal/acp`, `internal/agentruntime/runtime.go`, and the ACP fields in `contracts/polymux.schema.json`.
+Code: `internal/acp`, `internal/server/child.go`, `internal/agentruntime/runtime.go`, and `ExternalAgent` in `contracts/polymux.schema.json`.
 
 ## Bot quality
 
@@ -72,10 +83,16 @@ How a bot's handling of work is judged. A change to how bots run, delegate or sc
 
 - Every GUI (macOS, iOS, web, or any future one) is a client only.
 - No GUI embeds the server. The Mac app carries a copy and has launchd run it, so it outlives the app. A new install starts it; an update never does. Joining a network retires it while it's empty; a server with data stays until someone merges it or turns it off.
-- That copy is `Contents/Helpers/Polymux Server.app`, so System Settings lists it by name and icon, and bots inherit what it's granted. A new install opens with a welcome whose permissions step, like Settings › General, opens the Grant window (`apps/Polymux/Sources/Permissions/`). It docks beside System Settings, where its icon is dragged into the Full Disk Access or Screen Recording list, and reads the server's own answer from `GET /privacy`.
+- That copy is `Contents/Helpers/Polymux Server.app`, so System Settings lists it by name and icon, and bots inherit what it's granted. A new install opens with setup: choose whether this Mac runs the server or connects to another, grant the server's permissions, and install the official plugins it can use. The permissions step, like Settings › General, opens the Grant window (`apps/Polymux/Sources/Permissions/`). It docks inside System Settings, where Polymux Server's icon is dragged into the Full Disk Access or Screen Recording list, and reads the server's own answer from `GET /privacy`. Settings › General can run setup again and open the same list.
 - Clients talk to the server through one documented API (`contracts`). No client gets a private or privileged path.
 - Any client can be removed or replaced without affecting the server or other clients.
 - Clients are interchangeable: the same server works with any number of them at once.
+
+## Policy and extensions
+
+- Permission rules, interactive approval, usage limits and cost reporting are plugin responsibilities, not server policy. The server records what happened and carries a gate's question and answer; it has no rules or defaults of its own.
+- A plugin may use a generic server capability — asking a person before a call, reading token use — while the rules, wording and presentation stay in the plugin. See [Plugins](plugins.md#policy-lives-in-plugins).
+- A new capability may require a plugin API addition. A new rule must not require a server change.
 
 ## Cost and accounts
 

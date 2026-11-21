@@ -1,0 +1,38 @@
+{
+  "name": "computer-use",
+  "title": "Computer Use",
+  "description": "Let a chat's bots see and use apps and the browser on this server's computer, through cua-driver.",
+  "symbol": "cursorarrow.rays",
+  "version": "0.1.0",
+  "kind": "scoped",
+  "engines": { "plugins": 7 },
+  "service": "bin/polymux-computer-use",
+  "skills": ["skills/computer-use.md"],
+  "provides": ["tools", "gate"],
+  "tools": [
+    {
+      "name": "describe",
+      "description": "List the desktop and browser tools Computer Use offers, or pass a tool name to inspect its schema. Computer Use restricts the accepted arguments.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool": { "type": "string", "description": "A tool's name, such as get_window_state. Omit to list every tool." }
+        }
+      }
+    },
+    {
+      "name": "call",
+      "description": "Run one cua-driver tool on the server's desktop or an exact browser tab. Use describe to discover supported calls. Screenshots come back as images. Actions require approval.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool": { "type": "string", "description": "The cua-driver tool to run." },
+          "args": { "type": "object", "description": "Its arguments, as describe lists them." }
+        },
+        "required": ["tool"]
+      }
+    }
+  ]
+}

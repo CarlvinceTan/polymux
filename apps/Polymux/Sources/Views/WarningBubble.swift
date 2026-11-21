@@ -1,25 +1,19 @@
 import SwiftUI
 
 struct WarningBubble: View {
+    private static let countWidth: CGFloat = 24
+    static let countInset = countWidth + 9
+
     let text: String
     var symbol = "exclamationmark.triangle"
-    let visible: Bool
+    var more = 0
     let dismiss: () -> Void
 
-    var body: some View {
-        bubble
-            .hidden()
-            .accessibilityHidden(true)
-            .overlay {
-                ZStack {
-                    if visible { bubble.transition(.opacity) }
-                }
-                .motion(Motion.fade, value: visible)
-            }
-            .frame(maxWidth: BubbleStyle.width)
+    private var summary: String {
+        more > 0 ? "\(text), \(more) more" : text
     }
 
-    private var bubble: some View {
+    var body: some View {
         HStack(spacing: 10) {
             Label(text, systemImage: symbol)
             Button("Dismiss", systemImage: "xmark", action: dismiss)
@@ -27,6 +21,7 @@ struct WarningBubble: View {
                 .buttonStyle(.plain)
                 .tapArea(14)
                 .accessibilityLabel("Dismiss warning")
+                .accessibilityValue(summary)
                 .help("Dismiss")
         }
         .font(.footnote)
@@ -34,6 +29,19 @@ struct WarningBubble: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: BubbleStyle.radius))
+        .overlay(alignment: .trailing) {
+            if more > 0 {
+                Text("+\(more)")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.muted)
+                    .fixedSize()
+                    .frame(width: Self.countWidth, alignment: .leading)
+                    .offset(x: Self.countInset)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: BubbleStyle.width)
     }
 }
 

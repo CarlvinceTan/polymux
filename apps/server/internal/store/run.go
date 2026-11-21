@@ -34,6 +34,8 @@ type Work struct {
 	FromAgentID string           `json:"fromAgentID,omitempty"`
 	// DeviceID is the paired device the user sent the message from.
 	DeviceID string `json:"deviceID,omitempty"`
+	// External is the agent a child task runs on instead of its bot's model.
+	External *contract.ExternalAgent `json:"external,omitempty"`
 }
 
 type SendInput struct {
@@ -86,11 +88,7 @@ func NewRun(job, thread, agent, trigger string) contract.Run {
 }
 
 func (s *Store) queueTx(ctx context.Context, tx *sql.Tx, work Work, target string) error {
-	data, err := json.Marshal(work)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,thread_id,request,input) VALUES(?,?,'{}',?)`, work.Message.ID, work.Message.ThreadID, string(data)); err != nil {
+	if err := s.insertJobTx(ctx, tx, work.Message.ID, work.Message.ThreadID, "{}", work, "queued", deliveryQueue); err != nil {
 		return err
 	}
 	s.jobs.wake(work.Message.ThreadID)
@@ -100,10 +98,11 @@ func (s *Store) queueTx(ctx context.Context, tx *sql.Tx, work Work, target strin
 	}
 	run.ParentRunID = work.ParentRunID
 	run.RoutineID = work.RoutineID
+	run.External = work.External
 	if work.TaskID != "" {
 		run.TaskID = &work.TaskID
 	}
-	_, err = s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeRunStart, AgentID: &target, RunID: &run.ID, Run: &run}, nil)
+	_, err := s.appendTx(ctx, tx, contract.Event{ConversationID: run.ConversationID, Type: contract.EventTypeRunStart, AgentID: &target, RunID: &run.ID, Run: &run}, nil)
 	return err
 }
 

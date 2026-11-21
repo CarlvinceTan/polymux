@@ -6,7 +6,16 @@ final class ProviderFixture: @unchecked Sendable {
     private let lock = NSLock()
     private var phase: Int64 = 0
     private var providers: [Provider] = []
-    private var settings = Settings(appearance: VerifyFixture.appearance)
+    private var settings: Settings = {
+        var settings = Settings(appearance: VerifyFixture.appearance)
+        if CommandLine.arguments.contains("--verify-call-ready") {
+            settings.liveProvider = "gemini"
+            settings.liveModel = "gemini-3.8-live"
+            settings.liveVoice = "Aoede"
+            settings.speechKeys = ["gemini"]
+        }
+        return settings
+    }()
 
     func response(_ request: URLRequest) throws -> Data {
         try lock.withLock {
@@ -18,6 +27,9 @@ final class ProviderFixture: @unchecked Sendable {
                     if let value = patch.switcherBadges { settings.switcherBadges = value }
                     if let value = patch.defaultModel { settings.defaultModel = value }
                     if let value = patch.defaultProvider { settings.defaultProvider = value }
+                    if let value = patch.liveProvider { settings.liveProvider = value }
+                    if let value = patch.liveModel { settings.liveModel = value }
+                    if let value = patch.liveVoice { settings.liveVoice = value }
                     settings.revision += 1
                 }
                 return try JSONEncoder().encode(settings)

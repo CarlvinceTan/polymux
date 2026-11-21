@@ -10,7 +10,7 @@ struct GrantView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AppIcon()
+            ServerIcon()
                 .frame(width: 96, height: 96)
                 .onDrag { NSItemProvider(contentsOf: ServerHost.bundle) ?? NSItemProvider() }
                 .help(store.opened.map { "Drag this icon into the list in System Settings to grant \($0.title)." } ?? "")
@@ -45,7 +45,7 @@ struct GrantView: View {
         HStack(spacing: 13) {
             Image(systemName: permission.symbol)
                 .font(.system(size: 15, weight: .light))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(permission.tint)
                 .frame(width: 34, height: 34)
                 .background(.quinary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
@@ -67,9 +67,9 @@ struct GrantView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             if store.granted.contains(permission) {
                 Label("Granted", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.green)
             } else {
-                Button("Grant…") { store.grant(permission) }
+                Button("Grant") { store.grant(permission) }
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
                     .accessibilityLabel("Grant \(permission.title)")
@@ -88,6 +88,30 @@ struct GrantView: View {
 struct AppIcon: View {
     var body: some View {
         Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+    }
+}
+
+/// Polymux Server as System Settings lists it, which is what permissions are granted to.
+struct ServerIcon: View {
+    var body: some View {
+        Image(nsImage: NSWorkspace.shared.icon(forFile: ServerHost.bundle.path))
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+    }
+}
+#endif
+
+#if os(iOS)
+import SwiftUI
+
+/// The app's logo, standing in for the icon on iPhone.
+struct AppIcon: View {
+    var body: some View {
+        Image("Logo")
             .resizable()
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)

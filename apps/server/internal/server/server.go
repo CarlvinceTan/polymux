@@ -23,14 +23,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/CarlvinceTan/polymux/apps/server/internal/acp"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/chatstyle"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/device"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/network"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/providers"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/proxy"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/search"
@@ -40,6 +44,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/CarlvinceTan/polymux/packages/memory"
+	engine "github.com/CarlvinceTan/polymux/packages/search"
 	vaultstore "github.com/CarlvinceTan/polymux/packages/vault"
 )
 
@@ -65,6 +70,8 @@ type Config struct {
 	Log         *slog.Logger
 	Push        PushSender
 	Devices     *device.Broker
+	// HistoryEmbedder must be local; bot recall queries never go to the app's remote embedder.
+	HistoryEmbedder engine.Embedder
 	// Ticket returns this server's tunnel ticket, waiting at most the given time; nil disables it.
 	Ticket    func(time.Duration) string
 	PublicURL string
@@ -72,6 +79,12 @@ type Config struct {
 	BackgroundTimeout time.Duration
 	GroupCaps         *GroupCaps
 	VaultKeys         vaultstore.Keys
+	// Registry finds external agents for delegated tasks; nil reads the ACP registry, or stays offline in tests.
+	Registry *acp.Registry
+	// PluginIndex overrides the default plugin index address.
+	PluginIndex string
+	// Publish is what transport plugins may expose.
+	Publish plugins.Publish
 }
 type Server struct {
 	peerOnce   sync.Once
@@ -81,6 +94,7 @@ type Server struct {
 	moveKey    *ecdh.PrivateKey
 	drafts     sync.Map
 	Store      *store.Store
+	plugins    *plugins.Manager
 	memory     *memory.Store
 	settings   *settings.Store
 	secrets    *secrets.Store
@@ -113,6 +127,7 @@ type Server struct {
 	presence   map[string]int
 	resources  sync.Map
 	turns      sync.Map
+	approvals  sync.Map
 	shells     sync.Map
 	voices     map[string]*voiceWork
 	voiceSeen  map[string]bool
@@ -164,6 +179,13 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 	}
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "attachments"), 0700); err != nil {
 		return nil, err
+	}
+	if c.Registry == nil {
+		url := acp.RegistryURL
+		if testing.Testing() {
+			url = ""
+		}
+		c.Registry = acp.NewRegistry(filepath.Join(c.DataDir, "external-agents"), url)
 	}
 	// Refresh tokens from the removed OneDrive connector must not survive startup.
 	if err := os.RemoveAll(filepath.Join(c.DataDir, "connections", "onedrive")); err != nil {
@@ -258,7 +280,7 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 			c.Model = assistant.Agent.Model
 		}
 		if c.Model == "" {
-			c.Model = "openai/gpt-5.5"
+			c.Model = "openai/gpt-6.1-sol"
 		}
 	}
 	if err := s.Register(ctx, agents); err != nil {
@@ -281,12 +303,17 @@ func New(ctx context.Context, s *store.Store, c Config) (*Server, error) {
 	if c.VaultKeys == nil {
 		c.VaultKeys = hostKeys{Dir: filepath.Join(c.DataDir, "vault")}
 	}
-	v.vault, err = vaultstore.Open(ctx, s.DB, c.VaultKeys)
+	v.vault, err = vaultstore.Open(ctx, filepath.Join(c.DataDir, "vault"), c.VaultKeys)
 	if err != nil {
 		cancel()
 		return nil, errors.Join(err, v.memory.Close())
 	}
 	v.vaultJobs = map[string]*vaultJob{}
+	v.plugins, err = plugins.New(ctx, plugins.Config{Dir: filepath.Join(c.DataDir, "plugins"), Index: c.PluginIndex, Publish: c.Publish, Store: s, Log: c.Log})
+	if err != nil {
+		cancel()
+		return nil, errors.Join(err, v.memory.Close())
+	}
 	// Only a runtime that runs commands needs a secret environment: the proxy for web requests
 	// and the local agent socket for SSH keys.
 	if runtime, ok := c.Factory.(shellRuntime); ok {
@@ -376,6 +403,7 @@ func (s *Server) Close() error {
 		for _, group := range groups {
 			errs = append(errs, group.close())
 		}
+		s.plugins.Close()
 		s.vault.Close()
 		if s.proxy != nil {
 			errs = append(errs, s.proxy.Close())
@@ -409,14 +437,14 @@ func (s *Server) networkInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 // invite carries the direct address and, when available, a tunnel ticket for other networks.
-// A configured public address replaces both.
+// A transport plugin's address, like a configured public one, replaces both.
 func (s *Server) invite(r *http.Request, token string) map[string]string {
 	return s.inviteAt(r.Context(), r.Host, token)
 }
 
 func (s *Server) inviteAt(ctx context.Context, host, token string) map[string]string {
-	if s.config.PublicURL != "" {
-		return map[string]string{"url": s.config.PublicURL, "token": token}
+	if url, ok := pickInvite(s.settings.Snapshot().Transport, s.config.PublicURL, s.plugins.Transports(ctx)); ok {
+		return map[string]string{"url": url, "token": token}
 	}
 	value := map[string]string{"url": "http://" + host, "token": token}
 	if s.config.Ticket != nil {
@@ -425,6 +453,37 @@ func (s *Server) inviteAt(ctx context.Context, host, token string) map[string]st
 		}
 	}
 	return value
+}
+
+// pickInvite chooses where a new pairing link points. An explicit transport
+// wins; otherwise a public URL, then the first ready plugin, and finally the
+// caller's direct address with an Iroh ticket.
+func pickInvite(preference, publicURL string, transports []plugins.Transport) (string, bool) {
+	switch preference {
+	case "iroh":
+		return "", false
+	case "public":
+		if publicURL != "" {
+			return publicURL, true
+		}
+	default:
+		if preference != "" {
+			for _, transport := range transports {
+				if transport.Plugin == preference && transport.State == contract.PluginStateReady && transport.API != "" {
+					return transport.API, true
+				}
+			}
+		}
+	}
+	if publicURL != "" {
+		return publicURL, true
+	}
+	for _, transport := range transports {
+		if transport.State == contract.PluginStateReady && transport.API != "" {
+			return transport.API, true
+		}
+	}
+	return "", false
 }
 
 func (s *Server) network(w http.ResponseWriter, r *http.Request) {
@@ -569,6 +628,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /client", s.reportClient)
 	s.mux.HandleFunc("GET /client/requests", s.clientStream)
 	s.mux.HandleFunc("POST /client/requests/{id}", s.answerClient)
+	s.pluginRoutes()
 	s.mux.HandleFunc("GET /settings", s.getSettings)
 	s.mux.HandleFunc("PATCH /settings", s.updateSettings)
 	s.mux.HandleFunc("GET /speech/live", s.speechLive)
@@ -618,6 +678,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /threads/{id}/tool-runs", s.toolRuns)
 	s.mux.HandleFunc("POST /threads/{id}/messages", s.send)
 	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/answer", s.answerChoice)
+	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/approval", s.answerApproval)
 	s.mux.HandleFunc("POST /threads/{id}/messages/{messageID}/credential", s.answerCredential)
 	s.mux.HandleFunc("PUT /threads/{id}/messages/{messageID}/reaction", s.react)
 	s.mux.HandleFunc("POST /threads/{id}/voice", s.voice)
@@ -693,15 +754,8 @@ func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentReque
 		avatar := defaultAvatar()
 		request.Avatar = &avatar
 	}
-	acpCfg, err := cleanACP(request.ACP)
-	if err != nil {
-		return contract.Agent{}, err
-	}
 	provider, model, reasoning := s.defaultModel()
-	if acpCfg != nil {
-		// The external agent brings its own model; no provider is involved.
-		provider, model = "", ""
-	} else if request.Model != nil {
+	if request.Model != nil {
 		// An explicit model runs on the fallback endpoint, as before providers existed.
 		provider, model = "", strings.TrimSpace(*request.Model)
 		if model == "" || len(model) > 256 {
@@ -718,7 +772,7 @@ func (s *Server) addAgent(ctx context.Context, request contract.CreateAgentReque
 	}
 	d := agentruntime.Definition{
 		Agent: contract.Agent{ID: ID(), Name: request.Name, Role: request.Role, Model: model, Avatar: request.Avatar,
-			Provider: provider, Reasoning: reasoning, ACP: acpCfg, CreatedBy: creator.ID},
+			Provider: provider, Reasoning: reasoning, CreatedBy: creator.ID},
 		Prompt: request.Prompt,
 		Tools:  []string{"read", "write", "edit", "bash", "find", "ls"},
 	}
@@ -755,32 +809,6 @@ func (s *Server) defaultModel() (provider, model, reasoning string) {
 	return "", "", settings.DefaultReasoning
 }
 
-// cleanACP validates an optional external-agent attachment. An empty command means
-// the agent is not attached (and, on update, detaches it back to a model).
-func cleanACP(a *contract.AgentACP) (*contract.AgentACP, error) {
-	if a == nil {
-		return nil, nil
-	}
-	command := strings.TrimSpace(a.Command)
-	if command == "" {
-		return nil, nil
-	}
-	if len(command) > 4096 || strings.ContainsAny(command, "\x00\r\n") {
-		return nil, invalidProfile("Enter a valid ACP command.")
-	}
-	if len(a.Args) > 64 {
-		return nil, invalidProfile("Too many ACP arguments.")
-	}
-	args := make([]string, len(a.Args))
-	for i, arg := range a.Args {
-		if len(arg) > 4096 || strings.ContainsAny(arg, "\x00") {
-			return nil, invalidProfile("Enter valid ACP arguments.")
-		}
-		args[i] = arg
-	}
-	return &contract.AgentACP{Command: command, Args: args}, nil
-}
-
 var errNoProvider = errors.New("no provider is set up")
 
 // autoModel is what a Not set bot runs on: the default model, else the first provider's preferred
@@ -810,7 +838,7 @@ func (s *Server) autoModel() (provider, model string, err error) {
 
 // withModel fills in this turn's model for a Not set bot.
 func (s *Server) withModel(d agentruntime.Definition) (agentruntime.Definition, error) {
-	if d.Agent.ACP != nil || d.Agent.Model != "" {
+	if d.External != nil || d.Agent.Model != "" {
 		return d, nil
 	}
 	var err error
@@ -876,8 +904,6 @@ type agentPatch struct {
 	Model          *string                 `json:"model,omitempty"`
 	Reasoning      *string                 `json:"reasoning,omitempty"`
 	Fallback       *contract.AgentFallback `json:"fallback,omitempty"`
-	// The bot-facing edit tool decodes its input into this patch; only the API may set a command.
-	ACP *contract.AgentACP `json:"-"`
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
@@ -887,7 +913,7 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	profile, err := s.editAgent(r.Context(), r.PathValue("id"), agentPatch{
 		Name: request.Name, Role: request.Role, Prompt: request.Prompt, Workspace: request.Workspace,
-		Provider: request.Provider, Model: request.Model, Reasoning: request.Reasoning, Fallback: request.Fallback, ACP: request.ACP,
+		Provider: request.Provider, Model: request.Model, Reasoning: request.Reasoning, Fallback: request.Fallback,
 	})
 	if !s.profileError(w, err) {
 		s.respond(w, profile, err)
@@ -920,14 +946,6 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		if strings.TrimSpace(*patch.Model) == "" || len(*patch.Model) > 256 || len(*patch.Provider) > 128 || strings.ContainsAny(*patch.Model, "\x00\r\n") || (*patch.Provider != "" && !s.enabledModel(*patch.Provider, *patch.Model)) || (*patch.Provider == "" && !fallback(s.config.Factory)) {
 			return empty, invalidProfile("Choose an available model for this bot.")
 		}
-	}
-	var acpCfg *contract.AgentACP
-	if patch.ACP != nil {
-		cleaned, err := cleanACP(patch.ACP)
-		if err != nil {
-			return empty, err
-		}
-		acpCfg = cleaned
 	}
 	s.actorsMu.RLock()
 	defer s.actorsMu.RUnlock()
@@ -976,9 +994,6 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		fallback.Models = append([]contract.FallbackModel{}, fallback.Models...)
 		d.Agent.Fallback = &fallback
 	}
-	if patch.ACP != nil {
-		d.Agent.ACP = acpCfg
-	}
 	d.Agent.Active = false
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -989,7 +1004,7 @@ func (s *Server) editAgent(ctx context.Context, id string, patch agentPatch) (co
 		return empty, err
 	}
 	changedPrompt := a.definition.Prompt != d.Prompt
-	if changedPrompt || a.definition.DelegationDisabled != d.DelegationDisabled || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace || a.definition.Agent.Model != d.Agent.Model || a.definition.Agent.Provider != d.Agent.Provider || a.definition.Agent.Reasoning != d.Agent.Reasoning || !reflect.DeepEqual(a.definition.Agent.Fallback, d.Agent.Fallback) || !reflect.DeepEqual(a.definition.Agent.ACP, d.Agent.ACP) {
+	if changedPrompt || a.definition.DelegationDisabled != d.DelegationDisabled || a.definition.Agent.Name != d.Agent.Name || a.definition.Agent.Role != d.Agent.Role || a.definition.Workspace != d.Workspace || a.definition.Agent.Model != d.Agent.Model || a.definition.Agent.Provider != d.Agent.Provider || a.definition.Agent.Reasoning != d.Agent.Reasoning || !reflect.DeepEqual(a.definition.Agent.Fallback, d.Agent.Fallback) {
 		a.revision++
 	}
 	a.definition = d
@@ -1271,6 +1286,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 			s.stopReviews(r.Context(), t.AgentID)
 		}
 	}
+	// A message instead of an answer settles any question still waiting in this chat.
+	if err := s.Store.DismissChoices(r.Context(), t.ID); err != nil {
+		s.config.Log.Error("dismiss questions", "error", err)
+	}
 	write(w, status, m)
 }
 
@@ -1372,6 +1391,14 @@ func ID() string {
 func (s *Server) work(ctx context.Context, a *actor) {
 	defer s.workers.Done()
 	defer close(a.done)
+	// Removing the bot waits on done, so it also waits for running child tasks.
+	var children sync.WaitGroup
+	children.Add(1)
+	go func() {
+		defer children.Done()
+		s.workChildren(ctx, a, &children)
+	}()
+	defer children.Wait()
 	for {
 		if !s.admission.wait(ctx, nil) {
 			return
@@ -1391,6 +1418,57 @@ func (s *Server) work(ctx context.Context, a *actor) {
 		s.admission.done()
 		if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
 			s.config.Log.Error("claim job", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-queued:
+		}
+	}
+}
+
+// maxChildren bounds how many child tasks one bot runs at once.
+const maxChildren = 4
+
+// workChildren runs the bot's child tasks as soon as they're queued, each alongside its
+// parent turn, so a parent that waits for a result never blocks the task it started.
+func (s *Server) workChildren(ctx context.Context, a *actor, running *sync.WaitGroup) {
+	slots := make(chan struct{}, maxChildren)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case slots <- struct{}{}:
+		}
+		if !s.admission.wait(ctx, nil) {
+			return
+		}
+		queued := s.Store.JobQueued(a.id)
+		id, err := s.Store.ChildJob(ctx, a.id)
+		if err == nil {
+			// Each child runs on its own actor, as group members do, so it never touches
+			// the bot's open session or the cancel its Stop button uses.
+			a.mu.Lock()
+			child := &actor{id: a.id, definition: a.definition, revision: a.revision}
+			a.mu.Unlock()
+			running.Add(1)
+			go func() {
+				defer running.Done()
+				defer func() { <-slots }()
+				defer s.admission.done()
+				s.reply(ctx, ctx, child, id)
+				finishCtx, end := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer end()
+				if err := s.Store.Finish(finishCtx, id); err != nil {
+					s.config.Log.Error("finish child job", "error", err)
+				}
+			}()
+			continue
+		}
+		s.admission.done()
+		<-slots
+		if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
+			s.config.Log.Error("claim child job", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -1557,6 +1635,7 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	runCtx = context.WithValue(runCtx, htmlKey{}, scope)
 	d, sess, isolated, err := s.turnSession(runCtx, writeCtx, a, work, run, state, err)
 	scope.cwd = outputCWD(d, s.config.DataDir)
+	err = errors.Join(err, s.bindGate(runCtx, state, scope.cwd))
 	var result agentruntime.Result
 	if err == nil {
 		err = context.Cause(runCtx)
@@ -1684,9 +1763,15 @@ func (s *Server) execute(ctx, turn context.Context, a *actor, work store.Work) c
 	if !silent && result.Text != "" && result.Text != st.content.String() {
 		setText(&m, &result.Text)
 	}
-	// Models that skip send_to_user still reach the chat as separate messages.
+	// Models that skip send_to_user still reach the chat as separate messages, tidied as send_to_user would.
 	if err == nil && voiced && !silent {
 		m.Parts = splitBeats(m.Parts)
+		for n, part := range m.Parts {
+			if part.Kind == contract.PartKindText && part.Text != nil {
+				text := chatstyle.Tidy(*part.Text)
+				m.Parts[n].Text = &text
+			}
+		}
 	}
 	if err == nil && !silent && !handed && work.Trigger != contract.RunTriggerReview && len(m.Parts) == 0 {
 		err = errEmptyReply
@@ -1854,12 +1939,25 @@ func (s *Server) afterTurn(ctx, writeCtx, turn context.Context, a *actor, done t
 	}
 }
 
+// launch resolves how to start the external agent a task runs on.
+func (s *Server) launch(ctx context.Context, external contract.ExternalAgent) (acp.Launch, error) {
+	if external.Agent != "" {
+		return s.config.Registry.Launch(ctx, external.Agent)
+	}
+	return acp.Launch{Command: external.Command, Args: external.Args}, nil
+}
+
 // turnSession reuses the actor's session when its definition and MCP scope are unchanged,
 // or opens one for this turn. It joins setup failures onto err and opens nothing after one.
 func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work store.Work, run contract.Run, state *turnState, err error) (agentruntime.Definition, agentruntime.Session, bool, error) {
 	a.mu.Lock()
 	d, revision := a.definition, a.revision
 	a.mu.Unlock()
+	if work.External != nil {
+		launch, launchErr := s.launch(runCtx, *work.External)
+		err = errors.Join(err, launchErr)
+		d.External = &launch
+	}
 	d, modelErr := s.withModel(d)
 	err = errors.Join(err, modelErr)
 	model := d.Agent.Provider + "/" + d.Agent.Model
@@ -1873,6 +1971,19 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 	configJSON, scopeErr := json.Marshal(d.MCP)
 	if scopeErr != nil {
 		err = errors.Join(err, scopeErr)
+	}
+	chat := a.threadID
+	if chat == "" {
+		chat = a.id
+	}
+	state.external = externalTools(d)
+	if work.Trigger != contract.RunTriggerCreated && work.Trigger != contract.RunTriggerReview {
+		d.CodeTools = append(slices.Clone(d.CodeTools), s.pluginTools(runCtx, chat, a.id, state)...)
+	}
+	for _, tool := range d.CodeTools {
+		schema, schemaErr := json.Marshal(tool.Schema())
+		err = errors.Join(err, schemaErr)
+		configJSON = append(append(configJSON, '\n'), schema...)
 	}
 	scopeHash := sha256.Sum256(configJSON)
 	a.mu.Lock()
@@ -1896,7 +2007,6 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 		d.Worktree = a.sessionDir
 	}
 	a.mu.Unlock()
-	state.external = externalTools(d)
 	for _, server := range d.MCP {
 		state.prefixes = append(state.prefixes, server.Name+"__")
 	}
@@ -1940,6 +2050,7 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 				d.ExtraTools = append(d.ExtraTools[:0:0], &chatTool{store: s.Store, question: true})
 			} else {
 				d.ExtraTools = append(slices.Clone(d.ExtraTools), s.turnTools(a, work, state)...)
+				d.Skills = append(slices.Clone(d.Skills), s.plugins.SkillFiles(runCtx, chat)...)
 			}
 			if err == nil && !d.Intro && d.Workspace != "" {
 				// Prepare the conversation's checkout before a session opens; a

@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -31,7 +33,7 @@ func testVault(t *testing.T, s *Server) {
 	t.Helper()
 	s.vault.Close()
 	var err error
-	s.vault, err = vault.Open(t.Context(), s.Store.DB, &vaultKeys{})
+	s.vault, err = vault.Open(t.Context(), t.TempDir(), &vaultKeys{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +81,22 @@ func TestVaultManagement(t *testing.T) {
 	}
 	call("GET", "/vault/items", "", "", "", 401)
 	call("GET", "/vault", "", token, "", 200)
+	// Sync is off until a folder is set; a new synced file needs a password, never echoed back.
+	folder := t.TempDir()
+	if got := call("GET", "/vault/sync", "", token, "", 200); !strings.Contains(string(got), `"state":"off"`) {
+		t.Fatal("sync is not off by default", string(got))
+	}
+	call("PUT", "/vault/sync", `{"location":"relative"}`, token, "", 400)
+	call("PUT", "/vault/sync", `{"location":"`+folder+`","password":"short"}`, token, "", 400)
+	call("PUT", "/vault/sync", `{"location":"`+folder+`/missing/deeper"}`, token, "", 409)
+	synced := call("PUT", "/vault/sync", `{"location":"`+folder+`","password":"sync-route-password"}`, token, "", 200)
+	if !strings.Contains(string(synced), `"state":"synced"`) || strings.Contains(string(synced), "sync-route-password") {
+		t.Fatal("sync was not set up, or echoed its password", string(synced))
+	}
+	if _, err := os.Stat(filepath.Join(folder, vault.FileName)); err != nil {
+		t.Fatal("no vault file in the sync folder", err)
+	}
+	call("PUT", "/vault/sync", `{"location":""}`, token, "", 200)
 	item := contract.VaultItem{ID: "private", Kind: "login", Title: "Example", URL: "https://example.com", Fields: map[string]string{"password": "vault-private-value", "username": "vault-private-user"}, Codes: []contract.VaultCode{{ID: "code", Value: "vault-private-recovery"}}}
 	body, _ := json.Marshal(item)
 	call("PUT", "/vault/items/private", string(body), "", "", 401)

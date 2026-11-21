@@ -12,10 +12,11 @@ const project = readFileSync(new URL('../../Polymux/Polymux.xcodeproj/project.pb
 const versions = [...project.matchAll(/MARKETING_VERSION = ([^;]+);/g)].map((match) => match[1]);
 const version = versions[0];
 
-test('development delivery is manual-only and restricted to the upstream dev branch', () => {
+test('development delivery runs only on dev pushes or manual dispatch, upstream, and only when enabled', () => {
   const {on: events, jobs} = workflow('dev');
-  assert.deepEqual(Object.keys(events), ['workflow_dispatch']);
-  assert.equal(jobs.verify.if, "github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux'");
+  assert.deepEqual(Object.keys(events), ['push', 'workflow_dispatch']);
+  assert.deepEqual(events.push.branches, ['dev']);
+  assert.equal(jobs.verify.if, "github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')");
   assert.equal(jobs.verify.uses, './.github/workflows/tests.yml');
   assert.equal(jobs.version.needs, 'verify');
   for (const name of ['ios', 'macos']) {

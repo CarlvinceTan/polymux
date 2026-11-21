@@ -1,4 +1,3 @@
-// @cua
 // Cua's modified-key route verifies multiline entry through the real keyboard handler.
 let app = await cua.getApp(APP);
 const name = "Keyboard" + Date.now();

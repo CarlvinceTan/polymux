@@ -9,14 +9,17 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	indexer "github.com/CarlvinceTan/polymux/apps/server/internal/search"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/packages/memory"
+	"github.com/CarlvinceTan/polymux/packages/search"
 	"github.com/MichaelKinsy/PiG/agent"
 )
 
@@ -217,6 +220,90 @@ func TestHistoryMatchesTail(t *testing.T) {
 				t.Fatal("history match exposed highlight markers")
 			}
 		})
+	}
+}
+
+type historyEmbed func(context.Context, search.Input) ([]float32, string, error)
+
+func (f historyEmbed) Embed(ctx context.Context, input search.Input) ([]float32, string, error) {
+	return f(ctx, input)
+}
+
+func TestHistorySemanticFallback(t *testing.T) {
+	api, _ := startTest(t, &testFactory{})
+	text := "The pool opens at seven."
+	m := contract.Message{ID: "pool", ThreadID: "assistant", Role: "user", Status: "done",
+		Parts: []contract.Part{{Kind: "text", Text: &text}}}
+	if _, err := api.Store.Append(t.Context(), contract.Event{ConversationID: m.ThreadID, Type: "message.start"}, &m); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.config.Index.Ingest(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(t.Context(), turnKey{}, &turnState{
+		run: contract.Run{AgentID: "assistant", ConversationID: m.ThreadID}, work: store.Work{Trigger: "message"},
+	})
+	call := func(tool *historyTool, args string) string {
+		t.Helper()
+		result, err := tool.Execute(ctx, "history", json.RawMessage(args), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Text()
+	}
+	keyword := call(api.historyTool(), `{"query":"pool"}`)
+	if !strings.Contains(keyword, text) {
+		t.Fatalf("keyword baseline lost the fixture: %s", keyword)
+	}
+	var remoteCalls atomic.Int32
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		remoteCalls.Add(1)
+		http.Error(w, "unexpected embedding query", http.StatusBadRequest)
+	}))
+	defer remote.Close()
+	backend, _, err := search.Start(t.Context(), search.Config{URL: remote.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteServer := &Server{Store: api.Store, config: Config{
+		Index: &indexer.Index{Embedder: backend.Embedder}, HistoryEmbedder: backend.LocalEmbedder(),
+	}}
+	remoteTool := remoteServer.historyTool()
+	if strings.Contains(remoteTool.Description(), "semantic=true") {
+		t.Fatal("remote-only backend advertises semantic history")
+	}
+	if got := call(remoteTool, `{"query":"pool","semantic":true}`); got != keyword || remoteCalls.Load() != 0 {
+		t.Fatalf("remote-only recall did not stay lexical: %s, remote calls=%d", got, remoteCalls.Load())
+	}
+
+	var localCalls atomic.Int32
+	started := make(chan time.Duration, 1)
+	local := &historyTool{store: api.Store, local: historyEmbed(func(ctx context.Context, in search.Input) ([]float32, string, error) {
+		localCalls.Add(1)
+		deadline, _ := ctx.Deadline()
+		started <- time.Until(deadline)
+		<-ctx.Done()
+		return nil, "", ctx.Err()
+	})}
+	if got := call(local, `{"query":"pool"}`); got != keyword {
+		t.Fatalf("default recall changed: %s", got)
+	}
+	if got := call(local, `{"semantic":true}`); !strings.Contains(got, `"next_before"`) {
+		t.Fatalf("browse lost its cursor: %s", got)
+	}
+	if n := localCalls.Load(); n != 0 {
+		t.Fatalf("default and browse should skip the embedder, got %d calls", n)
+	}
+	if got := call(local, `{"query":"pool","semantic":true}`); got != keyword {
+		t.Fatalf("timeout changed the ranked keyword results: got %s, want %s", got, keyword)
+	}
+	select {
+	case remaining := <-started:
+		if remaining <= 0 || remaining > 250*time.Millisecond || localCalls.Load() != 1 {
+			t.Fatalf("semantic query lacked its short deadline: %s", remaining)
+		}
+	default:
+		t.Fatal("semantic query never reached the embedder")
 	}
 }
 

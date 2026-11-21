@@ -45,6 +45,8 @@ func (t *skillTool) read(name string) (string, error) {
 		return skills.Cards()
 	case "polymux":
 		return skills.Polymux()
+	case "bot-creator":
+		return skills.BotCreator()
 	case "report":
 		return skills.Report()
 	}

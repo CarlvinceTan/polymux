@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/chatstyle"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/MichaelKinsy/PiG/agent"
@@ -143,7 +144,7 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	d.AfterInner = afterInner
 	d.ExtraTools = append(slices.Clone(d.ExtraTools), &htmlTool{store: v.server.Store, dir: filepath.Join(v.server.config.DataDir, "attachments")},
 		&peerTool{server: v.server, private: true}, &voicePublish{work: v, agentID: task.target},
-		&historyTool{store: v.server.Store}, &workTool{store: v.server.Store}, &routineTool{server: v.server})
+		v.server.historyTool(), &workTool{store: v.server.Store}, &routineTool{server: v.server})
 	for _, action := range []string{"save", "recall", "forget"} {
 		d.ExtraTools = append(d.ExtraTools, &memoryTool{store: v.server.Store, provider: v.server.memory, action: action})
 	}
@@ -213,6 +214,9 @@ func (v *voiceWork) run(ctx context.Context, task voiceTask) (result agentruntim
 	}
 	for _, connection := range d.MCP {
 		state.prefixes = append(state.prefixes, connection.Name+"__")
+	}
+	if err = v.server.bindGate(ctx, state, outputCWD(d, v.server.config.DataDir)); err != nil {
+		return empty, "", err
 	}
 	ctx = context.WithValue(ctx, turnKey{}, state)
 	ctx = context.WithValue(ctx, htmlKey{}, &htmlScope{messageID: state.run.ID, cwd: outputCWD(d, v.server.config.DataDir), publish: func(ctx context.Context, attachment contract.Attachment, path string) error {
@@ -418,7 +422,7 @@ func (t *voicePublish) Execute(ctx context.Context, id string, args json.RawMess
 	if id == "" || len(id) > 256 || strings.TrimSpace(input.Text) == "" || len(input.Text) > 16384 || !utf8.ValidString(input.Text) {
 		return agent.AgentToolResult{}, errors.New("invalid user-facing message")
 	}
-	if err := t.work.publish(ctx, t.agentID, id, input.Text, nil, ""); err != nil {
+	if err := t.work.publish(ctx, t.agentID, id, chatstyle.Tidy(input.Text), nil, ""); err != nil {
 		return agent.AgentToolResult{}, fmt.Errorf("publish user-facing message: %w", err)
 	}
 	return agent.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "Message sent to the user's typed conversation."}}}, nil

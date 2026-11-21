@@ -11,24 +11,21 @@ If instructed to make changes, preserve the existing structure where possible; i
 
 Apply these unless instructed otherwise.
 
-- Think before coding. If in doubt, ask.
-- If there are multiple ways to implement something, present them first before coding.
+- Decide and proceed. When there are several ways to implement something, pick the simplest and note the choice and the alternative in the report. Ask only when the change is irreversible, outward-facing, or a product decision.
 - Simplicity first: write the minimal code that solves the problem.
 - Only touch what's necessary. Prefer not to touch what already works.
 - Don't retain legacy code (old paths, compatibility shims, deprecated fallbacks) unless instructed; suggest keeping it if removal might be a concern.
 - Define what success looks like up front, and don't stop until it is achieved.
-- Other agents may edit this tree at the same time. Before editing an area, list recent changes (`find . -mmin -30 -type f -not -path './.build/*' -not -path '*/node_modules/*'`) and re-read changed files. Report another agent's in-progress breakage rather than reworking it.
+- Other agents may edit this tree at the same time; work in your own worktree to avoid collisions. When sharing the tree, before editing an area, list recent changes (`find . -mmin -30 -type f -not -path './.build/*' -not -path '*/node_modules/*'`) and re-read changed files. Report another agent's in-progress breakage rather than reworking it.
 - At the end of a task, check whether `AGENTS.md` or `AGENTS.local.md` went stale because of new changes, workflows or setup. If so, propose the exact edit in your report, and make it only once it is explicitly accepted.
 
 ## Reference Matching
 
-When asked to make something like another app or implementation, follow this order for the requested scope:
+When asked to make something like another app or implementation:
 
-1. Find the reference. Inspect and exercise the relevant feature in the app, or inspect its source code when available. Establish the appearance, behaviour, states, and timing to match.
-2. Match it exactly first. Reproduce the reference from its code or by direct visual and interaction comparison, before introducing project-specific customisations. When the source uses another language or framework, start with a faithful direct port, preserving its logic, structure, and behaviour even if the result is not yet idiomatic in this project.
-3. Verify parity. Compare the running implementation against the reference, including relevant interactions, states, and transitions. A successful build alone does not establish a match. If the reference cannot be accessed or a difference cannot be verified, state the gap rather than claiming parity.
-4. Adapt only after parity is verified. Apply the necessary project-specific differences, such as styling, and make intentional differences explicit. Repeat the comparisons to confirm that only those intended differences changed.
-5. Refactor into idiomatic project code as a separate pass after the matching baseline works. Repeat the same comparisons to ensure the refactor preserves appearance and behaviour, including any intentional project adaptations.
+- Inspect the reference (running app or source) and reproduce it faithfully first. When the source uses another language or framework, port its logic, structure and behaviour directly before making it idiomatic.
+- Verify parity by direct comparison of interactions, states and transitions; a successful build doesn't establish a match. If the reference can't be accessed, state the gap.
+- Only then apply project-specific differences, state them explicitly, and refactor in a separate pass, re-verifying each time.
 
 ## Verification
 
@@ -55,7 +52,7 @@ When asked to make something like another app or implementation, follow this ord
 
 Keep toolchains and dependencies on the latest stable release unless that breaks something; prefer upgrading in one scoped change over mixing it with feature work.
 
-- Keep one Go version. `go.work`, `apps/server/go.mod` and `plugins/go.mod` carry the same `go` directive, and CI reads `apps/server/go.mod`; don't leave a lagging `toolchain` line. Update any doc that states the Go version (`apps/site/src/content/docs/`).
+- Keep one Go version. `go.work` and `apps/server/go.mod` carry the same `go` directive, and CI reads `apps/server/go.mod`; don't leave a lagging `toolchain` line. Update any doc that states the Go version (`apps/site/src/content/docs/`).
 - Swift packages are locked by `Package.resolved` (`Package.swift` at the root and under `apps/Polymux`); the site uses `apps/site/package-lock.json`. Refresh the lock file with the upgrade, not separately.
 - Read the release notes for each major or minor bump, then apply only the migration it requires. Drop deprecated APIs the upgrade obsoletes instead of leaving compatibility shims.
 - Preserve behaviour. An upgrade should not change what the app does; a visible or behavioural difference is a bug to fix, or an intentional change to state explicitly and verify against the reference.
@@ -63,41 +60,16 @@ Keep toolchains and dependencies on the latest stable release unless that breaks
 - If latest can't be adopted, keep the reason next to the pin and report it rather than silently staying behind.
 - In the report: versions before and after, breaking changes handled, and any behaviour left unverified.
 
-## Plugins
+When instructed to update, look beyond the lock files at everything Polymux takes from upstream, and report what is stale even if you leave it:
 
-[`docs/plugins.md`](docs/plugins.md) is how plugins work. Read it before changing them, and update it when the manifest, index, routes or capabilities change.
-
-How it fits together:
-
-- Polymux ships no plugin code. A plugin is a versioned package listed in a JSON registry, installed at a pinned version only when someone confirms it. The package's `plugin.json` decides what it is, not its registry row.
-- Global plugins replace the sidebar and content through the switcher. Scoped plugins attach to chats, direct or group, and may have no UI. Chats always stays in the switcher.
-- The server owns install state, chat activation and the shared layout (`apps/server/internal/plugins`). It runs at most one service per plugin and forwards `/plugins/{name}/api/*` to it behind normal device authentication.
-- Plugin screens are native and ship in the app, because iOS can't load native code. A package only names a `surface`, which `apps/Polymux/Sources/Plugins/PluginSurface.swift` maps to views. An app without that surface shows Needs update. The exception is `web`: a Scoped package ships its own page, which fills the side panel.
-- `plugins/index.json` on `dev` is the one registry, served at `https://polymux.com/plugins/index.json` (`apps/site/vercel.json`). The server's Marketplace and the site's `/plugins/` page both read it, so never give either its own list. The official plugins' code and packaging live in `plugins/`.
-
-Developing a plugin:
-
-- Everything beyond `kind` is opt-in: `surface`, `service`, `skills`, `settings`, `provides`. Add only what the plugin needs.
-- A plugin with a `surface` must set `symbol` (unfilled, for unselected) and `selectedSymbol` (filled, for selected). Installs without both are refused.
-- A plugin sets its icons and nothing else about its chrome, except that a web plugin can hide the side panel's close button. Buttons, the close button, panels and layout belong to the app. Reuse the app's components, so a plugin reads like the rest of Polymux; Hub reuses the bot chat's bubbles, replies and composer parts.
-- Add new `Plugin*` or plugin-specific types to `contracts/polymux.schema.json` and run `python3 contracts/generate.py`. Don't hand-edit the generated files.
-- A service gets `POLYMUX_PLUGIN_PORT`, `POLYMUX_PLUGIN_TOKEN`, `POLYMUX_PLUGIN_DATA`, `POLYMUX_PLUGIN_ROOT` and, with settings, `POLYMUX_PLUGIN_SETTINGS`. Keep its state in the data folder, which uninstalling removes. It's built with `CGO_ENABLED=0`, so its dependencies must be pure Go.
-- Client stores follow the Data rules in `DESIGN.md`: restore what's saved first, then refresh, and only load ahead in ways with no side effect. Hub's preloading must never mark a chat read.
-
-Testing a plugin:
-
-- Server: `go test -tags sqlite_fts5 ./internal/plugins` from `apps/server`. A plugin's own tests run with `scripts/test.sh plugins`.
-- UI: add routes to `apps/Polymux/Sources/PluginFixture.swift` and flows in `e2e/flows/fixture-plugin*.js` or `fixture-hub*.js`, started with `// @fixture --verify-fixture --verify-plugins`. Running by hand with `scripts/run.sh --fixture` also needs a view flag, such as `--verify-settings`.
-- Never test against a real account, bridge or mailbox. Reading can have side effects, and sending reaches real people. Say what stayed unverified against the real service.
-
-Maintaining plugins:
-
-- Saved installs keep the manifest they were installed with, so a manifest or service change reaches an install only when it's reinstalled. Bump `version` for every release.
-- A bridge's seed config only applies when its config is first written, so a change to `seedConfig` doesn't reach existing installs.
-- Raise `plugins.APIVersion` and the package's `engines.plugins` for an incompatible plugin API change. Ship a new `surface` in the app before listing the package that needs it.
-- Release a plugin from `dev`: bump `version` in its `plugin.json`, then run the Release plugin workflow with the plugin's name. It tests, builds every target, publishes the release and merges the entry into `plugins/index.json` on `dev`, which polymux.com serves.
+- Toolchains and packages: Go, Swift packages, the site's npm packages, and the skills pinned in `skills-lock.json`.
+- External agents: the ACP protocol version in `apps/server/internal/acp`, and the agent logos in the app. Run `python3 scripts/acp-icons.py` to pull them from the ACP registry, so new agents get a logo and changed ones update. The server reads the registry itself at runtime.
+- Model defaults: the recommended models in `apps/server/internal/providers/catalogue.go`, so new bots don't start on retired or superseded models.
+- Anything else that copies an upstream list, version or asset you come across. Mention it so it can be added here.
 
 ## Documentation
+
+`docs/` is the general reference for how the codebase fits together; consult it for more detail on a topic. `docs/experiments.md` lists the experimental branches and what each is about; `dev` and `main` stay free of experimental code.
 
 Keep documents in `docs/` human- and developer-focused: simple, concise, and easy to scan. Prioritise helping readers quickly understand the repository, its structure, and how the code fits together. Include only the detail needed for that understanding; link to relevant code or focused references instead of duplicating implementation details or exhaustive specifications.
 
@@ -146,8 +118,8 @@ Never update it unless explicitly asked; report conflicts or suggest changes ins
 
 ## Repository safety
 
+- In a new clone, run `git config core.hooksPath .githooks` once. It enables the commit guard (commits only on `dev`, docs still point at real files) and the push guard (only `dev` may be pushed). CI runs the same docs check, so it is enforced on origin even where hooks are off.
 - Preserve unrelated worktree changes. Never run `git stash`.
 - Don't push or make changes to `main` unless instructed
-- Don't commit unless instructed
-- Don't create worktrees unless instructed
+- Commit verified work on `dev` once its tests pass; don't push unless instructed
 - Don't make backups (copies, snapshots, `.bak` files, backup branches) unless explicitly instructed; suggesting one is fine

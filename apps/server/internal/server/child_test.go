@@ -19,6 +19,8 @@ type childFactory struct {
 	target  string
 	opened  chan struct{}
 	release chan struct{}
+	// wait keeps the parent's turn open until its child starts, as a polling bot does.
+	wait bool
 }
 
 func (f *childFactory) Open(_ context.Context, d agentruntime.Definition, _ string) (agentruntime.Session, error) {
@@ -68,6 +70,13 @@ func (s *childSession) Send(ctx context.Context, message contract.Message, _ fun
 	if result.Terminate {
 		return agentruntime.Result{}, fmt.Errorf("spawn ended the parent turn")
 	}
+	if s.factory.wait {
+		select {
+		case <-s.factory.opened:
+		case <-time.After(3 * time.Second):
+			return agentruntime.Result{}, fmt.Errorf("child never started while the parent waited")
+		}
+	}
 	return agentruntime.Result{Text: "Parent continued"}, nil
 }
 func (*childSession) Abort(context.Context) error { return nil }
@@ -75,15 +84,19 @@ func (*childSession) Path() string                { return "fixture" }
 func (*childSession) Close() error                { return nil }
 
 func TestSpawnContinues(t *testing.T) {
-	for _, target := range []string{"", "b"} {
-		t.Run("target="+target, func(t *testing.T) {
+	for _, c := range []struct {
+		target string
+		wait   bool
+	}{{"", false}, {"b", false}, {"", true}} {
+		target := c.target
+		t.Run(fmt.Sprintf("target=%s/wait=%t", target, c.wait), func(t *testing.T) {
 			dir := t.TempDir()
 			db, err := store.Open(t.Context(), filepath.Join(dir, "db"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { db.Close() })
-			factory := &childFactory{target: target, opened: make(chan struct{}), release: make(chan struct{})}
+			factory := &childFactory{target: target, opened: make(chan struct{}), release: make(chan struct{}), wait: c.wait}
 			api, err := New(t.Context(), db, Config{DataDir: dir, Factory: factory, Definitions: []agentruntime.Definition{
 				{Agent: contract.Agent{ID: "a", Name: "A"}}, {Agent: contract.Agent{ID: "b", Name: "B"}},
 			}})

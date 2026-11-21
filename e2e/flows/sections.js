@@ -1,4 +1,3 @@
-// @cua
 // Renaming sections preserves their chats, collapsed state, selection, and unsent draft.
 let app = await cua.getApp(APP);
 const state = await app.getState({ include_screenshot: false });

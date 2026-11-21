@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/plugins"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/untrusted"
 	"github.com/MichaelKinsy/PiG/agent"
@@ -27,26 +28,37 @@ type chainState struct {
 }
 
 type turnState struct {
-	run        contract.Run
-	work       store.Work
-	mu         sync.Mutex
-	handoff    *store.Work
-	target     string
-	tools      int
-	reload     bool
-	notice     *string
-	external   map[string]bool
-	prefixes   []string
-	waits      map[string]bool
-	checkpoint *store.Checkpoint
-	store      *store.Store
-	hookErr    error
-	task       *store.Task
-	cancel     context.CancelFunc
-	removals   []string
-	posts      int
-	spoke      bool
-	status     func(string) error
+	run           contract.Run
+	work          store.Work
+	mu            sync.Mutex
+	handoff       *store.Work
+	target        string
+	tools         int
+	reload        bool
+	notice        *string
+	external      map[string]bool
+	prefixes      []string
+	waits         map[string]bool
+	checkpoint    *store.Checkpoint
+	store         *store.Store
+	hookErr       error
+	task          *store.Task
+	cancel        context.CancelFunc
+	removals      []string
+	posts         int
+	spoke         bool
+	bubbles       int
+	wallBounced   bool
+	parrotBounced bool
+	styleBounced  bool
+	status        func(string) error
+	// gate asks plugins about a tool call. chats are those whose rules bind this run.
+	gate func(ctx context.Context, tool string, args json.RawMessage) plugins.Decision
+	// answer asks again with the person's answer, so a plugin can remember it.
+	answer func(ctx context.Context, tool string, args json.RawMessage, answer, card string) plugins.Decision
+	// ask carries a plugin's question to the person and returns their answer and the card.
+	ask   func(ctx context.Context, call string, ask plugins.Ask, tool string, args json.RawMessage) (string, string, error)
+	chats []string
 }
 
 func beforeTool(ctx context.Context, call, name string, args json.RawMessage) agent.ToolCallHookResult {
@@ -57,6 +69,27 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 	if state == nil {
 		return agent.ToolCallHookResult{Block: true, Reason: "No active Polymux run"}
 	}
+	// Asked outside the lock, since a plugin takes a moment to answer.
+	if state.gate != nil {
+		decision := state.gate(ctx, name, args)
+		if decision.Ask != nil {
+			if state.ask == nil || state.answer == nil {
+				return agent.ToolCallHookResult{Block: true, Reason: "This chat's rules need an approval, but no one can answer it."}
+			}
+			answer, card, err := state.ask(ctx, call, *decision.Ask, name, args)
+			if err != nil {
+				return agent.ToolCallHookResult{Block: true, Reason: err.Error()}
+			}
+			decision = state.answer(ctx, name, args, answer, card)
+			// A plugin may ask once per call. Asking again would hold the turn with no way out.
+			if decision.Ask != nil {
+				return agent.ToolCallHookResult{Block: true, Reason: "This chat's rules asked for another approval that can't be answered."}
+			}
+		}
+		if !decision.Allow {
+			return agent.ToolCallHookResult{Block: true, Reason: decision.Reason}
+		}
+	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.handoff != nil || state.checkpoint != nil || state.notice != nil || state.hookErr != nil || state.work.Trigger == contract.RunTriggerCreated && name != "ask_user" {
@@ -65,6 +98,9 @@ func beforeTool(ctx context.Context, call, name string, args json.RawMessage) ag
 	state.tools++
 	if !slices.Contains(quietTools, name) {
 		state.spoke = false
+		// Real work between messages starts a fresh reply burst.
+		state.bubbles = 0
+		state.wallBounced = false
 	}
 	if state.work.Trigger == contract.RunTriggerChild && (name == "task" || name == "message_agent" || name == "handoff_agent" || name == "manage_tasks") {
 		return agent.ToolCallHookResult{Block: true, Reason: "Child tasks cannot delegate or schedule continuations"}

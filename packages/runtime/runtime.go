@@ -31,8 +31,10 @@ type Definition struct {
 	// Keep an explicit clear from inheriting the startup default again.
 	WorkspaceSet bool `json:"workspaceSet,omitempty"`
 	// Worktree is the conversation's prepared checkout, resolved per session.
-	Worktree   string                   `json:"-"`
-	ExtraTools []agent.AgentTool        `json:"-"`
+	Worktree   string            `json:"-"`
+	ExtraTools []agent.AgentTool `json:"-"`
+	// CodeTools join the MCP tools inside codemode instead of being offered to the model directly.
+	CodeTools  []agent.AgentTool        `json:"-"`
 	Scope      string                   `json:"-"`
 	Intro      bool                     `json:"-"`
 	Ephemeral  bool                     `json:"-"`

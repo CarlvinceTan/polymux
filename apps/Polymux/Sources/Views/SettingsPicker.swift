@@ -7,7 +7,8 @@ struct SettingsField: View {
     var secure = false
 
     var body: some View {
-        LabeledContent(title) {
+        HStack(spacing: 8) {
+            Text(title).lineLimit(1).layoutPriority(1)
             Group {
                 if secure {
                     SecureField("", text: $text)
@@ -20,6 +21,9 @@ struct SettingsField: View {
             .foregroundStyle(.primary)
             .multilineTextAlignment(.trailing)
             .autocorrectionDisabled()
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .clipped()
             .accessibilityLabel(title)
             .accessibilityHint(prompt)
             .overlay(alignment: .trailing) {
@@ -36,12 +40,14 @@ struct SettingsPicker: View {
     let title: String
     @Binding var selection: String
     let options: [(String, String)]
+    let width: DropdownWidth
     @State private var choosing = false
 
-    init(_ title: String, selection: Binding<String>, options: [(String, String)]) {
+    init(_ title: String, selection: Binding<String>, options: [(String, String)], width: DropdownWidth = .content) {
         self.title = title
         _selection = selection
         self.options = options
+        self.width = width
     }
 
     private var value: String { options.first { $0.1 == selection }?.0 ?? selection }
@@ -59,7 +65,7 @@ struct SettingsPicker: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityValue(value)
-        .dropdown(isPresented: $choosing) {
+        .dropdown(isPresented: $choosing, width: width) {
             DropdownOptions(selection: $selection, options: options)
         }
     }

@@ -13,6 +13,9 @@ public final class VoiceAudio {
     private let duplex: Bool
     private var tapped = false
     private var muted = false
+    #if os(iOS)
+    private var sessionActive = false
+    #endif
 
     public init(duplex: Bool = true) {
         self.duplex = duplex
@@ -28,6 +31,7 @@ public final class VoiceAudio {
             try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
         }
         try session.setActive(true)
+        sessionActive = true
         #endif
 
         let input = engine.inputNode
@@ -59,6 +63,7 @@ public final class VoiceAudio {
     public func resume() throws {
         #if os(iOS)
         try AVAudioSession.sharedInstance().setActive(true)
+        sessionActive = true
         #endif
         if !engine.isRunning { try engine.start() }
     }
@@ -83,7 +88,10 @@ public final class VoiceAudio {
             tapped = false
         }
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if sessionActive {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            sessionActive = false
+        }
         #endif
     }
 }
@@ -210,42 +218,78 @@ nonisolated final class VoiceCapture: AudioCapture, @unchecked Sendable {
 @MainActor
 final class AppleInput: SpeechInput {
     private let audio: VoiceAudio
+    private let language: DictationLanguage
     private var analyzer: SpeechAnalyzer?
     private var inputs: AsyncStream<AnalyzerInput>.Continuation?
     private var events: AsyncThrowingStream<VoiceEvent, Error>.Continuation?
     private var tasks: [Task<Void, Never>] = []
-    private var locale: Locale?
+    private var coordinator: DictationCoordinator?
+    private var reserved: [Locale] = []
     private var fallback: LegacyInput?
     private var capture: VoiceCapture?
     private var terms = Vocabulary.terms(Vocabulary.base)
 
-    init(audio: VoiceAudio) { self.audio = audio }
+    init(audio: VoiceAudio, language: DictationLanguage = .multilingual) {
+        self.audio = audio
+        self.language = language
+    }
 
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
         let microphone = await AVAudioApplication.requestRecordPermission()
+        try Task.checkCancellation()
         guard microphone else { throw SpeechFailure.microphone }
         let permission = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { @Sendable status in
                 continuation.resume(returning: status)
             }
         }
+        try Task.checkCancellation()
         guard permission == .authorized else { throw SpeechFailure.recognition }
-        guard SpeechTranscriber.isAvailable,
-              let selected = await SpeechTranscriber.supportedLocale(equivalentTo: .current) else {
-            let fallback = LegacyInput(audio: audio)
-            self.fallback = fallback
-            await fallback.setVocabulary(terms)
-            return try await fallback.start()
+        guard SpeechTranscriber.isAvailable else { return try await legacy() }
+
+        var ready: [(Locale, DictationTranscriber)] = []
+        for locale in DictationDevice.locales(for: DictationDevice.language(language)) {
+            guard let selected = await DictationTranscriber.supportedLocale(equivalentTo: locale),
+                  !ready.contains(where: { $0.0.identifier == selected.identifier }) else { continue }
+            let transcriber = DictationTranscriber(
+                locale: selected,
+                contentHints: [],
+                transcriptionOptions: [.punctuation],
+                reportingOptions: [.volatileResults, .frequentFinalization],
+                attributeOptions: [.transcriptionConfidence]
+            )
+            ready.append((selected, transcriber))
         }
-        let transcriber = SpeechTranscriber(locale: selected, preset: .progressiveTranscription)
-        let detector = SpeechDetector(detectionOptions: .init(sensitivityLevel: .medium), reportResults: true)
-        let modules: [any SpeechModule] = [transcriber, detector]
-        if try await AssetInventory.reserve(locale: selected) { locale = selected }
-        if let installation = try await AssetInventory.assetInstallationRequest(supporting: modules) {
-            try await installation.downloadAndInstall()
+        guard !ready.isEmpty else { return try await legacy() }
+
+        do {
+            for (locale, _) in ready {
+                if try await AssetInventory.reserve(locale: locale) { reserved.append(locale) }
+            }
+            if let installation = try await AssetInventory.assetInstallationRequest(supporting: ready.map(\.1)) {
+                try await installation.downloadAndInstall()
+            }
+        } catch {
+            var installed: [(Locale, DictationTranscriber)] = []
+            for (locale, transcriber) in ready {
+                do {
+                    if let installation = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                        try await installation.downloadAndInstall()
+                    }
+                    installed.append((locale, transcriber))
+                } catch { continue }
+            }
+            ready = installed
+            if ready.isEmpty {
+                await releaseReserved()
+                return try await legacy()
+            }
         }
         try Task.checkCancellation()
+
+        let modules = ready.map(\.1)
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: modules) else {
+            await releaseReserved()
             throw SpeechFailure.audio
         }
         let analyzer = SpeechAnalyzer(modules: modules)
@@ -262,40 +306,36 @@ final class AppleInput: SpeechInput {
         events = eventStream.continuation
         let capture = VoiceCapture(format: format, inputs: inputStream.continuation, events: eventStream.continuation)
         self.capture = capture
-        tasks = [
+        let coordinator = DictationCoordinator(continuation: eventStream.continuation,
+                                               locales: ready.map { $0.0.identifier })
+        self.coordinator = coordinator
+        tasks = ready.map { (locale, transcriber) in
             Task {
                 do {
                     for try await result in transcriber.results {
-                        eventStream.continuation.yield(.transcript(.init(
-                            text: String(result.text.characters),
-                            start: result.range.start.seconds,
-                            end: result.range.end.seconds,
-                            final: result.isFinal
-                        )))
+                        await coordinator.accept(result, locale: locale.identifier)
                     }
                 } catch {
-                    if !Task.isCancelled { eventStream.continuation.finish(throwing: error) }
-                }
-            },
-            Task {
-                do {
-                    for try await result in detector.results {
-                        eventStream.continuation.yield(.activity(result.speechDetected))
-                    }
-                } catch {
-                    if !Task.isCancelled { eventStream.continuation.finish(throwing: error) }
-                }
-            },
-            Task {
-                do {
-                    try await analyzer.start(inputSequence: inputStream.stream)
-                } catch {
-                    if !Task.isCancelled { eventStream.continuation.finish(throwing: error) }
+                    if !Task.isCancelled { await coordinator.failed(locale.identifier) }
                 }
             }
-        ]
+        }
+        tasks.append(Task {
+            do {
+                try await analyzer.start(inputSequence: inputStream.stream)
+            } catch {
+                if !Task.isCancelled { eventStream.continuation.finish(throwing: error) }
+            }
+        })
         try audio.start(capture: capture)
         return eventStream.stream
+    }
+
+    private func legacy() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
+        let fallback = LegacyInput(audio: audio, language: language)
+        self.fallback = fallback
+        await fallback.setVocabulary(terms)
+        return try await fallback.start()
     }
 
     func setMuted(_ muted: Bool) {
@@ -306,8 +346,17 @@ final class AppleInput: SpeechInput {
     func finalize() async throws {
         if let fallback { try await fallback.finalize() }
         else {
+            let listeners = tasks
             capture?.emitSilence(seconds: 0.4)
-            try await analyzer?.finalize(through: nil)
+            inputs?.finish()
+            do {
+                try await analyzer?.finalizeAndFinishThroughEndOfInput()
+            } catch {
+                await coordinator?.finish()
+                throw error
+            }
+            for listener in listeners { await listener.value }
+            await coordinator?.finish()
         }
     }
 
@@ -321,6 +370,8 @@ final class AppleInput: SpeechInput {
     }
 
     func stop() async {
+        await coordinator?.finish()
+        coordinator = nil
         await fallback?.stop()
         fallback = nil
         capture = nil
@@ -333,8 +384,13 @@ final class AppleInput: SpeechInput {
         analyzer = nil
         inputs = nil
         events = nil
-        if let locale { await AssetInventory.release(reservedLocale: locale) }
-        locale = nil
+        await releaseReserved()
+    }
+
+    private func releaseReserved() async {
+        let locales = reserved
+        reserved = []
+        for locale in locales { await AssetInventory.release(reservedLocale: locale) }
     }
 }
 
@@ -360,12 +416,23 @@ private final class LegacyInput: SpeechInput {
     private var received = false
     private var replay: [VoiceBuffer] = []
     private var canReplay = true
+    private var ending = false
     private var terms = Vocabulary.terms(Vocabulary.base)
+    private let language: DictationLanguage
 
-    init(audio: VoiceAudio) { self.audio = audio }
+    init(audio: VoiceAudio, language: DictationLanguage = .multilingual) {
+        self.audio = audio
+        self.language = language
+    }
 
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
-        guard let recognizer = SFSpeechRecognizer(locale: .current) else { throw SpeechFailure.locale }
+        var locale = DictationDevice.locale(for: language)
+        var recognizer = SFSpeechRecognizer(locale: locale)
+        if recognizer == nil, language == .multilingual {
+            locale = DictationDevice.locale(for: .english)
+            recognizer = SFSpeechRecognizer(locale: locale)
+        }
+        guard let recognizer else { throw SpeechFailure.locale }
         guard recognizer.isAvailable else { throw SpeechFailure.unavailable }
         self.recognizer = recognizer
         let bufferStream = AsyncStream<VoiceBuffer>.makeStream(bufferingPolicy: .bufferingNewest(128))
@@ -397,7 +464,13 @@ private final class LegacyInput: SpeechInput {
         recognize(at: capture?.time ?? 0)
     }
 
-    func finalize() async throws { request?.endAudio() }
+    func finalize() async throws {
+        ending = true
+        renewal?.cancel()
+        buffers?.finish()
+        await inputTask?.value
+        request?.endAudio()
+    }
 
     private func recognize(at start: Double, replay: [VoiceBuffer] = []) {
         guard let recognizer, let events else { return }
@@ -425,7 +498,8 @@ private final class LegacyInput: SpeechInput {
                     text: result.bestTranscription.formattedString,
                     start: start,
                     end: start + max(0.01, (last?.timestamp ?? 0) + (last?.duration ?? 0)),
-                    final: result.isFinal
+                    final: result.isFinal,
+                    confidences: result.isFinal ? result.bestTranscription.segments.map { Double($0.confidence) } : []
                 )
             }
             Task { @MainActor in
@@ -436,11 +510,17 @@ private final class LegacyInput: SpeechInput {
                         self.replay = []
                     }
                     events.yield(.transcript(transcript))
-                    if transcript.final { self.finishTurn(); return }
+                    if transcript.final {
+                        if self.ending { events.finish() }
+                        else { self.finishTurn() }
+                        return
+                    }
                 }
                 if let error {
                     let failure = error as NSError
-                    if local, !self.received, self.canReplay, failure.domain == "kLSRErrorDomain", failure.code == 300 {
+                    if self.ending {
+                        events.finish()
+                    } else if local, !self.received, self.canReplay, failure.domain == "kLSRErrorDomain", failure.code == 300 {
                         self.onDevice = false
                         self.recognize(at: start, replay: self.replay)
                     } else if failure.domain == "kAFAssistantErrorDomain", failure.code == 1110 {
@@ -489,5 +569,3 @@ private final class LegacyInput: SpeechInput {
         replay = []
     }
 }
-
-

@@ -4,4 +4,5 @@ Products Polymux compares itself against. They guide behaviour, not UI parity, a
 
 - **Grok Bot**: [b-nnett/grok-bot-0.18-reconstructed](https://github.com/b-nnett/grok-bot-0.18-reconstructed), a reconstruction of the shipped 0.18 macOS app. Its mobile app also connects to phone data (calendar, reminders, contacts, location, Home). The installed app is far newer than 0.18 and is the reference for features the reconstruction lacks, such as per-task threads; its bot prompts and tool schemas stay on Cursor's servers.
 - **Rakazo**: [elie222/rakazo](https://github.com/elie222/rakazo), an open-source Grok Bot alternative.
+- **Agent Swarm**: [desplega-ai/agent-swarm](https://github.com/desplega-ai/agent-swarm), an open-source multi-agent orchestrator. Its nightly [dreaming](https://www.agent-swarm.dev/blog/our-agents-dream-every-night) loop is the reference for consolidation in [Proactivity](proactivity.md).
 - **OpenBot**: [CopilotKit/OpenBot](https://github.com/CopilotKit/OpenBot), self-hosted "AI coworkers". Not to be confused with [ashhart/OpenBot](https://github.com/ashhart/OpenBot), a separate, small Grok Bot reimplementation.

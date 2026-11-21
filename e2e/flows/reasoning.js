@@ -1,4 +1,3 @@
-// @cua
 // Full-row reasoning pickers persist globally and each bot can override its initial preference.
 let app = await cua.getApp(APP);
 const host = await app.getState({ query: "Settings", include_screenshot: false });

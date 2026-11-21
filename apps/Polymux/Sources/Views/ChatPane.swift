@@ -25,10 +25,11 @@ struct ChatPane: View {
     @State private var showVoice = false
     @State private var voiceStore: (any VoiceSession)?
     @State private var openingVoice = false
-    @State private var voiceIssue: String?
-    @State private var dismissedIssue: String?
+    @State private var notices: [Notice] = []
+    @State private var shownReply: ReplyIssue?
     /// Whether the profile panel (or a group's editor) is open; it stays open across chats.
     @Binding var showProfile: Bool
+    @Binding var pluginPanel: String?
     /// What the profile panel, which the window owns on macOS, reads from this chat.
     let openChat: OpenChat
     @State private var target: ReplyTarget?
@@ -59,6 +60,7 @@ struct ChatPane: View {
     @Environment(\.connectionDismissed) private var connectionDismissed
     #if os(iOS)
     @Environment(\.self) private var environment
+    @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
     private var verticalToolbar: Bool {
@@ -72,10 +74,11 @@ struct ChatPane: View {
 
     init(agent: Agent, thread: PolymuxKit.Thread, session: AppSession,
          drops: Binding<[DroppedFile]>, files: Binding<[DraftFile]>,
-         showProfile: Binding<Bool>, openChat: OpenChat,
+         showProfile: Binding<Bool>, pluginPanel: Binding<String?>, openChat: OpenChat,
          destination: SearchDestination? = nil, store: ChatStore) {
         self.agent = agent
         _showProfile = showProfile
+        _pluginPanel = pluginPanel
         self.openChat = openChat
         self.thread = thread
         self.session = session
@@ -99,6 +102,11 @@ struct ChatPane: View {
             NavigationStack {
                 conversation
                     .navigationDestination(isPresented: profilePresented) { profile }
+                    .navigationDestination(item: $pluginPanel) { name in
+                        if let plugin = pluginGroups.joined().first(where: { $0.name == name }) {
+                            PluginPanel(plugin: plugin, thread: thread, session: session) { pluginPanel = nil }
+                        }
+                    }
                     .toolbar(.hidden, for: .tabBar)
             }
             #else
@@ -137,6 +145,14 @@ struct ChatPane: View {
             store.isVisible = phase == .active
             if store.isVisible { Task { await store.markRead() } }
         }
+    }
+
+    private var pluginGroups: [[Plugin]] {
+        session.plugins.buttons(chat: thread.isTask ? thread.agentID : thread.id)
+    }
+
+    private func togglePlugin(_ plugin: Plugin) {
+        pluginPanel = pluginPanel == plugin.name ? nil : plugin.name
     }
 
     #if os(iOS)
@@ -231,29 +247,38 @@ struct ChatPane: View {
         .navigationTitle("")
         .overlay(alignment: .top) {
             if !showSearch {
-                ZStack(alignment: .top) {
-                    ChatHeader(title: chatTitle, subtitle: headerRole, members: members,
-                               isGroup: thread.isGroup, conversationID: thread.id, runs: store.runs, activity: store.activity,
-                               connected: session.sidebar.isConnected,
-                               edit: { showProfile.toggle() })
-                        .padding(.top, 8)
-                        .offset(y: -headerInset)
-                        .accessibilityLabel(thread.isGroup ? "Edit chat" : "Edit \(agent.name)’s profile")
-                        .help(thread.isGroup ? "Edit chat" : "Edit agent profile")
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
-                }
-                #if os(macOS)
-                .background {
-                    ToolbarAnchor { inset in
-                        ToolbarInset.last = inset
-                        toolbarInset = inset
+                ChatHeader(title: chatTitle, subtitle: headerRole, members: members,
+                           isGroup: thread.isGroup, conversationID: thread.id, runs: store.runs, activity: store.activity,
+                           connected: session.sidebar.isConnected,
+                           edit: { showProfile.toggle() })
+                    .padding(.top, 8)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+                    #if os(macOS)
+                    // Pinned to the window top, so it sits in place from the first frame
+                    // while the toolbar's height is still settling.
+                    .ignoresSafeArea(.container, edges: .top)
+                    #else
+                    .offset(y: -headerInset)
+                    #endif
+                    .accessibilityLabel(thread.isGroup ? "Edit chat" : "Edit \(agent.name)’s profile")
+                    .help(thread.isGroup ? "Edit chat" : "Edit agent profile")
+            }
+        }
+        .overlay(alignment: .top) {
+            if !showSearch {
+                Color.clear
+                    #if os(macOS)
+                    .background {
+                        ToolbarAnchor { inset in
+                            ToolbarInset.last = inset
+                            toolbarInset = inset
+                        }
                     }
-                }
-                #else
-                .background {
-                    ToolbarAnchor { top, safeTop in alignHeader(top: top, safeTop: safeTop) }
-                }
-                #endif
+                    #else
+                    .background {
+                        ToolbarAnchor { top, safeTop in alignHeader(top: top, safeTop: safeTop) }
+                    }
+                    #endif
             }
         }
         #if os(macOS)
@@ -282,7 +307,8 @@ struct ChatPane: View {
         .task { dropFolder = try? await DroppedFile.prepare() }
         #endif
         #if os(macOS)
-        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice)) {
+        .panelBar(value: ChatBarState(search: showSearch, opening: openingVoice, voice: showVoice, canCall: canCall,
+                                      plugins: pluginGroups, panel: pluginPanel)) {
             if showSearch {
                 HStack(spacing: 8) {
                     searchField
@@ -300,7 +326,8 @@ struct ChatPane: View {
                             PanelNavButton(symbol: "chevron.left", label: "Back") { openChat.show(agent.id) }
                         }
                         Spacer(minLength: 0)
-                        if !thread.isGroup {
+                        PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
+                        if canCall {
                             PanelNavButton(symbol: "phone", label: "Speech conversation",
                                            enabled: !openingVoice && !showVoice, action: openVoice)
                         }
@@ -323,7 +350,16 @@ struct ChatPane: View {
                 }
             }
             .sharedBackgroundVisibility(.hidden)
-            if showSearch || !thread.isGroup {
+            if !showSearch && !pluginGroups.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    if sizeClass == .compact {
+                        PluginMenu(groups: pluginGroups, open: togglePlugin)
+                    } else {
+                        PluginButtons(groups: pluginGroups, selected: pluginPanel, open: togglePlugin)
+                    }
+                }
+            }
+            if showSearch || canCall {
                 ToolbarItem(placement: .primaryAction) {
                     if showSearch {
                         Button("Close search", systemImage: "xmark", action: closeSearch)
@@ -435,57 +471,93 @@ struct ChatPane: View {
 
     private var topInset: CGFloat { showSearch ? 8 : max(0, headerHeight - headerInset) + 8 }
 
+    private struct Notice: Identifiable {
+        let id = UUID()
+        let message: String
+        var fromReply = false
+    }
+
+    private struct ReplyIssue: Equatable {
+        let id: String
+        let message: String
+    }
+
+    private struct ReplyStatus: Equatable {
+        let issue: ReplyIssue?
+        let visible: Bool
+    }
+
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // A voice start that failed needs no action, so its note fades on its own.
-            if let voiceIssue {
-                Text(voiceIssue).font(.caption2).foregroundStyle(.muted)
-                    .task(id: voiceIssue) {
-                        try? await Task.sleep(for: .seconds(6))
-                        self.voiceIssue = nil
+        composerField
+            .overlay(alignment: .top) {
+                // Warnings float above the input without changing the chat inset.
+                VStack(spacing: 0) {
+                    ConnectionStatus(connected: connected, dismissed: connectionDismissed, collapses: true)
+                    if !notices.isEmpty {
+                        warnings.padding(.horizontal, WarningBubble.countInset).padding(.top, 8)
+                    }
+                    if showLatest && !latestVisible && !showSearch && !showVoice {
+                        latestButton.padding(.top, 8)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .motion(Motion.fade, value: notices.map(\.id))
+                .alignmentGuide(.top) { $0[.bottom] + 8 }
+            }
+            .onChange(of: replyStatus, initial: true) { previous, status in
+                if previous.issue != status.issue { notices.removeAll(where: \.fromReply) }
+                if status.visible, let issue = status.issue, issue != shownReply {
+                    shownReply = issue
+                    notices.append(Notice(message: issue.message, fromReply: true))
+                }
+            }
+            .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge).padding(.top, 10)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+    }
+
+    private var warnings: some View {
+        ZStack {
+            // Queued warnings keep aging while only the latest is shown.
+            ForEach(notices) { notice in
+                Color.clear.frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+                    .task {
+                        do { try await Task.sleep(for: .seconds(6)) } catch { return }
+                        dismiss(notice.id)
                     }
             }
-            composerField
-                .overlay(alignment: .top) {
-                    // Status and the latest button float above the input without changing the chat inset.
-                    VStack(spacing: 8) {
-                        ZStack(alignment: .bottom) {
-                            ConnectionStatus(connected: connected, dismissed: connectionDismissed)
-                            WarningBubble(text: serverIssue?.message ?? "", visible: issueVisible) {
-                                dismissedIssue = serverIssue?.id
-                            }
-                        }
-                        .frame(height: statusVisible ? nil : 0)
-                        if showLatest && !latestVisible && !showSearch && !showVoice {
-                            latestButton
-                        }
-                    }
-                    .alignmentGuide(.top) { $0[.bottom] + 8 }
-                }
+            if let latest = notices.last {
+                WarningBubble(text: latest.message, more: notices.count - 1) { dismiss(latest.id) }
+                    .id(latest.id)
+                    .transition(.opacity)
+            }
         }
-        .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge).padding(.top, 10)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+    }
+
+    private func warn(_ message: String) {
+        guard !notices.contains(where: { $0.message == message }) else { return }
+        notices.append(Notice(message: message))
+    }
+
+    private func dismiss(_ id: UUID) {
+        notices.removeAll { $0.id == id }
     }
 
     private var connected: Bool { store.isConnected && session.sidebar.isConnected }
 
-    private var serverIssue: (id: String, message: String)? {
-        if let message = store.messages.last, let notice = store.activity.notice(for: message) {
-            return (message.id, notice)
+    private var replyStatus: ReplyStatus {
+        ReplyStatus(issue: serverIssue, visible: connected && !showSearch && !showVoice)
+    }
+
+    private var serverIssue: ReplyIssue? {
+        guard let message = store.messages.last else { return nil }
+        if let notice = store.activity.notice(for: message) {
+            return ReplyIssue(id: message.id, message: notice)
         }
-        guard let message = store.messages.last(where: { $0.role == MessageRole.assistant && $0.status == MessageStatus.error }),
+        guard message.role == MessageRole.assistant, message.status == MessageStatus.error,
               let error = store.activity.issue(for: message),
               !error.message.isEmpty else { return nil }
-        return (message.id, error.message)
-    }
-
-    private var issueVisible: Bool {
-        serverIssue != nil && dismissedIssue != serverIssue?.id
-            && connected && store.messages.last?.id == serverIssue?.id
-    }
-
-    private var statusVisible: Bool {
-        (!connected && !connectionDismissed.wrappedValue) || issueVisible
+        return ReplyIssue(id: message.id, message: error.message)
     }
 
     private var latestButton: some View {
@@ -495,7 +567,7 @@ struct ChatPane: View {
     private var visibleMessages: [Message] {
         store.messages.filter { message in
             message.role != MessageRole.assistant || message.parts.contains {
-                $0.attachment != nil || [PartKind.choice, PartKind.credential, PartKind.vault].contains($0.kind)
+                $0.attachment != nil || [PartKind.choice, PartKind.credential, PartKind.vault, PartKind.approval].contains($0.kind)
                     || (message.status != MessageStatus.streaming && !($0.text ?? "").isEmpty)
             }
         }
@@ -520,7 +592,7 @@ struct ChatPane: View {
                              store.activity.setListening(active, conversationID: thread.id, agentID: member.id)
                          }
                      },
-                     files: files)
+                     warn: warn, files: files)
             .frame(height: showVoice ? 0 : nil)
             .opacity(showVoice ? 0 : 1)
             .allowsHitTesting(!showVoice)
@@ -531,11 +603,21 @@ struct ChatPane: View {
         withAnimation(Motion.quick.unless(reduceMotion)) { reply = value }
     }
 
-    /// Opens at once from the settings already loaded; only a first launch waits for them.
+    private var canCall: Bool {
+        guard !thread.isGroup, let settings = session.settings.value else { return false }
+        return VoiceConfig(settings: settings).canStart
+    }
+
     private func openVoice() {
-        // Speech conversations are one to one.
         guard !thread.isGroup, !openingVoice, !showVoice else { return }
-        if let settings = session.settings.value {
+        #if DEBUG
+        if CallFixture.enabled {
+            startVoice(session.settings.value ?? PolymuxKit.Settings())
+            return
+        }
+        #endif
+        guard canCall, let settings = session.settings.value else { return }
+        if !session.settings.isSaving {
             startVoice(settings)
             return
         }
@@ -543,10 +625,10 @@ struct ChatPane: View {
         Task {
             defer { openingVoice = false }
             guard await session.settings.synchronize(), let settings = session.settings.value else {
-                voiceIssue = session.settings.error ?? "Connect to the agent server and wait for settings to save."
+                warn(session.settings.error ?? "Connect to the agent server and wait for settings to save.")
                 return
             }
-            startVoice(settings)
+            if VoiceConfig(settings: settings).canStart { startVoice(settings) }
         }
     }
 
@@ -823,6 +905,9 @@ private struct ChatBarState: Hashable {
     let search: Bool
     let opening: Bool
     let voice: Bool
+    let canCall: Bool
+    let plugins: [[Plugin]]
+    let panel: String?
 }
 
 struct ReplyTarget: Hashable, Sendable {
@@ -909,6 +994,8 @@ struct MessageBubble: View, @MainActor Equatable {
     let agents: [Agent]
     let react: (String) -> Void
     let scrollSpace: Namespace.ID
+    /// Hub draws its own reaction bar beneath the bubble.
+    var showsReactions = true
 
     /// Bubbles redraw for what they show. Their actions never change for a given message.
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -970,7 +1057,7 @@ struct MessageBubble: View, @MainActor Equatable {
                             client: client, jump: { jump(reply) },
                              width: replyWidth(reply))
             }
-            if !reactions.isEmpty {
+            if showsReactions, !reactions.isEmpty {
                 ReactionsView(reactions: reactions, agents: agents, react: react)
                     .disabled(!canReact || reacting)
             }
@@ -1020,12 +1107,12 @@ struct MessageBubble: View, @MainActor Equatable {
     private var displayParts: [(offset: Int, element: Part)] {
         let parts = Array(message.parts.enumerated())
         let attachments = parts.filter { $0.element.attachment != nil }
-        let choices = parts.filter { [PartKind.choice, PartKind.credential, PartKind.vault].contains($0.element.kind) }
+        let cards = parts.filter { [PartKind.choice, PartKind.credential, PartKind.vault, PartKind.approval].contains($0.element.kind) }
         // A reply still being written is shown whole when it finishes, not as it arrives.
         // Its text is still recorded, so a stopped reply keeps what it managed to say.
-        if message.status == MessageStatus.streaming { return attachments + choices }
-        return attachments + choices +
-            parts.filter { $0.element.attachment == nil && ![PartKind.choice, PartKind.credential, PartKind.vault].contains($0.element.kind) && !($0.element.text ?? "").isEmpty }
+        if message.status == MessageStatus.streaming { return attachments + cards }
+        return attachments + cards +
+            parts.filter { $0.element.attachment == nil && ![PartKind.choice, PartKind.credential, PartKind.vault, PartKind.approval].contains($0.element.kind) && !($0.element.text ?? "").isEmpty }
     }
 
     @ViewBuilder private func partView(_ part: Part, index: Int) -> some View {
@@ -1037,6 +1124,9 @@ struct MessageBubble: View, @MainActor Equatable {
                       reactions: reactions, react: canReact && !reacting ? react : nil)
         } else if part.kind == PartKind.choice {
             ChoiceCard(part: part, client: client, message: message, bubble: bubble)
+                .appMenu { reactionMenu }
+        } else if let approval = part.approval, part.kind == PartKind.approval {
+            ApprovalCard(part: part, client: client, message: message, bubble: bubble)
                 .appMenu { reactionMenu }
         } else if let request = part.credential, part.kind == PartKind.credential {
             CredentialCard(request: request, client: client, message: message, bubble: bubble)

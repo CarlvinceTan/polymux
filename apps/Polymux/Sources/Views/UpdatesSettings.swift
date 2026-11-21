@@ -15,7 +15,7 @@ struct UpdatesSettings: View {
             Toggle("Check automatically", isOn: Binding(get: { Updates.shared.automaticallyChecks },
                 set: { Updates.shared.automaticallyChecks = $0 }))
         } header: {
-            Text("Updates").foregroundStyle(.primary)
+            SectionHeader("Updates", symbol: "arrow.down.circle.fill")
         }
         .panelRow()
         #endif
@@ -43,29 +43,33 @@ struct UpdatesSettings: View {
                                                                set: { settings?.edit(SettingsPatch(updateChannel: $0)) }),
                            options: [("Nightly", SettingsUpdateChannel.nightly), ("Stable", SettingsUpdateChannel.stable)])
                 .disabled(settings?.value == nil)
-            #if os(macOS)
-            if let status = Updates.shared.status {
-                Text(status).font(.footnote).foregroundStyle(.muted)
-            }
-            #endif
+            SettingsPicker("Server updates", selection: Binding(get: { settings?.value?.updateMode ?? SettingsUpdateMode.automatic },
+                                                               set: { settings?.edit(SettingsPatch(updateMode: $0)) }),
+                           options: [("Automatic", SettingsUpdateMode.automatic), ("Manual", SettingsUpdateMode.manual)])
+                .disabled(settings?.value == nil)
         } header: {
             #if os(macOS)
-            HStack {
-                Text("Version").foregroundStyle(.primary)
-                Spacer()
+            SectionHeader("Version", symbol: "info.circle.fill") {
+                if let status = Updates.shared.status {
+                    Text(status).font(.footnote).foregroundStyle(.muted).lineLimit(1)
+                        .transition(.opacity)
+                }
                 Button("Check for updates", systemImage: "arrow.clockwise") { Updates.shared.check() }
                     .accessibilityLabel("Check for updates")
                     .help("Check for updates")
                     .symbolEffect(.rotate, isActive: Updates.shared.checking)
                     .disabled(Updates.shared.checking)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
             #else
             Text("Version").foregroundStyle(.primary)
             #endif
         }
         .panelRow()
+        #if os(macOS)
+        .animation(.default, value: Updates.shared.status)
+        #endif
     }
 
     private var clientLabel: String {

@@ -21,6 +21,9 @@ const Created = "fake-session"
 // Crash in a prompt makes the fake exit mid-turn.
 const Crash = "fake-agent-crash"
 
+// Wait in a prompt makes the fake stream one chunk, then hold the turn until session/cancel.
+const Wait = "fake-agent-wait"
+
 // Serve answers ACP requests on stdin until the parent closes it.
 func Serve() {
 	in := bufio.NewScanner(os.Stdin)
@@ -60,32 +63,53 @@ func Serve() {
 				} `json:"prompt"`
 			}
 			_ = json.Unmarshal(msg.Params, &params)
+			wait := false
 			for _, block := range params.Prompt {
 				if strings.Contains(block.Text, Crash) {
 					os.Exit(1)
 				}
+				wait = wait || strings.Contains(block.Text, Wait)
 			}
-			prompt(out, in, msg.ID)
+			if wait {
+				hold(out, in, msg.ID)
+			} else {
+				prompt(out, in, msg.ID)
+			}
 		}
 	}
 }
 
 func prompt(out *json.Encoder, in *bufio.Scanner, id *int64) {
 	update(out, map[string]any{"sessionUpdate": "agent_message_chunk",
-		"content": map[string]any{"type": "text", "text": "Hello "}})
+		"content": map[string]any{"type": "text", "text": "Reading the notes."}})
 	update(out, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1",
 		"title": "Read file", "rawInput": map[string]any{"path": "notes.md"}})
 	update(out, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
 		"content": []any{map[string]any{"type": "content",
 			"content": map[string]any{"type": "text", "text": "notes"}}}})
 	chosen := askPermission(out, in)
-	text := "from ACP"
+	text := "Hello from ACP"
 	if chosen == "allow-once" {
 		text += " [allow-once]"
 	}
 	update(out, map[string]any{"sessionUpdate": "agent_message_chunk",
 		"content": map[string]any{"type": "text", "text": text}})
 	respond(out, id, map[string]any{"stopReason": "end_turn"})
+}
+
+// hold streams a chunk, then answers the prompt as cancelled once session/cancel arrives.
+func hold(out *json.Encoder, in *bufio.Scanner, id *int64) {
+	update(out, map[string]any{"sessionUpdate": "agent_message_chunk",
+		"content": map[string]any{"type": "text", "text": "Working"}})
+	for in.Scan() {
+		var msg struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(in.Bytes(), &msg) == nil && msg.Method == "session/cancel" {
+			respond(out, id, map[string]any{"stopReason": "cancelled"})
+			return
+		}
+	}
 }
 
 // askPermission sends a permission request and returns the selected option ID.

@@ -8,14 +8,25 @@ trap 'cancel_drain; rm -f "$LOG"' EXIT
 trap 'exit 130' INT TERM HUP
 pick_target install "${1:-}"
 
-# The server listens on loopback; other devices reach it through a tunnel.
+# The server listens on loopback; other devices reach it through a tunnel or a transport plugin.
 ADDRESS="http://127.0.0.1:7337"
 
 backup() {
   [ -d "$HOME_DIR/data" ] || return 0
   dest="$HOME_DIR/backups/data-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$(dirname "$dest")"
-  ditto "$HOME_DIR/data" "$dest"
+  # A stopping server still removes its WAL files, so wait for it to exit and retry if a file vanishes.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -s -o /dev/null --max-time 1 "$ADDRESS/health" || break
+    sleep 1
+  done
+  for attempt in 1 2 3; do
+    rm -rf "$dest"
+    if ditto "$HOME_DIR/data" "$dest"; then return 0; fi
+    [ "$attempt" = 3 ] || sleep 2
+  done
+  rm -rf "$dest"
+  return 1
 }
 
 install_server() {

@@ -200,6 +200,7 @@ func TestResumeReportsRetries(t *testing.T) {
 	if _, err := session.Send(t.Context(), turn("continue this turn"), nil); err != nil {
 		t.Fatal(err)
 	}
+	queueTurn(t, session.(*durableSession), "continue this turn")
 	var retries atomic.Int32
 	result, err := session.(*durableSession).Resume(t.Context(), 0, func(delta Delta) error {
 		if delta.Kind == "run.retrying" {

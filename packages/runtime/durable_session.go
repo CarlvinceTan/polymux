@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/MichaelKinsy/PiG/chord"
 	"github.com/MichaelKinsy/PiG/durable"
 	"github.com/MichaelKinsy/PiG/durable/env"
 	envnode "github.com/MichaelKinsy/PiG/durable/env/node"
@@ -241,6 +243,9 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (D
 			_ = session.Close()
 		}
 	}()
+	if !d.Intro {
+		connected = append(connected, d.CodeTools...)
+	}
 	connected, err = wrapMCP(connected, session.beforeMCP, session.afterMCP)
 	if err != nil {
 		return nil, err
@@ -356,14 +361,18 @@ const MaxRequestBytes = 128 << 10
 type modelRegistry struct {
 	mu      sync.RWMutex
 	id      string
+	name    string
 	api     ai.API
 	baseURL string
 	key     string
 	client  Client
-	open    func(model string) ai.Provider
+	open    func(model *ai.Model) ai.Provider
 	// reasoning lets a bot's reasoning level reach the provider; the fallback endpoint never had it.
 	reasoning bool
 	windows   map[string]int
+	// levels are the reasoning levels each model declares, by model; nil takes high.
+	levels    map[string][]string
+	vision    map[string]bool
 	providers map[string]ai.Provider
 	models    []*ai.Model
 	// builtin is the PiG provider that owns this provider's endpoints, models and sign-in.
@@ -372,10 +381,22 @@ type modelRegistry struct {
 }
 
 // newModelRegistry serves the configured OpenAI-compatible endpoint, the development fallback.
+// Google's endpoint, including its OpenAI-compatible path, is served by PiG's Gemini provider,
+// since the compatible path loses the thought signatures Gemini needs between tool calls.
 func newModelRegistry(baseURL, key string, client Client) *modelRegistry {
 	r := &modelRegistry{id: DurableProvider, api: ai.APIOpenAICompletions, baseURL: baseURL, key: key, client: client, providers: make(map[string]ai.Provider)}
-	r.open = func(model string) ai.Provider {
-		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: baseURL, APIKey: key, Model: model, ProviderID: r.id, ExtraHeaders: client.Headers})
+	r.open = func(model *ai.Model) ai.Provider {
+		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: baseURL, APIKey: key, Model: model.ID, ProviderID: r.id, ExtraHeaders: client.Headers})
+	}
+	if u, err := url.Parse(baseURL); err == nil && u.Hostname() == "generativelanguage.googleapis.com" {
+		if google := builtinProvider("google"); google != nil {
+			store := ai.NewInMemoryCredentialStore()
+			if _, err := store.Modify(context.Background(), r.id, func(*ai.Credential) (*ai.Credential, error) {
+				return &ai.Credential{Type: ai.CredentialAPIKey, Key: key}, nil
+			}); err == nil {
+				r.builtin, r.credentials, r.baseURL = google, store, ""
+			}
+		}
 	}
 	return r
 }
@@ -383,6 +404,7 @@ func newModelRegistry(baseURL, key string, client Client) *modelRegistry {
 // ProviderSpec is a provider from Settings that chats can use.
 type ProviderSpec struct {
 	ID      string
+	Name    string
 	Type    string
 	BaseURL string
 	Key     string
@@ -393,6 +415,10 @@ type ProviderSpec struct {
 	Preferred string
 	// Windows holds the context windows the provider reported, by model.
 	Windows map[string]int
+	// Levels holds the reasoning levels each model declares, by model.
+	Levels map[string][]string
+	// Vision names the models that take pictures, such as screenshots a tool returns.
+	Vision map[string]bool
 	// Builtin is the PiG provider serving this type, with its credential in Credentials; nil uses BaseURL and Key.
 	Builtin     *ai.ModelsProvider
 	Credentials ai.CredentialStore
@@ -404,10 +430,21 @@ func SettingsProvider(id string) string { return "settings:" + id }
 // newSpecRegistry serves a local or custom Settings provider over the OpenAI-compatible API.
 func newSpecRegistry(spec ProviderSpec) *modelRegistry {
 	client := Client{Headers: spec.Headers, Session: spec.Session}
-	r := &modelRegistry{id: SettingsProvider(spec.ID), baseURL: spec.BaseURL, key: spec.Key, client: client, reasoning: true, windows: spec.Windows, providers: make(map[string]ai.Provider)}
+	r := &modelRegistry{id: SettingsProvider(spec.ID), name: spec.Name, baseURL: spec.BaseURL, key: spec.Key, client: client, reasoning: true,
+		windows: spec.Windows, levels: spec.Levels, vision: spec.Vision, providers: make(map[string]ai.Provider)}
 	r.api = ai.APIOpenAICompletions
-	r.open = func(model string) ai.Provider {
-		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: spec.BaseURL, APIKey: spec.Key, Model: model, ProviderID: r.id, ExtraHeaders: spec.Headers})
+	r.open = func(model *ai.Model) ai.Provider {
+		config := ai.OpenAIConfig{BaseURL: spec.BaseURL, APIKey: spec.Key, Model: model.ID, ProviderID: r.id, ExtraHeaders: spec.Headers}
+		// The provider reads image support from its own metadata, not the catalogue's model.
+		if slices.Contains(model.Input, "image") {
+			if known, ok := ai.LookupModel(r.id + "/" + model.ID); ok {
+				model.ThinkingLevelMap = known.ToModel().ThinkingLevelMap
+			} else if known, ok := ai.LookupModel(model.ID); ok {
+				model.ThinkingLevelMap = known.ToModel().ThinkingLevelMap
+			}
+			config.ModelMetadata = model
+		}
+		return ai.NewOpenAIProvider(config)
 	}
 	for _, model := range spec.Models {
 		r.add(model)
@@ -417,12 +454,22 @@ func newSpecRegistry(spec ProviderSpec) *modelRegistry {
 
 // newBuiltinRegistry serves a Settings provider through PiG's own provider.
 func newBuiltinRegistry(spec ProviderSpec) *modelRegistry {
-	r := &modelRegistry{id: SettingsProvider(spec.ID), client: Client{Headers: spec.Headers, Session: spec.Session}, windows: spec.Windows,
+	r := &modelRegistry{id: SettingsProvider(spec.ID), name: spec.Name, client: Client{Headers: spec.Headers, Session: spec.Session}, windows: spec.Windows,
 		builtin: spec.Builtin, credentials: spec.Credentials, providers: make(map[string]ai.Provider)}
 	for _, model := range spec.Models {
 		r.add(model)
 	}
 	return r
+}
+
+// builtinProvider is PiG's own provider with this ID, or nil.
+func builtinProvider(id string) *ai.ModelsProvider {
+	for _, p := range ai.BuiltinProviders() {
+		if p.ID == id {
+			return p
+		}
+	}
+	return nil
 }
 
 func (r *modelRegistry) catalogued(id string) *ai.Model {
@@ -458,7 +505,6 @@ func (r *modelRegistry) add(id string) {
 	if _, exists := r.providers[id]; exists {
 		return
 	}
-	r.providers[id] = r.open(id)
 	window := r.windows[id]
 	if window <= 0 {
 		window = r.client.Window
@@ -467,11 +513,35 @@ func (r *modelRegistry) add(id string) {
 		window = DefaultWindow
 	}
 	model := &ai.Model{ID: id, Capabilities: ai.ModelCapabilities{ContextWindow: window}, ProviderMeta: ai.ProviderMetadata{ProviderID: r.id, API: r.api, BaseURL: r.baseURL}}
-	if r.reasoning {
-		model.Capabilities.MaxThinking = ai.ThinkingLevelHigh
-		model.ProviderMeta.Reasoning = true
+	if r.vision[id] {
+		model.Input = []string{"text", "image"}
+		model.Capabilities.SupportsImages = true
 	}
+	if r.reasoning {
+		if top := maxThinking(r.levels[id]); top != ai.ThinkingOff {
+			model.Capabilities.MaxThinking = ai.ThinkingLevel(top)
+			model.ProviderMeta.Reasoning = true
+		}
+	}
+	r.providers[id] = r.open(model)
 	r.models = append(r.models, model)
+}
+
+// thinkingRank orders Pi's thinking levels, lowest first.
+var thinkingRank = []ai.ModelThinkingLevel{ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow, ai.ThinkingMedium, ai.ThinkingHigh, ai.ThinkingXHigh, ai.ThinkingMax}
+
+// maxThinking is the highest level the model declares, high when it declares none.
+func maxThinking(levels []string) ai.ModelThinkingLevel {
+	if len(levels) == 0 {
+		return ai.ThinkingHigh
+	}
+	best := ai.ThinkingOff
+	for _, level := range thinkingRank {
+		if slices.Contains(levels, string(level)) {
+			best = level
+		}
+	}
+	return best
 }
 
 func (r *modelRegistry) list() []*ai.Model {
@@ -504,7 +574,7 @@ func (r *modelRegistry) register(models *ai.Models) {
 		}, r.client.Session)(ctx, selected, transcript, opts)
 	}
 	models.SetProvider(&ai.ModelsProvider{
-		ID: r.id, Name: r.id, BaseURL: r.baseURL,
+		ID: r.id, Name: r.name, BaseURL: r.baseURL,
 		GetModels: func() ([]*ai.Model, error) {
 			return r.list(), nil
 		},
@@ -537,8 +607,12 @@ func (r *modelRegistry) registerBuiltin(models *ai.Models) {
 		return r.builtin.StreamSimple(ctx, &selected, transcript, opts)
 	}, r.client.Session)
 	auth := r.builtin.Auth
+	name := r.name
+	if name == "" {
+		name = r.builtin.Name
+	}
 	models.SetProvider(&ai.ModelsProvider{
-		ID: r.id, Name: r.builtin.Name, Headers: r.builtin.Headers,
+		ID: r.id, Name: name, Headers: r.builtin.Headers,
 		GetModels: func() ([]*ai.Model, error) {
 			return r.list(), nil
 		},
@@ -569,7 +643,8 @@ func passthrough(open ai.ModelsStreamFunction, session string) ai.ModelsStreamFu
 		id := markerID(transcript)
 		opts.MaxRetries = new(0)
 		opts.Headers = sessionHeaders(opts.Headers, session, opts.SessionID)
-		if opts.Fetch == nil {
+		// Google's adapters make their own requests and refuse a custom client.
+		if opts.Fetch == nil && !ownsClient(model) {
 			opts.Fetch = retryClient()
 		}
 		// Upstream owns the summarizer prompt, so pin facts here; the summary entry stores the copy.
@@ -753,7 +828,9 @@ type durableSession struct {
 	emitMu sync.Mutex
 	emit   func(Delta) error
 	// park is set when BeforeTool requests Terminate; AfterTools aborts the in-flight turn.
-	park       atomic.Bool
+	park atomic.Bool
+	// blocked names calls a blocked BeforeTool never started; afterTool still runs for them.
+	blocked    sync.Map
 	clients    []*mcp.Client
 	extensions []*durable.Extension
 	runtime    *DurableRuntime
@@ -825,6 +902,7 @@ func (s *durableSession) hooks() []durable.HookRegistration {
 					if decision.Terminate {
 						s.park.Store(true)
 					}
+					s.blocked.Store(call.ID, struct{}{})
 					return &harness.BeforeToolResult{Block: &reason}, nil
 				}
 				s.report(Delta{Kind: "tool.start", ToolID: call.ID, Tool: call.Name, Brief: toolSummary(call.Name, raw)})
@@ -839,6 +917,9 @@ func (s *durableSession) hooks() []durable.HookRegistration {
 			},
 			AfterTool: func(ctx context.Context, call harness.ToolHookCall, result durable.ToolExecutionResult, api harness.HookApi) (*durable.ToolExecutionResult, error) {
 				if _, ok := s.turnContext(api.ConversationId(), ctx); !ok {
+					return nil, nil
+				}
+				if _, blocked := s.blocked.LoadAndDelete(call.ID); blocked {
 					return nil, nil
 				}
 				s.report(Delta{Kind: "tool.done", ToolID: call.ID, Tool: call.Name, Failed: result.IsError != nil && *result.IsError, Output: toolExcerpt(result.Output)})
@@ -1215,6 +1296,9 @@ func (s *durableSession) replay(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	if settled.State.Outcome == nil || settled.State.Outcome.Status != durable.OutcomeCompleted {
+		if outcome := settled.State.Outcome; outcome != nil && outcome.Error != nil {
+			return Result{}, fmt.Errorf("resume did not finish (%s): %s", outcome.Status, outcome.Error.Message)
+		}
 		return Result{}, errors.New("resume did not finish")
 	}
 	// A tool round completes its generation before starting the next one.
@@ -1326,7 +1410,7 @@ func (s *durableSession) stream(ctx context.Context, emit func(Delta) error) fun
 	if emit == nil {
 		return func() {}
 	}
-	watch, err := s.conversation.Watch(ctx)
+	watch, err := s.conversation.Watch(ctx, nil)
 	if err != nil {
 		return func() {}
 	}
@@ -1334,7 +1418,11 @@ func (s *durableSession) stream(ctx context.Context, emit func(Delta) error) fun
 	seen := ""
 	started := false
 	compactions := map[durable.EntryId]bool{}
-	watch.Start(func(_ context.Context, view harness.ConversationView, _ []durable.Op) error {
+	watch.Start(func(_ context.Context, change chord.WatchCall[harness.ConversationView]) error {
+		if change.Kind == chord.WatchCallFailed {
+			return nil
+		}
+		view := change.Value
 		mu.Lock()
 		defer mu.Unlock()
 		for _, entry := range view.Entries {

@@ -222,7 +222,7 @@ func TestMergeKeepsSecretValues(t *testing.T) {
 	keys := map[*node]*vaultKeys{a: {}, b: {}}
 	for n, key := range keys {
 		n.api.vault.Close()
-		store, err := vaultstore.Open(t.Context(), n.api.Store.DB, key)
+		store, err := vaultstore.Open(t.Context(), filepath.Join(n.api.config.DataDir, "vault"), key)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +248,7 @@ func TestMergeKeepsSecretValues(t *testing.T) {
 	if err := a.api.secrets.Save("owner", secrets.Credential{Name: "api", Origin: "https://example.com", Value: "mine"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := mergeSealed(t, a, b, []network.MovedKey{{Service: "com.polymux.vault", Value: hex.EncodeToString(keys[b].value)}}); err != nil {
+	if err := mergeSealed(t, a, b, []network.MovedKey{{Service: "com.polymux.vault", Suffix: "/password", Value: hex.EncodeToString(keys[b].value)}}); err != nil {
 		t.Fatal(err)
 	}
 	<-exited

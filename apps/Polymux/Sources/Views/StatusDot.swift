@@ -3,16 +3,25 @@ import SwiftUI
 /// Whether a device is connected, shown as a small light.
 struct StatusDot: View {
     enum State {
-        case online, offline, pairing, checking, unknown
+        case online, offline, pairing, checking, unknown, lastOnline, lastOffline
 
-        /// The light in words; nil when presence isn't known.
-        var title: String? {
+        /// The light in words.
+        var title: String {
             switch self {
             case .online: "Online"
             case .offline: "Offline"
             case .pairing: "Pairing"
             case .checking: "Checking"
-            case .unknown: nil
+            case .unknown: "Unknown"
+            case .lastOnline: "Last seen online"
+            case .lastOffline: "Last seen offline"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .unknown: "Status unknown"
+            default: title
             }
         }
     }
@@ -24,7 +33,10 @@ struct StatusDot: View {
             switch state {
             case .online: Circle().fill(Color("Online"))
             case .offline: Circle().fill(Color("Offline"))
-            case .unknown: Color.clear
+            // Cached presence, outlined so it doesn't read as live.
+            case .lastOnline: Circle().strokeBorder(Color("Online"), lineWidth: 1.5)
+            case .lastOffline: Circle().strokeBorder(Color("Offline"), lineWidth: 1.5)
+            case .unknown: Circle().strokeBorder(.secondary, lineWidth: 1.5)
             case .pairing, .checking:
                 // Fills and empties while the state is still settling.
                 Circle().strokeBorder(.secondary, lineWidth: 1.5)
@@ -35,6 +47,6 @@ struct StatusDot: View {
         }
         .frame(width: 8, height: 8)
         .accessibilityElement()
-        .accessibilityLabel(state.title ?? "Status unknown")
+        .accessibilityLabel(state.label)
     }
 }

@@ -34,13 +34,25 @@ struct ProviderGroup: Identifiable {
     static func collect(_ providers: [Provider], names: [String: String]) -> [Self] {
         var groups: [Self] = []
         for provider in providers {
-            if let index = groups.firstIndex(where: { $0.id == provider.type }) {
+            // The user names servers they point at; each one gets its own row.
+            let own = server(provider.type)
+            let id = own ? provider.id : provider.type
+            if let index = groups.firstIndex(where: { $0.id == id }) {
                 groups[index].connections.append(provider)
             } else {
-                let name = names[provider.type] ?? ProviderPreset(rawValue: provider.type)?.label ?? provider.name
-                groups.append(Self(id: provider.type, name: name, connections: [provider]))
+                let preset = ProviderPreset(rawValue: provider.type)?.label
+                let name = own ? (provider.name.isEmpty ? preset ?? provider.type : provider.name)
+                    : names[provider.type] ?? preset ?? provider.name
+                groups.append(Self(id: id, name: name, connections: [provider]))
             }
         }
         return groups
+    }
+
+    private static func server(_ type: String) -> Bool {
+        switch ProviderPreset(rawValue: type) {
+        case .custom, .ollama, .lmstudio: true
+        default: false
+        }
     }
 }

@@ -21,7 +21,6 @@ These workflows start when the user indicates the relevant intent; no exact skil
 | [cdesign](../.agents/skills/cdesign/SKILL.md) | General UI rules: responsiveness, layout balance, native platform fit, generic AI patterns to reject, text, accessibility, and contrast. Use with [`DESIGN.md`](../DESIGN.md), which holds Polymux-specific policies. |
 | [avatar-preview](../.agents/skills/avatar-preview/SKILL.md) | Animated GIF previews using the real avatar renderer. Use to review avatars, emotions, motion and state effects without launching the app. |
 | [cua-driver](../.agents/skills/cua-driver/SKILL.md) | Operating and verifying real native app UI. This is the current driver for manual checks and E2E flows. |
-| [ui-control](../.agents/skills/ui-control/SKILL.md) | Inspecting or capturing an owned test instance with the experimental Control tool. Observation only; it cannot perform input or replace Cua. See [Control candidate](control.md). |
 
 ## Website
 
@@ -37,7 +36,7 @@ Use these when the task calls for them.
 | Skill | What it's for |
 | --- | --- |
 | [mobile-native](../.agents/skills/mobile-native/SKILL.md) | Web fixes for phones, such as sticky hover and input zoom. For the website only; the app is native. |
-| [agent-browser](../.agents/skills/agent-browser/SKILL.md) | Exploratory browser checks, using your own `--session`. It drives Chrome, so regression coverage stays in `apps/site/test/`, which also runs WebKit. Native app UI uses cua-driver or ui-control. Needs the CLI; its `skills get core` command serves the guide for the installed version. |
+| [agent-browser](../.agents/skills/agent-browser/SKILL.md) | Exploratory browser checks, using your own `--session`. It drives Chrome, so regression coverage stays in `apps/site/test/`, which also runs WebKit. Native app UI uses cua-driver. Needs the CLI; its `skills get core` command serves the guide for the installed version. |
 
 ## Go server
 
@@ -64,6 +63,6 @@ Start with **golang-how-to** for Go work. It identifies the relevant topic skill
 
 - Edit the skill's own `SKILL.md` for its instructions; keep this page as a short index.
 - [`.claude/skills`](../.claude/skills) links to `.agents/skills/`, so there is no second copy to maintain.
-- [`skills-lock.json`](../skills-lock.json) records sources and hashes for imported skills. Repository-created skills such as `cdesign`, `avatar-preview`, and `ui-control` live directly in the checkout.
+- [`skills-lock.json`](../skills-lock.json) records sources and hashes for imported skills. Repository-created skills such as `cdesign` and `avatar-preview` live directly in the checkout.
 
 The **Skills up to date** CI check reports available updates on pull requests and pushes to `dev` or `main`, respecting pinned refs. Updates and check errors produce warnings while the check passes; details appear in its job summary. It does not update skills or the lock file.

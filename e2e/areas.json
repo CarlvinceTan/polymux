@@ -6,8 +6,8 @@
      "flows": ["fixture-sidebar*", "fixture-markers.js", "fixture-window-reopen.js", "sections.js", "section-bot.js", "unassigned.js", "relaunch.js"]},
     {"paths": ["*/Views/ChatPane.swift", "*/Views/ChatHeader.swift", "*/Views/ScrollDate.swift", "*/Views/ReplyPreview.swift", "*/Views/BubbleStyle.swift", "*/Views/MediaView.swift", "*/Views/MediaGrid.swift", "*/Views/AttachmentPreview.swift", "*/Views/AudioView.swift", "*/PolymuxKit/ChatStore.swift"],
      "flows": ["fixture-chat*", "fixture-history.js", "fixture-scroll-latest.js", "fixture-replies.js", "fixture-reply-*", "fixture-media.js", "fixture-unsent.js", "fixture-status.js", "chat.js", "replies.js"]},
-    {"paths": ["*/Views/ComposerView.swift", "*/Views/DraftPreview.swift", "*/Views/KeptDraft.swift", "*/Views/DictationInput.swift", "*/Views/DictationPolish.swift", "*/PolymuxKit/DraftStore.swift"],
-     "flows": ["fixture-composer-layout.js", "fixture-draft.js", "fixture-dictation.js", "fixture-mentions.js", "composer-keyboard.js", "chat.js"]},
+    {"paths": ["*/Views/ComposerView.swift", "*/Views/WarningBubble.swift", "*/Views/DraftPreview.swift", "*/Views/KeptDraft.swift", "*/SpeechKit/Dictation.swift", "*/Views/DictationPolish.swift", "*/PolymuxKit/DraftStore.swift"],
+     "flows": ["fixture-composer-layout.js", "fixture-draft.js", "fixture-dictation.js", "fixture-reply-stack.js", "fixture-mentions.js", "composer-keyboard.js", "chat.js"]},
     {"paths": ["*/Views/ProfileView.swift", "*/Views/OpenChat.swift", "*/Views/GroupEditor.swift", "*/Views/InlineInput.swift", "*/PolymuxKit/ProfileStore.swift"],
      "flows": ["fixture-profile*", "fixture-inline-text.js", "fixture-tasks.js", "fixture-gallery-scroll.js", "profile-text.js", "instructions.js", "mute.js", "reasoning.js", "group.js"]},
     {"paths": ["*/Views/Provider*.swift", "*/Views/ModelLabel.swift", "*/PolymuxKit/ProviderStore.swift", "*/PolymuxKit/ProviderSignIn.swift"],
@@ -24,6 +24,10 @@
      "flows": ["fixture-new-*", "empty-groups.js", "random-name.js", "group.js"]},
     {"paths": ["*/Views/AddDevice.swift", "*/Views/DeviceView.swift", "*/Views/ConnectionStatus.swift", "*/PolymuxKit/Network*.swift", "*/PolymuxKit/Pairing.swift"],
      "flows": ["fixture-devices*", "fixture-pairing.js", "fixture-status*"]},
+    {"paths": ["*/Plugins/*", "*/PluginFixture.swift", "*/PolymuxKit/PluginStore.swift"],
+     "flows": ["fixture-plugin*"]},
+    {"paths": ["*/Hub/*", "*/PolymuxKit/HubStore.swift"],
+     "flows": ["fixture-hub*"]},
     {"paths": ["*/AvatarUI/*", "*/Avatar/*", "packages/AvatarKit/**"],
      "flows": ["fixture-avatar*", "fixture-new-bot.js", "fixture-actions.js"]}
   ]

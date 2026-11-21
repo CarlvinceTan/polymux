@@ -1,0 +1,147 @@
+# Plugins
+
+The app and server ship no plugin code. A plugin is a versioned package listed in an index file, and it's installed only when someone asks for that version. The model follows [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/plugin-market.md): one JSON index, an explicit confirmation showing the source, and pinned versions.
+
+## Three kinds
+
+| | Global | Scoped | Both |
+| --- | --- | --- | --- |
+| Applies to | Everything | The chats it's active in, direct or group | Everything, with a button in the chats it's active in |
+| UI | A switcher entry that replaces the sidebar and content | A button left of the call button, opening the side panel; optional | A row above the chats that fills the content beside them, plus the Scoped button |
+| Example | Hub | A chat's notes | Canvas |
+
+The switcher only appears once a Global plugin can be shown or a second server is known, and always keeps Chats. With more than one server it lists each server's Chats, named after the server, and its Global plugins, and picking one moves the app to that server. iPhone's icons show the server's initial instead, or a number when initials clash. It's the native tab bar on iPhone and sits at the foot of the sidebar elsewhere. The sidebar's Search and + buttons stay in place and act on the plugin on show. Unread badges on the switcher can be turned off in Settings. Scoped buttons share one layout, and each chat shows only those active in it. On iPhone they collapse into a menu. The call button, the sidebar button and the side panel's close button belong to the app.
+
+## Policy lives in plugins
+
+The server has no permission policy, no approval prompts, no usage limits and no cost rules of its own. Those are plugin decisions, so a network can change them without changing Polymux, and a bot's rules can be as simple or as complex as the person wants.
+
+- **Permissions and approval** belong to a gate plugin. A gate answers `allow`, `deny` or `ask`. An `ask` carries the question, its options and what each answer means; Polymux writes the card, waits, and hands the chosen option back. Whether to ask, what to show and what "always" remembers stay in the plugin. [`permissions`](../plugins/permissions) is the first gate and the reference for this.
+- **Usage and cost** belong to a usage plugin. The server records token use on every final message and knows the model's price; it does not decide what to show. A usage plugin can read subscription windows, credits, tokens per second or anything else a provider exposes, keep its own settings, and render its own surface. No usage plugin ships yet; the data is there for one to read.
+- **Anything else that judges a call** — rate limits, spend caps, content policy — is a gate or tools plugin, not a core setting. A new capability means a plugin API addition, not a rule in the server.
+
+## How it fits together
+
+- **Index**: [`plugins/index.json`](../plugins/index.json) on `dev`, served at `https://polymux.com/plugins/index.json`. The server reads it from `POLYMUX_PLUGIN_INDEX`, an `index-url` file in its plugins folder, or that default address. The last good copy is kept for offline use.
+- **Website**: `apps/site` fetches the same index when it builds and lists it at `/plugins/`, so a new release shows there at the next site build. A failed fetch stops the build. `POLYMUX_SITE_REGISTRY` points a build at a local index instead.
+- **Package**: a `.tgz` with a `plugin.json` at its root. The package decides what a plugin is, not its index row. Downloads are checked against the index's SHA-256 before unpacking.
+- **Install state and layout**: on the server (`internal/plugins`, `plugins` tables), shared by every client.
+- **Service**: a package may run one process. The server supervises it, gives it a port and token, and forwards `/plugins/{name}/api/*` to it through the normal device authentication. It gets its own folder for data, and uninstalling removes that folder.
+- **Screens**: a plugin can name a native `surface` the app already ships or package a web page. An app without the requested surface shows Needs update. See [Web pages](#web-pages).
+- **Skills**: `skills` in `plugin.json` lists Markdown skill files, and `plugins/scripts/package.sh` ships them. A Global or both plugin's apply to every chat, and a Scoped plugin's to its active chats. They reach an agent when its session next opens.
+
+## Capabilities and settings
+
+Everything beyond `kind` is opt-in. A plugin may have a `surface`, a `service`, `skills`, `settings`, and `provides`, which names what the service offers Polymux. The capabilities are `transport`, `gate` and `tools`; each needs a `service`.
+
+`settings` lists options as `key`, `title`, `type` (`bool` or `text`) and `default`. The server keeps the values in the plugin's data folder (`GET`/`PUT /plugins/{name}/settings`), points the service at that file with `POLYMUX_PLUGIN_SETTINGS`, and restarts the service on a change.
+
+## Transports
+
+A transport plugin makes this server reachable from other networks, so a phone needs nothing beyond the plugin. The server gives its service two loopback addresses and asks where they ended up:
+
+- `POLYMUX_PUBLISH_API`: the plain-HTTP API listener. The transport terminates TLS for it.
+- `POLYMUX_PUBLISH_DEVICE`: the pinned-TLS device listener. The transport must pass it through untouched, or the pinned fingerprint no longer matches.
+- `GET /transport` on the service answers `{state, message, api, device}`, with `state` one of `starting`, `ready` or `error`. A ready `api` goes in invite links; a ready `device` goes in device pairing links.
+
+`GET /transports` on the server lists every transport's report. [`tailscale`](../plugins/tailscale) runs `tailscale serve` for both listeners and reports the MagicDNS addresses; its HTTPS needs certificates enabled once in the Tailscale admin console. [`opentunnel`](../plugins/opentunnel) points an OpenTunnel route at the API listener and requires the `opentunnel` CLI and a dedicated profile. It terminates TLS on this machine and has no raw pass-through, so it publishes only the API listener.
+
+New pairing links follow **Settings → Network**: the chosen transport when it is ready, otherwise the configured public URL, then the first ready plugin (by name), then Iroh.
+
+## Tools
+
+A `tools` plugin gives agents tools its service answers. `tools` in `plugin.json` lists each one's `name`, `description` and JSON Schema `parameters`.
+
+- **Asking**: `POST /tools/{name}` on the service receives `{chat, agent, args}` and answers `{text}`, which goes back to the model marked as untrusted. With plugin API 7 it may add `images: [{data, mimeType}]`, base64 pictures such as screenshots (at most four are kept), and `structured`, JSON a codemode script reads as `structuredContent`.
+- **Which chats**: tools follow the same rule as skills, and reach an agent when its session next opens.
+- **Codemode**: like MCP tools, plugin tools aren't offered to the model one by one. They sit inside the one `codemode` tool beside every MCP server's tools, and a script calls them as `tools.plugin_name__tool_name(args)` (`CodeTools` in `packages/runtime`). A script hands a picture to the model with `image()`.
+- **Names**: an agent sees `plugin_name__tool_name`, with the plugin's hyphens as underscores. Gates decide these calls like any other.
+
+## Gates
+
+A gate is a Scoped plugin that decides agent tool calls in its active chats. Polymux asks it from `beforeTool` (`internal/server/coordination.go`), which every tool call passes, MCP calls inside codemode and voice turns included.
+
+- **Asking**: `POST /gate` on the service receives `{chat, agent, dir, tool, args}` and answers `{allow, reason}` or `{ask}`. A refused call never runs, and `reason` goes back to the model as its result.
+- **Approving**: an `ask` is `{title, detail, options: [{id, label, outcome}]}`. Polymux posts it as a card in the chat and waits; an answer comes back to the same gate as `answer`, so the plugin can allow the call, deny it, or remember it. A gate asks once per call — a second ask declines, so a plugin can't hold a turn forever. Plugin API version 5 adds this to the gate protocol.
+- **Which chats**: a run answers to its own chat and to the chats of whatever started it, so a child task, a peer request or a task thread stays under the rules of the chat it came from (`boundChats`).
+- **Failing closed**: every gate has to allow a call. A gate that's stopped, failed or being reinstalled blocks calls in its chats. Only turning it off for a chat or uninstalling it lifts its rules, and agents have no tool for either.
+- **This machine**: `http_request` can't reach this machine from a bound chat, since an agent could read the local token and change its rules through the API.
+- **New bots**: a bound agent can't hire a bot with a first task, which would start with no parent run. It can hire one and message it, which keeps the rules.
+
+### Permissions
+
+[`permissions`](../plugins/permissions) is the first gate. Each chat gets a list of rules, edited in its side panel and kept in the plugin's data folder. A rule reads as one sentence: when a bot **runs a command**, **reads a file**, **writes a file** or **uses a tool** matching a pattern, **allow**, **ask** or **deny** it.
+
+| Kind | Covers | Pattern |
+| --- | --- | --- |
+| `read` | `read`, `find`, `ls`, `grep`, `attach_file` | A path. `*` stays within a folder, `**` crosses them |
+| `write` | `write`, `edit` | A path |
+| `command` | `bash`, `run_device` | A command. `*` matches anything |
+| `tool` | Every tool, by name | A name, such as `github__*` |
+
+`deny` wins, then `ask`, then a wildcard `allow`. An exact `allow` (the one "Always allow" adds) settles the call without asking again. A kind with any wildcard allow rule becomes an allow list, so whatever they don't cover is blocked. An empty pattern covers everything of that kind.
+
+- **Paths** resolve as the file tools do, then again with links followed, so `..` and symlinks don't get around a rule. No rule can open the plugin's own folder.
+- **Commands** are parsed, and each command in a line has to pass on its own, nested ones included. With allow rules, anything that can't be judged without running it is blocked: a command name built from variables, a redirect to a file, or an assignment.
+
+Bash runs unsandboxed as the server's user, so path rules only bind the file tools. While commands are unrestricted, a bot can still reach those files and even edit the rules, and the panel says so. Deny rules on commands are best effort, since `sh -c` can hide a name. An allow list is the firm option, but it's only as tight as its commands: allowing `python *` allows anything.
+
+## Web pages
+
+A Scoped plugin can set `"surface": "web"` and `"page": "ui/index.html"` instead of using a built-in screen. A Both plugin can use `"surface": "web-workspace"` with plugin API 6 to open the same page above the chats and in a chat's side panel. In the workspace, `polymux.chat` is empty. Only Marketplace plugins can use this surface.
+
+- **What the app keeps**: the panel's edge, which resizes it and collapses it past half its minimum width, and the close button. `"hideClose": true` removes the button, and the page closes the panel with `polymux.close()`. On iPhone the panel is a page, so the system's Back stays.
+- **Reaching the server**: the page loads from `polymux-plugin://<name>/`, a scheme the app answers itself (`PluginWeb.swift`). Files come from `GET /plugins/{name}/ui/*`, only out of the folder holding the page, and `api/*` goes to the plugin's service. The page never holds the device's credential and can't reach other plugins or the rest of the API. Responses arrive whole, so streaming doesn't work.
+- **In the page**: `polymux.chat`, `?chat=`, and `document.documentElement.dataset.theme` with a `polymux:theme` event. Storage is thrown away with the view. Other sites can be loaded inside the page; following a link to one opens the browser.
+- **Activity**: a web workspace can declare `"activity": true` to read bot names, run states and handoffs at `api/_host/activity`. It does not receive messages, tool input or output, run summaries, or credentials.
+
+## Plugins made by bots
+
+A bot can build a plugin in a folder and install it without an index, so it never reaches the Marketplace. The bundled [`plugin-creator`](../apps/server/internal/skills/plugin-creator/SKILL.md) skill teaches the format.
+
+- **Installing**: `install_plugin` checks the folder and copies it to `.pending/`, then posts a card. Only a person answering that card installs it (`internal/plugins/local.go`, `internal/server/plugin_install.go`), and it turns on in that chat. The card's install answer is out of reach of `ask_user`.
+- **Limits**: direct chats only, never a chat under a gate. A local plugin is Scoped or tools-only, can't be a transport or a gate, can't use a built-in surface, and can't replace a plugin from an index.
+- **Source**: shows as `Made by <bot>` under Installed. A plugin's service runs as the server's user, so the card says so. A bot with a shell can already do what a plugin can; the card is consent, not a sandbox.
+
+## plugin.json
+
+```json
+{
+  "name": "hub",
+  "title": "Hub",
+  "description": "Your messages and mail in one place.",
+  "symbol": "tray.2",
+  "selectedSymbol": "tray.2.fill",
+  "version": "0.1.1",
+  "kind": "global",
+  "surface": "hub",
+  "engines": { "plugins": 3 },
+  "service": "bin/polymux-hub",
+  "skills": ["skills/email.md"],
+  "provides": ["tools"],
+  "tools": [{ "name": "email_accounts", "description": "List the user's mailboxes.", "parameters": { "type": "object", "properties": {} } }]
+}
+```
+
+A transport adds `"provides": ["transport"]` and, if it has options, `"settings": [{ "key": "https-port", "title": "HTTPS port", "type": "text", "default": "8443" }]`; see the Tailscale plugin's [`plugin.json`](../plugins/tailscale/plugin.json).
+
+`symbol` and `selectedSymbol` are the SF Symbol's unfilled and filled forms, for unselected and selected, and they're the only UI a plugin sets. A plugin with a `surface` must set both, or the install is refused. `engines.plugins` is the plugin API version it needs (`plugins.APIVersion`).
+
+## Activity
+
+The [Canvas plugin](../plugins/canvas) owns its editor, repository scans, and agent reports. It combines read-only activity summaries with editable cards, wires, and positions. The workspace and each chat save their own board. Opening it in a chat filters the live activity shown, not who can read a report.
+
+## Computer Use and Context
+
+Both are Scoped tools plugins for the computer the server runs on, so they're turned on per chat under Settings → Plugins.
+
+- [`computer-use`](../plugins/computer-use) keeps one `cua-driver mcp` session open, which drives apps and the browser using CuaDriver.app's own Accessibility and Screen Recording grants. It exposes a restricted list of desktop and browser tools and asks for approval before each action. It does not expose driver scripts, nested steps or file transfer.
+- [`context`](../plugins/context) is cstack's `context` tool ported to Go: the front app and window, input idle time, prompts on screen, apps, windows, every browser tab, devices and the network. It only reads. Tabs need the Polymux app's Automation consent for each browser, and the prompt check needs cua-driver. On Linux it reads only Tailscale peers.
+
+## Official plugins
+
+[`plugins/`](../plugins/) holds the official plugins as one Go module, kept out of `go.work` so a plugin's dependencies can't change the server's build. Its [README](../plugins/README.md) covers packaging and releasing.
+
+## Hub
+
+Hub, your messages and mail in one place, is the first plugin. [`plugins/hub`](../plugins/hub) holds its service and its documentation. Its screens ship in the app (`surface: "hub"`), its routes sit under `/plugins/hub/api`, and `contracts/generate.py` writes its wire types from the shared schema.

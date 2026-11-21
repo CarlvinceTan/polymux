@@ -1,4 +1,4 @@
-// @fixture --verify-fixture
+// @fixture --verify-fixture --verify-plugins
 // The + menu opens above the composer from +'s leading edge, Escape keeps the draft, and its rows act.
 const app = await cua.getApp(APP);
 const plus = { role: "button", name: "Add attachment" };

@@ -16,12 +16,17 @@ const CardsName = "html-cards"
 
 const cardsFile = CardsName + "/REFERENCE.md"
 
-//go:embed polymux/SKILL.md report/SKILL.md skill-creator/SKILL.md skill-creator/LICENSE.txt html-cards/REFERENCE.md
+//go:embed bot-creator/SKILL.md polymux/SKILL.md report/SKILL.md skill-creator/SKILL.md skill-creator/LICENSE.txt plugin-creator/SKILL.md html-cards/REFERENCE.md
 var files embed.FS
 
 // Polymux returns the bundled guide to Polymux itself.
 func Polymux() (string, error) {
 	return text("polymux/SKILL.md")
+}
+
+// BotCreator returns the bundled guide to designing bots.
+func BotCreator() (string, error) {
+	return text("bot-creator/SKILL.md")
 }
 
 // Report returns the bundled bug-report and feedback skill.
@@ -49,7 +54,7 @@ type Skill struct {
 
 // Names lists the bundled skills in their prompt order.
 func Names() []string {
-	return []string{"polymux", "report", "skill-creator"}
+	return []string{"polymux", "bot-creator", "report", "skill-creator", "plugin-creator"}
 }
 
 // Install writes the bundled skills and the card reference under dir, so an agent can read one

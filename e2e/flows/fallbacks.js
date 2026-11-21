@@ -6,7 +6,7 @@ await app.click({ role: "button", name: "Models" });
 await app.click({ role: "button", name: "Add provider" });
 await app.waitFor({ role: "button", name: "Add custom provider" });
 await app.click({ role: "button", name: "Add custom provider" });
-await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL" });
+await app.typeText(`${ADDRESS}/v1`, { role: "textfield", name: "Base URL" });
 for (const model of ["alpha", "beta", "gamma"]) {
     await app.typeText(model, { role: "textfield", name: "Model ID" });
     await app.click({ role: "button", name: "Add" });

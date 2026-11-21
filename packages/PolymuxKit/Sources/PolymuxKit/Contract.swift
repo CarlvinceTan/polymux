@@ -149,7 +149,9 @@ public struct Settings: Codable, Hashable, Sendable {
     public var defaultModel: String
     public var defaultReasoning: String
     public var updateChannel: String?
+    public var updateMode: String?
     public var switcherBadges: Bool?
+    public var transport: String?
 
     public init(
         revision: Int64 = 0,
@@ -167,7 +169,9 @@ public struct Settings: Codable, Hashable, Sendable {
         defaultModel: String = "",
         defaultReasoning: String = "",
         updateChannel: String? = nil,
-        switcherBadges: Bool? = nil
+        updateMode: String? = nil,
+        switcherBadges: Bool? = nil,
+        transport: String? = nil
     ) {
         self.revision = revision
         self.appearance = appearance
@@ -184,7 +188,9 @@ public struct Settings: Codable, Hashable, Sendable {
         self.defaultModel = defaultModel
         self.defaultReasoning = defaultReasoning
         self.updateChannel = updateChannel
+        self.updateMode = updateMode
         self.switcherBadges = switcherBadges
+        self.transport = transport
     }
 }
 
@@ -203,6 +209,11 @@ public enum SettingsUpdateChannel {
     public static let stable = "stable"
 }
 
+public enum SettingsUpdateMode {
+    public static let automatic = "automatic"
+    public static let manual = "manual"
+}
+
 public struct SettingsPatch: Codable, Hashable, Sendable {
     public var appearance: String?
     public var liveProvider: String?
@@ -217,7 +228,9 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
     public var defaultModel: String?
     public var defaultReasoning: String?
     public var updateChannel: String?
+    public var updateMode: String?
     public var switcherBadges: Bool?
+    public var transport: String?
 
     public init(
         appearance: String? = nil,
@@ -233,7 +246,9 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         defaultModel: String? = nil,
         defaultReasoning: String? = nil,
         updateChannel: String? = nil,
-        switcherBadges: Bool? = nil
+        updateMode: String? = nil,
+        switcherBadges: Bool? = nil,
+        transport: String? = nil
     ) {
         self.appearance = appearance
         self.liveProvider = liveProvider
@@ -248,7 +263,9 @@ public struct SettingsPatch: Codable, Hashable, Sendable {
         self.defaultModel = defaultModel
         self.defaultReasoning = defaultReasoning
         self.updateChannel = updateChannel
+        self.updateMode = updateMode
         self.switcherBadges = switcherBadges
+        self.transport = transport
     }
 }
 
@@ -265,6 +282,11 @@ public enum SettingsPatchDefaultReasoning {
 public enum SettingsPatchUpdateChannel {
     public static let nightly = "nightly"
     public static let stable = "stable"
+}
+
+public enum SettingsPatchUpdateMode {
+    public static let automatic = "automatic"
+    public static let manual = "manual"
 }
 
 public struct AgentFallback: Codable, Hashable, Sendable {
@@ -378,19 +400,6 @@ public enum FallbackModelReasoning {
     public static let max = "max"
 }
 
-public struct AgentACP: Codable, Hashable, Sendable {
-    public var command: String
-    public var args: [String]?
-
-    public init(
-        command: String = "",
-        args: [String]? = nil
-    ) {
-        self.command = command
-        self.args = args
-    }
-}
-
 public struct Agent: Codable, Hashable, Sendable {
     public var id: String
     public var name: String
@@ -401,7 +410,6 @@ public struct Agent: Codable, Hashable, Sendable {
     public var provider: String?
     public var reasoning: String?
     public var fallback: AgentFallback?
-    public var acp: AgentACP?
     public var createdBy: String?
 
     public init(
@@ -414,7 +422,6 @@ public struct Agent: Codable, Hashable, Sendable {
         provider: String? = nil,
         reasoning: String? = nil,
         fallback: AgentFallback? = nil,
-        acp: AgentACP? = nil,
         createdBy: String? = nil
     ) {
         self.id = id
@@ -426,7 +433,6 @@ public struct Agent: Codable, Hashable, Sendable {
         self.provider = provider
         self.reasoning = reasoning
         self.fallback = fallback
-        self.acp = acp
         self.createdBy = createdBy
     }
 }
@@ -602,6 +608,7 @@ public struct Part: Codable, Hashable, Sendable {
     public var allowText: Bool?
     public var credential: CredentialRequest?
     public var vault: VaultCard?
+    public var approval: Approval?
 
     public init(
         kind: String = "",
@@ -615,7 +622,8 @@ public struct Part: Codable, Hashable, Sendable {
         answerText: String? = nil,
         allowText: Bool? = nil,
         credential: CredentialRequest? = nil,
-        vault: VaultCard? = nil
+        vault: VaultCard? = nil,
+        approval: Approval? = nil
     ) {
         self.kind = kind
         self.text = text
@@ -629,6 +637,7 @@ public struct Part: Codable, Hashable, Sendable {
         self.allowText = allowText
         self.credential = credential
         self.vault = vault
+        self.approval = approval
     }
 }
 
@@ -639,6 +648,7 @@ public enum PartKind {
     public static let choice = "choice"
     public static let credential = "credential"
     public static let vault = "vault"
+    public static let approval = "approval"
 }
 
 public struct ReplyContext: Codable, Hashable, Sendable {
@@ -1062,6 +1072,25 @@ public struct Proactivity: Codable, Hashable, Sendable {
     }
 }
 
+public struct ExternalAgent: Codable, Hashable, Sendable {
+    public var agent: String?
+    public var name: String
+    public var command: String?
+    public var args: [String]?
+
+    public init(
+        agent: String? = nil,
+        name: String = "",
+        command: String? = nil,
+        args: [String]? = nil
+    ) {
+        self.agent = agent
+        self.name = name
+        self.command = command
+        self.args = args
+    }
+}
+
 public struct Run: Codable, Hashable, Sendable {
     public var jobID: String
     public var id: String
@@ -1088,6 +1117,7 @@ public struct Run: Codable, Hashable, Sendable {
     public var summary: String
     public var statusText: String?
     public var notice: String?
+    public var external: ExternalAgent?
 
     public init(
         jobID: String = "",
@@ -1114,7 +1144,8 @@ public struct Run: Codable, Hashable, Sendable {
         startedAt: String? = nil,
         summary: String = "",
         statusText: String? = nil,
-        notice: String? = nil
+        notice: String? = nil,
+        external: ExternalAgent? = nil
     ) {
         self.jobID = jobID
         self.id = id
@@ -1141,6 +1172,7 @@ public struct Run: Codable, Hashable, Sendable {
         self.summary = summary
         self.statusText = statusText
         self.notice = notice
+        self.external = external
     }
 }
 
@@ -1266,6 +1298,56 @@ public enum PeerDeliveryStatus {
     public static let interrupted = "interrupted"
 }
 
+public struct Approval: Codable, Hashable, Sendable {
+    public var title: String
+    public var detail: String?
+    public var status: String
+    public var answerID: String?
+    public var options: [ApprovalOption]?
+
+    public init(
+        title: String = "",
+        detail: String? = nil,
+        status: String = "",
+        answerID: String? = nil,
+        options: [ApprovalOption]? = nil
+    ) {
+        self.title = title
+        self.detail = detail
+        self.status = status
+        self.answerID = answerID
+        self.options = options
+    }
+}
+
+public enum ApprovalStatus {
+    public static let pending = "pending"
+    public static let allowed = "allowed"
+    public static let denied = "denied"
+    public static let expired = "expired"
+}
+
+public struct ApprovalOption: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    public var outcome: String
+
+    public init(
+        id: String = "",
+        label: String = "",
+        outcome: String = ""
+    ) {
+        self.id = id
+        self.label = label
+        self.outcome = outcome
+    }
+}
+
+public enum ApprovalOptionOutcome {
+    public static let allow = "allow"
+    public static let deny = "deny"
+}
+
 public struct ChoiceOption: Codable, Hashable, Sendable {
     public var id: String
     public var label: String
@@ -1288,7 +1370,6 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
     public var provider: String?
     public var avatar: AvatarDesign?
     public var sectionID: String?
-    public var acp: AgentACP?
 
     public init(
         initialTask: String? = nil,
@@ -1298,8 +1379,7 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         model: String? = nil,
         provider: String? = nil,
         avatar: AvatarDesign? = nil,
-        sectionID: String? = nil,
-        acp: AgentACP? = nil
+        sectionID: String? = nil
     ) {
         self.initialTask = initialTask
         self.name = name
@@ -1309,7 +1389,6 @@ public struct CreateAgentRequest: Codable, Hashable, Sendable {
         self.provider = provider
         self.avatar = avatar
         self.sectionID = sectionID
-        self.acp = acp
     }
 }
 
@@ -1334,7 +1413,6 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
     public var model: String?
     public var reasoning: String?
     public var fallback: AgentFallback?
-    public var acp: AgentACP?
 
     public init(
         name: String? = nil,
@@ -1343,8 +1421,7 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
         provider: String? = nil,
         model: String? = nil,
         reasoning: String? = nil,
-        fallback: AgentFallback? = nil,
-        acp: AgentACP? = nil
+        fallback: AgentFallback? = nil
     ) {
         self.name = name
         self.role = role
@@ -1353,7 +1430,6 @@ public struct UpdateAgentRequest: Codable, Hashable, Sendable {
         self.model = model
         self.reasoning = reasoning
         self.fallback = fallback
-        self.acp = acp
     }
 }
 
@@ -1867,6 +1943,16 @@ public struct Activity: Codable, Hashable, Sendable {
     }
 }
 
+public struct ApprovalAnswer: Codable, Hashable, Sendable {
+    public var optionID: String
+
+    public init(
+        optionID: String = ""
+    ) {
+        self.optionID = optionID
+    }
+}
+
 public struct ChoiceAnswer: Codable, Hashable, Sendable {
     public var optionID: String
     public var text: String?
@@ -2104,6 +2190,43 @@ public struct VaultBrowser: Codable, Hashable, Sendable {
     }
 }
 
+public struct VaultSync: Codable, Hashable, Sendable {
+    public var location: String
+    public var state: String
+    public var syncedAt: Int64
+
+    public init(
+        location: String = "",
+        state: String = "",
+        syncedAt: Int64 = 0
+    ) {
+        self.location = location
+        self.state = state
+        self.syncedAt = syncedAt
+    }
+}
+
+public enum VaultSyncState {
+    public static let off = "off"
+    public static let synced = "synced"
+    public static let pending = "pending"
+    public static let unavailable = "unavailable"
+    public static let locked = "locked"
+}
+
+public struct VaultSyncChange: Codable, Hashable, Sendable {
+    public var location: String
+    public var password: String?
+
+    public init(
+        location: String = "",
+        password: String? = nil
+    ) {
+        self.location = location
+        self.password = password
+    }
+}
+
 public struct RoutineWatch: Codable, Hashable, Sendable {
     public var url: String
     public var jsonPointers: [String]?
@@ -2324,5 +2447,1233 @@ public struct MCPStatus: Codable, Hashable, Sendable {
         self.name = name
         self.connected = connected
         self.tools = tools
+    }
+}
+
+public struct Plugin: Codable, Hashable, Sendable {
+    public var name: String
+    public var title: String
+    public var description: String
+    public var symbol: String
+    public var selectedSymbol: String
+    public var version: String
+    public var kind: String
+    public var surface: String
+    public var page: String?
+    public var hideClose: Bool?
+    public var state: String
+    public var issue: String?
+    public var source: String
+    public var chats: [String]
+
+    public init(
+        name: String = "",
+        title: String = "",
+        description: String = "",
+        symbol: String = "",
+        selectedSymbol: String = "",
+        version: String = "",
+        kind: String = "",
+        surface: String = "",
+        page: String? = nil,
+        hideClose: Bool? = nil,
+        state: String = "",
+        issue: String? = nil,
+        source: String = "",
+        chats: [String] = []
+    ) {
+        self.name = name
+        self.title = title
+        self.description = description
+        self.symbol = symbol
+        self.selectedSymbol = selectedSymbol
+        self.version = version
+        self.kind = kind
+        self.surface = surface
+        self.page = page
+        self.hideClose = hideClose
+        self.state = state
+        self.issue = issue
+        self.source = source
+        self.chats = chats
+    }
+}
+
+public enum PluginKind {
+    public static let global = "global"
+    public static let scoped = "scoped"
+    public static let both = "both"
+}
+
+public enum PluginState {
+    public static let installing = "installing"
+    public static let ready = "ready"
+    public static let failed = "failed"
+}
+
+public struct MarketPlugin: Codable, Hashable, Sendable {
+    public var name: String
+    public var title: String
+    public var description: String
+    public var symbol: String
+    public var author: String
+    public var homepage: String
+    public var kind: String
+    public var surface: String
+    public var version: String
+    public var source: String
+    public var compatible: Bool
+    public var installed: String?
+
+    public init(
+        name: String = "",
+        title: String = "",
+        description: String = "",
+        symbol: String = "",
+        author: String = "",
+        homepage: String = "",
+        kind: String = "",
+        surface: String = "",
+        version: String = "",
+        source: String = "",
+        compatible: Bool = false,
+        installed: String? = nil
+    ) {
+        self.name = name
+        self.title = title
+        self.description = description
+        self.symbol = symbol
+        self.author = author
+        self.homepage = homepage
+        self.kind = kind
+        self.surface = surface
+        self.version = version
+        self.source = source
+        self.compatible = compatible
+        self.installed = installed
+    }
+}
+
+public struct PluginLayout: Codable, Hashable, Sendable {
+    public var switcher: [String]
+    public var buttons: [[String]]
+
+    public init(
+        switcher: [String] = [],
+        buttons: [[String]] = []
+    ) {
+        self.switcher = switcher
+        self.buttons = buttons
+    }
+}
+
+public struct PluginList: Codable, Hashable, Sendable {
+    public var installed: [Plugin]
+    public var layout: PluginLayout
+
+    public init(
+        installed: [Plugin] = [],
+        layout: PluginLayout
+    ) {
+        self.installed = installed
+        self.layout = layout
+    }
+}
+
+public struct InstallPlugin: Codable, Hashable, Sendable {
+    public var name: String
+    public var version: String
+
+    public init(
+        name: String = "",
+        version: String = ""
+    ) {
+        self.name = name
+        self.version = version
+    }
+}
+
+public struct UpdatePlugin: Codable, Hashable, Sendable {
+    public var chats: [String]
+
+    public init(
+        chats: [String] = []
+    ) {
+        self.chats = chats
+    }
+}
+
+public struct HubField: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var secret: Bool
+
+    public init(
+        id: String = "",
+        name: String = "",
+        secret: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.secret = secret
+    }
+}
+
+public struct HubFlow: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+
+    public init(
+        id: String = "",
+        name: String = ""
+    ) {
+        self.id = id
+        self.name = name
+    }
+}
+
+public struct HubAccount: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var issue: String?
+
+    public init(
+        id: String = "",
+        name: String = "",
+        issue: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.issue = issue
+    }
+}
+
+public struct HubPlatform: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var state: String
+    public var issue: String?
+    public var accounts: [HubAccount]
+    public var flows: [HubFlow]
+    public var setup: [HubField]
+
+    public init(
+        id: String = "",
+        name: String = "",
+        state: String = "",
+        issue: String? = nil,
+        accounts: [HubAccount] = [],
+        flows: [HubFlow] = [],
+        setup: [HubField] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.state = state
+        self.issue = issue
+        self.accounts = accounts
+        self.flows = flows
+        self.setup = setup
+    }
+}
+
+public enum HubPlatformState {
+    public static let stopped = "stopped"
+    public static let running = "running"
+    public static let failed = "failed"
+}
+
+public struct HubMailAccount: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var email: String
+    public var issue: String?
+    public var imap: String?
+    public var smtp: String?
+    public var auth: String?
+    public var signatures: [HubMailSignature]?
+    public var defaultSignature: String?
+
+    public init(
+        id: String = "",
+        name: String = "",
+        email: String = "",
+        issue: String? = nil,
+        imap: String? = nil,
+        smtp: String? = nil,
+        auth: String? = nil,
+        signatures: [HubMailSignature]? = nil,
+        defaultSignature: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.email = email
+        self.issue = issue
+        self.imap = imap
+        self.smtp = smtp
+        self.auth = auth
+        self.signatures = signatures
+        self.defaultSignature = defaultSignature
+    }
+}
+
+public struct HubStatus: Codable, Hashable, Sendable {
+    public var state: String
+    public var issue: String?
+    public var revision: Int64
+    public var platforms: [HubPlatform]
+    public var mail: [HubMailAccount]
+    public var incognito: Bool
+    public var mailProviders: [HubMailProvider]
+    public var selector: String?
+    public var textOnly: [String]
+    public var wechatRename: Bool
+    public var mailPresets: [HubMailPreset]?
+
+    public init(
+        state: String = "",
+        issue: String? = nil,
+        revision: Int64 = 0,
+        platforms: [HubPlatform] = [],
+        mail: [HubMailAccount] = [],
+        incognito: Bool = false,
+        mailProviders: [HubMailProvider] = [],
+        selector: String? = nil,
+        textOnly: [String] = [],
+        wechatRename: Bool = false,
+        mailPresets: [HubMailPreset]? = nil
+    ) {
+        self.state = state
+        self.issue = issue
+        self.revision = revision
+        self.platforms = platforms
+        self.mail = mail
+        self.incognito = incognito
+        self.mailProviders = mailProviders
+        self.selector = selector
+        self.textOnly = textOnly
+        self.wechatRename = wechatRename
+        self.mailPresets = mailPresets
+    }
+}
+
+public enum HubStatusState {
+    public static let starting = "starting"
+    public static let ready = "ready"
+    public static let failed = "failed"
+}
+
+public enum HubStatusSelector {
+    public static let text = "text"
+    public static let both = "both"
+    public static let logo = "logo"
+}
+
+public struct HubLoginStep: Codable, Hashable, Sendable {
+    public var login: String
+    public var step: String
+    public var kind: String
+    public var instructions: String
+    public var display: String
+    public var code: String
+    public var fields: [HubField]
+
+    public init(
+        login: String = "",
+        step: String = "",
+        kind: String = "",
+        instructions: String = "",
+        display: String = "",
+        code: String = "",
+        fields: [HubField] = []
+    ) {
+        self.login = login
+        self.step = step
+        self.kind = kind
+        self.instructions = instructions
+        self.display = display
+        self.code = code
+        self.fields = fields
+    }
+}
+
+public enum HubLoginStepKind {
+    public static let display = "display"
+    public static let input = "input"
+    public static let cookies = "cookies"
+    public static let done = "done"
+}
+
+public struct HubLoginStart: Codable, Hashable, Sendable {
+    public var flow: String
+
+    public init(
+        flow: String = ""
+    ) {
+        self.flow = flow
+    }
+}
+
+public struct HubLoginAnswer: Codable, Hashable, Sendable {
+    public var values: [String: String]
+
+    public init(
+        values: [String: String] = [:]
+    ) {
+        self.values = values
+    }
+}
+
+public struct HubReaction: Codable, Hashable, Sendable {
+    public var key: String
+    public var count: Int64
+    public var mine: Bool
+    public var people: [HubMember]
+
+    public init(
+        key: String = "",
+        count: Int64 = 0,
+        mine: Bool = false,
+        people: [HubMember] = []
+    ) {
+        self.key = key
+        self.count = count
+        self.mine = mine
+        self.people = people
+    }
+}
+
+public struct HubAttachment: Codable, Hashable, Sendable {
+    public var uri: String
+    public var name: String
+    public var mime: String
+    public var size: Int64
+    public var width: Int64
+    public var height: Int64
+    public var voice: Bool
+    public var duration: Int64
+
+    public init(
+        uri: String = "",
+        name: String = "",
+        mime: String = "",
+        size: Int64 = 0,
+        width: Int64 = 0,
+        height: Int64 = 0,
+        voice: Bool = false,
+        duration: Int64 = 0
+    ) {
+        self.uri = uri
+        self.name = name
+        self.mime = mime
+        self.size = size
+        self.width = width
+        self.height = height
+        self.voice = voice
+        self.duration = duration
+    }
+}
+
+public struct HubMessage: Codable, Hashable, Sendable {
+    public var id: String
+    public var chat: String
+    public var sender: String
+    public var senderName: String
+    public var mine: Bool
+    public var text: String
+    public var at: Int64
+    public var kind: String
+    public var attachment: HubAttachment?
+    public var replyTo: String?
+    public var replyText: String?
+    public var replySender: String?
+    public var reactions: [HubReaction]
+    public var edited: Bool
+    public var readers: [HubMember]
+
+    public init(
+        id: String = "",
+        chat: String = "",
+        sender: String = "",
+        senderName: String = "",
+        mine: Bool = false,
+        text: String = "",
+        at: Int64 = 0,
+        kind: String = "",
+        attachment: HubAttachment? = nil,
+        replyTo: String? = nil,
+        replyText: String? = nil,
+        replySender: String? = nil,
+        reactions: [HubReaction] = [],
+        edited: Bool = false,
+        readers: [HubMember] = []
+    ) {
+        self.id = id
+        self.chat = chat
+        self.sender = sender
+        self.senderName = senderName
+        self.mine = mine
+        self.text = text
+        self.at = at
+        self.kind = kind
+        self.attachment = attachment
+        self.replyTo = replyTo
+        self.replyText = replyText
+        self.replySender = replySender
+        self.reactions = reactions
+        self.edited = edited
+        self.readers = readers
+    }
+}
+
+public enum HubMessageKind {
+    public static let text = "text"
+    public static let image = "image"
+    public static let video = "video"
+    public static let audio = "audio"
+    public static let file = "file"
+    public static let sticker = "sticker"
+    public static let notice = "notice"
+}
+
+public struct HubPage: Codable, Hashable, Sendable {
+    public var messages: [HubMessage]
+    public var before: String?
+
+    public init(
+        messages: [HubMessage] = [],
+        before: String? = nil
+    ) {
+        self.messages = messages
+        self.before = before
+    }
+}
+
+public struct HubChat: Codable, Hashable, Sendable {
+    public var id: String
+    public var platform: String
+    public var name: String
+    public var avatar: String
+    public var group: Bool
+    public var space: Bool
+    public var parents: [String]
+    public var preview: String
+    public var at: Int64
+    public var unread: Int64
+    public var accounts: [String]?
+
+    public init(
+        id: String = "",
+        platform: String = "",
+        name: String = "",
+        avatar: String = "",
+        group: Bool = false,
+        space: Bool = false,
+        parents: [String] = [],
+        preview: String = "",
+        at: Int64 = 0,
+        unread: Int64 = 0,
+        accounts: [String]? = nil
+    ) {
+        self.id = id
+        self.platform = platform
+        self.name = name
+        self.avatar = avatar
+        self.group = group
+        self.space = space
+        self.parents = parents
+        self.preview = preview
+        self.at = at
+        self.unread = unread
+        self.accounts = accounts
+    }
+}
+
+public struct HubChanges: Codable, Hashable, Sendable {
+    public var revision: Int64
+    public var chats: [HubChat]
+
+    public init(
+        revision: Int64 = 0,
+        chats: [HubChat] = []
+    ) {
+        self.revision = revision
+        self.chats = chats
+    }
+}
+
+public struct HubSend: Codable, Hashable, Sendable {
+    public var id: String
+    public var text: String
+    public var replyTo: String?
+    public var attachment: HubAttachment?
+    public var mentions: HubMentions?
+    public var sticker: Bool?
+
+    public init(
+        id: String = "",
+        text: String = "",
+        replyTo: String? = nil,
+        attachment: HubAttachment? = nil,
+        mentions: HubMentions? = nil,
+        sticker: Bool? = nil
+    ) {
+        self.id = id
+        self.text = text
+        self.replyTo = replyTo
+        self.attachment = attachment
+        self.mentions = mentions
+        self.sticker = sticker
+    }
+}
+
+public struct HubReact: Codable, Hashable, Sendable {
+    public var key: String
+
+    public init(
+        key: String = ""
+    ) {
+        self.key = key
+    }
+}
+
+public struct HubPerson: Codable, Hashable, Sendable {
+    public var id: String
+    public var platform: String
+    public var account: String
+    public var name: String
+    public var avatar: String
+    public var chat: String
+
+    public init(
+        id: String = "",
+        platform: String = "",
+        account: String = "",
+        name: String = "",
+        avatar: String = "",
+        chat: String = ""
+    ) {
+        self.id = id
+        self.platform = platform
+        self.account = account
+        self.name = name
+        self.avatar = avatar
+        self.chat = chat
+    }
+}
+
+public struct HubChatCreate: Codable, Hashable, Sendable {
+    public var platform: String
+    public var account: String
+    public var people: [String]
+    public var name: String
+
+    public init(
+        platform: String = "",
+        account: String = "",
+        people: [String] = [],
+        name: String = ""
+    ) {
+        self.platform = platform
+        self.account = account
+        self.people = people
+        self.name = name
+    }
+}
+
+public struct HubLinkMember: Codable, Hashable, Sendable {
+    public var platform: String
+    public var chat: String
+    public var name: String
+
+    public init(
+        platform: String = "",
+        chat: String = "",
+        name: String = ""
+    ) {
+        self.platform = platform
+        self.chat = chat
+        self.name = name
+    }
+}
+
+public struct HubLink: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var members: [HubLinkMember]
+
+    public init(
+        id: String = "",
+        name: String = "",
+        members: [HubLinkMember] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.members = members
+    }
+}
+
+public struct HubLinkEdit: Codable, Hashable, Sendable {
+    public var name: String
+    public var members: [HubLinkMember]
+
+    public init(
+        name: String = "",
+        members: [HubLinkMember] = []
+    ) {
+        self.name = name
+        self.members = members
+    }
+}
+
+public struct HubDelivery: Codable, Hashable, Sendable {
+    public var chat: String
+    public var name: String
+    public var ok: Bool
+
+    public init(
+        chat: String = "",
+        name: String = "",
+        ok: Bool = false
+    ) {
+        self.chat = chat
+        self.name = name
+        self.ok = ok
+    }
+}
+
+public struct HubBroadcastMessage: Codable, Hashable, Sendable {
+    public var id: String
+    public var text: String
+    public var at: Int64
+    public var deliveries: [HubDelivery]
+
+    public init(
+        id: String = "",
+        text: String = "",
+        at: Int64 = 0,
+        deliveries: [HubDelivery] = []
+    ) {
+        self.id = id
+        self.text = text
+        self.at = at
+        self.deliveries = deliveries
+    }
+}
+
+public struct HubBroadcast: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var recipients: [HubLinkMember]
+    public var messages: [HubBroadcastMessage]
+
+    public init(
+        id: String = "",
+        name: String = "",
+        recipients: [HubLinkMember] = [],
+        messages: [HubBroadcastMessage] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.recipients = recipients
+        self.messages = messages
+    }
+}
+
+public struct HubBroadcastEdit: Codable, Hashable, Sendable {
+    public var name: String
+    public var recipients: [HubLinkMember]
+
+    public init(
+        name: String = "",
+        recipients: [HubLinkMember] = []
+    ) {
+        self.name = name
+        self.recipients = recipients
+    }
+}
+
+public struct HubMailSetup: Codable, Hashable, Sendable {
+    public var name: String
+    public var email: String
+    public var password: String
+    public var imapHost: String
+    public var imapPort: Int64
+    public var smtpHost: String
+    public var smtpPort: Int64
+
+    public init(
+        name: String = "",
+        email: String = "",
+        password: String = "",
+        imapHost: String = "",
+        imapPort: Int64 = 0,
+        smtpHost: String = "",
+        smtpPort: Int64 = 0
+    ) {
+        self.name = name
+        self.email = email
+        self.password = password
+        self.imapHost = imapHost
+        self.imapPort = imapPort
+        self.smtpHost = smtpHost
+        self.smtpPort = smtpPort
+    }
+}
+
+public struct HubMailFolder: Codable, Hashable, Sendable {
+    public var name: String
+    public var role: String
+    public var unread: Int64
+    public var label: String
+
+    public init(
+        name: String = "",
+        role: String = "",
+        unread: Int64 = 0,
+        label: String = ""
+    ) {
+        self.name = name
+        self.role = role
+        self.unread = unread
+        self.label = label
+    }
+}
+
+public struct HubMailEnvelope: Codable, Hashable, Sendable {
+    public var id: Int64
+    public var account: String
+    public var folder: String
+    public var from: String
+    public var address: String
+    public var subject: String
+    public var preview: String
+    public var at: Int64
+    public var seen: Bool
+    public var flagged: Bool
+    public var attachments: Int64
+    public var answered: Bool
+    public var draft: Bool
+    public var importance: String
+
+    public init(
+        id: Int64 = 0,
+        account: String = "",
+        folder: String = "",
+        from: String = "",
+        address: String = "",
+        subject: String = "",
+        preview: String = "",
+        at: Int64 = 0,
+        seen: Bool = false,
+        flagged: Bool = false,
+        attachments: Int64 = 0,
+        answered: Bool = false,
+        draft: Bool = false,
+        importance: String = ""
+    ) {
+        self.id = id
+        self.account = account
+        self.folder = folder
+        self.from = from
+        self.address = address
+        self.subject = subject
+        self.preview = preview
+        self.at = at
+        self.seen = seen
+        self.flagged = flagged
+        self.attachments = attachments
+        self.answered = answered
+        self.draft = draft
+        self.importance = importance
+    }
+}
+
+public enum HubMailEnvelopeImportance {
+    public static let high = "high"
+    public static let normal = "normal"
+    public static let low = "low"
+}
+
+public struct HubMailFile: Codable, Hashable, Sendable {
+    public var part: String
+    public var name: String
+    public var mime: String
+    public var size: Int64
+    public var contentId: String
+    public var inline: Bool
+
+    public init(
+        part: String = "",
+        name: String = "",
+        mime: String = "",
+        size: Int64 = 0,
+        contentId: String = "",
+        inline: Bool = false
+    ) {
+        self.part = part
+        self.name = name
+        self.mime = mime
+        self.size = size
+        self.contentId = contentId
+        self.inline = inline
+    }
+}
+
+public struct HubMailMessage: Codable, Hashable, Sendable {
+    public var envelope: HubMailEnvelope
+    public var to: [HubMailAddress]
+    public var cc: [HubMailAddress]
+    public var bcc: [HubMailAddress]
+    public var text: String
+    public var html: String
+    public var files: [HubMailFile]
+    public var messageId: String
+    public var references: [String]
+
+    public init(
+        envelope: HubMailEnvelope,
+        to: [HubMailAddress] = [],
+        cc: [HubMailAddress] = [],
+        bcc: [HubMailAddress] = [],
+        text: String = "",
+        html: String = "",
+        files: [HubMailFile] = [],
+        messageId: String = "",
+        references: [String] = []
+    ) {
+        self.envelope = envelope
+        self.to = to
+        self.cc = cc
+        self.bcc = bcc
+        self.text = text
+        self.html = html
+        self.files = files
+        self.messageId = messageId
+        self.references = references
+    }
+}
+
+public struct HubMailSend: Codable, Hashable, Sendable {
+    public var account: String
+    public var to: [String]
+    public var cc: [String]
+    public var bcc: [String]
+    public var subject: String
+    public var text: String
+    public var html: String?
+    public var draft: Bool?
+    public var importance: String?
+    public var inReplyTo: String?
+    public var references: [String]?
+    public var files: [HubMailAttach]?
+    public var replaces: HubMailDraft?
+
+    public init(
+        account: String = "",
+        to: [String] = [],
+        cc: [String] = [],
+        bcc: [String] = [],
+        subject: String = "",
+        text: String = "",
+        html: String? = nil,
+        draft: Bool? = nil,
+        importance: String? = nil,
+        inReplyTo: String? = nil,
+        references: [String]? = nil,
+        files: [HubMailAttach]? = nil,
+        replaces: HubMailDraft? = nil
+    ) {
+        self.account = account
+        self.to = to
+        self.cc = cc
+        self.bcc = bcc
+        self.subject = subject
+        self.text = text
+        self.html = html
+        self.draft = draft
+        self.importance = importance
+        self.inReplyTo = inReplyTo
+        self.references = references
+        self.files = files
+        self.replaces = replaces
+    }
+}
+
+public struct HubMailChange: Codable, Hashable, Sendable {
+    public var ids: [Int64]
+    public var seen: Bool?
+    public var flagged: Bool?
+    public var folder: String?
+    public var erase: Bool?
+
+    public init(
+        ids: [Int64] = [],
+        seen: Bool? = nil,
+        flagged: Bool? = nil,
+        folder: String? = nil,
+        erase: Bool? = nil
+    ) {
+        self.ids = ids
+        self.seen = seen
+        self.flagged = flagged
+        self.folder = folder
+        self.erase = erase
+    }
+}
+
+public struct HubMention: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+
+    public init(
+        id: String = "",
+        label: String = ""
+    ) {
+        self.id = id
+        self.label = label
+    }
+}
+
+public struct HubMentions: Codable, Hashable, Sendable {
+    public var users: [HubMention]
+    public var everyone: Bool
+
+    public init(
+        users: [HubMention] = [],
+        everyone: Bool = false
+    ) {
+        self.users = users
+        self.everyone = everyone
+    }
+}
+
+public struct HubMember: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var avatar: String
+
+    public init(
+        id: String = "",
+        name: String = "",
+        avatar: String = ""
+    ) {
+        self.id = id
+        self.name = name
+        self.avatar = avatar
+    }
+}
+
+public struct HubRename: Codable, Hashable, Sendable {
+    public var name: String
+
+    public init(
+        name: String = ""
+    ) {
+        self.name = name
+    }
+}
+
+public struct HubSettings: Codable, Hashable, Sendable {
+    public var incognito: Bool
+    public var selector: String?
+
+    public init(
+        incognito: Bool = false,
+        selector: String? = nil
+    ) {
+        self.incognito = incognito
+        self.selector = selector
+    }
+}
+
+public enum HubSettingsSelector {
+    public static let text = "text"
+    public static let both = "both"
+    public static let logo = "logo"
+}
+
+public struct HubMailProvider: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var setup: [HubField]
+
+    public init(
+        id: String = "",
+        name: String = "",
+        setup: [HubField] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.setup = setup
+    }
+}
+
+public struct HubMailClient: Codable, Hashable, Sendable {
+    public var clientId: String
+    public var clientSecret: String
+
+    public init(
+        clientId: String = "",
+        clientSecret: String = ""
+    ) {
+        self.clientId = clientId
+        self.clientSecret = clientSecret
+    }
+}
+
+public struct HubMailSignIn: Codable, Hashable, Sendable {
+    public var id: String
+    public var url: String
+
+    public init(
+        id: String = "",
+        url: String = ""
+    ) {
+        self.id = id
+        self.url = url
+    }
+}
+
+public struct HubMailCallback: Codable, Hashable, Sendable {
+    public var code: String
+    public var state: String
+    public var error: String
+
+    public init(
+        code: String = "",
+        state: String = "",
+        error: String = ""
+    ) {
+        self.code = code
+        self.state = state
+        self.error = error
+    }
+}
+
+public struct HubMailUpload: Codable, Hashable, Sendable {
+    public var name: String
+    public var mime: String
+    public var data: String
+
+    public init(
+        name: String = "",
+        mime: String = "",
+        data: String = ""
+    ) {
+        self.name = name
+        self.mime = mime
+        self.data = data
+    }
+}
+
+public struct HubMailAddress: Codable, Hashable, Sendable {
+    public var name: String
+    public var address: String
+
+    public init(
+        name: String = "",
+        address: String = ""
+    ) {
+        self.name = name
+        self.address = address
+    }
+}
+
+public struct HubMailSignature: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var text: String
+    public var html: String
+
+    public init(
+        id: String = "",
+        name: String = "",
+        text: String = "",
+        html: String = ""
+    ) {
+        self.id = id
+        self.name = name
+        self.text = text
+        self.html = html
+    }
+}
+
+public struct HubMailSignatures: Codable, Hashable, Sendable {
+    public var signatures: [HubMailSignature]
+    public var defaultSignature: String?
+
+    public init(
+        signatures: [HubMailSignature] = [],
+        defaultSignature: String? = nil
+    ) {
+        self.signatures = signatures
+        self.defaultSignature = defaultSignature
+    }
+}
+
+public struct HubMailPreset: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var imapHost: String
+    public var imapPort: Int64
+    public var smtpHost: String
+    public var smtpPort: Int64
+    public var hint: String
+    public var hidden: Bool
+
+    public init(
+        id: String = "",
+        name: String = "",
+        imapHost: String = "",
+        imapPort: Int64 = 0,
+        smtpHost: String = "",
+        smtpPort: Int64 = 0,
+        hint: String = "",
+        hidden: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.imapHost = imapHost
+        self.imapPort = imapPort
+        self.smtpHost = smtpHost
+        self.smtpPort = smtpPort
+        self.hint = hint
+        self.hidden = hidden
+    }
+}
+
+public struct HubMailAttach: Codable, Hashable, Sendable {
+    public var id: String
+    public var contentId: String?
+
+    public init(
+        id: String = "",
+        contentId: String? = nil
+    ) {
+        self.id = id
+        self.contentId = contentId
+    }
+}
+
+public struct HubMailDraft: Codable, Hashable, Sendable {
+    public var id: Int64
+    public var folder: String
+
+    public init(
+        id: Int64 = 0,
+        folder: String = ""
+    ) {
+        self.id = id
+        self.folder = folder
+    }
+}
+
+public struct HubMailSent: Codable, Hashable, Sendable {
+    public var draft: HubMailDraft?
+
+    public init(
+        draft: HubMailDraft? = nil
+    ) {
+        self.draft = draft
     }
 }

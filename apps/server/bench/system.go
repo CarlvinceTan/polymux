@@ -116,7 +116,7 @@ func (p *Polymux) Start(ctx context.Context, env Env) error {
 		bots = nil
 		for _, b := range team {
 			bots = append(bots, agentruntime.Definition{Agent: contract.Agent{ID: b.id, Name: b.name, Role: b.role, Model: env.Model}, Tools: []string{},
-				Prompt: agentruntime.DefaultPrompt + "\n\n" + b.brief, MCP: []agentruntime.MCPServer{{Name: "world", URL: env.World.RoleURL(b.tools)}}})
+				Prompt: agentruntime.StartPrompt(b.brief), MCP: []agentruntime.MCPServer{{Name: "world", URL: env.World.RoleURL(b.tools)}}})
 			p.names[b.id] = b.name
 		}
 	}

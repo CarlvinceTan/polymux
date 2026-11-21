@@ -94,6 +94,12 @@ public struct APIClient: Sendable {
     /// The credential in use, to save for a server that's moving.
     public func currentToken() async -> String? { await credential.value() }
 
+    /// True while the server reports it is draining for an update; a failed check counts as no.
+    public func serverUpdating() async -> Bool {
+        struct Health: Decodable { let status: String }
+        return (try? await get("health", retrying: false) as Health)?.status == "updating"
+    }
+
     public func allowDevice(_ id: String) async throws {
         var request = try await request("network/devices/\(id)/allow")
         request.httpMethod = "POST"
@@ -284,6 +290,10 @@ public struct APIClient: Sendable {
         try await post("threads/\(threadID)/messages/\(messageID)/answer", ChoiceAnswer(optionID: optionID, text: text))
     }
 
+    public func answerApproval(threadID: String, messageID: String, optionID: String) async throws -> Message {
+        try await post("threads/\(threadID)/messages/\(messageID)/approval", ApprovalAnswer(optionID: optionID))
+    }
+
     public func react(threadID: String, messageID: String, request: ReactionRequest) async throws -> Message {
         try await write("threads/\(threadID)/messages/\(messageID)/reaction", method: "PUT", body: request)
     }
@@ -423,6 +433,95 @@ public struct APIClient: Sendable {
         request.httpMethod = "DELETE"
         let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
+    }
+
+    public func plugins() async throws -> PluginList {
+        try await get("plugins")
+    }
+
+    public func pluginMarket() async throws -> [MarketPlugin] {
+        try await get("plugins/market")
+    }
+
+    public func installPlugin(name: String, version: String) async throws -> Plugin {
+        try await write("plugins", method: "POST", body: InstallPlugin(name: name, version: version))
+    }
+
+    public func updatePlugin(name: String, chats: [String]) async throws -> Plugin {
+        try await write("plugins/\(name)", method: "PATCH", body: UpdatePlugin(chats: chats))
+    }
+
+    public func savePluginLayout(_ layout: PluginLayout) async throws -> PluginLayout {
+        try await write("plugins/layout", method: "PUT", body: layout)
+    }
+
+    public func pluginSettings(name: String) async throws -> [PluginSetting] {
+        try await get("plugins/\(name)/settings")
+    }
+
+    public func savePluginSettings(name: String, values: [String: PluginSettingValue]) async throws -> [PluginSetting] {
+        try await write("plugins/\(name)/settings", method: "PUT", body: values)
+    }
+
+    public func transports() async throws -> [PluginTransport] {
+        try await get("transports")
+    }
+
+    public func removePlugin(name: String) async throws {
+        var request = try await request("plugins/\(name)")
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
+    public func pluginGet<T: Decodable>(_ name: String, _ path: String, query: [URLQueryItem] = []) async throws -> T {
+        try await get("plugins/\(name)/api/\(path)", query: query, retrying: false)
+    }
+
+    public func pluginWrite<T: Decodable>(_ name: String, _ path: String, method: String = "POST",
+                                          query: [URLQueryItem] = [], body: some Encodable) async throws -> T {
+        let data = try await pluginCall(name, path, method: method, query: query, body: JSONEncoder().encode(body))
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    public func pluginPerform(_ name: String, _ path: String, method: String = "POST",
+                              query: [URLQueryItem] = [], body: some Encodable) async throws {
+        _ = try await pluginCall(name, path, method: method, query: query, body: JSONEncoder().encode(body))
+    }
+
+    public func pluginDelete(_ name: String, _ path: String) async throws {
+        _ = try await pluginCall(name, path, method: "DELETE", body: nil)
+    }
+
+    /// A plugin's API waits as long as its work does, such as a QR code being scanned.
+    public func pluginCall(_ name: String, _ path: String, method: String, query: [URLQueryItem] = [],
+                           body: Data?, contentType: String = "application/json", timeout: TimeInterval = 200) async throws -> Data {
+        var request = try await request("plugins/\(name)/api/\(path)", query: query)
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        if let body {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        return data
+    }
+
+    /// A web plugin page's own request: a file beside the page, or its service under `api/`.
+    public func pluginWeb(_ name: String, path: String, query: [URLQueryItem], method: String, body: Data?,
+                          contentType: String?) async throws -> (Data, HTTPURLResponse) {
+        var request = try await request("plugins/\(name)/" + (path.hasPrefix("api/") ? path : "ui/" + path), query: query)
+        request.httpMethod = method
+        request.timeoutInterval = 200
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        if let body {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let reply = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        return (data, reply)
     }
 
     /// Deletes a section. Its chats return to the main list, or are deleted too when `chats` is set.

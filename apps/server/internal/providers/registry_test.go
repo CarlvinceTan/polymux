@@ -18,6 +18,14 @@ type fakeStore map[string]string
 func (f fakeStore) Set(id, key string) error      { f[Service+"/"+id] = key; return nil }
 func (f fakeStore) Get(id string) (string, error) { return f[Service+"/"+id], nil }
 func (f fakeStore) Delete(id string) error        { delete(f, Service+"/"+id); return nil }
+
+// TestBedrockIsLinked catches PiG moving a provider out of ai without its side-effect import.
+func TestBedrockIsLinked(t *testing.T) {
+	if Builtin("amazon-bedrock") == nil {
+		t.Fatal("amazon-bedrock provider is not linked")
+	}
+}
+
 func TestP2KeysNeverPersisted(t *testing.T) {
 	dir := t.TempDir()
 	s, err := settings.Open(filepath.Join(dir, "settings.json"))

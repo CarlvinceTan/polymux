@@ -12,7 +12,7 @@ import (
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
 )
 
-func (s *Store) Spawn(ctx context.Context, parent, call, target, task string) (contract.Run, error) {
+func (s *Store) Spawn(ctx context.Context, parent, call, target, task string, external *contract.ExternalAgent) (contract.Run, error) {
 	if parent == "" || call == "" || len(call) > 128 || target == "" || len(target) > 128 || strings.TrimSpace(task) == "" || len(task) > 8192 {
 		return contract.Run{}, errors.New("invalid child task")
 	}
@@ -21,7 +21,7 @@ func (s *Store) Spawn(ctx context.Context, parent, call, target, task string) (c
 		return contract.Run{}, err
 	}
 	id := fmt.Sprintf("child:%x", sha256.Sum256(key))
-	work := Work{Trigger: contract.RunTriggerChild, ParentRunID: &parent, Task: task,
+	work := Work{Trigger: contract.RunTriggerChild, ParentRunID: &parent, Task: task, External: external,
 		Message: contract.Message{ID: id, ThreadID: target, Role: contract.MessageRoleUser, CreatedAt: Now(), Parts: []contract.Part{{Kind: contract.PartKindText, Text: &task}}}}
 	run := NewRun(id, target, target, contract.RunTriggerChild)
 	tx, err := s.DB.BeginTx(ctx, nil)

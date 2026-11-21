@@ -19,9 +19,9 @@ Paths below are relative to the repository root.
 | [`apps/site/`](../apps/site/) | Public website and user-facing documentation. |
 | [`packages/`](../packages/) | Reusable Go backend modules (`runtime`, `memory`, `vault`, `search`) and shared Swift app code. See [Backend packages](packages.md) for backend usage and boundaries. |
 | [`contracts/`](../contracts/) | Shared API schema and code generation for the server and clients. |
+| [`plugins/`](../plugins/) | The official plugins and the scripts that package them. See [Plugins](plugins.md). |
 | [`scripts/`](../scripts/) | Build, run, test, installation, and delivery commands. |
 | [`e2e/`](../e2e/) | UI test flows and fixtures. |
-| [`tools/`](../tools/) | Developer tools, including the experimental Control observer. |
 | [`.agents/skills/`](../.agents/skills/) | Task-specific guidance and helper tools for coding agents. See [Project skills](skills.md). |
 | [`docs/`](./) | Developer overviews and focused references, indexed below. |
 | [`.github/workflows/`](../.github/workflows/) | CI checks and release workflows. |
@@ -32,13 +32,18 @@ Generated output is separate from source: `.build/` holds caches and local build
 
 | Document | Read it for |
 | --- | --- |
-| [Architecture](architecture.md) | Server/client responsibilities, ownership, privacy, and dependency rules. |
+| [Architecture](architecture.md) | Server/client responsibilities, ownership, privacy, dependency rules, and the prompt-layer hierarchy. |
 | [Backend packages](packages.md) | Reusable Go backend modules, import examples and product adapters. |
 | [Project skills](skills.md) | Available coding-agent skills, what they do, and when to use them. |
 | [Development delivery](development.md) | Development-channel builds, deployment, TestFlight, and delivery status—not general local setup. |
 | [Vault](vault.md) | Credential handling, private cards, secret references, and security boundaries. |
-| [Control candidate](control.md) | The observation-only UI tooling experiment and its current limits. E2E input still uses Cua. |
+| [Experiments](experiments.md) | Experimental branches kept out of `dev` and `main`, and what each is about. |
+| [Plugins](plugins.md) | Global and Scoped plugins, packages, the index, and Hub. |
 | [References](references.md) | Other products that inform Polymux's behaviour. |
+| [Chat style](chat-style.md) | How bots' messages to the user read, what the style is modelled on, and where it is enforced. |
+| [Proactivity](proactivity.md) | Design for proactive behaviour: the goal hierarchy, intentions, ambient ingestion through an attention filter, and dreaming. |
+| [Intake sources](intake-sources.md) | Catalogue of sources for ambient ingestion by field and kind, with trust tiers, learned weights and swappable source, search and fetch interfaces. |
+| [Speech](speech.md) | Dictation stages, the review gate, and how its on-device model is converted and checked. |
 | [Benchmarks](benchmarks.md) | The planned benchmark index: quality, speed and cost across harnesses, and how it stays honest. |
 
 ## Working on a change

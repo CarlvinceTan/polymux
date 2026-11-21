@@ -105,6 +105,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
     private static let providers = ProviderFixture()
     private static let profiles = Profiles()
     private static let profileLoads = ProfileLoads()
+    private static let networkLoads = NetworkLoads()
     private let responseLock = NSLock()
     private var responseTask: Task<Void, Never>?
 
@@ -180,7 +181,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                                   createdAt: "2026-10-27T06:00:00Z", status: MessageStatus.done, seq: 1, agentID: "t-chief")
             let run = Run(id: "switched-reply", conversationID: "t-chief", trigger: RunTrigger.message,
                           seq: 2, createdAt: "2026-10-27T06:00:00Z", agentID: "t-chief", status: RunStatus.completed,
-                          summary: "Ready", notice: "gpt-6.1-sol hit its usage limit, so deepseek-v4-pro replied instead.")
+                          summary: "Ready", notice: "DeepSeek V4.1 Flash on DeepSeek is unavailable, so OpenCode Go replied instead.")
             return [Event(seq: 1, conversationID: "t-chief", type: EventType.messageDone, message: message, createdAt: message.createdAt),
                     Event(seq: 2, conversationID: "t-chief", type: EventType.runDone, run: run)]
         }
@@ -239,10 +240,14 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
         let runs = (0...6).map { index in
             let date = WireDate.string(Date(timeIntervalSince1970: 1_790_000_000 + Double(index) * 60))
             let active = index == 0
-            let run = Run(id: "profile-\(index)", conversationID: "t-chief", trigger: index == 6 ? RunTrigger.message : RunTrigger.child,
+            let run = Run(id: "profile-\(index)", conversationID: "t-chief", trigger: RunTrigger.child,
                           seq: Int64(index + 1), createdAt: date, updatedAt: date,
                           activity: active ? "Reviewing calendar" : "", agentID: "t-chief",
-                          status: active ? RunStatus.running : RunStatus.completed, summary: index == 6 ? "Ordinary chat reply" : "Finished task \(index)")
+                          status: active ? RunStatus.running : RunStatus.completed, summary: "Finished task \(index)",
+                          external: index == 5 ? ExternalAgent(agent: "claude-acp", name: "Claude Agent")
+                              : index == 6 ? ExternalAgent(agent: "github-copilot-cli", name: "GitHub Copilot")
+                              : index == 4 ? ExternalAgent(name: "local-agent", command: "/usr/local/bin/local-agent")
+                              : index == 3 ? ExternalAgent(agent: "opencode", name: "OpenCode") : nil)
             return Event(seq: run.seq, conversationID: "t-chief", type: active ? EventType.runUpdate : EventType.runDone,
                          createdAt: date, run: run)
         }
@@ -319,6 +324,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                       createdAt: at, payload: row)
             }
     }()
+    private static let plugins = PluginFixture()
     private var onSecondServer: Bool {
         Self.secondServer.map { request.url?.absoluteString.hasPrefix($0) == true } ?? false
     }
@@ -357,13 +363,24 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             return
         }
         if SiteFixture.handle(self) { return }
+        if CommandLine.arguments.contains("--verify-plugins"), path.hasPrefix("/plugins"), !onSecondServer {
+            // Hub's wait for changes holds its request, as the real server does.
+            let waits = path.hasSuffix("/chats") && request.url?.query?.contains("since") == true
+            let task = Task { @Sendable [self] in
+                if waits { try? await Task.sleep(for: .seconds(2)) }
+                if let data = try? Self.plugins.response(request) { reply(data, mime: path.hasSuffix(".html") ? "text/html" : "application/json") }
+            }
+            responseLock.withLock { responseTask = task }
+            return
+        }
         if CommandLine.arguments.contains("--verify-model-levels"), path == "/providers" {
             let model = ProviderModel(id: "chat", tags: ["text"], enabled: true, reasoning: ["off", "low", "high", "max"])
             let provider = Provider(id: "levels", type: "fixture", name: "Levels", enabled: true, models: [model])
             reply((try? JSONEncoder().encode([provider])) ?? Data())
             return
         }
-        if CommandLine.arguments.contains("--verify-providers"), path.hasPrefix("/providers") || path == "/settings" {
+        if (CommandLine.arguments.contains("--verify-providers") && (path.hasPrefix("/providers") || path == "/settings"))
+            || (CommandLine.arguments.contains("--verify-call-ready") && path == "/settings") {
             let task = Task { @Sendable [self] in
                 do {
                     let slow = CommandLine.arguments.contains("--verify-providers-slow") && path == "/providers" && request.httpMethod == "GET"
@@ -414,6 +431,11 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             reply(Data("{}".utf8))
             return
         }
+        if request.httpMethod == "DELETE", path == "/network/devices/d-old" {
+            Self.networkLoads.removeSpare()
+            reply(Data("{}".utf8))
+            return
+        }
         if request.httpMethod == "PATCH", request.url?.path.contains("/threads/") == true {
             do {
                 let data = try Self.sidebar.patch(request)
@@ -430,7 +452,7 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didLoad: Data(": connected\n\n".utf8))
             return
         }
-        if request.url?.lastPathComponent == "answer" {
+        if ["answer", "approval"].contains(request.url?.lastPathComponent) {
             Self.answers.add(self)
             return
         }
@@ -487,12 +509,16 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                     data = try JSONEncoder().encode(Settings(appearance: theme))
                 case "network":
                     if CommandLine.arguments.contains("--verify-network-fail") { fail(); return }
+                    if CommandLine.arguments.contains("--verify-network-late-fail"), Self.networkLoads.later() { fail(); return }
                     if CommandLine.arguments.contains("--verify-network-slow") { return }
-                    let devices: [[String: Any]] = [
+                    var devices: [[String: Any]] = [
                         ["id": "d-mac", "name": "Home server", "paired": true],
                         ["id": "d-ios", "name": "Carlvince’s iPhone", "paired": true],
                         ["id": "d-old", "name": "Spare MacBook Pro used for development and device-pairing verification", "label": "Spare device", "paired": true, "client": "spare"],
                     ]
+                    if Self.networkLoads.spareRemoved {
+                        devices.removeAll { $0["id"] as? String == "d-old" }
+                    }
                     data = try JSONSerialization.data(withJSONObject: [
                         "server": ["id": onSecondServer ? "fixture-studio" : "fixture-home", "name": onSecondServer ? "Studio" : "Home server",
                                    "network": onSecondServer ? "Studio" : "Home server", "build": "0.4.0", "platform": "macOS", "role": "server"],
@@ -598,6 +624,24 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
         }
 
         func count(_ path: String) -> Int { lock.withLock { counts[path, default: 0] } }
+    }
+
+    /// Serves the first device list so the next one can fail against a cached copy.
+    private final class NetworkLoads: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        private var removed = false
+
+        var spareRemoved: Bool { lock.withLock { removed } }
+
+        func removeSpare() { lock.withLock { removed = true } }
+
+        func later() -> Bool {
+            lock.withLock {
+                count += 1
+                return count > 1
+            }
+        }
     }
 
     private final class Profiles: @unchecked Sendable {
@@ -722,6 +766,15 @@ struct ApprovalFixture: View {
         ChoiceOption(id: "day", label: "Plan my day"),
         ChoiceOption(id: "code", label: "Build something")
     ])
+    private let gate = Part(kind: PartKind.approval, approval: Approval(
+        title: "Run this command?",
+        detail: "rm -rf build && make test",
+        status: ApprovalStatus.pending,
+        options: [
+            ApprovalOption(id: "allow_once", label: "Allow once", outcome: ApprovalOptionOutcome.allow),
+            ApprovalOption(id: "allow_always", label: "Always allow", outcome: ApprovalOptionOutcome.allow),
+            ApprovalOption(id: "deny", label: "Deny", outcome: ApprovalOptionOutcome.deny),
+        ]))
     private let client = APIClient(baseURL: URL(string: "http://approval.invalid")!,
                                    session: VerifyFixture.session(), token: "")
 
@@ -730,6 +783,9 @@ struct ApprovalFixture: View {
             ChoiceCard(part: part, client: client,
                        message: Message(id: "choice:t-approval", threadID: "t-approval", role: MessageRole.assistant, parts: [part], createdAt: "", status: MessageStatus.done, agentID: "t-approval"),
                        bubble: BubbleStyle.incoming(scheme))
+            ApprovalCard(part: gate, client: client,
+                         message: Message(id: "approval:t-approval", threadID: "t-approval", role: MessageRole.assistant, parts: [gate], createdAt: "", status: MessageStatus.done, agentID: "t-approval"),
+                         bubble: BubbleStyle.incoming(scheme))
             Button("Fail answer") { VerifyFixture.failAnswers() }
                 .accessibilityValue(scheme == .dark ? "dark" : "light")
         }

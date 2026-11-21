@@ -86,6 +86,9 @@ PRAGMA user_version=2;`)
 	if err := s.migrateRuns(ctx); err != nil {
 		return err
 	}
+	if err := s.migrateInbox(ctx); err != nil {
+		return err
+	}
 	if err := s.migrateProactivity(ctx); err != nil {
 		return err
 	}
@@ -119,13 +122,19 @@ PRAGMA user_version=2;`)
 	if err := s.migrateTaskThreads(ctx); err != nil {
 		return err
 	}
+	if err := s.migratePlugins(ctx); err != nil {
+		return err
+	}
 	// Background loops look these up every few seconds.
 	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS messages_pending ON messages(status) WHERE indexing_state='pending';
 CREATE INDEX IF NOT EXISTS messages_failed ON messages(id) WHERE indexing_state='error';
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id,status);`); err != nil {
 		return err
 	}
-	return s.closeFocusCards(ctx)
+	if err := s.closeFocusCards(ctx); err != nil {
+		return err
+	}
+	return s.expireApprovals(ctx)
 }
 
 func Now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
@@ -158,7 +167,7 @@ func (s *Store) saveDefinition(ctx context.Context, a contract.Agent, definition
 	}
 	a.Active = false
 	if a.Avatar == nil {
-		if avatar := contract.GrokBotAvatarFromDefinition(definition); avatar != nil {
+		if avatar := contract.AvatarFromDefinition(definition); avatar != nil {
 			a.Avatar = avatar
 		}
 	}
@@ -396,13 +405,10 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	if err != nil {
 		return a, err
 	}
-	acp, err := json.Marshal(a.ACP)
-	if err != nil {
-		return a, err
-	}
+	// json_remove drops the external agent bots could once be attached to.
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE agents SET data=json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?,'$.fallback',json(?),'$.acp',json(?)) WHERE id=?`,
-		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, string(fallback), string(acp), a.ID,
+		`UPDATE agents SET data=json_remove(json_set(data,'$.name',?,'$.role',?,'$.model',?,'$.provider',?,'$.reasoning',?,'$.fallback',json(?)),'$.acp') WHERE id=?`,
+		a.Name, a.Role, a.Model, a.Provider, a.Reasoning, string(fallback), a.ID,
 	); err != nil {
 		return a, err
 	}
@@ -416,7 +422,7 @@ func (s *Store) UpdateDefinition(ctx context.Context, a contract.Agent, definiti
 	}
 	a = saved
 	if avatar == nil {
-		avatar = contract.GrokBotAvatarFromDefinition(definition)
+		avatar = contract.AvatarFromDefinition(definition)
 	}
 	if avatar != nil {
 		a.Avatar = avatar
@@ -977,11 +983,12 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 			return m, false, err
 		}
 	}
-	work, err := json.Marshal(Work{Trigger: contract.RunTriggerMessage, Message: m, Targets: targets, Routing: input.Routing, ParentRunID: parent, DeviceID: input.DeviceID})
-	if err != nil {
-		return m, false, err
+	work := Work{Trigger: contract.RunTriggerMessage, Message: m, Targets: targets, Routing: input.Routing, ParentRunID: parent, DeviceID: input.DeviceID}
+	state, delivery := "queued", deliveryQueue
+	if parent != nil {
+		state, delivery = "steer", deliverySteer
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,thread_id,request,input) VALUES(?,?,?,?)`, request.ID, thread, string(encoded), string(work)); err != nil {
+	if err := s.insertJobTx(ctx, tx, request.ID, thread, string(encoded), work, state, delivery); err != nil {
 		return m, false, err
 	}
 	s.jobs.wake(thread)
@@ -992,9 +999,6 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 		}
 	}
 	if parent != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state='steer' WHERE id=?`, request.ID); err != nil {
-			return m, false, err
-		}
 		return m, true, tx.Commit()
 	}
 	for _, target := range targets {
@@ -1007,9 +1011,18 @@ func (s *Store) Accept(ctx context.Context, input SendInput) (contract.Message, 
 	return m, true, tx.Commit()
 }
 
+// Job claims the thread's next queued turn. Child tasks are claimed separately by ChildJob,
+// so they run alongside the turn that spawned them instead of waiting behind it.
 func (s *Store) Job(ctx context.Context, thread string) (string, error) {
 	var id string
-	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' ORDER BY rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
+	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger') IS NOT 'child' ORDER BY enqueued_seq,rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
+	return id, err
+}
+
+// ChildJob claims the thread's next queued child task.
+func (s *Store) ChildJob(ctx context.Context, thread string) (string, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id=(SELECT id FROM jobs WHERE thread_id=? AND state='queued' AND json_extract(input,'$.trigger')='child' ORDER BY enqueued_seq,rowid LIMIT 1) RETURNING id`, thread).Scan(&id)
 	return id, err
 }
 

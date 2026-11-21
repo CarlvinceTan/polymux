@@ -15,7 +15,7 @@ import (
 )
 ```
 
-All four use Go 1.27.3. The repository's `go.work` connects them to the server; the server also has relative replacements so it builds with `GOWORK=off` from this checkout. No package release is published by this extraction. After the source is pushed, consumers can pin a commit or a module-specific release tag.
+All four use Go 1.27.4. The repository's `go.work` connects them to the server; the server also has relative replacements so it builds with `GOWORK=off` from this checkout. No package release is published by this extraction. After the source is pushed, consumers can pin a commit or a module-specific release tag.
 
 For a local consumer beside a checkout named `polymux`, use a local replacement:
 
@@ -34,7 +34,7 @@ PiG supplies codemode execution, nested-call validation, the native SQLite adapt
 
 Start with [`ExampleNewDurable`](../packages/runtime/example_test.go). Open storage with `NewDurableStorage`, construct the runtime, and call `Open` and `Send`. Retain `Session.Path()` to reopen a conversation. Close sessions and the runtime before closing storage. The example uses a local model endpoint and runs without paid credentials or a Polymux server.
 
-Hosts supply credentials through provider configuration and may add PiG tools through `Definition.ExtraTools`. `Client.BuildPrompt` supplies host policy; `Client.InstallSkills` supplies bundled skill files. The default prompt and skill loader do not install Polymux's product guides. Hosts authorize tools, MCP connections, attachment paths and shell access; the runtime is not an execution sandbox.
+Hosts supply credentials through provider configuration and may add PiG tools through `Definition.ExtraTools`. `CorePrompt` is the package-level core: identity, handling of quoted and external data, and the tool contract, with no Polymux product policy. `Client.BuildPrompt` supplies host policy above it; `Client.InstallSkills` supplies bundled skill files. The default prompt and skill loader do not install Polymux's product guides. Hosts authorize tools, MCP connections, attachment paths and shell access; the runtime is not an execution sandbox.
 
 Polymux's [`internal/agentruntime`](../apps/server/internal/agentruntime/) adapts its saved agent definitions, messages and usage to the library and supplies its policy and bundled skills. Existing conversation identifiers, `durable.db` records and provider namespaces retain their format.
 
@@ -44,16 +44,20 @@ Polymux's [`internal/agentruntime`](../apps/server/internal/agentruntime/) adapt
 
 See [`ExampleNew`](../packages/memory/example_test.go) for saving, reopening and detecting a conflicting edit. Hosts authenticate access to owner/scope identifiers and decide which documents enter an agent's context. Polymux keeps its memory tools, scope selection and retrieval policy in the server. The existing per-owner `memory.sqlite` format and document identifiers are unchanged.
 
+Bots use `recall_memory` for saved facts and `recall_history` for original messages from the current conversation. History browses newest first without a query, or ranks matches by BM25 with a query. Only browsing returns a page cursor; `before` limits a ranked query to older messages.
+
+When the server starts a local embedding process, `recall_history` also offers `semantic: true` for paraphrases. It combines keyword and semantic rankings over the same eligible messages. If embeddings are unavailable or exceed their 250 ms budget, it returns keyword matches. Bot recall queries never go to the app's configured remote embedding endpoint.
+
 ### Vault
 
-[`vault`](../packages/vault/) owns its domain types, the `vault_meta` and `vault_items` tables, encrypted storage, revision checks, imports, TOTP and origin-bound credential operations. It does not own the caller's database connection. `Open` creates its tables if absent; the version-1 encrypted records are preserved when retiring the password wrapper. Future format changes belong to this module, not the HTTP adapter.
+[`vault`](../packages/vault/) owns its domain types, the KeePass (KDBX 4) file it stores them in, revision checks, merging, the optional sync location, imports, TOTP and origin-bound credential operations. It is pure Go and needs no database. Future format changes belong to this module, not the HTTP adapter.
 
 Start with the executable [`ExampleOpen`](../packages/vault/example_test.go):
 
-1. Open a SQLite `*sql.DB` using your chosen compatible driver. The tests use `go-sqlite3`, which requires cgo and a C compiler.
-2. Implement `vault.Keys` with secure unattended-key storage. The example's memory-only keys are for demonstrations, not persistent use.
-3. Call `vault.Open`; storage initializes on first use with the host key.
-4. Use `vault.Item`, `Save`, `List` and the credential-use operations. Close the vault before closing its database.
+1. Choose a folder for the embedded vault (`vault.kdbx`) and its per-host settings (`config.json`).
+2. Implement `vault.Keys` with secure unattended storage for the vault password. The example's memory-only keys are for demonstrations, not persistent use.
+3. Call `vault.Open`; the vault is created on first use with a random password.
+4. Use `vault.Item`, `Save`, `List` and the credential-use operations. `SetSync` adds a sync location.
 
 **Authorization belongs to the host.** Data methods are trusted APIs: `Get`, `Save`, `Values` and `File` do not authenticate devices themselves. Authenticate devices before management operations; expose blank replacement fields instead of saved values. Only expose value-free metadata, references and receipts to models. This is not a sandbox against an agent with unrestricted host access.
 

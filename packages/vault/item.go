@@ -18,7 +18,7 @@ var itemFields = map[string][]string{
 	"api":      {"token", "notes"},
 	"card":     {"holder", "number", "expiry", "cvc", "pin", "notes"},
 	"totp":     {"username", "totp", "notes"},
-	"note":     {"notes"},
+	"note":     {"token", "notes"},
 	"recovery": {"username", "notes"},
 	"wifi":     {"ssid", "security", "username", "password", "notes"},
 	"passkey":  {"username", "rpID", "credentialID", "userHandle", "privateKey", "signCount", "notes"},

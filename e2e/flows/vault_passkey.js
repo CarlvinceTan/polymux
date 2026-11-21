@@ -1,5 +1,4 @@
-// @control
-// Needs Control for multiline secure input; fields stay write-only across restart and edits.
+// Fields stay write-only across restart and edits; the multiline private key is typed into its editor.
 let app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Vault" });
@@ -13,16 +12,18 @@ await app.typeText("example.com", { role: "textfield", name: "Relying party" });
 await app.typeText("Rml4dHVyZS1wYXNza2V5", { role: "textfield", name: "Credential ID" });
 await app.typeText("dmF1bHQtdXNlcg", { role: "textfield", name: "User handle" });
 const key = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgs76Li0g48POtU63S\nhQqUm72/LII7VpTVJ8fWCsy+mt2hRANCAAQc9MhcZ9e9/v+6Va6y5y/SOeNbmbEr\nHU/vz2HZGKz9qBvCep0m22dAJMNCrNd32jCWZt0RHFsCXs7o4AmRlC5O\n-----END PRIVATE KEY-----\n";
-await app.setValue({ role: "textfield", name: "Private key" }, key);
+await app.typeText(key, { role: "textarea", name: "Private key" });
 await app.click({ role: "button", name: "Save vault item" });
 await app.waitFor({ role: "button", name: "Settings passkey" });
 await app.click({ role: "button", name: "Close Settings" });
 return "ok";
 // @relaunch
 let app = await cua.getApp(APP);
+await app.waitFor({ role: "button", name: "Settings", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Settings" });
+await app.waitFor({ role: "button", name: "Vault", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Vault" });
-await app.waitFor({ role: "button", name: "Settings passkey" });
+await app.waitFor({ role: "button", name: "Settings passkey", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Settings passkey" });
 await app.waitFor({ role: "textfield", name: "Vault title" });
 if ((await app.query({ text: "BEGIN PRIVATE KEY" })).length) throw new Error("Private key exposed");

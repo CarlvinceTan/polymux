@@ -177,7 +177,7 @@ func TestNotSetBotsFollowProviders(t *testing.T) {
 	}
 	defer db.Close()
 	// Chief was created before any provider, pinned to the keyless endpoint.
-	chief := agentruntime.Definition{Agent: contract.Agent{ID: "chief", Name: "Chief", Model: "openai/gpt-5.5"}}
+	chief := agentruntime.Definition{Agent: contract.Agent{ID: "chief", Name: "Chief", Model: "openai/gpt-6.1-sol"}}
 	data, err := json.Marshal(chief)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestNotSetBotsFollowProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	factory := &keylessFactory{definitionFactory{opened: make(chan openedAgent, 4)}}
-	api, err := New(t.Context(), db, Config{DataDir: dir, Model: "openai/gpt-5.5", Factory: factory, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), VaultKeys: &vaultKeys{}})
+	api, err := New(t.Context(), db, Config{DataDir: dir, Model: "openai/gpt-6.1-sol", Factory: factory, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), VaultKeys: &vaultKeys{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,12 +218,12 @@ func TestNotSetBotsFollowProviders(t *testing.T) {
 		response.Body.Close()
 		return response.StatusCode
 	}
-	if status := post(`{"name":"Pinned","role":"","prompt":"","model":"openai/gpt-5.5"}`); status != http.StatusBadRequest {
+	if status := post(`{"name":"Pinned","role":"","prompt":"","model":"openai/gpt-6.1-sol"}`); status != http.StatusBadRequest {
 		t.Fatalf("keyless endpoint model accepted: %d", status)
 	}
 	// Connecting a provider is enough: the next turn runs on pi's preferred model, not the first listed.
 	if err := api.settings.SetProviders([]contract.Provider{{ID: "work", Type: "openai", Name: "Work", BaseURL: "https://example.com/v1", Enabled: true,
-		Models: []contract.ProviderModel{{ID: "gpt-4", Tags: []string{"text"}, Enabled: true}, {ID: "gpt-5.5", Tags: []string{"text"}, Enabled: true}}}}); err != nil {
+		Models: []contract.ProviderModel{{ID: "gpt-4", Tags: []string{"text"}, Enabled: true}, {ID: "gpt-6.1-sol", Tags: []string{"text"}, Enabled: true}}}}); err != nil {
 		t.Fatal(err)
 	}
 	response, err := http.Post(endpoint.URL+"/threads/chief/messages", "application/json", strings.NewReader(`{"id":"next","text":"hello","attachmentIDs":[]}`))
@@ -231,7 +231,7 @@ func TestNotSetBotsFollowProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if opened := <-factory.opened; opened.definition.Agent.Provider != "work" || opened.definition.Agent.Model != "gpt-5.5" {
+	if opened := <-factory.opened; opened.definition.Agent.Provider != "work" || opened.definition.Agent.Model != "gpt-6.1-sol" {
 		t.Fatalf("Not set bot ran on %q/%q", opened.definition.Agent.Provider, opened.definition.Agent.Model)
 	}
 	awaitReply(t, api, "chief", "next")

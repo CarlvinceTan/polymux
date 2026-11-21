@@ -117,12 +117,30 @@ struct VaultFields: View {
                     ForEach(fields, id: \.key) { field in
                         row(field.title) {
                             HStack(spacing: PanelStyle.rowInset) {
-                                SecureField("", text: Binding(get: { item.fields[field.key] ?? "" }, set: {
+                                let text = Binding(get: { item.fields[field.key] ?? "" }, set: {
                                     item.fields[field.key] = $0
                                     if !$0.isEmpty { item.removed.removeAll { $0 == field.key } }
-                                }), prompt: Text(saved.contains(field.key) && !item.removed.contains(field.key) ? "Saved" : "Not set")
-                                    .foregroundStyle(.muted))
-                                    .accessibilityLabel(field.title)
+                                })
+                                let hint = saved.contains(field.key) && !item.removed.contains(field.key) ? "Saved" : "Not set"
+                                if field.key == "privateKey" {
+                                    // A PEM key spans lines, which a secure field can't take.
+                                    TextEditor(text: text)
+                                        .font(.caption.monospaced())
+                                        .scrollContentBackground(.hidden)
+                                        .frame(minHeight: 72, maxHeight: 120)
+                                        .padding(6)
+                                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                                        .overlay(alignment: .topLeading) {
+                                            if text.wrappedValue.isEmpty {
+                                                Text(hint).font(.caption.monospaced()).foregroundStyle(.muted)
+                                                    .padding(.horizontal, 11).padding(.vertical, 6).allowsHitTesting(false)
+                                            }
+                                        }
+                                        .accessibilityLabel(field.title)
+                                } else {
+                                    SecureField("", text: text, prompt: Text(hint).foregroundStyle(.muted))
+                                        .accessibilityLabel(field.title)
+                                }
                                 if saved.contains(field.key), !item.removed.contains(field.key) {
                                     Button("Clear", systemImage: "minus.circle") {
                                         item.fields[field.key] = ""
@@ -138,7 +156,7 @@ struct VaultFields: View {
                 }
                 .padding(.horizontal, PanelStyle.rowInset)
             }
-            if !item.codes.isEmpty || ["login", "recovery"].contains(item.kind) {
+            if !item.codes.isEmpty || ["login", "note", "recovery"].contains(item.kind) {
                 PanelSection("Recovery codes", count: item.codes.isEmpty ? nil : item.codes.count) {
                     ForEach(item.codes.map(\.id), id: \.self) { id in
                         let code = Binding(get: { item.codes.first { $0.id == id } ?? VaultCode(id: id) }, set: { value in
@@ -182,11 +200,10 @@ struct VaultFields: View {
         let notes = Field(key: "notes", title: "Notes")
         switch kind {
         case "login": return [user, password, totp, notes]
-        case "api": return [Field(key: "token", title: "Secret"), notes]
+        case "api", "note": return [Field(key: "token", title: "Secret"), notes]
         case "card": return [Field(key: "holder", title: "Cardholder"), Field(key: "number", title: "Card number"),
                              Field(key: "expiry", title: "Expiry"), Field(key: "cvc", title: "Security code"), Field(key: "pin", title: "PIN"), notes]
         case "totp": return [user, totp, notes]
-        case "note": return [notes]
         case "recovery": return [user, notes]
         case "wifi": return [Field(key: "ssid", title: "Network"), Field(key: "security", title: "Security"), user, password, notes]
         case "passkey": return [user, Field(key: "rpID", title: "Relying party"), Field(key: "credentialID", title: "Credential ID"),

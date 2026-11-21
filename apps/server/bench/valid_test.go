@@ -16,6 +16,7 @@ import (
 type perfect struct {
 	act      func(t *testing.T, w *World, d dates)
 	seen     []Message
+	seenAt   func(d dates) []Message
 	sent     []Sent
 	routines []contract.Routine
 }
@@ -89,7 +90,9 @@ var perfects = map[string]perfect{
 				}
 			}
 		}
-	}, seen: []Message{msg(200, "", "Exam's Friday 20th. Focus on probability, random variables, sampling distributions, confidence intervals, hypothesis testing, t-tests and chi-square. Bayesian networks (week 6) isn't examinable. Problem set 5 is due next Wednesday.")}},
+	}, seenAt: func(d dates) []Message {
+		return []Message{msg(200, "", fmt.Sprintf("Exam's Friday %d. Focus on probability, random variables, sampling distributions, confidence intervals, hypothesis testing, t-tests and chi-square. Bayesian networks (week 6) isn't examinable. Problem set 5 is due next Wednesday.", d.examDay().Day()))}
+	}},
 
 	"sort-week": {act: func(t *testing.T, w *World, d dates) {
 		use(t, w, "email_send", map[string]any{"to": "marco.bianchi@mailbox.test", "subject": "Inspection", "body": "Thursday at 9am works, I'll be home."})
@@ -254,7 +257,11 @@ func TestPerfectAgentPassesHarderScenarios(t *testing.T) {
 			if p.act != nil {
 				p.act(t, w, w.life.d)
 			}
-			v := &View{World: w, Seen: p.seen, Sent: p.sent, Routines: p.routines, memo: map[string]int{}}
+			seen := p.seen
+			if p.seenAt != nil {
+				seen = p.seenAt(w.life.d)
+			}
+			v := &View{World: w, Seen: seen, Sent: p.sent, Routines: p.routines, memo: map[string]int{}}
 			for _, task := range sc.Check(v) {
 				if !task.OK {
 					t.Errorf("perfect run failed %s", task.Name)

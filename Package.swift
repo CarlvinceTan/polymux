@@ -30,13 +30,15 @@ let package = Package(
         // Linked by the app and its Live Activity extension, so it carries no other dependencies.
         .target(name: "PolymuxCall", path: "packages/PolymuxCall/Sources/PolymuxCall"),
         // Speech-to-text: microphone capture, Apple recognition and dictation post-processing.
-        .target(name: "SpeechKit", path: "packages/SpeechKit/Sources/SpeechKit"),
+        .target(name: "SpeechKit", path: "packages/SpeechKit/Sources/SpeechKit", resources: [.copy("Resources")]),
         // Speech-to-speech live calls; the app supplies the agent consult through VoiceReply.
         .target(name: "PolymuxVoice", dependencies: ["PolymuxKit", "PolymuxCall", "SpeechKit"], path: "packages/PolymuxVoice/Sources/PolymuxVoice"),
         .target(name: "PolymuxUpdates", dependencies: [.product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS]))], path: "packages/PolymuxUpdates/Sources/PolymuxUpdates"),
         .executableTarget(name: "MediaText", path: "packages/MediaText/Sources/MediaText"),
         .testTarget(name: "PolymuxKitTests", dependencies: ["PolymuxKit", "PolymuxAvatar", "AvatarKit"], path: "packages/PolymuxKit/Tests/PolymuxKitTests"),
         .testTarget(name: "SpeechKitTests", dependencies: ["SpeechKit"], path: "packages/SpeechKit/Tests/SpeechKitTests"),
+        // The dictation gate against its oracle; see docs/speech.md.
+        .testTarget(name: "SpeechKitBench", dependencies: ["SpeechKit"], path: "packages/SpeechKit/Bench", resources: [.copy("oracle.json")]),
         .testTarget(name: "PolymuxVoiceTests", dependencies: ["PolymuxVoice", "PolymuxKit", "SpeechKit"], path: "packages/PolymuxVoice/Tests/PolymuxVoiceTests"),
         .testTarget(name: "AvatarKitTests", dependencies: ["AvatarKit"], path: "packages/AvatarKit/Tests/AvatarKitTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "AvatarKitCTests", dependencies: ["AvatarKit", "AvatarKitC", "AvatarKitCTypes"], path: "packages/AvatarKitC/Tests/AvatarKitCTests"),

@@ -1,4 +1,3 @@
-// @cua
 // Replies and reactions keep their identity after an app relaunch.
 let app = await cua.getApp(APP);
 const name = "Replies" + Date.now();

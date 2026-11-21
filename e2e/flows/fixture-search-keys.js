@@ -1,5 +1,4 @@
 // @fixture --verify-fixture --verify-load
-// @cua
 // Arrow keys keep the chosen result in view past the fold, and Return opens exactly that result.
 const app = await cua.getApp(APP);
 await cua.sleep(2500);

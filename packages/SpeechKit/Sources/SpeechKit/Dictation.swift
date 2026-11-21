@@ -15,37 +15,43 @@ public final class DictationInput {
         AVAudioApplication.shared.recordPermission == .denied
             || [.denied, .restricted].contains(SFSpeechRecognizer.authorizationStatus())
     }
-    private let makeInput: () -> (any SpeechInput, () -> Void)
+    private let makeInput: (DictationLanguage) -> (any SpeechInput, () -> Void)
     private var pause: (() -> Void)?
     private var input: (any SpeechInput)?
     private var task: Task<Void, Never>?
-    private var final = false
+    private var drained = false
     private var session = UUID()
     private var stopTask: Task<Void, Never>?
     private var terms = Vocabulary.terms(Vocabulary.base)
+    private var options = DictationOptions()
 
     public init() {
         #if DEBUG
         if CommandLine.arguments.contains("--verify-fixture"), CommandLine.arguments.contains("--verify-dictation") {
             permission = { false }
-            makeInput = { (DictationFixture(), {}) }
+            makeInput = { _ in (DictationFixture(), {}) }
             return
         }
         #endif
         permission = Self.isDenied
-        makeInput = {
+        makeInput = { language in
             let audio = VoiceAudio(duplex: false)
-            return (AppleInput(audio: audio), { audio.stop() })
+            return (AppleInput(audio: audio, language: language), { audio.stop() })
         }
     }
 
-    public init(makeInput: @escaping () -> any SpeechInput, pause: @escaping () -> Void = {},
+    public init(makeInput: @escaping (DictationLanguage) -> any SpeechInput, pause: @escaping () -> Void = {},
          denied: @escaping @Sendable () -> Bool = DictationInput.isDenied) {
-        self.makeInput = { (makeInput(), pause) }
+        self.makeInput = { language in (makeInput(language), pause) }
         permission = denied
     }
 
-    /// Names the recogniser should hear correctly while dictating: agent and chat names.
+    /// Applies the user's language and device policy before the next dictation starts.
+    public func configure(_ options: DictationOptions) {
+        self.options = options
+    }
+
+    /// Names the recogniser should hear correctly while dictating: agent, chat and dictionary terms.
     public func setVocabulary(_ names: [String]) {
         terms = Vocabulary.terms(Vocabulary.base + names)
         let current = terms
@@ -60,28 +66,28 @@ public final class DictationInput {
     public func start(transcript: @escaping (VoiceTranscript) -> Void, failure: @escaping (Error) -> Void) {
         guard !active, !stopping else { return }
         active = true
-        final = false
+        drained = false
         ready = false
         session = UUID()
         let current = session
-        let (input, pause) = makeInput()
+        let (input, pause) = makeInput(DictationDevice.language(options.language))
         self.pause = pause
         self.input = input
         let startTerms = terms
         task = Task {
+            var started = false
             do {
                 await input.setVocabulary(startTerms)
                 let stream = try await input.start()
                 try Task.checkCancellation()
                 guard session == current else { return }
+                started = true
                 ready = true
                 denied = false
                 for try await event in stream {
                     guard !Task.isCancelled, session == current else { break }
                     switch event {
-                    case .transcript(let value):
-                        final = value.final
-                        transcript(value)
+                    case .transcript(let value): transcript(value)
                     case .level(let value): level = value
                     case .activity: break
                     }
@@ -91,6 +97,12 @@ public final class DictationInput {
                     await refresh()
                     if !Task.isCancelled, session == current { failure(error) }
                 }
+            }
+            if session == current {
+                drained = true
+                if stopping { return }
+            } else if started {
+                return
             }
             await input.stop()
             guard session == current else { return }
@@ -103,6 +115,7 @@ public final class DictationInput {
     public func stop() async {
         if let stopTask { await stopTask.value; return }
         guard active else { return }
+        if drained { await task?.value; return }
         let pending = Task { await finish() }
         stopTask = pending
         await pending.value
@@ -115,12 +128,11 @@ public final class DictationInput {
         if let input {
             pause?()
             if ready {
-                // Bound finalization so Send also works when recognition stalls.
-                final = false
+                // A final segment can be followed by more; wait for the stream to drain.
                 let finalization = Task { try? await input.finalize() }
                 let clock = ContinuousClock()
                 let deadline = clock.now.advanced(by: .seconds(1))
-                while !final && active && clock.now < deadline {
+                while !drained && clock.now < deadline {
                     let next = min(deadline, clock.now.advanced(by: .milliseconds(50)))
                     try? await clock.sleep(until: next)
                 }
@@ -147,6 +159,7 @@ private final class DictationFixture: SpeechInput {
     private var task: Task<Void, Never>?
 
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
+        if CommandLine.arguments.contains("--verify-dictation-unavailable") { throw SpeechFailure.unavailable }
         try await Task.sleep(for: .seconds(3))
         let stream = AsyncThrowingStream<VoiceEvent, Error>.makeStream()
         events = stream.continuation
@@ -154,8 +167,8 @@ private final class DictationFixture: SpeechInput {
             let levels: [Float] = [0, 0, 0.03, 0.08, 0.2, 0.5, 0.3, 0.1, 0.04, 0, 0.05, 0.15, 0.4, 0.8, 0.2, 0]
             // One segment, revised then closed, as the recogniser reports a sentence with a hesitation.
             let heard: [Int: (text: String, end: Double, final: Bool)] = [
-                2: ("Let's, um,", 1.2, false),
-                6: ("Let's, um, ship it", 2.4, true)
+                2: ("Let's, um, ask Quen to", 1.2, false),
+                6: ("Let's, um, ask Quen to ship it", 2.4, true)
             ]
             var index = 0
             while !Task.isCancelled {
@@ -173,7 +186,8 @@ private final class DictationFixture: SpeechInput {
     }
 
     func finalize() async throws {
-        events?.yield(.transcript(.init(text: "", start: 0, end: 0, final: true)))
+        task?.cancel()
+        events?.finish()
     }
 
     public func stop() async {

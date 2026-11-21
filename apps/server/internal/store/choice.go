@@ -134,6 +134,50 @@ func (s *Store) AnswerChoice(ctx context.Context, thread, id string, answer cont
 	return card, tx.Commit()
 }
 
+// DismissChoices marks the question cards still waiting in a chat as skipped, since the user
+// sent a message instead of answering.
+func (s *Store) DismissChoices(ctx context.Context, thread string) error {
+	rows, err := s.DB.QueryContext(ctx, `SELECT data FROM messages WHERE thread_id=? AND role='assistant'
+		AND json_extract(data,'$.parts[0].kind')='choice' AND json_extract(data,'$.parts[0].answerID') IS NULL`, thread)
+	if err != nil {
+		return err
+	}
+	var cards []contract.Message
+	for rows.Next() {
+		var data string
+		var card contract.Message
+		if err := rows.Scan(&data); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := json.Unmarshal([]byte(data), &card); err != nil {
+			rows.Close()
+			return err
+		}
+		cards = append(cards, card)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(cards) == 0 {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, card := range cards {
+		skipped := ChoiceDismissed
+		card.Parts[0].AnswerID = &skipped
+		if _, err := s.appendTx(ctx, tx, contract.Event{ConversationID: thread, Type: contract.EventTypeMessageDone, AgentID: card.AgentID}, &card); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // closeFocusCards marks the retired first-run cards that were never answered as skipped,
 // so every client shows them settled instead of offering choices nothing can accept.
 func (s *Store) closeFocusCards(ctx context.Context) error {

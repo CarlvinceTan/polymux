@@ -3,11 +3,16 @@ let app = await cua.getApp(APP);
 const host = await app.getState({ query: "Settings", include_screenshot: false });
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
+const search = { role: "textfield", name: "Search models" };
+await app.click({ role: "button", name: "Model" });
+await app.waitFor({ ...search, timeout_ms: 5000 });
+const [withoutModels] = await app.query(search);
+await app.pressKey("escape", search);
 await app.click({ role: "button", name: "Add provider" });
 await app.click({ role: "button", name: "Add custom provider" });
 await app.setValue({ role: "textfield", name: "Name" }, "Menu QA");
 await app.typeText("http://127.0.0.1:1/v1", { role: "textfield", name: "Base URL" });
-for (const model of ["alpha", "beta"]) {
+for (const model of ["alpha", "beta", "zeta-multilingual-long-context-preview"]) {
     await app.typeText(model, { role: "textfield", name: "Model ID" });
     await app.click({ role: "button", name: "Add" });
 }
@@ -15,8 +20,14 @@ await app.click({ role: "button", name: "Save" });
 await app.waitFor({ role: "button", name: "Edit Custom", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Model" });
 await app.waitFor({ role: "button", name: "Not set", value: "Selected", timeout_ms: 5000 });
-await app.typeText("no-such-model", { role: "textfield", name: "Search models" });
+const [full] = await app.query(search);
+if (!withoutModels?.frame || !full?.frame || Math.abs(full.frame.w - withoutModels.frame.w) > 1) {
+    throw new Error("Model menu changed width when models were added");
+}
+await app.typeText("no-such-model", search);
 await app.waitFor({ text: "No models found.", timeout_ms: 5000 });
+const [empty] = await app.query(search);
+if (!full?.frame || !empty?.frame || Math.abs(full.frame.w - empty.frame.w) > 1) throw new Error("Model menu changed width while searching");
 if ((await app.query({ role: "button", name: "Alpha Custom" })).length) throw new Error("Unmatched model stayed visible");
 await app.setValue({ role: "textfield", name: "Search models" }, "custom");
 await app.waitFor({ role: "button", name: "Alpha Custom", timeout_ms: 5000 });

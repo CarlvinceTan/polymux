@@ -24,14 +24,14 @@ private struct NetworkRow: View {
             Image(systemName: local ? "laptopcomputer" : "server.rack")
                 .font(.title3)
                 .foregroundStyle(.muted)
-                .frame(width: 28)
                 .accessibilityHidden(true)
+                .overlay(alignment: .bottomTrailing) {
+                    StatusDot(state: state).scaleEffect(0.75).offset(x: 2, y: 2)
+                }
+                .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.title).lineLimit(1)
-                HStack(spacing: 6) {
-                    StatusDot(state: state)
-                    Text(place).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
-                }
+                Text(place).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
             }
             .layoutPriority(1)
             Spacer(minLength: PanelStyle.rowInset)
@@ -47,7 +47,7 @@ private struct NetworkRow: View {
             Button(action: action) { content }
                 .buttonStyle(.plain)
                 .accessibilityLabel(server.title)
-                .accessibilityValue([place, count].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityValue([place, state.label, count].compactMap { $0 }.joined(separator: ", "))
         } else {
             content
         }
@@ -74,13 +74,11 @@ struct NetworkSettings: View {
                     NetworkRow(server: server, store: pool.sessions[server.address]?.network) { open(server.address) }
                 }
             } header: {
-                HStack {
-                    Text("Networks").foregroundStyle(Color.primary)
-                    Spacer()
+                SectionHeader("Networks", symbol: "network", tint: .blue) {
                     Button("Join network", systemImage: "plus", action: join)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
             } footer: {
                 if let joinIssue { Text(joinIssue).font(.footnote).foregroundStyle(.primary) }
             }
@@ -112,7 +110,7 @@ struct NetworkSettings: View {
                 }
             }
         } header: {
-            Text("This Mac").foregroundStyle(Color.primary)
+            SectionHeader("This Mac", symbol: "laptopcomputer")
         } footer: {
             if let issue = ServerHost.shared.issue { Text(issue).font(.footnote).foregroundStyle(.muted) }
         }
@@ -173,6 +171,11 @@ struct NetworkPage: View {
     private var session: AppSession? { pool.sessions[server.address] }
     private var store: NetworkStore? { session?.network }
     private var network: NetworkInfo? { store?.value }
+    private var transports: [PluginTransport] { session?.plugins.transports ?? [] }
+    private var selectedTransport: PluginTransport? {
+        guard let name = session?.settings.value?.transport, !name.isEmpty else { return nil }
+        return transports.first { $0.plugin == name }
+    }
     private var unreachable: Bool { store?.isConnected != true }
     private var title: String { name.isEmpty ? server.title : name }
     private var others: [ServerDevice] { pool.servers.known.filter { $0.address != server.address } }
@@ -201,7 +204,8 @@ struct NetworkPage: View {
     }
 
     private var page: some View {
-        PanelView(title, onClose: { close() }, onBack: back) {
+        PanelView(title, onClose: { close() }, onBack: back,
+                  accessory: PanelAccessory(symbol: "plus", label: "Add device") { adding = true }) {
             Form {
                 Section {
                     SettingsField(title: "Name", text: $name, prompt: server.title)
@@ -210,21 +214,29 @@ struct NetworkPage: View {
                     LabeledContent("Server") {
                         Text(network?.server.name ?? server.name).lineLimit(1).truncationMode(.middle)
                     }
+                    if !transports.isEmpty {
+                        SettingsPicker("Pairing links", selection: Binding(
+                            get: { session?.settings.value?.transport ?? "" },
+                            set: { session?.settings.edit(SettingsPatch(transport: $0)) }),
+                            options: [("Automatic", "")] + transports.map { ($0.title, $0.plugin) })
+                        .disabled(session?.settings.value == nil)
+                    }
+                } footer: {
+                    if let transport = selectedTransport, transport.state != "ready" {
+                        Text("\(transport.title): \(transportState(transport))")
+                            .font(.footnote).foregroundStyle(.muted)
+                    }
                 }
                 .panelRow()
                 Section {
                     devices
                 } header: {
-                    HStack {
-                        Text("Devices").foregroundStyle(Color.primary)
-                        Spacer()
-                        Button("Add device", systemImage: "plus") { adding = true }
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
+                    Text("Devices").foregroundStyle(Color.primary)
                 } footer: {
                     if let issue = store?.actionIssue ?? store?.issue {
                         Text(issue).font(.footnote).foregroundStyle(.muted)
+                    } else if unreachable, network != nil {
+                        Text("Showing the last known devices.").font(.footnote).foregroundStyle(.muted)
                     }
                 }
                 .panelRow()
@@ -253,6 +265,7 @@ struct NetworkPage: View {
                 }
             }
             .formStyle(.grouped)
+            .task { await session?.plugins.loadTransports() }
         }
         .panelDismiss(onClose: { close() })
         .alert("Leave \(title)?", isPresented: $leaving) {
@@ -296,16 +309,14 @@ struct NetworkPage: View {
             Button { managing = device } label: {
                 HStack(spacing: 10) {
                     StatusDot(state: status(device))
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(device.title).lineLimit(1).layoutPriority(1)
                             if device.id == network?.current {
                                 Text("This device").font(.subheadline).foregroundStyle(.muted).lineLimit(1)
                             }
                         }
-                        if device.title != device.name {
-                            Text(device.name).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
-                        }
+                        Text(detail(device)).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.right").foregroundStyle(.muted)
@@ -388,8 +399,22 @@ struct NetworkPage: View {
         network?.restricted?.contains { $0.id == device.id } == true
     }
 
+    private func transportState(_ transport: PluginTransport) -> String {
+        switch transport.state {
+        case "ready": "Ready"
+        case "error": transport.message ?? "Unavailable"
+        default: transport.message ?? "Starting"
+        }
+    }
+
     private func removable(_ device: NetworkInfo.Device) -> Bool {
         device.id != network?.current && device.id != network?.host
+    }
+
+    /// What a device row shows under its name.
+    private func detail(_ device: NetworkInfo.Device) -> String {
+        [status(device).title, device.title != device.name ? device.name : nil]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     /// What a device row shows besides its name, for VoiceOver.
@@ -401,8 +426,12 @@ struct NetworkPage: View {
 
     private func status(_ device: NetworkInfo.Device) -> StatusDot.State {
         if device.paired == false { return .pairing }
-        // The list is from the cache when the server can't be reached, so presence is unknown.
-        if unreachable || store?.issue != nil { return .unknown }
+        // The list is from the cache when the server can't be reached, so show what it last saw.
+        if unreachable || store?.issue != nil {
+            guard let online = network?.online else { return .unknown }
+            let seen = device.id == network?.current || online.contains(device.id)
+            return seen ? .lastOnline : .lastOffline
+        }
         return device.id == network?.current || network?.online?.contains(device.id) == true ? .online : .offline
     }
 

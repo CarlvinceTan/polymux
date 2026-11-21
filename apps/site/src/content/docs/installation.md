@@ -10,12 +10,12 @@ published: true
 
 # Install
 
-Native downloads are published on the [Releases page](/releases/). Until a release is available, installation builds from source. Older Electron downloads are a different app.
+Download the macOS disk image from the [Releases page](/releases/). Open it, drag Polymux into Applications, then eject the disk image and open Polymux from Applications. Setup lets you start the bundled server on this Mac or pair with one that's already running. If the installer isn't available, use the source instructions below. Older Electron downloads are a different app.
 
 ## Requirements
 
-- **Client:** macOS 27 and Xcode 27.
-- **Server:** Go 1.27.3, Git, and a C compiler. Xcode’s command-line tools provide the compiler on macOS.
+- **Mac download:** an Apple silicon Mac running macOS 27.
+- **Build from source:** Xcode 27 for the client; Go 1.27.4, Git, and a C compiler for the server. Xcode’s command-line tools provide the compiler on macOS.
 
 ## The Mac app
 
@@ -72,8 +72,10 @@ Open Polymux, then pair it with your server.
 
 ## Pair another Mac
 
-1. On an already connected client, open **Settings → Network**, choose the network, press **+** beside Devices, and copy its pairing link.
-2. On the new client, open **Settings → Network**, press **+** beside Networks, paste the link into **Join with a link**, and press **Return**.
+1. On an already connected client, open **Settings → Network**, choose the network, and press **+** beside the close button to get a pairing link and QR code.
+2. Open the link on the new device. If it opens in a browser, choose **Open Polymux**. You can also paste the link under **Settings → Network → Join network**.
+
+On iPhone, you can scan the QR code or paste the link on the **Connect to Your Server** setup screen. The iPhone runs the client only; leave your server running on the other device.
 
 For a server-only installation, generate a link on the server Mac instead. Replace `SERVER_ADDRESS` with the address printed by the installer:
 
@@ -85,7 +87,7 @@ Pairing links contain credentials. Share them privately, and use the complete li
 
 ## If something is not working
 
-- **Cannot connect:** check that the server is running and try a fresh pairing link. Other devices connect through an encrypted tunnel. If the tunnel is turned off on the server, install a transport plugin.
+- **Cannot connect:** check that the server is running and try a fresh pairing link. Other devices connect through an encrypted tunnel, or through a transport plugin such as Tailscale. If the tunnel is turned off on the server, install a transport plugin.
 - **Chats open but replies fail:** check your provider and **Default model** in **Settings → Models**.
 
 To update, pull the source version you want and rerun the relevant install command. Release builds check for updates automatically; use **Polymux → Check for Updates…** to check now. Next, [choose a model](/docs/models-and-agents/) and [start a conversation](/docs/).

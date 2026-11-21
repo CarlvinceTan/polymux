@@ -8,8 +8,9 @@ for (let i = 0; ; i++) {
     await cua.sleep(250);
 }
 await app.waitFor({ text: "Server-authored reply.", timeout_ms: 10000 });
-await app.waitFor({ text: "gpt-6.1-sol hit its usage limit, so deepseek-v4-pro replied instead.", timeout_ms: 10000 });
+const notice = "DeepSeek V4.1 Flash on DeepSeek is unavailable, so OpenCode Go replied instead.";
+await app.waitFor({ text: notice, timeout_ms: 10000 });
 await app.click({ role: "button", name: "Dismiss warning" });
-await app.waitFor({ role: "statictext", name: "gpt-6.1-sol hit its usage limit, so deepseek-v4-pro replied instead.", gone: true, timeout_ms: 3000 });
+await app.waitFor({ role: "statictext", name: notice, gone: true, timeout_ms: 3000 });
 await app.waitFor({ text: "Server-authored reply." });
 return "ok";

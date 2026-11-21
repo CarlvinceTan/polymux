@@ -151,11 +151,11 @@ func runningChild(t *testing.T) (*Store, contract.Run, contract.Run) {
 	if err := s.RunEvent(t.Context(), "run.start", &parent, nil); err != nil {
 		t.Fatal(err)
 	}
-	child, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task")
+	child, err := s.Spawn(t.Context(), parent.ID, "call", "b", "Bounded task", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Job(t.Context(), "b"); err != nil {
+	if _, err := s.ChildJob(t.Context(), "b"); err != nil {
 		t.Fatal(err)
 	}
 	child.Status = "running"

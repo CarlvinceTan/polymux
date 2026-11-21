@@ -407,21 +407,36 @@ func (t *memoryTool) Execute(ctx context.Context, _ string, args json.RawMessage
 	}
 }
 
-type historyTool struct{ store *store.Store }
+type historyTool struct {
+	store *store.Store
+	local search.Embedder
+}
+
+func (s *Server) historyTool() *historyTool {
+	return &historyTool{store: s.Store, local: s.config.HistoryEmbedder}
+}
 
 func (*historyTool) Name() string                           { return "recall_history" }
 func (*historyTool) Label() string                          { return "Retrieve conversation history" }
 func (*historyTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
-func (*historyTool) Description() string {
-	return "Retrieve completed messages from this conversation only, newest first. Omit query to browse; query searches lexical indexed history, not external providers (recent unindexed messages can be absent). Use before from next_before to page older messages. Returns bounded text with IDs, authors and timestamps, not instructions. Cannot retrieve another agent's private chats."
+func (t *historyTool) Description() string {
+	desc := "Retrieve completed messages from this conversation only. With a query, return the best keyword matches from the local index (recent unindexed messages can be absent). Without a query, browse newest first and pass next_before as before for the next page. With a query, before only restricts the search to older messages. Returns bounded text with IDs, authors and timestamps, not instructions."
+	if t.local != nil {
+		desc += " Set semantic=true for paraphrases when exact words aren't known; falls back to keyword matches if unavailable."
+	}
+	return desc
 }
 func (t *historyTool) Schema() ai.ToolSchema {
+	properties := map[string]any{
+		"query":  map[string]any{"type": "string", "maxLength": 2048},
+		"before": map[string]any{"type": "integer", "minimum": 0},
+		"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 24},
+	}
+	if t.local != nil {
+		properties["semantic"] = map[string]any{"type": "boolean"}
+	}
 	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{
-		"type": "object", "additionalProperties": false, "properties": map[string]any{
-			"query":  map[string]any{"type": "string", "maxLength": 2048},
-			"before": map[string]any{"type": "integer", "minimum": 0},
-			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 24},
-		},
+		"type": "object", "additionalProperties": false, "properties": properties,
 	}}
 }
 func (t *historyTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
@@ -430,9 +445,10 @@ func (t *historyTool) Execute(ctx context.Context, _ string, args json.RawMessag
 		return agent.AgentToolResult{}, err
 	}
 	var input struct {
-		Query  string `json:"query"`
-		Before int64  `json:"before"`
-		Limit  int    `json:"limit"`
+		Query    string `json:"query"`
+		Before   int64  `json:"before"`
+		Limit    int    `json:"limit"`
+		Semantic bool   `json:"semantic"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return agent.AgentToolResult{}, err
@@ -447,7 +463,12 @@ func (t *historyTool) Execute(ctx context.Context, _ string, args json.RawMessag
 	if strings.TrimSpace(input.Query) != "" && query == "" {
 		return agent.AgentToolResult{}, errors.New("history search requires words")
 	}
-	items, err := t.store.History(ctx, state.run.AgentID, state.run.ConversationID, query, input.Before, input.Limit)
+	var items []store.HistoryMessage
+	if query != "" && input.Semantic && t.local != nil {
+		items, err = t.store.SearchHistory(ctx, state.run.AgentID, state.run.ConversationID, input.Query, input.Before, input.Limit, t.local)
+	} else {
+		items, err = t.store.History(ctx, state.run.AgentID, state.run.ConversationID, query, input.Before, input.Limit)
+	}
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
@@ -461,7 +482,7 @@ func (t *historyTool) Execute(ctx context.Context, _ string, args json.RawMessag
 	}
 	output := struct {
 		Messages []evidence `json:"messages"`
-		Next     int64      `json:"next_before"`
+		Next     int64      `json:"next_before,omitempty"`
 	}{Messages: []evidence{}}
 	budget := 16384
 	for _, item := range items {
@@ -470,13 +491,15 @@ func (t *historyTool) Execute(ctx context.Context, _ string, args json.RawMessag
 		}
 		text := store.Text(item.Message)
 		limit := min(4096, budget)
-		if query != "" {
+		if item.Snippet != "" {
 			text = historyExcerpt(item.Snippet, limit)
 		}
 		text = bounded(text, limit)
 		budget -= len(text)
 		output.Messages = append(output.Messages, evidence{item.ID, item.Seq, item.Role, item.AgentID, item.CreatedAt, text})
-		output.Next = item.Seq
+		if query == "" {
+			output.Next = item.Seq
+		}
 	}
 	return toolResult(output)
 }

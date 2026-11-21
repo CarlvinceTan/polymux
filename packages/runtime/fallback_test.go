@@ -440,6 +440,7 @@ func TestFallbackPolicy(t *testing.T) {
 }
 
 func TestFallbackNotice(t *testing.T) {
+	const primary = "chosen-2-5"
 	useClock(t, &recordClock{})
 	var limited atomic.Bool
 	limited.Store(true)
@@ -450,7 +451,7 @@ func TestFallbackNotice(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
-		if body.Model == "chosen" {
+		if body.Model == primary {
 			w.WriteHeader(429)
 			if limited.Load() {
 				_, _ = io.WriteString(w, `{"error":{"type":"insufficient_quota"}}`)
@@ -462,10 +463,10 @@ func TestFallbackNotice(t *testing.T) {
 	t.Cleanup(provider.Close)
 	runtime := openDurable(t, provider)
 	runtime.SetProviders([]ProviderSpec{
-		{ID: "own", BaseURL: provider.URL + "/v1", Models: []string{"chosen"}},
+		{ID: "own", BaseURL: provider.URL + "/v1", Models: []string{primary}},
 		{ID: "spare", BaseURL: provider.URL + "/v1", Models: []string{"backup"}},
 	})
-	session, err := runtime.Open(t.Context(), Definition{Agent: Agent{ID: "assistant", Name: "Assistant", Model: "chosen", Provider: "own"}}, "")
+	session, err := runtime.Open(t.Context(), Definition{Agent: Agent{ID: "assistant", Name: "Assistant", Model: primary, Provider: "own"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,14 +487,45 @@ func TestFallbackNotice(t *testing.T) {
 		}
 	}
 	// The second turn skips the cooling model but still says why.
-	send("chosen hit its usage limit, so backup replied instead.")
-	send("chosen hit its usage limit, so backup replied instead.")
+	send("Chosen 2.5 hit its usage limit, so Backup replied instead.")
+	send("Chosen 2.5 hit its usage limit, so Backup replied instead.")
 	limited.Store(false)
 	runtime.SetProviders([]ProviderSpec{
-		{ID: "own", BaseURL: provider.URL + "/v1", Models: []string{"chosen"}},
+		{ID: "own", BaseURL: provider.URL + "/v1", Models: []string{primary}},
 		{ID: "spare", BaseURL: provider.URL + "/v1", Models: []string{"backup"}},
 	})
-	send("chosen is unavailable, so backup replied instead.")
+	send("Chosen 2.5 is unavailable, so Backup replied instead.")
+}
+
+func TestFallbackNoticeDistinguishesProviders(t *testing.T) {
+	runtime := openDurable(t, &httptest.Server{URL: "http://localhost"})
+	runtime.SetProviders([]ProviderSpec{
+		{ID: "own", Name: "DeepSeek Direct", Models: []string{"deepseek-flash"}, Builtin: builtinProvider("deepseek")},
+		{ID: "spare", Name: "OpenCode Go", Models: []string{"deepseek-v4.1-flash"}, Builtin: builtinProvider("opencode-go")},
+	})
+	original := runtime.catalogue.GetModel(SettingsProvider("own"), "deepseek-flash")
+	replacement := runtime.catalogue.GetModel(SettingsProvider("spare"), "deepseek-v4.1-flash")
+	if original == nil || replacement == nil {
+		t.Fatal("fallback models not registered")
+	}
+	want := "DeepSeek V4.1 Flash on DeepSeek Direct is unavailable, so OpenCode Go replied instead."
+	if got := runtime.fallback.switchNotice(original, replacement, false); got != want {
+		t.Errorf("notice = %q, want %q", got, want)
+	}
+}
+
+func TestModelLabel(t *testing.T) {
+	for _, test := range []struct{ name, id, display, want string }{
+		{name: "catalog name", id: "gpt-6.1-sol", display: "GPT 6.1 Sol", want: "GPT 6.1 Sol"},
+		{name: "custom version", id: "model-2-5", display: " ", want: "Model 2.5"},
+		{name: "namespaced id", id: "org/model-2-5", want: "org/model-2-5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := modelLabel(&ai.Model{ID: test.id, DisplayName: test.display}); got != test.want {
+				t.Errorf("model label = %q, want %q", got, test.want)
+			}
+		})
+	}
 }
 
 func TestFallbackAttribution(t *testing.T) {

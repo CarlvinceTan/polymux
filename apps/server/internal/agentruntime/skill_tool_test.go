@@ -19,7 +19,7 @@ func TestReadSkillServesBundledAndConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	tool := &skillTool{configured: []string{path}}
-	for name, marker := range map[string]string{"report": skills.IssueRepo, skills.CardsName: "Chart", "polymux": "Polymux", "crm": "Use the CRM."} {
+	for name, marker := range map[string]string{"report": skills.IssueRepo, skills.CardsName: "Chart", "polymux": "Polymux", "bot-creator": "Bot creator", "crm": "Use the CRM."} {
 		result, err := tool.Execute(t.Context(), "call", json.RawMessage(`{"name":"`+name+`"}`), nil)
 		if err != nil || !strings.Contains(result.Text(), marker) {
 			t.Fatalf("read_skill %s: %v, missing %q", name, err, marker)

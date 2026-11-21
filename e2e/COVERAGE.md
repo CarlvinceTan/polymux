@@ -57,6 +57,7 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Streaming reply | Sidebar preview stable | flow | `fixture-sidebar-preview.js` |
 | Failed reply warning | One quiet bubble | flow | `fixture-reply-error.js`, `fixture-reply-recovered.js` |
 | Replaced model warning | Says why another model replied | flow | `fixture-reply-notice.js` |
+| Concurrent composer warnings | Show the latest with a count of the rest, expire independently, keep the input still | flow | `fixture-reply-stack.js` |
 | Reasoning levels | Picker offers only the model's levels | flow | `fixture-model-levels.js` |
 | Unsent and not sent | Inline, delete works | flow | `fixture-unsent.js` |
 | Images load | Space reserved, nothing jumps | done | New uploads record their size and the bubble holds that space; older images still size on load |
@@ -87,10 +88,10 @@ The bar for every row: answers in the same frame, no blank frame, no movement th
 | Devices | A network's page lists them; loading, failed, pair | flow | `fixture-devices.js`, `-slow`, `-failed`, `fixture-pairing.js` |
 | Networks | Join a second, switch, each keeps its place, numbered names, rename, leave | flow | `servers.js`, `fixture-servers.js` |
 | This Mac's server | New install, relaunch, off and on, join keeps it or retires it, or merges it from the join screen | flow | `fresh.js`, `join-empty.js`, `join-keeps.js`, `join-merge.js` |
-| First-run welcome | Shown once on a new install, steps to permissions counted from the server, Settings reopens them | flow | `fresh.js`, `fixture-onboarding.js` |
+| First-run setup | Shown once on a new install: server choice, permissions counted from the server, official plugins; Settings reopens it | flow | `fresh.js`, `fixture-onboarding.js` |
 | Move | Preview, move, app follows, old copy, a new server beside it | flow | `move.js` |
 | Merge | Preview, merge, both sets of bots, same names told apart, old server goes | flow | `merge.js` |
-| Vault | Locked, unlocked, import | flow | `vault.js`, `vault_browser.js`, `vault_kdbx.js`, `vault_passkey.js` (always on Control), `vault_values.js` |
+| Vault | Locked, unlocked, import | flow | `vault.js`, `vault_browser.js`, `vault_kdbx.js`, `vault_passkey.js`, `vault_values.js` |
 | Updates | Check and states | flow | `fixture-updates.js` |
 
 ## States
@@ -119,3 +120,36 @@ Measured with `--verify-fixture --verify-load --verify-renders` (72 chats, Debug
 | Release build, idle with six chats | not measured | 81 MB, 1 to 2% CPU |
 
 Release builds have no fixture, so the render counts are Debug numbers.
+
+## Plugins
+
+| Flow | Checked | Status | Evidence |
+| --- | --- | --- | --- |
+| Install from the marketplace | Asks first, shows the source, joins the switcher | flow | `fixture-plugin-settings.js` |
+| Scoped buttons | Shared order, only active plugins, call button last | flow | `fixture-plugins.js`, `fixture-plugin-layout.js` |
+| Side panel swap | Plugin and profile swap at one width; close button stays | flow | `fixture-plugins.js` |
+| Permission rules | Rules are added and removed in the side panel; warns while commands can reach path rules | flow | `fixture-permissions.js` |
+| Web plugin panel | Its page fills the side panel and reaches its service; the edge resizes it; it can hide the close button | flow | `fixture-plugin-web.js`, `fixture-plugin-web-noclose.js` |
+| Plugin made by a bot | Waits for a person, stays out of the Marketplace, only serves its own page; tapping Install shows its button, page and service in the app | done | `TestBotPluginWaitsForAPerson`, `local_test.go`; a scripted bot on a `run.sh` server, 2026-11-02 |
+| Global switcher | Hidden with no Global plugin, always keeps Chats | flow | `fixture-plugin-settings.js`, `PluginStoreTests` |
+| Hub chats | Replaces sidebar and content, unread pills, optimistic send | flow | `fixture-hub.js` |
+| Hub on a real homeserver | Join, unread, reply, reaction, read, media | done | Real server, sidecar and Tuwunel, driven over the API |
+| Hub Spaces | One row per Space, opens in place, back to the platform | flow | `fixture-hub-spaces.js` |
+| Hub linked accounts | One platform's accounts narrow its list, shared groups stay in each | flow | `fixture-hub-account-picker.js`; the mapping from a bridge's own Spaces is covered by `TestChatsNameTheirAccounts` |
+| Hub mail | One source with a mailbox dropdown, reader, actions, filters, search, trash, erase, paging, back to top, an unreadable message, combined list | flow | `fixture-hub-mail.js`; IMAP against an in-process server in `mail_test.go`, and `TestLiveMailbox` by hand against a real server |
+| Hub mail writing | Reply quoting and threading, default signature, autosaved draft reopens, sending clears it | flow | `fixture-hub-compose.js`; SMTP against an in-process server in `mail_test.go` |
+| Hub mailboxes and signatures | State and servers listed, editing, signatures per mailbox with a default | flow | `fixture-hub-signatures.js`; formatted text was checked by hand from the toolbar to a new message |
+| Hub chat search | Reaches older pages, filters, returns to the message | flow | `fixture-hub-search.js` |
+| Hub mentions and rename | Menu above the box, identity sent, optimistic rename | flow | `fixture-hub-mentions.js` |
+| Hub composer, stickers and voice notes | + menu, emoji above +, picker sends, record, pause, discard, send | flow | `fixture-hub-media.js`; a stand-in replaces the microphone, so a real recording is still unverified |
+| Hub OAuth and Incognito | Provider sign-in, client setup, private reads clear the count | flow | `fixture-hub-account.js`; the browser step is skipped, so a real Google or Microsoft sign-in is still unverified |
+| Hub reactions and read marks | Who reacted, instant toggle, add from the bar, who read | flow | `fixture-hub-reactions.js`; the hover tooltip was checked in a screenshot through the read mark, which shares it |
+| Hub WeChat chats | Rename offered, pictures offered, voice notes not | flow | `fixture-hub-wechat.js`; the helper is tested against a stand-in by `TestRenameHelperCallsTheExactFunction`, and it renamed a real group and back on 4.1.15, confirmed by reading the name back. The Hub button itself hasn't been pressed on a real chat |
+| Hub iMessage and WeChat | Connect against a real Mac and relay | gap | Go tests use fakes. Neither ran against real Messages or WeChat, which would touch real conversations |
+| Hub tools | Sidebar Search and + act on Hub; selector styles | flow | `fixture-hub-tools.js` |
+| Hub replies | Agent reply preview, send, jump to the original, back to latest | flow | `fixture-hub-reply.js` |
+| Hub cached chats | A chat seen before opens at once from what's saved | flow | `fixture-hub-cache.js` |
+| Hub new chats and accounts | Direct chat, named group on one account, second account, disconnect | flow | `fixture-hub-create.js`; `TestCreateChat` covers the bridge calls, and a real bridge is still unverified |
+| Switcher badges | Live with Hub closed, can be turned off | flow | `fixture-plugin-badges.js` |
+| Bridge login, live bridged chats | QR and code logins with a real account | gap | Needs linked accounts |
+| Hub mail, contacts and broadcasts screens | Exercised in the app | gap | Logic tested in Go; screens not driven |
