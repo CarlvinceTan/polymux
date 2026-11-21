@@ -11,6 +11,8 @@ import (
 
 	"github.com/CarlvinceTan/polymux/apps/server/internal/agentruntime"
 	"github.com/CarlvinceTan/polymux/apps/server/internal/contract"
+	indexer "github.com/CarlvinceTan/polymux/apps/server/internal/search"
+	"github.com/CarlvinceTan/polymux/apps/server/internal/store"
 )
 
 func TestMEM1MemoryAfterRestart(t *testing.T) {
@@ -54,6 +56,70 @@ func TestMEM1MemoryAfterRestart(t *testing.T) {
 		h.die("recalled fact did not reach the typed reply")
 	}
 	pass(t, "MEM1", "saved preference and its source recalled through real tools after server/runtime restart")
+}
+
+func TestMEM5RankedHistory(t *testing.T) {
+	const evidence = "The Atlas canary launch moved to Thursday."
+	const query = "Atlas canary launch"
+	var appendMessage func(id, thread, status, text string) error
+	h := Start(t, Options{ID: "MEM5", Steps: []Step{
+		Fixed(func(*ChatRequest) error {
+			// Index a more relevant message after the question was accepted.
+			return appendMessage("future", agentID, "done", strings.Repeat(query+" ", 8))
+		}, ToolReply("ranked-recall", "recall_history", map[string]any{"query": query, "limit": 1})),
+		Fixed(func(req *ChatRequest) error {
+			if !hasToolResult(req, "ranked-recall", evidence) ||
+				!hasToolResult(req, "ranked-recall", `"id":"decision"`) ||
+				hasToolResult(req, "ranked-recall", "next_before") {
+				return fmt.Errorf("ranked history did not return the older decision without a browse cursor")
+			}
+			return nil
+		}, ToolReply("browse-recall", "recall_history", map[string]any{"limit": 1})),
+		Fixed(func(req *ChatRequest) error {
+			if !hasToolResult(req, "browse-recall", `"id":"chatter-25"`) ||
+				!hasToolResult(req, "browse-recall", "next_before") {
+				return fmt.Errorf("unfiltered history did not keep the latest-first browse cursor")
+			}
+			return nil
+		}, TextReply("Thursday.")),
+	}})
+	index := indexer.Index{Store: h.Store}
+	appendMessage = func(id, thread, status, text string) error {
+		m := contract.Message{ID: id, ThreadID: thread, Role: "user", Status: status,
+			Parts: []contract.Part{{Kind: "text", Text: &text}}, CreatedAt: store.Now()}
+		if _, err := h.Store.Append(t.Context(), contract.Event{ConversationID: thread, Type: "message.start"}, &m); err != nil {
+			return err
+		}
+		return index.Ingest(t.Context(), m)
+	}
+	if err := h.Store.Register(t.Context(), []contract.Agent{{ID: "private", Name: "Private"}}); err != nil {
+		h.die(err.Error())
+	}
+	seed := func(id, thread, status, text string) {
+		if err := appendMessage(id, thread, status, text); err != nil {
+			h.die(err.Error())
+		}
+	}
+	seed("decision", agentID, "done", strings.Repeat("Meeting notes. ", 300)+evidence)
+	for i := range 26 {
+		seed(fmt.Sprintf("chatter-%d", i), agentID, "done", "Checking in about the launch.")
+	}
+	seed("private-decision", "private", "done", strings.Repeat(query+" ", 8))
+	seed("failed-decision", agentID, "error", strings.Repeat(query+" ", 8))
+	if code := h.Send(agentID, "ranked-question", "When did the Atlas canary launch move to?"); code != http.StatusAccepted {
+		h.die(fmt.Sprintf("recall request status %d", code))
+	}
+	if run := h.WaitRun(agentID, "ranked-question", agentID, deadline); run.Status != "completed" {
+		h.die("recall run status " + run.Status)
+	}
+	if err := h.Emulator.Done(); err != nil {
+		h.die(err.Error())
+	}
+	replies := h.AssistantDone(agentID)
+	if len(replies) != 1 || messageText(replies[0]) != "Thursday." {
+		h.die("recalled decision did not reach the user")
+	}
+	pass(t, "MEM5", "ranked tool recall finds an older decision before the accepted turn, while browsing keeps its cursor")
 }
 
 func TestVOICE1PrivateRecall(t *testing.T) {

@@ -35,10 +35,13 @@ AND m.status='done' AND m.role IN('user','assistant')
 AND EXISTS(SELECT 1 FROM thread_members tm WHERE tm.thread_id=m.thread_id AND tm.agent_id=?)`
 	args := []any{thread, before, agent}
 	if query != "" {
-		statement += ` AND messages_fts MATCH ? AND messages_fts.thread_id=?`
+		statement += ` AND messages_fts MATCH ? AND messages_fts.thread_id=?
+ORDER BY bm25(messages_fts), m.seq DESC`
 		args = append(args, query, thread)
+	} else {
+		statement += ` ORDER BY m.seq DESC`
 	}
-	statement += ` ORDER BY m.seq DESC LIMIT ?`
+	statement += ` LIMIT ?`
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, statement, args...)
 	if err != nil {

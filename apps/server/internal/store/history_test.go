@@ -34,15 +34,19 @@ func TestHistory(t *testing.T) {
 	if err != nil || len(items) != 2 {
 		t.Fatal("lexical query included incomplete evidence", items, err)
 	}
-	items, err = s.History(t.Context(), "a", "b", "", 0, 24)
-	if err != nil || len(items) != 0 {
-		t.Fatal("cross-conversation disclosure", items, err)
+	for _, query := range []string{"", `"orange"`} {
+		items, err = s.History(t.Context(), "a", "b", query, 0, 24)
+		if err != nil || len(items) != 0 {
+			t.Fatal("cross-conversation disclosure", items, err)
+		}
 	}
 	if _, err := s.DB.ExecContext(t.Context(), `DELETE FROM thread_members WHERE thread_id='a' AND agent_id='a'`); err != nil {
 		t.Fatal(err)
 	}
-	items, err = s.History(t.Context(), "a", "a", "", 0, 24)
-	if err != nil || len(items) != 0 {
-		t.Fatal("revoked membership retained access", items, err)
+	for _, query := range []string{"", `"orange"`} {
+		items, err = s.History(t.Context(), "a", "a", query, 0, 24)
+		if err != nil || len(items) != 0 {
+			t.Fatal("revoked membership retained access", items, err)
+		}
 	}
 }

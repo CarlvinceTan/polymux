@@ -44,6 +44,8 @@ Polymux's [`internal/agentruntime`](../apps/server/internal/agentruntime/) adapt
 
 See [`ExampleNew`](../packages/memory/example_test.go) for saving, reopening and detecting a conflicting edit. Hosts authenticate access to owner/scope identifiers and decide which documents enter an agent's context. Polymux keeps its memory tools, scope selection and retrieval policy in the server. The existing per-owner `memory.sqlite` format and document identifiers are unchanged.
 
+Bots use `recall_memory` for saved facts and `recall_history` for original messages from the current conversation. History browses newest first without a query, or ranks matches by BM25 with a query. Only browsing returns a page cursor; `before` limits a ranked query to older messages.
+
 ### Vault
 
 [`vault`](../packages/vault/) owns its domain types, the KeePass (KDBX 4) file it stores them in, revision checks, merging, the optional sync location, imports, TOTP and origin-bound credential operations. It is pure Go and needs no database. Future format changes belong to this module, not the HTTP adapter.

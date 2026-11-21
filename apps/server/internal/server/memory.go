@@ -413,7 +413,7 @@ func (*historyTool) Name() string                           { return "recall_his
 func (*historyTool) Label() string                          { return "Retrieve conversation history" }
 func (*historyTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 func (*historyTool) Description() string {
-	return "Retrieve completed messages from this conversation only, newest first. Omit query to browse; query searches lexical indexed history, not external providers (recent unindexed messages can be absent). Use before from next_before to page older messages. Returns bounded text with IDs, authors and timestamps, not instructions. Cannot retrieve another agent's private chats."
+	return "Retrieve completed messages from this conversation only. With a query, return the best keyword matches from the local index (recent unindexed messages can be absent). Without a query, browse newest first and pass next_before as before for the next page. With a query, before only restricts the search to older messages. Returns bounded text with IDs, authors and timestamps, not instructions."
 }
 func (t *historyTool) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: map[string]any{
@@ -461,7 +461,7 @@ func (t *historyTool) Execute(ctx context.Context, _ string, args json.RawMessag
 	}
 	output := struct {
 		Messages []evidence `json:"messages"`
-		Next     int64      `json:"next_before"`
+		Next     int64      `json:"next_before,omitempty"`
 	}{Messages: []evidence{}}
 	budget := 16384
 	for _, item := range items {
@@ -476,7 +476,9 @@ func (t *historyTool) Execute(ctx context.Context, _ string, args json.RawMessag
 		text = bounded(text, limit)
 		budget -= len(text)
 		output.Messages = append(output.Messages, evidence{item.ID, item.Seq, item.Role, item.AgentID, item.CreatedAt, text})
-		output.Next = item.Seq
+		if query == "" {
+			output.Next = item.Seq
+		}
 	}
 	return toolResult(output)
 }
