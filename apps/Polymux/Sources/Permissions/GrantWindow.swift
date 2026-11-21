@@ -48,6 +48,7 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         following?.cancel()
         following = Task { [weak self] in
             var seen = false
+            var lastRaise = Date.distantPast
             let started = Date.now
             let deadline = started.addingTimeInterval(10)
             while !Task.isCancelled {
@@ -56,7 +57,10 @@ final class GrantWindow: NSObject, NSWindowDelegate {
                 if let frame = SystemSettings.frame() {
                     seen = true
                     // Brings Settings forward for the first seconds, in case it opened behind Polymux.
-                    if !SystemSettings.isFront, Date.now < started.addingTimeInterval(3) { SystemSettings.raise() }
+                    if !SystemSettings.isFront, Date.now.timeIntervalSince(lastRaise) > 1, Date.now < started.addingTimeInterval(3) {
+                        lastRaise = .now
+                        SystemSettings.raise()
+                    }
                     place(frame)
                 } else if seen || Date.now > deadline {
                     break
@@ -166,10 +170,14 @@ enum SystemSettings {
     static var app: NSRunningApplication? { NSRunningApplication.runningApplications(withBundleIdentifier: id).first }
     static var isFront: Bool { NSWorkspace.shared.frontmostApplication?.bundleIdentifier == id }
 
-    /// Brings Settings and its windows forward.
+    /// Brings Settings and its windows forward, even when Polymux is not the active app:
+    /// macOS ignores activate() from a background app, but `open` asks LaunchServices.
     static func raise() {
         app?.unhide()
-        app?.activate()
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = ["-b", id]
+        try? open.run()
     }
 
     /// Its front window's frame, with the origin at the top left of the main screen.
