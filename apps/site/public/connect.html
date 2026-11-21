@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="referrer" content="no-referrer">
+  <title>Connect to Polymux</title>
+  <style>
+    :root { color-scheme: light dark; font: 1rem/1.5 system-ui, sans-serif; }
+    body { margin: 0; min-height: 100svh; display: grid; place-items: center; }
+    main { max-width: 25rem; padding: 1.5rem; text-align: center; }
+    h1 { margin: 0; font-size: 1.75rem; }
+    p { margin: 0.75rem 0; }
+    #open { padding: 0.65rem 1.1rem; border-radius: 2rem; background: #0860d9; color: white; font-weight: 600; }
+    #open:not([hidden]) { display: inline-block; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Connect to Polymux</h1>
+    <p id="hint">Ask for a new pairing link if this one is incomplete.</p>
+    <a id="open" hidden>Open Polymux</a>
+    <p><a href="/#download">Get Polymux</a></p>
+  </main>
+  <script>
+    const payload = location.hash.slice(1);
+    if (payload) {
+      const open = document.getElementById("open");
+      open.href = "polymux://connect?" + payload;
+      open.hidden = false;
+      document.getElementById("hint").textContent = "Open the app to pair this device with your server.";
+    }
+  </script>
+</body>
+</html>

@@ -29,7 +29,7 @@ struct AddDevice: View {
         .fullScreenCover(isPresented: $scanning) {
             QRScanner { text in
                 scanning = false
-                pasted = text
+                pasted = text.absoluteString
                 submit()
             }
         }
@@ -52,8 +52,8 @@ struct AddDevice: View {
                                 .frame(width: 220, height: 220)
                                 .accessibilityLabel("Pairing QR code")
                             HStack(spacing: 10) {
-                                ShareLink(item: invite.link) { Label("Share", systemImage: "square.and.arrow.up") }
-                                Button("Copy link", systemImage: "doc.on.doc") { copy(invite.link) }
+                                ShareLink(item: invite.shareLink) { Label("Share", systemImage: "square.and.arrow.up") }
+                                Button("Copy link", systemImage: "doc.on.doc") { copy(invite.shareLink) }
                             }
                             .buttonStyle(.glass)
                             Text("Single-use link. Expires in 3 minutes.")
@@ -145,15 +145,22 @@ struct AddDevice: View {
 import VisionKit
 
 /// Reads a pairing QR code with the camera.
-private struct QRScanner: View {
-    let found: (String) -> Void
+struct QRScanner: View {
+    let found: (URL) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var failed = false
 
     static var available: Bool { DataScannerViewController.isSupported }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Scanner(found: found).ignoresSafeArea()
+            if failed {
+                ContentUnavailableView("Camera unavailable", systemImage: "camera",
+                                       description: Text("Check camera access in Settings or paste the pairing link."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Scanner(found: found, failed: { failed = true }).ignoresSafeArea()
+            }
             Button("Close scanner", systemImage: "xmark") { dismiss() }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.glass)
@@ -162,30 +169,41 @@ private struct QRScanner: View {
     }
 
     private struct Scanner: UIViewControllerRepresentable {
-        let found: (String) -> Void
+        let found: (URL) -> Void
+        let failed: () -> Void
 
         func makeUIViewController(context: Context) -> DataScannerViewController {
             let scanner = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])],
                                                     isHighlightingEnabled: true)
             scanner.delegate = context.coordinator
-            try? scanner.startScanning()
+            do { try scanner.startScanning() }
+            catch { Task { @MainActor in failed() } }
             return scanner
         }
 
         func updateUIViewController(_ controller: DataScannerViewController, context: Context) {}
-        func makeCoordinator() -> Coordinator { Coordinator(found: found) }
+        func makeCoordinator() -> Coordinator { Coordinator(found: found, failed: failed) }
 
         final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-            let found: (String) -> Void
+            let found: (URL) -> Void
+            let failed: () -> Void
             private var done = false
-            init(found: @escaping (String) -> Void) { self.found = found }
+            init(found: @escaping (URL) -> Void, failed: @escaping () -> Void) {
+                self.found = found
+                self.failed = failed
+            }
+
+            func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
+                failed()
+            }
 
             func dataScanner(_ scanner: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
                 guard !done else { return }
                 for case .barcode(let code) in items {
-                    if let text = code.payloadStringValue, text.hasPrefix("polymux://") {
+                    if let text = code.payloadStringValue, let url = URL(string: text), Invite(link: url) != nil {
                         done = true
-                        found(text)
+                        scanner.stopScanning()
+                        found(url)
                         return
                     }
                 }

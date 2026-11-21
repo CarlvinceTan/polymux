@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["23YB4896XA.com.flarehq.polymux.app"],
+        "components": [{"/": "/connect"}]
+      }
+    ]
+  }
+}

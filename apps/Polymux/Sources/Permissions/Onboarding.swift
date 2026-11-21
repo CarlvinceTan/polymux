@@ -24,6 +24,7 @@ struct Onboarding: View {
 
     let pool: SessionPool
     let join: (URL) async throws -> Void
+    var incoming: Binding<URL?>? = nil
     let finish: () -> Void
 
     @State private var step = Onboarding.firstStep
@@ -32,6 +33,9 @@ struct Onboarding: View {
     @State private var joining = false
     @State private var joined = false
     @State private var joinIssue: String?
+    #if os(iOS)
+    @State private var scanning = false
+    #endif
     @AppStorage("serverAddress") private var address = ServerHost.address
     @Environment(PluginStore.self) private var plugins: PluginStore?
     @Environment(\.colorScheme) private var scheme
@@ -63,7 +67,12 @@ struct Onboarding: View {
         var heading: String {
             switch self {
             case .welcome: "Get Started with Polymux"
-            case .host: "Choose Where Bots Run"
+            case .host:
+                #if os(macOS)
+                "Choose Where Bots Run"
+                #else
+                "Connect to Your Server"
+                #endif
             case .permissions: "System Permissions"
             case .plugins: "Official Plugins"
             }
@@ -118,6 +127,19 @@ struct Onboarding: View {
                 joined = true
             }
         }
+        #if os(iOS)
+        .onChange(of: incoming?.wrappedValue, initial: true) { _, url in
+            guard let url else { return }
+            incoming?.wrappedValue = nil
+            acceptLink(url)
+        }
+        .fullScreenCover(isPresented: $scanning) {
+            QRScanner { url in
+                scanning = false
+                acceptLink(url)
+            }
+        }
+        #endif
     }
 
     private var content: some View {
@@ -167,7 +189,7 @@ struct Onboarding: View {
             #if os(macOS)
             "Run the server on this device, or connect to one that's already running."
             #else
-            "Connect to the server your bots run on."
+            "Bots run on another device. Pair this iPhone with that server."
             #endif
         case .permissions:
             "Bots inherit what Polymux Server is granted."
@@ -209,12 +231,29 @@ struct Onboarding: View {
             Button(step == .plugins ? "Done" : "Continue", action: advance)
                 .buttonStyle(OnboardingPrimaryButton())
                 .keyboardShortcut(.defaultAction)
-                .disabled(joining)
+                .disabled(joining || needsPairing)
         }
         .padding(.top, 4)
     }
 
+    private var needsPairing: Bool {
+        #if os(iOS)
+        step == .host && !joined
+        #else
+        false
+        #endif
+    }
+
     private var hostPage: some View {
+        #if os(macOS)
+        hostChoice
+        #else
+        // iPhone is only ever a client, so there is nothing to choose.
+        pairing
+        #endif
+    }
+
+    private var hostChoice: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
                 if ServerHost.shared.available {
@@ -267,6 +306,17 @@ struct Onboarding: View {
 
     private var pairing: some View {
         VStack(alignment: .leading, spacing: 8) {
+            #if os(iOS)
+            if QRScanner.available && !joined {
+                Button("Scan QR code", systemImage: "qrcode.viewfinder") {
+                    Keyboard.close()
+                    scanning = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(joining)
+            }
+            #endif
             HStack(spacing: 8) {
                 TextField("Pairing link", text: $link, prompt: Text("Paste a pairing link"))
                     .labelsHidden()
@@ -281,6 +331,10 @@ struct Onboarding: View {
                     .onSubmit(connect)
                 Button("Connect", action: connect)
                     .tint(.blue)
+                    #if os(iOS)
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    #endif
                     .disabled(joining || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if joining {
@@ -301,6 +355,15 @@ struct Onboarding: View {
         }
     }
 
+    #if os(iOS)
+    private func acceptLink(_ url: URL) {
+        guard !joining else { return }
+        step = .host
+        link = url.absoluteString
+        connect()
+    }
+    #endif
+
     private func connect() {
         guard !joining else { return }
         guard let url = URL(string: link.trimmingCharacters(in: .whitespacesAndNewlines)), Invite(link: url) != nil else {
@@ -314,6 +377,7 @@ struct Onboarding: View {
             do {
                 try await join(url)
                 joined = true
+                link = ""
             } catch is CancellationError {
             } catch {
                 joinIssue = error.isOffline ? "Can’t reach this server. Check its connection and try the link again."

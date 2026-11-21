@@ -431,6 +431,11 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
             reply(Data("{}".utf8))
             return
         }
+        if request.httpMethod == "DELETE", path == "/network/devices/d-old" {
+            Self.networkLoads.removeSpare()
+            reply(Data("{}".utf8))
+            return
+        }
         if request.httpMethod == "PATCH", request.url?.path.contains("/threads/") == true {
             do {
                 let data = try Self.sidebar.patch(request)
@@ -506,11 +511,14 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
                     if CommandLine.arguments.contains("--verify-network-fail") { fail(); return }
                     if CommandLine.arguments.contains("--verify-network-late-fail"), Self.networkLoads.later() { fail(); return }
                     if CommandLine.arguments.contains("--verify-network-slow") { return }
-                    let devices: [[String: Any]] = [
+                    var devices: [[String: Any]] = [
                         ["id": "d-mac", "name": "Home server", "paired": true],
                         ["id": "d-ios", "name": "Carlvince’s iPhone", "paired": true],
                         ["id": "d-old", "name": "Spare MacBook Pro used for development and device-pairing verification", "label": "Spare device", "paired": true, "client": "spare"],
                     ]
+                    if Self.networkLoads.spareRemoved {
+                        devices.removeAll { $0["id"] as? String == "d-old" }
+                    }
                     data = try JSONSerialization.data(withJSONObject: [
                         "server": ["id": onSecondServer ? "fixture-studio" : "fixture-home", "name": onSecondServer ? "Studio" : "Home server",
                                    "network": onSecondServer ? "Studio" : "Home server", "build": "0.4.0", "platform": "macOS", "role": "server"],
@@ -622,6 +630,11 @@ final class VerifyFixture: URLProtocol, @unchecked Sendable {
     private final class NetworkLoads: @unchecked Sendable {
         private let lock = NSLock()
         private var count = 0
+        private var removed = false
+
+        var spareRemoved: Bool { lock.withLock { removed } }
+
+        func removeSpare() { lock.withLock { removed = true } }
 
         func later() -> Bool {
             lock.withLock {

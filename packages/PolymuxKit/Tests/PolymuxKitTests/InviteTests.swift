@@ -7,11 +7,19 @@ struct InviteTests {
         for ticket in [nil, "endpointabc"] as [String?] {
             let invite = Invite(url: "http://192.168.1.20:7337", token: "a+b/c=", ticket: ticket)
             #expect(Invite(link: invite.link) == invite)
+            #expect(Invite(link: invite.shareLink) == invite)
+            #expect(invite.shareLink.query == nil)
+            #expect(invite.shareLink.absoluteString.hasPrefix("https://polymux.com/connect#"))
         }
     }
 
     @Test func rejectsOtherLinks() throws {
-        for text in ["https://polymux.app/connect?url=x&token=y", "polymux://settings", "polymux://connect?url=x"] {
+        for text in [
+            "https://polymux.app/connect#url=https://server.example&token=test",
+            "https://polymux.com/connect?url=https://server.example&token=test",
+            "https://polymux.com/connect#url=https://server.example&token=a&token=b",
+            "polymux://settings", "polymux://connect?url=x"
+        ] {
             #expect(Invite(link: try #require(URL(string: text))) == nil)
         }
     }

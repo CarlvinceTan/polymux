@@ -66,9 +66,9 @@ extension EnvironmentValues {
 
 extension View {
     /// `page` fills the screen on iPhone; elsewhere a panel is always a panel.
-    func panel<Presented: View>(isPresented: Binding<Bool>, page: Bool = false,
+    func panel<Presented: View>(isPresented: Binding<Bool>, page: Bool = false, animatesResize: Bool = true,
                                 @ViewBuilder content: @escaping () -> Presented) -> some View {
-        modifier(PanelPresentation(isPresented: isPresented, page: page, presented: content))
+        modifier(PanelPresentation(isPresented: isPresented, page: page, animatesResize: animatesResize, presented: content))
     }
 
     func panel<Item: Identifiable, Presented: View>(item: Binding<Item?>,
@@ -92,6 +92,7 @@ extension View {
 private struct PanelPresentation<Presented: View>: ViewModifier {
     @Binding var isPresented: Bool
     let page: Bool
+    let animatesResize: Bool
     @ViewBuilder let presented: () -> Presented
     @Environment(\.panelContext) private var parent
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -106,7 +107,7 @@ private struct PanelPresentation<Presented: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(macOS)
-        let entry = isPresented ? PanelEntry(id: id, view: AnyView(panel)) : nil
+        let entry = isPresented ? PanelEntry(id: id, view: AnyView(panel), animatesResize: animatesResize) : nil
         content
             .transformPreference(PanelEntries.self) { entries in
                 if let entry { entries.append(entry) }
@@ -169,6 +170,7 @@ import AppKit
 private struct PanelEntry: Identifiable {
     let id: UUID
     let view: AnyView
+    let animatesResize: Bool
 }
 
 private struct PanelEntries: PreferenceKey {
@@ -307,7 +309,7 @@ private struct PanelLayer: View {
                 entry.view
                     .frame(width: max(0, min(width ?? PanelSize.width, proxy.size.width - 48)),
                            height: PanelSize.height(height, available: proxy.size.height))
-                    .animation(measured ? Motion.move.unless(reduceMotion) : nil, value: height)
+                    .animation(measured && entry.animatesResize ? Motion.move.unless(reduceMotion) : nil, value: height)
                     .onPreferenceChange(PanelHeight.self) { value in
                         height = value
                         DispatchQueue.main.async { measured = true }

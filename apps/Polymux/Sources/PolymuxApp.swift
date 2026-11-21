@@ -223,6 +223,9 @@ struct AppRoot: View {
     @State private var pairingIssue: String?
     /// Set when a new install starts its own server, or on a fresh iPhone install.
     @AppStorage("onboarding.pending") private var onboarding = Onboarding.verifying || SetupDefaults.pending
+    #if os(iOS)
+    @State private var onboardingLink: URL?
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -301,7 +304,7 @@ struct AppRoot: View {
             // Closing Settings answers the join question with the default: keep separate.
             joinChoice = nil
         }
-        .panel(isPresented: settingsShown, page: true) {
+        .panel(isPresented: settingsShown, page: true, animatesResize: false) {
             ConnectionView(pool: pool, settings: activeSession?.settings,
                            client: activeSession?.client,
                            join: join,
@@ -340,11 +343,19 @@ struct AppRoot: View {
             showSettings = true
             return
         }
+        guard Invite(link: url) != nil else { return }
+        #if os(iOS)
+        if onboarding {
+            onboardingLink = url
+            return
+        }
+        #endif
         Task {
             do { try await join(url) }
             catch is CancellationError {}
             catch {
                 pairingIssue = error.isOffline ? "Can’t reach this server. Check its connection and create a new link." : error.reason(or: "Couldn’t pair with this server.")
+                settingsTab = .network
                 showSettings = true
             }
         }
@@ -380,11 +391,7 @@ struct AppRoot: View {
 
     /// Settings closes while setup is on screen, then returns when setup finishes.
     private var settingsShown: Binding<Bool> {
-        #if os(macOS)
         Binding(get: { showSettings && !onboarding }, set: { showSettings = $0 })
-        #else
-        $showSettings
-        #endif
     }
 
     /// This Mac's own server, which reports its permissions to the Grant window.
@@ -421,7 +428,7 @@ struct AppRoot: View {
         // iPhone has no window to fill, so setup covers the whole screen.
         mainContent
             .fullScreenCover(isPresented: $onboarding) {
-                Onboarding(pool: pool, join: join) {
+                Onboarding(pool: pool, join: join, incoming: $onboardingLink) {
                     UserDefaults.standard.set(true, forKey: "onboarding.completed")
                     onboarding = false
                 }

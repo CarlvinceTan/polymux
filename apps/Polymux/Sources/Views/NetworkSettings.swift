@@ -204,7 +204,8 @@ struct NetworkPage: View {
     }
 
     private var page: some View {
-        PanelView(title, onClose: { close() }, onBack: back) {
+        PanelView(title, onClose: { close() }, onBack: back,
+                  accessory: PanelAccessory(symbol: "plus", label: "Add device") { adding = true }) {
             Form {
                 Section {
                     SettingsField(title: "Name", text: $name, prompt: server.title)
@@ -230,13 +231,7 @@ struct NetworkPage: View {
                 Section {
                     devices
                 } header: {
-                    HStack {
-                        Text("Devices").foregroundStyle(Color.primary)
-                        Spacer()
-                        Button("Add device", systemImage: "plus") { adding = true }
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
+                    Text("Devices").foregroundStyle(Color.primary)
                 } footer: {
                     if let issue = store?.actionIssue ?? store?.issue {
                         Text(issue).font(.footnote).foregroundStyle(.muted)

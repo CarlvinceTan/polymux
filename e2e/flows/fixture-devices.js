@@ -7,6 +7,11 @@ await app.click({ role: "button", name: "Network" });
 await app.waitFor({ role: "button", name: "Home server", timeout_ms: 10000 });
 await app.click({ role: "button", name: "Home server" });
 await app.waitFor({ text: "Devices", timeout_ms: 10000 });
+const [add] = await app.query({ role: "button", name: "Add device" });
+const [close] = await app.query({ role: "button", name: "Close Home server" });
+if (!add || !close || add.frame.x >= close.frame.x || Math.abs(add.frame.y - close.frame.y) > 2) {
+    throw new Error("Add device isn't beside the close button");
+}
 await app.waitFor({ role: "button", name: "Home server", timeout_ms: 10000 });
 const [server] = await app.query({ role: "button", name: "Home server" });
 if (!(server?.value || "").includes("Server, Online")) throw new Error(`server device not online: ${server?.value}`);
