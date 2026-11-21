@@ -21,8 +21,7 @@ private struct NetworkRow: View {
 
     private var content: some View {
         HStack(spacing: PanelStyle.headingInset) {
-            Image(systemName: local ? "laptopcomputer" : "server.rack")
-                .font(.title3)
+            NetworkIcon(icon: store?.value?.server.icon, fallback: local ? "laptopcomputer" : "server.rack")
                 .foregroundStyle(.muted)
                 .accessibilityHidden(true)
                 .overlay(alignment: .bottomTrailing) {
@@ -169,6 +168,7 @@ struct NetworkPage: View {
     @State private var choosing: MoveServer.Kind?
     @State private var transfer: Transfer?
     @State private var leaving = false
+    @State private var deleting = false
 
     private struct Transfer {
         let kind: MoveServer.Kind
@@ -242,6 +242,11 @@ struct NetworkPage: View {
                     }
                 }
                 .panelRow()
+                NetworkIconPicker(current: network?.server.icon,
+                                  fallback: server.address == ServerHost.address ? "laptopcomputer" : "server.rack") { icon in
+                    Task { await store?.setIcon(icon) }
+                }
+                .disabled(unreachable)
                 Section {
                     devices
                 } header: {
@@ -268,7 +273,18 @@ struct NetworkPage: View {
                 }
                 .disabled(others.isEmpty)
                 .panelRow()
-                if server.address != ServerHost.address {
+                if server.address == ServerHost.address, ServerHost.shared.available {
+                    Section {
+                        Button("Delete server", role: .destructive) { deleting = true }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity)
+                            .disabled(ServerHost.shared.changing)
+                    } footer: {
+                        if let issue = ServerHost.shared.issue { Text(issue).font(.footnote).foregroundStyle(.muted) }
+                    }
+                    .panelRow()
+                } else if server.address != ServerHost.address {
                     Section {
                         Button("Leave \(title)", role: .destructive) { leaving = true }
                             .buttonStyle(.borderless)
@@ -282,6 +298,18 @@ struct NetworkPage: View {
             .task { await session?.plugins.loadTransports() }
         }
         .panelDismiss(onClose: { close() })
+        .alert("Delete \(title)?", isPresented: $deleting) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    guard await ServerHost.shared.delete() else { return }
+                    pool.remove(server.address)
+                    onBack()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This stops the server on this Mac and erases its chats and data. It can’t be undone.")
+        }
         .alert("Leave \(title)?", isPresented: $leaving) {
             Button("Leave", role: .destructive) {
                 pool.remove(server.address)
@@ -330,7 +358,9 @@ struct NetworkPage: View {
                                 Text("This device").font(.subheadline).foregroundStyle(.muted).lineLimit(1)
                             }
                         }
-                        Text(detail(device)).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
+                        if !detail(device).isEmpty {
+                            Text(detail(device)).font(.subheadline).foregroundStyle(.muted).lineLimit(1)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.right").foregroundStyle(.muted)
@@ -427,7 +457,7 @@ struct NetworkPage: View {
 
     /// What a device row shows under its name.
     private func detail(_ device: NetworkInfo.Device) -> String {
-        [status(device).title, device.title != device.name ? device.name : nil]
+        [device.system.flatMap { $0.isEmpty ? nil : $0 }, device.title != device.name ? device.name : nil]
             .compactMap { $0 }.joined(separator: " · ")
     }
 

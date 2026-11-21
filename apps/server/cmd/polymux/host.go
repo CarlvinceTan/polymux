@@ -17,7 +17,7 @@ import (
 
 func runHost(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: polymux host install|remove|update|forget")
+		return errors.New("usage: polymux host install|remove|update|forget|delete")
 	}
 	service, err := host.Open()
 	if err != nil {
@@ -39,8 +39,28 @@ func runHost(args []string) error {
 		return updateHost(service, binary)
 	case "forget":
 		return forgetMoved()
+	case "delete":
+		return deleteHost(service)
 	}
 	return fmt.Errorf("unknown host command %q", args[0])
+}
+
+// deleteHost stops the server this Mac runs and erases its data and Keychain items.
+func deleteHost(service host.Service) error {
+	if err := service.Remove(); err != nil {
+		return err
+	}
+	dir, err := dataDir()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return forgetMoved()
+	}
+	if err := os.Rename(dir, dir+".moved-"+time.Now().Format("20060102-150405")); err != nil {
+		return err
+	}
+	return forgetMoved()
 }
 
 func selfPath() (string, error) {

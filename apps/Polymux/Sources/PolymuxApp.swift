@@ -707,7 +707,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     static var allCases: [SettingsTab] {
         #if os(macOS)
-        [.general, .models, .voice, .network, .vault, .plugins, .updates, .shortcuts]
+        [.general, .models, .voice, .network, .vault, .plugins, .shortcuts, .updates]
         #else
         [.general, .models, .voice, .network, .vault, .plugins, .updates]
         #endif
@@ -715,7 +715,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String { rawValue.capitalized }
+    var title: String { self == .updates ? "Versions" : rawValue.capitalized }
 
     /// UI checks open Settings at launch: --verify-network, or its page with --verify-network-page;
     /// --verify-voice opens the Voice tab.

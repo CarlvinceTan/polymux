@@ -2,8 +2,8 @@
 // A refused appcast connection reports its result inside Settings without a Sparkle dialog.
 const app = await cua.getApp(APP);
 await app.click({ role: "button", name: "Settings" });
-await app.waitFor({ role: "button", name: "Updates", timeout_ms: 10000 });
-await app.click({ role: "button", name: "Updates" });
+await app.waitFor({ role: "button", name: "Versions", timeout_ms: 10000 });
+await app.click({ role: "button", name: "Versions" });
 await app.click({ role: "button", name: "Check for updates" });
 await app.waitFor({ role: "statictext", name: "Couldn’t check for updates.", timeout_ms: 10000 });
 // The outcome is shown briefly beside the button, then clears.

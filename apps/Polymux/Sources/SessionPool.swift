@@ -230,7 +230,7 @@ final class SessionPool {
             let tabs = session.plugins.tabs.isEmpty ? [PluginTab(id: PluginTab.chats, plugin: nil)] : session.plugins.tabs
             return tabs.map {
                 PluginTab(id: "\(server.address)#\($0.id)", plugin: $0.plugin, server: server.address,
-                          serverName: server.title, serverMark: mark)
+                          serverName: server.title, serverMark: mark, serverIcon: session.network.value?.server.icon)
             }
         }
     }
@@ -319,7 +319,13 @@ final class SessionPool {
         #else
         let name = UIDevice.current.name
         #endif
-        try? await session.client.renameDevice(name, client: Notifications.shared.installation)
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        #if os(macOS)
+        let system = "macOS \(version.majorVersion).\(version.minorVersion)"
+        #else
+        let system = "\(UIDevice.current.systemName) \(version.majorVersion).\(version.minorVersion)"
+        #endif
+        try? await session.client.renameDevice(name, client: Notifications.shared.installation, system: system)
         await session.network.refresh()
         report(session)
     }

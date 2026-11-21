@@ -14,6 +14,7 @@ import (
 
 func (s *Server) networkRoutes() {
 	s.mux.HandleFunc("PATCH /network", s.nameNetwork)
+	s.mux.HandleFunc("PUT /network/icon", s.iconNetwork)
 	s.mux.HandleFunc("POST /network/peers", s.linkPeer)
 	s.mux.HandleFunc("POST /network/devices/{id}/allow", s.allowDevice)
 	s.mux.HandleFunc("GET "+device.PeerPrefix+"state", s.peerState)
@@ -43,6 +44,32 @@ func (s *Server) nameNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.config.Devices.Store().NameNetwork(r.Context(), name, input.First); err != nil {
 		fail(w, 500, "network", "The name could not be saved.")
+		return
+	}
+	w.WriteHeader(204)
+}
+
+// iconNetwork sets the network's icon: a preset name or a small image data URL; empty clears it.
+func (s *Server) iconNetwork(w http.ResponseWriter, r *http.Request) {
+	if !nativeRequest(w, r) {
+		return
+	}
+	if s.config.Devices == nil {
+		fail(w, 404, "not_found", "Device pairing is unavailable.")
+		return
+	}
+	var input struct {
+		Icon string `json:"icon"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	if len(input.Icon) > 200_000 || (strings.Contains(input.Icon, ":") && !strings.HasPrefix(input.Icon, "data:image/")) {
+		fail(w, 400, "invalid", "Choose a preset or a smaller image.")
+		return
+	}
+	if err := s.config.Devices.Store().SetNetworkIcon(r.Context(), input.Icon); err != nil {
+		fail(w, 500, "network", "The icon could not be saved.")
 		return
 	}
 	w.WriteHeader(204)

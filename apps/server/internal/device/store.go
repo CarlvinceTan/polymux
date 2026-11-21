@@ -40,6 +40,8 @@ type Pairing struct {
 	Paired bool `json:"paired"`
 	// Client is the device's stable ID across servers; empty until it reports one.
 	Client string `json:"client,omitempty"`
+	// System is what the device runs, such as "macOS 26.1"; empty until it reports one.
+	System string `json:"system,omitempty"`
 }
 
 type Enrollment struct {
@@ -256,7 +258,7 @@ func (s *Store) Authenticate(ctx context.Context, token string) (Pairing, error)
 }
 
 func (s *Store) List(ctx context.Context) ([]Pairing, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,label,agent,capabilities,revoked,paired,client FROM devices ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,label,agent,capabilities,revoked,paired,client,system FROM devices ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +267,7 @@ func (s *Store) List(ctx context.Context) ([]Pairing, error) {
 	for rows.Next() {
 		var p Pairing
 		var caps string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Agent, &caps, &p.Revoked, &p.Paired, &p.Client); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Agent, &caps, &p.Revoked, &p.Paired, &p.Client, &p.System); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(caps), &p.Capabilities); err != nil {
@@ -301,6 +303,15 @@ func (s *Store) Rename(ctx context.Context, id, name string) error {
 	if n, err := result.RowsAffected(); err == nil && n != 1 {
 		return errors.New("device not found")
 	}
+	return err
+}
+
+// SetSystem records what a device runs, such as "macOS 26.1".
+func (s *Store) SetSystem(ctx context.Context, id, system string) error {
+	if len(system) > 64 || strings.ContainsAny(system, "\x00\r\n") {
+		return errors.New("invalid system")
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET system=? WHERE id=? AND revoked=0`, system, id)
 	return err
 }
 

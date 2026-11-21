@@ -217,9 +217,11 @@ struct SettingsEntry: Identifiable {
             add("Generation", ["Image", "Video"])
         case .updates:
             #if os(macOS)
-            add("Updates", ["Check automatically", "App update channel", "Stable", "Nightly"])
+            add("Client", ["Version", "Check automatically", "Client channel", "Stable", "Nightly"])
+            #else
+            add("Client", ["Version"])
             #endif
-            add("Version", ["Server channel", "Nightly", "Stable"])
+            add("Server", ["Version", "Server channel", "Updates", "Automatic", "Manual", "Stable", "Nightly"])
         case .shortcuts:
             add("Shortcuts", AppShortcutAction.allCases.map(\.title))
         case .vault, .plugins: break

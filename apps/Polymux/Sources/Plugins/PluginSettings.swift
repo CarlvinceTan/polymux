@@ -2,7 +2,7 @@ import SwiftUI
 import PolymuxKit
 
 private enum PluginPage: String, CaseIterable {
-    case installed, marketplace
+    case marketplace, installed
     var title: String { rawValue.capitalized }
 }
 

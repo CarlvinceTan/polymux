@@ -70,6 +70,22 @@ public final class NetworkStore {
         await persist()
     }
 
+    public func setIcon(_ icon: String) async {
+        let before = value?.server.icon
+        guard icon != (before ?? ""), pending.insert("icon").inserted else { return }
+        revision += 1
+        value?.server.icon = icon
+        actionIssue = nil
+        do { try await client.setNetworkIcon(icon) }
+        catch {
+            value?.server.icon = before
+            actionIssue = "Couldn’t change this network’s icon."
+        }
+        pending.remove("icon")
+        revision += 1
+        await persist()
+    }
+
     public func rename(_ device: NetworkInfo.Device, label: String) async {
         guard let index = value?.devices.firstIndex(where: { $0.id == device.id }),
               pending.insert(device.id).inserted else { return }

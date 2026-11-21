@@ -123,6 +123,18 @@ final class ServerHost {
         leftover = Self.oldCopy
     }
 
+    /// Stops this Mac's server and erases its data, for good.
+    func delete() async -> Bool {
+        guard !changing else { return false }
+        changing = true
+        defer { changing = false }
+        let done = await run("delete")
+        issue = done ? nil : "Couldn’t delete the server on this Mac."
+        running = Self.job.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        leftover = Self.oldCopy
+        return done
+    }
+
     func start() async {
         guard !changing else { return }
         changing = true

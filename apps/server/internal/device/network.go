@@ -45,11 +45,12 @@ type Grant struct {
 func (s *Store) addNetwork(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS peers(id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, ticket TEXT NOT NULL, token TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS merged(id TEXT PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS network_name(id INTEGER PRIMARY KEY CHECK(id=1), name TEXT NOT NULL);`)
+CREATE TABLE IF NOT EXISTS network_name(id INTEGER PRIMARY KEY CHECK(id=1), name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS network_icon(id INTEGER PRIMARY KEY CHECK(id=1), icon TEXT NOT NULL);`)
 	if err != nil {
 		return err
 	}
-	for _, column := range [][2]string{{"devices", "client"}, {"invitations", "role"}, {"invitations", "client"}, {"invitations", "name"}} {
+	for _, column := range [][2]string{{"devices", "client"}, {"devices", "system"}, {"invitations", "role"}, {"invitations", "client"}, {"invitations", "name"}} {
 		var exists int
 		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info(?) WHERE name=?`, column[0], column[1]).Scan(&exists); err != nil {
 			return err
@@ -112,6 +113,26 @@ func (s *Store) NameNetwork(ctx context.Context, name string, first bool) error 
 		query = `INSERT OR IGNORE INTO network_name VALUES(1,?)`
 	}
 	_, err := s.db.ExecContext(ctx, query, name)
+	return err
+}
+
+// NetworkIcon is a preset name or an image data URL; empty until a device picks one.
+func (s *Store) NetworkIcon(ctx context.Context) (string, error) {
+	var icon string
+	err := s.db.QueryRowContext(ctx, `SELECT icon FROM network_icon WHERE id=1`).Scan(&icon)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return icon, err
+}
+
+// SetNetworkIcon saves the network's icon; empty clears it.
+func (s *Store) SetNetworkIcon(ctx context.Context, icon string) error {
+	if icon == "" {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM network_icon WHERE id=1`)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO network_icon VALUES(1,?) ON CONFLICT(id) DO UPDATE SET icon=excluded.icon`, icon)
 	return err
 }
 

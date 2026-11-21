@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -497,10 +498,11 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 	}
 	name, _ := os.Hostname()
 	online := s.clients.online()
-	peers, restricted, merged, title := []device.Peer{}, []device.Pairing{}, []string{}, ""
+	peers, restricted, merged, title, icon := []device.Peer{}, []device.Pairing{}, []string{}, "", ""
 	if s.config.Devices != nil {
 		store := s.config.Devices.Store()
 		title, _ = store.NetworkName(r.Context())
+		icon, _ = store.NetworkIcon(r.Context())
 		if listed, err := store.Peers(r.Context()); err == nil {
 			peers = listed
 		}
@@ -514,6 +516,7 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 	for i := range devices {
 		if devices[i].ID == host {
 			devices[i].Name = name
+			devices[i].System = hostSystem()
 		}
 	}
 	if host != "" && !slices.Contains(online, host) {
@@ -521,7 +524,7 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request) {
 	}
 	write(w, 200, map[string]any{
 		"server": map[string]any{
-			"id": s.config.ServerID, "name": name, "network": title, "build": s.config.BuildSHA,
+			"id": s.config.ServerID, "name": name, "network": title, "icon": icon, "build": s.config.BuildSHA,
 			"platform": runtime.GOOS, "role": "server",
 		},
 		"devices":    devices,
@@ -544,7 +547,7 @@ func (s *Server) renameDevice(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Device pairing is unavailable.")
 		return
 	}
-	var input struct{ Name, Client string }
+	var input struct{ Name, Client, System string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
 		fail(w, 400, "invalid", "Send a device name.")
 		return
@@ -552,6 +555,9 @@ func (s *Server) renameDevice(w http.ResponseWriter, r *http.Request) {
 	if err := s.config.Devices.Rename(r.Context(), self, strings.TrimSpace(input.Name)); err != nil {
 		fail(w, 400, "invalid", err.Error())
 		return
+	}
+	if input.System != "" {
+		_ = s.config.Devices.Store().SetSystem(r.Context(), self, strings.TrimSpace(input.System))
 	}
 	if err := s.config.Devices.Store().Claim(r.Context(), self, input.Client); err != nil {
 		fail(w, 500, "invalid", "Couldn't save this device's ID.")
@@ -2220,4 +2226,27 @@ func redactError(detail string) string {
 		detail = strings.ToValidUTF8(detail[:1024], "")
 	}
 	return detail
+}
+
+// hostSystem names the OS this server runs on, such as "macOS 26.1" or "Ubuntu 24.04".
+func hostSystem() string {
+	switch runtime.GOOS {
+	case "darwin":
+		if out, err := exec.Command("sw_vers", "-productVersion").Output(); err == nil {
+			return "macOS " + strings.TrimSpace(string(out))
+		}
+		return "macOS"
+	case "linux":
+		if data, err := os.ReadFile("/etc/os-release"); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if value, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+					return strings.Trim(value, `"`)
+				}
+			}
+		}
+		return "Linux"
+	case "windows":
+		return "Windows"
+	}
+	return runtime.GOOS
 }

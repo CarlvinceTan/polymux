@@ -193,37 +193,27 @@ struct PluginSwitcher: View {
         .padding(.horizontal, ComposerMetrics.edge).padding(.bottom, ComposerMetrics.edge)
     }
 
-    /// Two servers' Chats share an icon, so each shows its server's name instead.
+    /// Each entry is an icon over a name; a server's Chats show its network icon and its name.
     @ViewBuilder private func entry(_ tab: PluginTab) -> some View {
         let count = unread[tab.id] ?? 0
-        if tab.plugin == nil, let name = tab.serverName {
-            VStack(spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(name)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    // A dot leaves the name its room; the count stays in the entry's accessibility value.
-                    if count > 0 { Circle().fill(Color("Unread")).frame(width: 7, height: 7) }
+        let selected = tab.id == selection
+        VStack(spacing: 2) {
+            Group {
+                if tab.plugin == nil {
+                    NetworkIcon(icon: tab.serverIcon, fallback: "bubble.left.and.bubble.right" + (selected ? ".fill" : ""), size: 20)
+                } else {
+                    Image(plugin: Self.symbol(tab, selected: selected)).font(.system(size: 17))
                 }
-                .padding(.horizontal, 8)
-                label(tab)
             }
-        } else {
-            VStack(spacing: 2) {
-                Image(plugin: Self.symbol(tab, selected: tab.id == selection))
-                    .font(.system(size: 17))
-                    .foregroundStyle(Color.primary)
-                    .frame(width: 24, height: 20)
-                    // Overlaps only the icon's corner, clear of the lens's top edge.
-                    .overlay(alignment: .topLeading) {
-                        if count > 0 { UnreadPill(count: count, small: true).offset(x: 19, y: -3) }
-                    }
-                label(tab)
+            .foregroundStyle(Color.primary)
+            .frame(width: 24, height: 20)
+            // Overlaps only the icon's corner, clear of the lens's top edge.
+            .overlay(alignment: .topLeading) {
+                if count > 0 { UnreadPill(count: count, small: true).offset(x: 19, y: -3) }
             }
-            .padding(.horizontal, 4)
+            label(tab)
         }
+        .padding(.horizontal, 4)
     }
 
     private func label(_ tab: PluginTab) -> some View {
@@ -236,7 +226,7 @@ struct PluginSwitcher: View {
     }
 
     static func label(_ tab: PluginTab) -> String {
-        tab.plugin?.title ?? "Chats"
+        tab.plugin?.title ?? tab.serverName ?? "Chats"
     }
 
     static func title(_ tab: PluginTab) -> String {

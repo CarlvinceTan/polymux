@@ -124,11 +124,11 @@ public struct APIClient: Sendable {
         return try JSONDecoder().decode(DraftState.self, from: data)
     }
 
-    public func renameDevice(_ name: String, client: String) async throws {
+    public func renameDevice(_ name: String, client: String, system: String = "") async throws {
         var request = try await request("network/devices/self")
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["name": name, "client": client])
+        request.httpBody = try JSONEncoder().encode(["name": name, "client": client, "system": system])
         let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
     }
@@ -140,6 +140,16 @@ public struct APIClient: Sendable {
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(Body(name: name, first: first))
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+    }
+
+    /// Sets this server's network icon: a preset symbol name or an image data URL; empty clears it.
+    public func setNetworkIcon(_ icon: String) async throws {
+        var request = try await request("network/icon")
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["icon": icon])
         let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
     }

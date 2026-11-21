@@ -11,13 +11,17 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
     public let serverName: String?
     /// Marks the server's Chats where a tab bar shows icons only.
     public let serverMark: String?
+    /// The network's chosen icon, if it has one.
+    public let serverIcon: String?
 
-    public init(id: String, plugin: Plugin?, server: String? = nil, serverName: String? = nil, serverMark: String? = nil) {
+    public init(id: String, plugin: Plugin?, server: String? = nil, serverName: String? = nil, serverMark: String? = nil,
+                serverIcon: String? = nil) {
         self.id = id
         self.plugin = plugin
         self.server = server
         self.serverName = serverName
         self.serverMark = serverMark
+        self.serverIcon = serverIcon
     }
 
     /// The entry within its server: `chats`, or a plugin's name.

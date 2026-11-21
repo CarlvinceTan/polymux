@@ -8,6 +8,8 @@ public struct NetworkInfo: Codable, Sendable {
         public let name: String
         /// What the network is called; nil or empty until a device names it.
         public var network: String?
+        /// A preset symbol name or an image data URL; nil or empty until a device picks one.
+        public var icon: String?
         public let build: String
         public let platform: String
         public let role: String
@@ -50,6 +52,8 @@ public struct NetworkInfo: Codable, Sendable {
         public var label: String?
         /// False while an invite for it hasn't been used yet.
         public var paired: Bool?
+        /// What the device runs, such as "macOS 26.1"; nil until it reports one.
+        public var system: String?
 
         public var title: String {
             if let label, !label.isEmpty { label } else { name }
