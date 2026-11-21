@@ -25,6 +25,8 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # Keep browser libraries and fonts in sync with the Playwright lockfile.
+    container: mcr.microsoft.com/playwright:v1.65.0-resolute@sha256:916c9fb63a8340822589dd5c821dae82e8012106bb8515a72f278d97f277446a
     steps:
       - uses: actions/checkout@v7
 
@@ -36,5 +38,4 @@ jobs:
 
       - run: npm ci --prefix apps/site
       - run: npm run verify --prefix apps/site
-      - run: npm exec --prefix apps/site -- playwright install --with-deps webkit chromium
       - run: npm run test:responsive --prefix apps/site
