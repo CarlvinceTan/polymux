@@ -131,7 +131,11 @@ jobs:
           artifact-ids: ${{ needs.macos-stage.outputs.artifact }}
           path: ${{ runner.temp }}
       - name: Restore the staged app
-        run: tar -xf "$RUNNER_TEMP/macos-stage.tar"
+        run: |
+          STAGE=$(mktemp -d "$RUNNER_TEMP/macos-stage.XXXXXX")
+          tar -xf "$RUNNER_TEMP/macos-stage.tar" -C "$STAGE" dist/macos dist/symbols
+          mkdir -p dist
+          mv "$STAGE/dist/macos" "$STAGE/dist/symbols" dist/
       - name: Import Developer ID certificate
         env:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}

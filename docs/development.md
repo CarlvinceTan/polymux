@@ -54,7 +54,7 @@ https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xm
 
 The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by tester groups. To share the same build externally, add it to a private external group in App Store Connect, submit it for TestFlight App Review when required, and invite testers by email. Builds previously uploaded as internal-only cannot be added to external groups.
 
-All development jobs are serialized. `scripts/dev-version.py` sets the iOS build number to the `dev` commit count (shown as `0.4.0 (190)`), so local and CI uploads never collide; the script defaults to the same number. The Mac build number stays monotonic across workflow runs and reruns. Do not rewrite `dev` history or upload an arbitrary larger iOS build. Build `1.0.1` was the first manual upload; every later iOS build must exceed it.
+Development delivery runs are serialized. `scripts/dev-version.py` sets the iOS build number to the `dev` commit count (shown as `0.4.0 (190)`), so local and CI uploads never collide; the script defaults to the same number. The Mac build number stays monotonic across workflow runs and reruns. Do not rewrite `dev` history or upload an arbitrary larger iOS build. Build `1.0.1` was the first manual upload; every later iOS build must exceed it.
 
 Native validation and delivery use GitHub's [`xcode-27` preview runner](https://github.com/actions/runner-images/issues/14404) and select its latest stable Xcode for the required macOS/iOS 27 SDKs. The `macos-26` image only provides Xcode 26. Do not lower deployment targets or execute public PR code on the server to work around SDK availability.
 
