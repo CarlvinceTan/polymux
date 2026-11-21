@@ -42,6 +42,8 @@ Manually dispatch `.github/workflows/dev.yml` on `dev` to run the reusable Tests
 - archives and uploads one iOS build to TestFlight for use by both internal and external tester groups;
 - signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease.
 
+The Mac app and bundled server compile beside verification. The compile job uses no signing credentials. Signing, notarization, and publication still require successful verification, as does the iOS upload.
+
 Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac development feed is:
 
 ```
