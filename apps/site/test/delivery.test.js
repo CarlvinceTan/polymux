@@ -16,9 +16,17 @@ test('development delivery runs only on dev pushes or manual dispatch, upstream,
   const {on: events, jobs} = workflow('dev');
   assert.deepEqual(Object.keys(events), ['push', 'workflow_dispatch']);
   assert.deepEqual(events.push.branches, ['dev']);
-  assert.equal(jobs.verify.if, "github.ref == 'refs/heads/dev' && github.repository == 'CarlvinceTan/polymux' && (github.event_name == 'workflow_dispatch' || vars.DEV_DELIVERY == 'true')");
+  for (const job of [jobs.verify, jobs['verify-push'], jobs.version]) {
+    assert.match(job.if, /github\.ref == 'refs\/heads\/dev' && github\.repository == 'CarlvinceTan\/polymux'/);
+  }
   assert.equal(jobs.verify.uses, './.github/workflows/tests.yml');
-  assert.equal(jobs.version.if, jobs.verify.if);
+  assert.equal(jobs.verify.needs, 'verify-push');
+  assert.equal(events.workflow_dispatch.inputs.reuse_checks.default, false);
+  const push = jobs['verify-push'];
+  assert.equal(push.permissions.actions, 'read');
+  assert.match(push.steps.at(-1).run, /--tests-if-present[\s\S]+--tests-only/);
+  assert.deepEqual(jobs.verified.needs, ['verify', 'verify-push']);
+  assert.equal(jobs.verified.if, "!cancelled() && (needs.verify.result == 'success' || (needs.verify-push.result == 'success' && needs.verify-push.outputs.missing != 'true'))");
 });
 
 test('Mac compilation can overlap tests but signing and uploads cannot', () => {
@@ -32,8 +40,8 @@ test('Mac compilation can overlap tests but signing and uploads cannot', () => {
   assert.ok(!JSON.stringify(stage).includes('secrets.'));
   assert.ok(stage.steps.some((step) => step.run === 'scripts/build.sh macos-stage'));
   assert.ok(!stage.steps.some((step) => /codesign|notarytool|gh release/.test(step.run ?? '')));
-  assert.deepEqual(jobs.ios.needs, ['verify', 'version']);
-  assert.deepEqual(jobs.macos.needs, ['verify', 'version', 'macos-stage']);
+  assert.deepEqual(jobs.ios.needs, ['verified', 'version']);
+  assert.deepEqual(jobs.macos.needs, ['verified', 'version', 'macos-stage']);
   for (const name of ['ios', 'macos']) {
     assert.equal(jobs[name].environment, 'development');
     assert.doesNotMatch(jobs[name].if ?? '', /always|failure|cancelled/);
@@ -45,13 +53,30 @@ test('Mac compilation can overlap tests but signing and uploads cannot', () => {
   assert.ok(jobs.macos.steps.indexOf(handoff) < jobs.macos.steps.indexOf(sign));
 });
 
+test('promotion does not wait for either delivery job or rerun its component suites', () => {
+  const {jobs} = workflow('branch-topology');
+  const gate = jobs.validate;
+  assert.equal(gate.needs, undefined);
+  assert.match(gate.steps.at(-1).run, /merge-base --is-ancestor[\s\S]+python3 scripts\/promotion\.py/);
+  for (const workflowName of ['tests', 'site', 'skills']) {
+    const {on: events} = workflow(workflowName);
+    assert.deepEqual(events.push.branches, ['main', 'dev']);
+    assert.equal(events.pull_request, undefined);
+  }
+  const tests = workflow('tests').jobs;
+  for (const name of ['swift', 'macos', 'ios']) {
+    assert.equal(tests[name].needs, 'changes');
+    assert.equal(tests[name].if, "needs.changes.outputs.swift == 'true'");
+  }
+});
+
 test('the app version has published native notes matching the release tag and download allowlist', () => {
   assert.ok(version);
   assert.equal(new Set(versions).size, 1, 'Debug and Release versions differ');
   const releases = loadPublishedReleases();
   const current = releases.find((release) => release.version === version);
   assert.ok(current, `Missing published notes for ${version}`);
-  assert.equal(current.tag, `app-v${version}`);
+  assert.equal(current.tag, `stable-v${version}`);
   assert.equal(current.downloadable, true);
   assert.equal(current.historical, false);
   assert.equal(releases.find((release) => release.downloadable && !release.historical)?.version, version);
@@ -59,7 +84,7 @@ test('the app version has published native notes matching the release tag and do
 
 test('manually running a native release at a tag never publishes it', () => {
   const {on: events, jobs} = workflow('release');
-  assert.deepEqual(events.push.tags, ['app-v*']);
+  assert.deepEqual(events.push.tags, ['stable-v*']);
   assert.ok(Object.hasOwn(events, 'workflow_dispatch'));
   const guard = "github.event_name == 'push' && github.ref_type == 'tag'";
   assert.equal(jobs.macos.steps.find((step) => step.name === 'Publish release').if, guard);
@@ -74,8 +99,8 @@ test('the release preflight accepts prepared notes and rejects missing, draft, o
     {name: 'missing notes', notes: null, error: /Publish .* on the site/},
     {name: 'draft notes', notes: notes.replace('published: true', 'published: false'), error: /must be published/},
     {name: 'disabled downloads', notes: notes.replace('downloadable: true', 'downloadable: false'), error: /must be downloadable/},
-    {name: 'Electron tag', notes: notes.replace(`tag: app-v${version}`, `tag: v${version}`), error: /must use tag: app-v/},
-    {name: 'mismatched pushed tag', notes, ref: 'tag', tag: 'app-v99.0.0', error: /does not match MARKETING_VERSION/},
+    {name: 'Electron tag', notes: notes.replace(`tag: stable-v${version}`, `tag: v${version}`), error: /must use tag: stable-v/},
+    {name: 'mismatched pushed tag', notes, ref: 'tag', tag: 'stable-v99.0.0', error: /does not match MARKETING_VERSION/},
   ];
   for (const item of cases) await context.test(item.name, () => {
     const root = mkdtempSync(join(tmpdir(), 'polymux-release-'));
@@ -94,7 +119,7 @@ test('the release preflight accepts prepared notes and rejects missing, draft, o
       });
       assert.equal(result.status, item.status ?? 1, result.stdout + result.stderr);
       if (item.error) assert.match(result.stdout + result.stderr, item.error);
-      else assert.equal(readFileSync(environment, 'utf8'), `VERSION=${version}\nTAG=app-v${version}\n`);
+      else assert.equal(readFileSync(environment, 'utf8'), `VERSION=${version}\nTAG=stable-v${version}\n`);
     } finally {rmSync(root, {recursive: true});}
   });
 });

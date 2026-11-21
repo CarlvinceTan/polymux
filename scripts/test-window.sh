@@ -8,7 +8,7 @@ fi
 shift
 cd "$ROOT"
 # The sidebar's + menu names avatar icons, so the checks link the app's AvatarKit build.
-scripts/check.sh --locked macos
+[ "${1:-}" = --reuse-build ] || scripts/check.sh --locked macos
 PRODUCTS="$ROOT/.build/xcode-test/Build/Products/Debug"
 OUT=$(mktemp -d -t polymux-window)
 trap 'rm -rf "$OUT"' EXIT

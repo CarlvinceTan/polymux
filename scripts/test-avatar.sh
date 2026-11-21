@@ -7,7 +7,7 @@ if [ "${1:-}" != --locked ]; then
 fi
 shift
 cd "$ROOT"
-scripts/check.sh --locked macos
+[ "${1:-}" = --reuse-build ] || scripts/check.sh --locked macos
 PRODUCTS="$ROOT/.build/xcode-test/Build/Products/Debug"
 OUT=$(mktemp -d -t polymux-avatar)
 trap 'rm -rf "$OUT"' EXIT

@@ -2,15 +2,20 @@ name: Branch topology
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened, ready_for_review]
+    types: [opened, edited, synchronize, reopened, ready_for_review, closed]
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    name: Require dev to main
+    name: Verified dev promotion
+    if: github.event.action != 'closed'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Validate permanent branches
         env:
@@ -21,5 +26,47 @@ jobs:
         run: |
           if [ "$HEAD" != dev ] || [ "$BASE" != main ] || [ "$HEAD_REPO" != "$REPOSITORY" ]; then
             echo "Only the dev -> main promotion pull request is allowed."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the dev push
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git merge-base --is-ancestor "$BASE_SHA" "$HEAD_SHA"; then
+            echo "Update dev with main before promoting it."
+            exit 1
+          fi
+          test "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse "$HEAD_SHA^{tree}")"
+          python3 scripts/promotion.py
+
+  sync-dev:
+    name: Sync main into dev
+    if: github.event.action == 'closed' && github.event.pull_request.merged && github.base_ref == 'main' && github.head_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - name: Fast-forward dev when it has not moved
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags origin refs/heads/dev
+          if [ "$(git rev-parse FETCH_HEAD)" != "$HEAD_SHA" ]; then
+            echo "::notice::Dev has moved. Update it with main before the next promotion."
+            exit 0
+          fi
+          git merge-base --is-ancestor "$HEAD_SHA" HEAD
+          if ! git push origin HEAD:refs/heads/dev; then
+            echo "::warning::Could not fast-forward dev. Update it with main before the next promotion."
             exit 1
           fi

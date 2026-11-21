@@ -5,7 +5,7 @@ import {loadContent} from '../scripts/content.ts';
 import {visiblePlatforms} from '../src/lib/platform.ts';
 import {response} from './helpers.js';
 
-const entry = {version: '1.0.0', title: 'Native release', date: '2026-10-24', summary: 'Native app', downloadable: true, historical: false, tag: 'app-v1.0.0'};
+const entry = {version: '1.0.0', title: 'Native release', date: '2026-10-24', summary: 'Native app', downloadable: true, historical: false, tag: 'stable-v1.0.0'};
 const remote = (overrides = {}) => ({tag_name: entry.tag, html_url: `https://github.com/CarlvinceTan/polymux/releases/tag/${entry.tag}`, assets: [
   {name: 'Polymux-1.0.0-arm64.dmg', browser_download_url: 'https://files.example/mac', size: 1},
   {name: 'Polymux-1.0.0-Setup.exe', browser_download_url: 'https://files.example/windows', size: 2},
@@ -23,7 +23,7 @@ test('uses the published native tag directly and maps installers for each platfo
   assert.equal(result.json().platforms.macos.url, 'https://files.example/mac');
   assert.equal(result.json().platforms.windows.url, 'https://files.example/windows');
   assert.equal(result.json().platforms.linux.url, 'https://files.example/linux');
-  assert.match(requests[0], /\/releases\/tags\/app-v1\.0\.0$/);
+  assert.match(requests[0], /\/releases\/tags\/stable-v1\.0\.0$/);
   assert.ok(!requests[0].includes('per_page'));
 });
 
@@ -112,11 +112,11 @@ test('download cards only show platforms the release actually ships', () => {
   const asset = {name: 'Polymux-1.0.0-arm64.dmg', url: 'https://files.example/mac', size: 1};
   assert.deepEqual(visiblePlatforms(null), ['macos']);
   assert.deepEqual(visiblePlatforms({
-    version: '1.0.0', releaseUrl: 'https://github.com/CarlvinceTan/polymux/releases/tag/app-v1.0.0',
+    version: '1.0.0', releaseUrl: 'https://github.com/CarlvinceTan/polymux/releases/tag/stable-v1.0.0',
     platforms: {macos: asset, windows: null, linux: null},
   }), ['macos']);
   assert.deepEqual(visiblePlatforms({
-    version: '1.0.0', releaseUrl: 'https://github.com/CarlvinceTan/polymux/releases/tag/app-v1.0.0',
+    version: '1.0.0', releaseUrl: 'https://github.com/CarlvinceTan/polymux/releases/tag/stable-v1.0.0',
     platforms: {macos: asset, windows: asset, linux: asset},
   }), ['macos', 'windows', 'linux']);
 });

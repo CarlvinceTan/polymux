@@ -1,4 +1,4 @@
-# Native releases are cut from app-v* tags. The Electron workflow on main only
+# Native releases are cut from stable-v* tags. The Electron workflow on main only
 # listens for v* tags, so the two pipelines cannot collide.
 #
 # Workflow dispatch is a dry run: it builds, signs, notarizes and uploads the
@@ -7,7 +7,7 @@ name: Release
 
 on:
   push:
-    tags: ["app-v*"]
+    tags: ["stable-v*"]
   workflow_dispatch:
 
 permissions:
@@ -43,7 +43,7 @@ jobs:
           test -n "$VERSION" || { echo "MARKETING_VERSION is missing."; exit 1; }
           case "$VERSION" in *-*) echo "Only stable versions can be released."; exit 1 ;; esac
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            test "$GITHUB_REF_NAME" = "app-v$VERSION" || {
+            test "$GITHUB_REF_NAME" = "stable-v$VERSION" || {
               echo "Tag $GITHUB_REF_NAME does not match MARKETING_VERSION $VERSION."
               exit 1
             }
@@ -56,10 +56,10 @@ jobs:
           NOTES="apps/site/src/content/releases/$VERSION.md"
           test -f "$NOTES" || { echo "Publish $VERSION on the site before releasing it."; exit 1; }
           grep -Eiq '^downloadable:[[:space:]]*true[[:space:]]*$' "$NOTES" || { echo "$NOTES must be downloadable."; exit 1; }
-          grep -Eq "^tag:[[:space:]]*['\"]?app-v${VERSION}['\"]?[[:space:]]*$" "$NOTES" || { echo "$NOTES must use tag: app-v$VERSION."; exit 1; }
+          grep -Eq "^tag:[[:space:]]*['\"]?stable-v${VERSION}['\"]?[[:space:]]*$" "$NOTES" || { echo "$NOTES must use tag: stable-v$VERSION."; exit 1; }
           if grep -Eiq '^published:[[:space:]]*false[[:space:]]*$' "$NOTES"; then echo "$NOTES must be published."; exit 1; fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "TAG=app-v$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=stable-v$VERSION" >> "$GITHUB_ENV"
 
       - name: Require release credentials
         env:
