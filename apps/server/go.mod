@@ -24,9 +24,9 @@ require (
 	github.com/miekg/dns v1.1.73
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/tobischo/gokeepasslib/v3 v3.7.1
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/image v0.48.0
-	golang.org/x/net v0.62.0
+	golang.org/x/net v0.63.0
 	modernc.org/sqlite v1.62.0
 )
 
