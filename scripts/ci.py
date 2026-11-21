@@ -14,7 +14,7 @@ def affected(paths):
         path.startswith(("apps/Polymux/", "packages/", "Package.", ".agents/skills/avatar-preview/"))
         and not path.startswith(go_packages) for path in paths
     )
-    plugins = shared or any(path.startswith("plugins/") for path in paths)
+    plugins = shared or any(path.startswith("plugins/") or path == "apps/server/go.mod" for path in paths)
     site_inputs = {"apps/Polymux/Polymux.xcodeproj/project.pbxproj", "plugins/index.json",
                    "plugins/hub/internal/hub/bridges.go", "scripts/ci.py"}
     site = any(path.startswith(("apps/site/", ".github/workflows/")) or path in site_inputs for path in paths)

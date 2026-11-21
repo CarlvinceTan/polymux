@@ -32,6 +32,7 @@ class SelectionTests(unittest.TestCase):
             (["apps/site/src/main.ts"], ["apps/Polymux/Info.plist"], {"swift", "site"}),
             (["plugins/index.json"], [], {"plugins", "site"}),
             (["plugins/hub/internal/hub/bridges.go"], [], {"plugins", "site"}),
+            ([], ["apps/server/go.mod"], {"server", "plugins"}),
             ([], ["docs/development.md"], set()),
         ]
         for before, main, checks in cases:
