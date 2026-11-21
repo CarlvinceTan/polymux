@@ -8,6 +8,8 @@ Plugins maintained by the Polymux team. The app and server don't include them: e
 | [`tailscale`](tailscale) | Reaches your server from other devices over your tailnet. |
 | [`opentunnel`](opentunnel) | Reaches your server through an OpenTunnel route. |
 | [`permissions`](permissions) | Rules a chat's bots can't break: what they may read, write, run and use, with an approval card when a rule asks first. |
+| [`computer-use`](computer-use) | Lets a chat's bots see and use apps and the browser on the server's computer, through cua-driver. |
+| [`context`](context) | Tells a chat's bots what's open on the server's computer: front app and window, apps, windows, tabs, prompts, devices and network. |
 
 ## Layout
 
@@ -16,6 +18,7 @@ Plugins maintained by the Polymux team. The app and server don't include them: e
 - `scripts/package.sh <plugin>`: builds `dist/plugins/<plugin>/<plugin>-<version>-<target>.tgz` and its checksum. A plugin that ships other programs gives a `prepare.sh` and packages them with `POLYMUX_PLUGIN_BINARIES`.
 - `scripts/index.py`: merges a built package into an `index.json`.
 - `permissions/verify.py`: runs the real package on a throwaway server with a scripted model, and checks that rules hold across file tools, commands, MCP calls, group chats and handed-off work. Run it after changing the gate.
+- `computer-use/verify.py`: runs the real Computer Use and Context packages the same way, through codemode, and checks that a screenshot reaches the model. It needs a Mac with CuaDriver.app running.
 
 This is one Go module, kept out of `go.work` so a plugin's dependencies can't change the server's build. Run its tests with `scripts/test.sh plugins`, and other `go` commands here with `GOWORK=off`.
 

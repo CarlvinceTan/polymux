@@ -2044,7 +2044,7 @@ func (s *Server) turnSession(runCtx, writeCtx context.Context, a *actor, work st
 				}
 				d.Skills = append(slices.Clone(d.Skills), s.plugins.SkillFiles(runCtx, chat)...)
 				if work.Trigger != contract.RunTriggerReview {
-					d.ExtraTools = append(d.ExtraTools, s.pluginTools(runCtx, chat, a.id, state)...)
+					d.CodeTools = append(slices.Clone(d.CodeTools), s.pluginTools(runCtx, chat, a.id, state)...)
 				}
 			}
 			if err == nil && !d.Intro && d.Workspace != "" {

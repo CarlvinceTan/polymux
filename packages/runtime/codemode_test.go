@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -133,5 +134,62 @@ func TestCodemodeStopped(t *testing.T) {
 	result, err := wrapped[0].Execute(t.Context(), "stopped", params, nil)
 	if err != nil || probe.ran.Load() || calls != 1 || !strings.Contains(result.Text(), "turn stopped") {
 		t.Fatalf("caught failure bypassed the stopped turn: %v %v calls=%d", result, err, calls)
+	}
+}
+
+// shotTool stands in for a plugin tool that answers with a screenshot.
+type shotTool struct{}
+
+func (shotTool) Name() string                           { return "camera__shot" }
+func (shotTool) Label() string                          { return "Camera" }
+func (shotTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
+func (shotTool) Description() string                    { return "Take a picture" }
+func (shotTool) Schema() ai.ToolSchema {
+	return ai.ToolSchema{Name: "camera__shot", Description: "Take a picture", Parameters: map[string]any{"type": "object"}}
+}
+func (shotTool) Execute(context.Context, string, json.RawMessage, agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+	png := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	return agent.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "shot"}, ai.ImageContent{Data: png, MimeType: "image/png"}}}, nil
+}
+
+// Code tools reach the model only through codemode, beside MCP tools, and their pictures can come back out.
+func TestCodeToolsJoinCodemode(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []struct {
+				Function struct{ Name, Description string }
+			}
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if len(body.Tools) != 1 || body.Tools[0].Function.Name != "codemode" ||
+			!strings.Contains(body.Tools[0].Function.Description, "camera__shot") || !strings.Contains(body.Tools[0].Function.Description, "notes__echo0") {
+			t.Errorf("tools: %+v", body.Tools)
+		}
+		sse(w, "Done", nil)
+	}))
+	defer provider.Close()
+	runtime := openDurable(t, provider)
+	session, err := runtime.Open(t.Context(), Definition{Agent: Agent{ID: "code", Name: "Code"},
+		MCP: []MCPServer{{Name: "notes", URL: fakeMCP(t, 1).URL}}, CodeTools: []agent.AgentTool{shotTool{}}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Send(t.Context(), turn("look"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	wrapped, err := wrapMCP([]agent.AgentTool{shotTool{}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := json.RawMessage(`{"code":"const r = await tools.camera__shot({}); image(r.content.find(c => c.type === 'image'))"}`)
+	result, err := wrapped[0].Execute(t.Context(), "call", params, nil)
+	if err != nil || result.IsError {
+		t.Fatalf("result %+v %v", result, err)
+	}
+	if !slices.ContainsFunc(result.Content, func(c ai.ToolResultMessageContent) bool { _, ok := c.(ai.ImageContent); return ok }) {
+		t.Fatalf("no picture in %+v", result.Content)
 	}
 }

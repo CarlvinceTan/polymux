@@ -15,7 +15,7 @@ import (
 )
 
 // APIVersion is what a package's engines.plugins may require at most.
-const APIVersion = 6
+const APIVersion = 7
 
 // Chats is the switcher entry for the app's own chats; no plugin can take the name.
 const Chats = "chats"

@@ -243,6 +243,9 @@ func (r *DurableRuntime) Open(ctx context.Context, d Definition, path string) (D
 			_ = session.Close()
 		}
 	}()
+	if !d.Intro {
+		connected = append(connected, d.CodeTools...)
+	}
 	connected, err = wrapMCP(connected, session.beforeMCP, session.afterMCP)
 	if err != nil {
 		return nil, err
@@ -363,12 +366,13 @@ type modelRegistry struct {
 	baseURL string
 	key     string
 	client  Client
-	open    func(model string) ai.Provider
+	open    func(model *ai.Model) ai.Provider
 	// reasoning lets a bot's reasoning level reach the provider; the fallback endpoint never had it.
 	reasoning bool
 	windows   map[string]int
 	// levels are the reasoning levels each model declares, by model; nil takes high.
 	levels    map[string][]string
+	vision    map[string]bool
 	providers map[string]ai.Provider
 	models    []*ai.Model
 	// builtin is the PiG provider that owns this provider's endpoints, models and sign-in.
@@ -381,8 +385,8 @@ type modelRegistry struct {
 // since the compatible path loses the thought signatures Gemini needs between tool calls.
 func newModelRegistry(baseURL, key string, client Client) *modelRegistry {
 	r := &modelRegistry{id: DurableProvider, api: ai.APIOpenAICompletions, baseURL: baseURL, key: key, client: client, providers: make(map[string]ai.Provider)}
-	r.open = func(model string) ai.Provider {
-		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: baseURL, APIKey: key, Model: model, ProviderID: r.id, ExtraHeaders: client.Headers})
+	r.open = func(model *ai.Model) ai.Provider {
+		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: baseURL, APIKey: key, Model: model.ID, ProviderID: r.id, ExtraHeaders: client.Headers})
 	}
 	if u, err := url.Parse(baseURL); err == nil && u.Hostname() == "generativelanguage.googleapis.com" {
 		if google := builtinProvider("google"); google != nil {
@@ -413,6 +417,8 @@ type ProviderSpec struct {
 	Windows map[string]int
 	// Levels holds the reasoning levels each model declares, by model.
 	Levels map[string][]string
+	// Vision names the models that take pictures, such as screenshots a tool returns.
+	Vision map[string]bool
 	// Builtin is the PiG provider serving this type, with its credential in Credentials; nil uses BaseURL and Key.
 	Builtin     *ai.ModelsProvider
 	Credentials ai.CredentialStore
@@ -425,10 +431,15 @@ func SettingsProvider(id string) string { return "settings:" + id }
 func newSpecRegistry(spec ProviderSpec) *modelRegistry {
 	client := Client{Headers: spec.Headers, Session: spec.Session}
 	r := &modelRegistry{id: SettingsProvider(spec.ID), name: spec.Name, baseURL: spec.BaseURL, key: spec.Key, client: client, reasoning: true,
-		windows: spec.Windows, levels: spec.Levels, providers: make(map[string]ai.Provider)}
+		windows: spec.Windows, levels: spec.Levels, vision: spec.Vision, providers: make(map[string]ai.Provider)}
 	r.api = ai.APIOpenAICompletions
-	r.open = func(model string) ai.Provider {
-		return ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: spec.BaseURL, APIKey: spec.Key, Model: model, ProviderID: r.id, ExtraHeaders: spec.Headers})
+	r.open = func(model *ai.Model) ai.Provider {
+		config := ai.OpenAIConfig{BaseURL: spec.BaseURL, APIKey: spec.Key, Model: model.ID, ProviderID: r.id, ExtraHeaders: spec.Headers}
+		// The provider reads image support from its own metadata, not the catalogue's model.
+		if slices.Contains(model.Input, "image") {
+			config.ModelMetadata = model
+		}
+		return ai.NewOpenAIProvider(config)
 	}
 	for _, model := range spec.Models {
 		r.add(model)
@@ -489,7 +500,6 @@ func (r *modelRegistry) add(id string) {
 	if _, exists := r.providers[id]; exists {
 		return
 	}
-	r.providers[id] = r.open(id)
 	window := r.windows[id]
 	if window <= 0 {
 		window = r.client.Window
@@ -498,12 +508,17 @@ func (r *modelRegistry) add(id string) {
 		window = DefaultWindow
 	}
 	model := &ai.Model{ID: id, Capabilities: ai.ModelCapabilities{ContextWindow: window}, ProviderMeta: ai.ProviderMetadata{ProviderID: r.id, API: r.api, BaseURL: r.baseURL}}
+	if r.vision[id] {
+		model.Input = []string{"text", "image"}
+		model.Capabilities.SupportsImages = true
+	}
 	if r.reasoning {
 		if top := maxThinking(r.levels[id]); top != ai.ThinkingOff {
 			model.Capabilities.MaxThinking = ai.ThinkingLevel(top)
 			model.ProviderMeta.Reasoning = true
 		}
 	}
+	r.providers[id] = r.open(model)
 	r.models = append(r.models, model)
 }
 

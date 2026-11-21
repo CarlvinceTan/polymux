@@ -1,0 +1,65 @@
+{
+  "name": "context",
+  "title": "Context",
+  "description": "Tell a chat's bots what's open on this server's computer: the front app and window, apps, windows, browser tabs, prompts, devices and the network.",
+  "symbol": "macwindow.on.rectangle",
+  "version": "0.1.0",
+  "kind": "scoped",
+  "engines": { "plugins": 7 },
+  "service": "bin/polymux-context",
+  "skills": ["skills/context.md"],
+  "provides": ["tools"],
+  "tools": [
+    {
+      "name": "summary",
+      "description": "One reading of this computer: the front app and window, how long since someone last used it, native prompts on screen, every running app and window, every browser tab, devices nearby and the network. Read-only; nothing is opened or focused.",
+      "parameters": { "type": "object", "additionalProperties": false, "properties": {} }
+    },
+    {
+      "name": "apps",
+      "description": "Running apps with pid and window count, the front one starred; or every installed app with installed: true.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "installed": { "type": "boolean", "description": "List installed apps instead of running ones." } }
+      }
+    },
+    {
+      "name": "windows",
+      "description": "Open windows with app, pid, window id and title, the front one starred. Pass the pid and window id to Computer Use.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "app": { "type": "string", "description": "Only windows of apps whose name or bundle id contains this." } }
+      }
+    },
+    {
+      "name": "tabs",
+      "description": "Every open browser tab, by browser window, with title, URL and tab id, the showing tab starred.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "query": { "type": "string", "description": "Only tabs whose title or URL contains this." } }
+      }
+    },
+    {
+      "name": "dialogs",
+      "description": "Whether native sheets, dialogs or system prompts are showing in up to four visible windows. Reports presence only, never their text. Needs cua-driver.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "app": { "type": "string", "description": "Only check apps whose name contains this." } }
+      }
+    },
+    {
+      "name": "devices",
+      "description": "Tailscale peers, Bluetooth devices (connected, nearby or out of range) and displays.",
+      "parameters": { "type": "object", "additionalProperties": false, "properties": {} }
+    },
+    {
+      "name": "network",
+      "description": "The network interface, Wi-Fi name, IP address, and whether it's an iPhone hotspot. Takes a few seconds.",
+      "parameters": { "type": "object", "additionalProperties": false, "properties": {} }
+    }
+  ]
+}

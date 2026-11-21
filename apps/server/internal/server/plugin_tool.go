@@ -30,12 +30,16 @@ func (t *pluginTool) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: t.tool.Parameters}
 }
 func (t *pluginTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
-	text, err := t.server.plugins.CallTool(ctx, t.tool.Plugin, t.tool.Name, plugins.ToolCall{Chat: t.chat, Agent: t.agent, Args: args})
+	result, err := t.server.plugins.CallTool(ctx, t.tool.Plugin, t.tool.Name, plugins.ToolCall{Chat: t.chat, Agent: t.agent, Args: args})
 	if err != nil {
 		t.server.config.Log.Warn("plugin tool", "plugin", t.tool.Plugin, "tool", t.tool.Name, "error", err)
 		return agent.AgentToolResult{}, errors.New(t.tool.Title + " couldn't answer.")
 	}
-	return agent.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: untrusted.Wrap(t.tool.Title, text)}}}, nil
+	content := []ai.ToolResultMessageContent{ai.TextContent{Text: untrusted.Wrap(t.tool.Title, result.Text)}}
+	for _, image := range result.Images {
+		content = append(content, ai.ImageContent{Data: image.Data, MimeType: image.MimeType})
+	}
+	return agent.AgentToolResult{Content: content, StructuredContent: result.Structured}, nil
 }
 
 func (s *Server) pluginTools(ctx context.Context, chat, agentID string, state *turnState) []agent.AgentTool {

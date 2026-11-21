@@ -32,8 +32,10 @@ type Definition struct {
 	// Keep an explicit clear from inheriting the startup default again.
 	WorkspaceSet bool `json:"workspaceSet,omitempty"`
 	// Worktree is the conversation's prepared checkout, resolved per session.
-	Worktree   string                   `json:"-"`
-	ExtraTools []agent.AgentTool        `json:"-"`
+	Worktree   string            `json:"-"`
+	ExtraTools []agent.AgentTool `json:"-"`
+	// CodeTools are reached through codemode, as MCP tools are.
+	CodeTools  []agent.AgentTool        `json:"-"`
 	Scope      string                   `json:"-"`
 	Intro      bool                     `json:"-"`
 	Ephemeral  bool                     `json:"-"`
@@ -205,6 +207,7 @@ func runtimeDefinition(d Definition) core.Definition {
 		WorkspaceSet:       d.WorkspaceSet,
 		Worktree:           d.Worktree,
 		ExtraTools:         extra,
+		CodeTools:          d.CodeTools,
 		Scope:              d.Scope,
 		Intro:              d.Intro,
 		Ephemeral:          d.Ephemeral,
@@ -237,6 +240,7 @@ func productDefinition(d core.Definition) Definition {
 		WorkspaceSet:       d.WorkspaceSet,
 		Worktree:           d.Worktree,
 		ExtraTools:         d.ExtraTools,
+		CodeTools:          d.CodeTools,
 		Scope:              d.Scope,
 		Intro:              d.Intro,
 		Ephemeral:          d.Ephemeral,

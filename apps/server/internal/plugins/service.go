@@ -168,21 +168,34 @@ func (s *service) publish(address, token string, cmd *exec.Cmd) {
 	s.mu.Unlock()
 }
 
+// limits bound one request to a service: how long it may take and how much it may answer.
+type limits struct {
+	wait time.Duration
+	size int64
+}
+
+var (
+	// quick suits status reads and gates, which sit in front of every call.
+	quick = limits{wait: 3 * time.Second, size: 64 << 10}
+	// toolLimits match an MCP call's: a tool can be long work and answer with pictures.
+	toolLimits = limits{wait: 10 * time.Minute, size: 16 << 20}
+)
+
 // get reads a JSON answer from the running service.
 func (s *service) get(ctx context.Context, path string, out any) error {
-	return s.call(ctx, http.MethodGet, path, nil, out)
+	return s.call(ctx, http.MethodGet, path, nil, out, quick)
 }
 
 // post sends JSON to the running service and reads its answer.
-func (s *service) post(ctx context.Context, path string, in, out any) error {
+func (s *service) post(ctx context.Context, path string, in, out any, bound limits) error {
 	body, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
-	return s.call(ctx, http.MethodPost, path, bytes.NewReader(body), out)
+	return s.call(ctx, http.MethodPost, path, bytes.NewReader(body), out, bound)
 }
 
-func (s *service) call(ctx context.Context, method, path string, body io.Reader, out any) error {
+func (s *service) call(ctx context.Context, method, path string, body io.Reader, out any, bound limits) error {
 	s.mu.Lock()
 	address, token := s.address, s.token
 	s.mu.Unlock()
@@ -194,7 +207,7 @@ func (s *service) call(ctx context.Context, method, path string, body io.Reader,
 		return err
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
-	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
+	response, err := (&http.Client{Timeout: bound.wait}).Do(request)
 	if err != nil {
 		return err
 	}
@@ -202,7 +215,7 @@ func (s *service) call(ctx context.Context, method, path string, body io.Reader,
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("service answered %d", response.StatusCode)
 	}
-	return json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(out)
+	return json.NewDecoder(io.LimitReader(response.Body, bound.size)).Decode(out)
 }
 
 func (s *service) forward(w http.ResponseWriter, r *http.Request, path string) bool {

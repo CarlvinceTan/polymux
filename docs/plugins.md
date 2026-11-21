@@ -52,8 +52,9 @@ New pairing links follow **Settings → Network**: the chosen transport when it 
 
 A `tools` plugin gives agents tools its service answers. `tools` in `plugin.json` lists each one's `name`, `description` and JSON Schema `parameters`.
 
-- **Asking**: `POST /tools/{name}` on the service receives `{chat, agent, args}` and answers `{text}`, which goes back to the model marked as untrusted.
+- **Asking**: `POST /tools/{name}` on the service receives `{chat, agent, args}` and answers `{text}`, which goes back to the model marked as untrusted. With plugin API 7 it may add `images: [{data, mimeType}]`, base64 pictures such as screenshots (at most four are kept), and `structured`, JSON a codemode script reads as `structuredContent`.
 - **Which chats**: tools follow the same rule as skills, and reach an agent when its session next opens.
+- **Codemode**: like MCP tools, plugin tools aren't offered to the model one by one. They sit inside the one `codemode` tool beside every MCP server's tools, and a script calls them as `tools.plugin_name__tool_name(args)` (`CodeTools` in `packages/runtime`). A script hands a picture to the model with `image()`.
 - **Names**: an agent sees `plugin_name__tool_name`, with the plugin's hyphens as underscores. Gates decide these calls like any other.
 
 ## Gates
@@ -129,6 +130,13 @@ A transport adds `"provides": ["transport"]` and, if it has options, `"settings"
 ## Activity
 
 The [Canvas plugin](../plugins/canvas) owns its editor, repository scans, and agent reports. It combines read-only activity summaries with editable cards, wires, and positions. The workspace and each chat save their own board. Opening it in a chat filters the live activity shown, not who can read a report.
+
+## Computer Use and Context
+
+Both are Scoped tools plugins for the computer the server runs on, so they're turned on per chat under Settings → Plugins.
+
+- [`computer-use`](../plugins/computer-use) keeps one `cua-driver mcp` session open, which drives apps and the browser through CuaDriver.app's own Accessibility and Screen Recording grants. It offers `describe` and `call`, so every cua-driver tool is reachable without listing each one; the few that change the driver itself are refused.
+- [`context`](../plugins/context) is cstack's `context` tool ported to Go: the front app and window, input idle time, prompts on screen, apps, windows, every browser tab, devices and the network. It only reads. Tabs need the Polymux app's Automation consent for each browser, and the prompt check needs cua-driver. On Linux it reads only Tailscale peers.
 
 ## Official plugins
 

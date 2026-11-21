@@ -46,10 +46,19 @@ func TestMain(m *testing.M) {
 				}
 				return
 			}
+			if r.URL.Path == "/tools/slow" {
+				time.Sleep(3500 * time.Millisecond)
+				_ = json.NewEncoder(w).Encode(ToolResult{Text: strings.Repeat("x", 200<<10)})
+				return
+			}
 			if strings.HasPrefix(r.URL.Path, "/tools/") {
 				var call ToolCall
 				_ = json.NewDecoder(r.Body).Decode(&call)
-				_ = json.NewEncoder(w).Encode(ToolResult{Text: r.URL.Path + " " + call.Chat + " " + call.Agent + " " + string(call.Args)})
+				images := []ToolImage{{Data: "x", MimeType: "text/html"}, {MimeType: "image/png"}}
+				for range 5 {
+					images = append(images, ToolImage{Data: "aGk=", MimeType: "image/png"})
+				}
+				_ = json.NewEncoder(w).Encode(ToolResult{Text: r.URL.Path + " " + call.Chat + " " + call.Agent + " " + string(call.Args), Images: images, Structured: json.RawMessage(`{"chat":"` + call.Chat + `"}`)})
 				return
 			}
 			if r.URL.Path == "/transport" {
@@ -411,15 +420,26 @@ func TestBothKeepsChatsAndOffersTools(t *testing.T) {
 	if len(tools) != 1 || tools[0].Plugin != "graph" || tools[0].Name != "report" {
 		t.Fatalf("tools %v", tools)
 	}
-	var answer string
+	var answer ToolResult
 	for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		answer, err = m.CallTool(t.Context(), "graph", "report", ToolCall{Chat: "c", Agent: "a", Args: json.RawMessage(`{"x":1}`)})
 		if err == nil || time.Now().After(end) {
 			break
 		}
 	}
-	if err != nil || answer != `/tools/report c a {"x":1}` {
-		t.Fatalf("answer %q %v", answer, err)
+	if err != nil || answer.Text != `/tools/report c a {"x":1}` {
+		t.Fatalf("answer %q %v", answer.Text, err)
+	}
+	// Only pictures reach the model, and at most four of them.
+	if len(answer.Images) != maxToolImages || answer.Images[0].MimeType != "image/png" {
+		t.Fatalf("images %v", answer.Images)
+	}
+	if string(answer.Structured) != `{"chat":"c"}` {
+		t.Fatalf("structured %s", answer.Structured)
+	}
+	// A tool can take longer and answer more than a status read or a gate may.
+	if slow, err := m.CallTool(t.Context(), "graph", "slow", ToolCall{}); err != nil || len(slow.Text) != 200<<10 {
+		t.Fatalf("slow tool: %d %v", len(slow.Text), err)
 	}
 }
 

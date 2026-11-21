@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/MichaelKinsy/PiG/ai"
@@ -40,5 +41,16 @@ func TestSpecModelLevelsSetMaxThinking(t *testing.T) {
 	}
 	if max != ai.ThinkingLevel(ai.ThinkingXHigh) {
 		t.Fatalf("qwen max = %q", max)
+	}
+}
+
+// A model tagged as seeing pictures gets them; any other gets a placeholder from PiG.
+func TestSpecVisionTakesImages(t *testing.T) {
+	registry := newSpecRegistry(ProviderSpec{ID: "custom", BaseURL: "http://127.0.0.1:1/v1", Models: []string{"eyes", "blind"},
+		Vision: map[string]bool{"eyes": true}})
+	for _, model := range registry.list() {
+		if sees := slices.Contains(model.Input, "image"); sees != (model.ID == "eyes") {
+			t.Fatalf("%s input %v", model.ID, model.Input)
+		}
 	}
 }

@@ -93,7 +93,7 @@ func (m *Manager) Check(ctx context.Context, chats []string, call Call) Decision
 	for _, gate := range gates {
 		call.Chat = gate.chat
 		var decision Decision
-		if gate.unit == nil || gate.unit.post(ctx, "/gate", call, &decision) != nil {
+		if gate.unit == nil || gate.unit.post(ctx, "/gate", call, &decision, quick) != nil {
 			return Decision{Reason: gate.title + " isn't running, so the call was blocked."}
 		}
 		if decision.Ask != nil {
