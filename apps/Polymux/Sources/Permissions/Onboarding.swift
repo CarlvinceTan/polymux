@@ -36,7 +36,8 @@ struct Onboarding: View {
     @State private var joining = false
     @State private var joined = false
     @State private var joinIssue: String?
-    @State private var addingProvider = false
+    /// Connecting a provider inside the model step; nil shows the step itself.
+    @State private var providerPage: SetupProviderPage?
     @State private var choosingModel = false
     #if os(iOS)
     @State private var scanning = false
@@ -134,13 +135,7 @@ struct Onboarding: View {
         .background(PanelSurface.color(scheme).ignoresSafeArea())
         .tint(.blue)
         .environment(session?.providers)
-        .panel(isPresented: $addingProvider) {
-            ProviderEditor(client: session?.client, original: nil, onBack: { addingProvider = false }) { list in
-                session?.providers.accept(list)
-                Task { await session?.settings.refresh() }
-            }
-            .environment(session?.providers)
-        }
+        .onChange(of: step) { providerPage = nil }
         #if os(iOS)
         .dropdownHost()
         #endif
@@ -288,13 +283,14 @@ struct Onboarding: View {
                 SetupProgress(count: steps.count, index: index)
                 Spacer(minLength: 0)
             }
-            if step == .models && providers.isEmpty {
+            if step == .models && providers.isEmpty && providerPage == nil {
                 Button("Later", action: advance)
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Set up a model later")
             }
-            if !needsPairing {
+            // Connecting a provider has its own actions on the page.
+            if !needsPairing && !(step == .models && providerPage != nil) {
                 Button(primaryTitle, action: advance)
                     .buttonStyle(OnboardingPrimaryButton())
                     .keyboardShortcut(.defaultAction)
@@ -512,7 +508,31 @@ struct Onboarding: View {
         }
     }
 
-    private var modelsPage: some View {
+    @ViewBuilder private var modelsPage: some View {
+        if let page = providerPage, let client = session?.client {
+            switch page {
+            case .choose:
+                SetupProviderPicker(options: session?.providers.options, choose: { providerPage = .signIn($0) },
+                                    local: { providerPage = .local })
+                    .task { await session?.providers.refreshOptions() }
+            case .signIn(let option):
+                SetupSignIn(client: client, option: option, connected: connected).id(option)
+            case .local:
+                SetupLocal(client: client, connected: connected)
+            }
+        } else {
+            modelsOverview
+        }
+    }
+
+    /// A provider finished connecting: list it and return to the step.
+    private func connected(_ provider: Provider) {
+        session?.providers.merge([provider])
+        Task { await session?.settings.refresh() }
+        providerPage = nil
+    }
+
+    private var modelsOverview: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(spacing: 0) {
                 ForEach(groups) { group in
@@ -522,7 +542,7 @@ struct Onboarding: View {
                     }
                     Divider().padding(.horizontal, 12)
                 }
-                Button { addingProvider = true } label: {
+                Button { providerPage = .choose } label: {
                     OnboardingRow(title: groups.isEmpty ? "Add a provider" : "Add another provider",
                                   detail: "OpenAI, Anthropic, Gemini, Ollama and more.",
                                   symbol: "plus", tint: .purple) {
@@ -728,6 +748,10 @@ struct Onboarding: View {
     }
 
     private func back() {
+        if step == .models, let page = providerPage {
+            providerPage = page == .choose ? nil : .choose
+            return
+        }
         if let index = steps.firstIndex(of: step), index > 0 {
             step = steps[index - 1]
         }
@@ -735,7 +759,7 @@ struct Onboarding: View {
 }
 
 /// One line of a setup card: an icon, a title and detail, and its control.
-private struct OnboardingRow<Trailing: View>: View {
+struct OnboardingRow<Trailing: View>: View {
     let title: String
     let detail: String
     let symbol: String
@@ -764,7 +788,7 @@ private struct OnboardingRow<Trailing: View>: View {
     }
 }
 
-private extension View {
+extension View {
     func onboardingCard(_ scheme: ColorScheme) -> some View {
         background(PanelSurface.card(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
@@ -789,7 +813,6 @@ private struct OnboardingPrimaryButton: ButtonStyle {
 /// The official plugins, shown as a visual grid.
 private struct OnboardingPlugins: View {
     let store: PluginStore
-    @State private var confirming: MarketPlugin?
     @Environment(\.colorScheme) private var scheme
 
     private var plugins: [MarketPlugin] {
@@ -830,14 +853,6 @@ private struct OnboardingPlugins: View {
                 await store.refresh()
                 try? await Task.sleep(for: .seconds(2))
             }
-        }
-        .alert("Install \(confirming?.title ?? "plugin")?", isPresented: Binding(
-            get: { confirming != nil }, set: { if !$0 { confirming = nil } }
-        ), presenting: confirming) { item in
-            Button("Install") { store.install(item) }
-            Button("Cancel", role: .cancel) {}
-        } message: { item in
-            Text("Version \(item.version) from \(item.source). It runs on your server.")
         }
     }
 
@@ -885,7 +900,7 @@ private struct OnboardingPlugins: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         } else {
-            Button(version == nil ? "Install" : "Update") { confirming = item }
+            Button(version == nil ? "Install" : "Update") { store.install(item) }
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
                 .accessibilityLabel("\(version == nil ? "Install" : "Update") \(item.title)")

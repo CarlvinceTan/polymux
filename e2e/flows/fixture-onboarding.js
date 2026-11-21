@@ -10,6 +10,12 @@ await app.click({ role: "button", name: "Continue" });
 // Without a provider, setup can only move on by putting the model off.
 await app.waitFor({ role: "statictext", name: "Connect a Model", timeout_ms: 5000 });
 await app.waitFor({ role: "button", name: "Set up a model later", timeout_ms: 5000 });
+// Choosing a provider happens on the page itself, and Back steps out of it.
+await app.click({ role: "button", name: "Add a provider" });
+await app.waitFor({ role: "textfield", name: "Search providers", timeout_ms: 5000 });
+if ((await app.query({ role: "button", name: "Close Add provider" })).length) throw new Error("Setup opened a panel");
+await app.click({ role: "button", name: "Back" });
+await app.waitFor({ role: "button", name: "Add a provider", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Add a provider" });
 await app.click({ role: "button", name: "Subscription · Subscription sign-in" });
 await app.waitFor({ text: "TEST-1234", timeout_ms: 10000 });
@@ -17,7 +23,7 @@ await app.typeText("http://localhost/callback?code=test", { role: "textfield", n
 await app.click({ role: "button", name: "Continue" });
 await app.waitFor({ role: "button", name: "Personal", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Personal" });
-// The sign-in closes its panel and the walkthrough lists the provider with a default model to pick.
+// The sign-in finishes on the page and the walkthrough lists the provider with a default model to pick.
 await app.waitFor({ role: "statictext", name: "Subscription", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Default model" });
 await app.click({ role: "button", name: "Subscription Chat Subscription" });

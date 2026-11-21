@@ -202,17 +202,10 @@ struct ProviderPicker: View {
         }
     }
 
-    /// Subscriptions first, then the most used API keys.
-    private static let favourites: [(type: String, auth: String)] = [
-        ("openai", ProviderOptionAuth.oauth), ("anthropic", ProviderOptionAuth.oauth),
-        ("openai", ProviderOptionAuth.apiKey), ("anthropic", ProviderOptionAuth.apiKey),
-        ("gemini", ProviderOptionAuth.apiKey), ("openrouter", ProviderOptionAuth.apiKey),
-    ]
-
     private var showsPopular: Bool { category == .all && query.isEmpty && !popular.isEmpty }
 
     private var popular: [ProviderOption] {
-        Self.favourites.compactMap { item in options.first { $0.type == item.type && $0.auth == item.auth } }
+        ProviderOption.popular(in: options)
     }
 
     private var rest: [ProviderOption] {
@@ -234,5 +227,19 @@ struct ProviderPicker: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(option.name) · \(option.label)")
+    }
+}
+
+extension ProviderOption {
+    /// Subscriptions first, then the most used API keys.
+    private static let favourites: [(type: String, auth: String)] = [
+        ("openai", ProviderOptionAuth.oauth), ("anthropic", ProviderOptionAuth.oauth),
+        ("openai", ProviderOptionAuth.apiKey), ("anthropic", ProviderOptionAuth.apiKey),
+        ("gemini", ProviderOptionAuth.apiKey), ("openrouter", ProviderOptionAuth.apiKey),
+    ]
+
+    /// The popular choices among what the server offers, in that order.
+    static func popular(in options: [ProviderOption]) -> [ProviderOption] {
+        favourites.compactMap { item in options.first { $0.type == item.type && $0.auth == item.auth } }
     }
 }
