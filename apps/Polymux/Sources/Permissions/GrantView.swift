@@ -104,3 +104,17 @@ struct ServerIcon: View {
     }
 }
 #endif
+
+#if os(iOS)
+import SwiftUI
+
+/// The app's logo, standing in for the icon on iPhone.
+struct AppIcon: View {
+    var body: some View {
+        Image("Logo")
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+    }
+}
+#endif

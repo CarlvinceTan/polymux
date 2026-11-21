@@ -221,10 +221,8 @@ struct AppRoot: View {
     @State private var settingsTab = SettingsTab.verifying ?? .general
     @State private var pairingTask: Task<Void, Error>?
     @State private var pairingIssue: String?
-    #if os(macOS)
-    /// Set when a new install starts its own server.
+    /// Set when a new install starts its own server, or on a fresh iPhone install.
     @AppStorage("onboarding.pending") private var onboarding = Onboarding.verifying || SetupDefaults.pending
-    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -420,7 +418,16 @@ struct AppRoot: View {
             mainContent
         }
         #else
+        // iPhone has no window to fill, so setup covers the whole screen.
         mainContent
+            .fullScreenCover(isPresented: $onboarding) {
+                Onboarding(pool: pool, join: join) {
+                    UserDefaults.standard.set(true, forKey: "onboarding.completed")
+                    onboarding = false
+                }
+                .environment(activeSession?.plugins)
+                .interactiveDismissDisabled()
+            }
         #endif
     }
 

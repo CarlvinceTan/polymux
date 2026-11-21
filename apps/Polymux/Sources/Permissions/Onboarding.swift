@@ -1,8 +1,7 @@
-#if os(macOS)
 import SwiftUI
 import PolymuxKit
 
-/// The first launch's setup. It fills the window: a step list on the left, and the current step on the right.
+/// The first launch's setup. It fills the window on a Mac and the whole screen on iPhone.
 struct Onboarding: View {
     /// UI checks open it at launch with --verify-onboarding.
     static var verifying: Bool {
@@ -13,11 +12,21 @@ struct Onboarding: View {
         #endif
     }
 
+    /// UI checks can open a later step with --onboarding-step=host.
+    private static var firstStep: Step {
+        #if DEBUG
+        let value = CommandLine.arguments.first { $0.hasPrefix("--onboarding-step=") }?.split(separator: "=").last
+        return [Step.host, .plugins].first { "\($0)" == value.map(String.init) } ?? .welcome
+        #else
+        .welcome
+        #endif
+    }
+
     let pool: SessionPool
     let join: (URL) async throws -> Void
     let finish: () -> Void
 
-    @State private var step = Step.welcome
+    @State private var step = Onboarding.firstStep
     @State private var host = Host.local
     @State private var link = ""
     @State private var joining = false
@@ -26,7 +35,18 @@ struct Onboarding: View {
     @AppStorage("serverAddress") private var address = ServerHost.address
     @Environment(PluginStore.self) private var plugins: PluginStore?
     @Environment(\.colorScheme) private var scheme
+    #if os(macOS)
     private let permissions = Permissions.shared
+    #endif
+
+    /// The Mac's own permissions only apply where the server runs.
+    private var steps: [Step] {
+        #if os(macOS)
+        Step.allCases
+        #else
+        Step.allCases.filter { $0 != .permissions }
+        #endif
+    }
 
     private enum Step: Int, CaseIterable, Hashable {
         case welcome, host, permissions, plugins
@@ -83,9 +103,13 @@ struct Onboarding: View {
             }
         }
         .background(PanelSurface.color(scheme))
+        #if os(macOS)
         .ignoresSafeArea(edges: .top)
+        #endif
         .tint(.blue)
+        #if os(macOS)
         .task { await permissions.refresh() }
+        #endif
         .onAppear {
             if !ServerHost.shared.available {
                 host = .remote
@@ -103,7 +127,11 @@ struct Onboarding: View {
             if step == .welcome { welcomeActions } else { navigationActions }
         }
         .frame(maxWidth: 700)
+        #if os(macOS)
         .padding(.horizontal, 40)
+        #else
+        .padding(.horizontal, 24)
+        #endif
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
     }
@@ -122,6 +150,7 @@ struct Onboarding: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
     }
@@ -129,9 +158,17 @@ struct Onboarding: View {
     private var detail: String {
         switch step {
         case .welcome:
+            #if os(macOS)
             "Choose where bots run, grant them access, and add what you need."
+            #else
+            "Connect to your server and add what you need."
+            #endif
         case .host:
+            #if os(macOS)
             "Run the server on this device, or connect to one that's already running."
+            #else
+            "Connect to the server your bots run on."
+            #endif
         case .permissions:
             "Bots inherit what Polymux Server is granted."
         case .plugins:
@@ -143,7 +180,10 @@ struct Onboarding: View {
         switch step {
         case .welcome: EmptyView()
         case .host: hostPage
-        case .permissions: permissionsPage
+        case .permissions:
+            #if os(macOS)
+            permissionsPage
+            #endif
         case .plugins: pluginsPage
         }
     }
@@ -232,6 +272,11 @@ struct Onboarding: View {
                     .labelsHidden()
                     .lineLimit(1)
                     .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .textFieldStyle(.roundedBorder)
+                    #endif
                     .disabled(joining)
                     .onSubmit(connect)
                 Button("Connect", action: connect)
@@ -251,6 +296,7 @@ struct Onboarding: View {
                 Text("On the other device, open Settings › Network › Add device.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -276,6 +322,7 @@ struct Onboarding: View {
         }
     }
 
+    #if os(macOS)
     private var permissionsPage: some View {
         VStack(spacing: 0) {
             ForEach(Array(permissions.all.enumerated()), id: \.element) { index, permission in
@@ -320,6 +367,7 @@ struct Onboarding: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
+    #endif
 
     private var pluginsPage: some View {
         Group {
@@ -357,16 +405,16 @@ struct Onboarding: View {
             }
             #endif
         }
-        if let next = Step(rawValue: step.rawValue + 1) {
-            step = next
+        if let index = steps.firstIndex(of: step), index + 1 < steps.count {
+            step = steps[index + 1]
         } else {
             finish()
         }
     }
 
     private func back() {
-        if let previous = Step(rawValue: step.rawValue - 1) {
-            step = previous
+        if let index = steps.firstIndex(of: step), index > 0 {
+            step = steps[index - 1]
         }
     }
 }
@@ -396,7 +444,11 @@ private struct OnboardingPlugins: View {
         (store.market ?? []).filter { $0.author == "Polymux" }
     }
 
+    #if os(macOS)
     private let columns = [GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 14, alignment: .top)]
+    #else
+    private let columns = [GridItem(.flexible(), alignment: .top)]
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -610,5 +662,3 @@ private struct PluginBanner: View {
         }
     }
 }
-
-#endif
