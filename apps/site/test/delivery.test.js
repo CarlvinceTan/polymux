@@ -37,6 +37,15 @@ test('the app version has published native notes matching the release tag and do
   assert.equal(releases.find((release) => release.downloadable && !release.historical)?.version, version);
 });
 
+test('manually running a native release at a tag never publishes it', () => {
+  const {on: events, jobs} = workflow('release');
+  assert.deepEqual(events.push.tags, ['app-v*']);
+  assert.ok(Object.hasOwn(events, 'workflow_dispatch'));
+  const guard = "github.event_name == 'push' && github.ref_type == 'tag'";
+  assert.equal(jobs.macos.steps.find((step) => step.name === 'Publish release').if, guard);
+  assert.equal(jobs.feed.if, guard);
+});
+
 test('the release preflight accepts prepared notes and rejects missing, draft, or mismatched releases', async (context) => {
   const script = workflow('release').jobs.macos.steps.find((step) => step.name === 'Resolve version').run;
   const notes = readFileSync(new URL(`../src/content/releases/${version}.md`, import.meta.url), 'utf8');
