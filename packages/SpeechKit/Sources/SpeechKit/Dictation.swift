@@ -19,7 +19,7 @@ public final class DictationInput {
     private var pause: (() -> Void)?
     private var input: (any SpeechInput)?
     private var task: Task<Void, Never>?
-    private var final = false
+    private var drained = false
     private var session = UUID()
     private var stopTask: Task<Void, Never>?
     private var terms = Vocabulary.terms(Vocabulary.base)
@@ -66,7 +66,7 @@ public final class DictationInput {
     public func start(transcript: @escaping (VoiceTranscript) -> Void, failure: @escaping (Error) -> Void) {
         guard !active, !stopping else { return }
         active = true
-        final = false
+        drained = false
         ready = false
         session = UUID()
         let current = session
@@ -75,19 +75,19 @@ public final class DictationInput {
         self.input = input
         let startTerms = terms
         task = Task {
+            var started = false
             do {
                 await input.setVocabulary(startTerms)
                 let stream = try await input.start()
                 try Task.checkCancellation()
                 guard session == current else { return }
+                started = true
                 ready = true
                 denied = false
                 for try await event in stream {
                     guard !Task.isCancelled, session == current else { break }
                     switch event {
-                    case .transcript(let value):
-                        final = value.final
-                        transcript(value)
+                    case .transcript(let value): transcript(value)
                     case .level(let value): level = value
                     case .activity: break
                     }
@@ -97,6 +97,12 @@ public final class DictationInput {
                     await refresh()
                     if !Task.isCancelled, session == current { failure(error) }
                 }
+            }
+            if session == current {
+                drained = true
+                if stopping { return }
+            } else if started {
+                return
             }
             await input.stop()
             guard session == current else { return }
@@ -109,6 +115,7 @@ public final class DictationInput {
     public func stop() async {
         if let stopTask { await stopTask.value; return }
         guard active else { return }
+        if drained { await task?.value; return }
         let pending = Task { await finish() }
         stopTask = pending
         await pending.value
@@ -121,12 +128,11 @@ public final class DictationInput {
         if let input {
             pause?()
             if ready {
-                // Bound finalization so Send also works when recognition stalls.
-                final = false
+                // A final segment can be followed by more; wait for the stream to drain.
                 let finalization = Task { try? await input.finalize() }
                 let clock = ContinuousClock()
                 let deadline = clock.now.advanced(by: .seconds(1))
-                while !final && active && clock.now < deadline {
+                while !drained && clock.now < deadline {
                     let next = min(deadline, clock.now.advanced(by: .milliseconds(50)))
                     try? await clock.sleep(until: next)
                 }
@@ -180,7 +186,8 @@ private final class DictationFixture: SpeechInput {
     }
 
     func finalize() async throws {
-        events?.yield(.transcript(.init(text: "", start: 0, end: 0, final: true)))
+        task?.cancel()
+        events?.finish()
     }
 
     public func stop() async {

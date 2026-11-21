@@ -13,6 +13,9 @@ public final class VoiceAudio {
     private let duplex: Bool
     private var tapped = false
     private var muted = false
+    #if os(iOS)
+    private var sessionActive = false
+    #endif
 
     public init(duplex: Bool = true) {
         self.duplex = duplex
@@ -28,6 +31,7 @@ public final class VoiceAudio {
             try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
         }
         try session.setActive(true)
+        sessionActive = true
         #endif
 
         let input = engine.inputNode
@@ -59,6 +63,7 @@ public final class VoiceAudio {
     public func resume() throws {
         #if os(iOS)
         try AVAudioSession.sharedInstance().setActive(true)
+        sessionActive = true
         #endif
         if !engine.isRunning { try engine.start() }
     }
@@ -83,7 +88,10 @@ public final class VoiceAudio {
             tapped = false
         }
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if sessionActive {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            sessionActive = false
+        }
         #endif
     }
 }
@@ -228,12 +236,14 @@ final class AppleInput: SpeechInput {
 
     func start() async throws -> AsyncThrowingStream<VoiceEvent, Error> {
         let microphone = await AVAudioApplication.requestRecordPermission()
+        try Task.checkCancellation()
         guard microphone else { throw SpeechFailure.microphone }
         let permission = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { @Sendable status in
                 continuation.resume(returning: status)
             }
         }
+        try Task.checkCancellation()
         guard permission == .authorized else { throw SpeechFailure.recognition }
         guard SpeechTranscriber.isAvailable else { return try await legacy() }
 
@@ -336,15 +346,16 @@ final class AppleInput: SpeechInput {
     func finalize() async throws {
         if let fallback { try await fallback.finalize() }
         else {
+            let listeners = tasks
             capture?.emitSilence(seconds: 0.4)
+            inputs?.finish()
             do {
-                try await analyzer?.finalize(through: nil)
+                try await analyzer?.finalizeAndFinishThroughEndOfInput()
             } catch {
                 await coordinator?.finish()
                 throw error
             }
-            // Give the result streams a moment to deliver their last finals.
-            try? await Task.sleep(for: .milliseconds(250))
+            for listener in listeners { await listener.value }
             await coordinator?.finish()
         }
     }
@@ -405,6 +416,7 @@ private final class LegacyInput: SpeechInput {
     private var received = false
     private var replay: [VoiceBuffer] = []
     private var canReplay = true
+    private var ending = false
     private var terms = Vocabulary.terms(Vocabulary.base)
     private let language: DictationLanguage
 
@@ -452,7 +464,13 @@ private final class LegacyInput: SpeechInput {
         recognize(at: capture?.time ?? 0)
     }
 
-    func finalize() async throws { request?.endAudio() }
+    func finalize() async throws {
+        ending = true
+        renewal?.cancel()
+        buffers?.finish()
+        await inputTask?.value
+        request?.endAudio()
+    }
 
     private func recognize(at start: Double, replay: [VoiceBuffer] = []) {
         guard let recognizer, let events else { return }
@@ -492,11 +510,17 @@ private final class LegacyInput: SpeechInput {
                         self.replay = []
                     }
                     events.yield(.transcript(transcript))
-                    if transcript.final { self.finishTurn(); return }
+                    if transcript.final {
+                        if self.ending { events.finish() }
+                        else { self.finishTurn() }
+                        return
+                    }
                 }
                 if let error {
                     let failure = error as NSError
-                    if local, !self.received, self.canReplay, failure.domain == "kLSRErrorDomain", failure.code == 300 {
+                    if self.ending {
+                        events.finish()
+                    } else if local, !self.received, self.canReplay, failure.domain == "kLSRErrorDomain", failure.code == 300 {
                         self.onDevice = false
                         self.recognize(at: start, replay: self.replay)
                     } else if failure.domain == "kAFAssistantErrorDomain", failure.code == 1110 {
@@ -545,5 +569,3 @@ private final class LegacyInput: SpeechInput {
         replay = []
     }
 }
-
-

@@ -54,4 +54,3 @@ import Testing
     #expect(transcripts.contains { $0.final && $0.text == "Hello there" })
     #expect(!transcripts.contains { $0.final && $0.text == "Hola" })
 }
-
