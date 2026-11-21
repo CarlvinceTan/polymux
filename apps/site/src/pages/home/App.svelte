@@ -10,10 +10,6 @@
   import {formatFileSize, type ReleaseDownloads} from '../../lib/platform';
 
   const providers = ['OpenAI', 'Anthropic', 'Google Gemini', 'xAI', 'OpenRouter', 'Ollama'];
-  const installs = [
-    {name: 'Server', detail: 'On the Mac where your agents live.', description: 'Runs your agents, remembers conversations, and connects your models and tools.', command: './scripts/install.sh server', anchor: 'server'},
-    {name: 'Client', detail: 'On each Mac you want to chat from.', description: 'The native macOS app. Pair it with your server and pick up the conversation.', command: './scripts/install.sh app', anchor: 'client'},
-  ];
   const phrases: {text: string; agent: Agent['id']; colors: string}[] = [
     {text: 'On your devices.', agent: 'whale', colors: '#8fd0ff, #a98bff 50%, #ff8ad8'},
     {text: 'Planning your day.', agent: 'atlas', colors: '#8fd0ff, #3c97ff'},
@@ -25,10 +21,6 @@
   let downloads = $state.raw<ReleaseDownloads | null>(null);
   const client = $derived(downloads?.platforms.macos ?? null);
   let nightly = $state.raw<{version: string; macos: {url: string; size: number}} | null>(null);
-  // The default download is the newest Nightly build; the stable release is the fallback.
-  const primary = $derived(nightly
-    ? {url: nightly.macos.url, size: nightly.macos.size, label: `Download Nightly ${nightly.version} for macOS`}
-    : client ? {url: client.url, size: client.size, label: `Download Polymux ${downloads?.version} for macOS`} : null);
 
   onMount(() => {
     if (!window.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -65,8 +57,8 @@
       </h1>
       <p class="lede">A planning partner. A fresh pair of eyes. An agent that remembers how you like things. All running on your own Mac.</p>
       <div class="actions">
-        {#if primary}
-          <a class="primary" href={primary.url}><DownloadIcon />Download for macOS</a>
+        {#if client}
+          <a class="primary" href={client.url}><DownloadIcon />Download for macOS</a>
         {:else}
           <a class="primary" href="#download"><DownloadIcon />Install</a>
         {/if}
@@ -114,30 +106,20 @@
     <div class="section-heading">
       <p class="eyebrow">Install Polymux</p>
       <h2 id="install-title">Start with <span class="glow">your Mac.</span></h2>
-      <p>{primary ? 'Download the macOS client, then install the server from source.' : 'Both parts are currently for macOS. Native downloads aren’t published yet; install from source using the setup guide.'}</p>
+      <p>{client ? 'Open the disk image, drag Polymux to Applications, then open it to start setup. The Mac app includes the server.' : 'The stable Mac installer is currently unavailable. See the installation guide for other ways to get started.'}</p>
     </div>
-    {#if primary}
+    {#if client}
       <p class="download-line">
-        <a class="primary" href={primary.url}><DownloadIcon />{primary.label}</a>
-        <span>{nightly ? 'Unstable, rebuilt from dev · ' : ''}{formatFileSize(primary.size)}</span>
+        <a class="primary" href={client.url}><DownloadIcon />Download for macOS</a>
+        <span>Polymux {downloads?.version} · DMG · {formatFileSize(client.size)}</span>
       </p>
+      <p class="install-note">Apple silicon · macOS 27 or later · <a href="/docs/installation/">Installation guide</a></p>
+    {:else}
+      <p class="install-note"><a href="/docs/installation/">Installation guide</a></p>
     {/if}
-    <div class="install-grid">
-      {#each installs as install, index (install.name)}
-        <article style:--tint={index ? agent('nova').tint : agent('atlas').tint}>
-          <div class="install-label"><span>0{index + 1}</span><h3>{install.name}</h3><span class="platform">macOS</span></div>
-          <h4>{install.detail}</h4>
-          <p>{install.description}</p>
-          <code>{install.command}</code>
-          <a class="text-link" href={`/docs/installation/#${install.anchor}`}>{install.name} setup <span aria-hidden="true">↗</span></a>
-        </article>
-      {/each}
-    </div>
-    <p class="install-note">Commands run from a source checkout. <a href="/docs/installation/#requirements">Requirements</a>: macOS 27, Go 1.27.1; Xcode 27 and signing for the client.</p>
-    {#if nightly && client}
-      <p class="together">Prefer stable? <a href={client.url}>Download Polymux {downloads?.version} <span aria-hidden="true">↓</span></a> · {formatFileSize(client.size)}</p>
+    {#if nightly}
+      <p class="together"><a href={nightly.macos.url}>Download Nightly</a> · Unstable ZIP · {formatFileSize(nightly.macos.size)}</p>
     {/if}
-    <p class="together">Using one Mac? <a href="/docs/installation/#one-mac">Install both together <span aria-hidden="true">↗</span></a></p>
   </section>
 </main>
 

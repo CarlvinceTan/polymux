@@ -17,18 +17,15 @@ before(async () => {
 });
 after(async () => {home?.window.close(); await server?.close();});
 
-test('installation distinguishes the Mac server and client without offering legacy downloads', () => {
+test('installation offers a guide before the native download resolves', () => {
   const document = home.window.document;
   const installation = document.querySelector('#download');
-  assert.match(installation.textContent, /Native downloads aren’t published yet/);
-  assert.match(installation.textContent, /source checkout/);
-  const cards = [...installation.querySelectorAll('article')];
-  assert.deepEqual(cards.map((card) => card.querySelector('h3').textContent), ['Server', 'Client']);
-  assert.deepEqual(cards.map((card) => card.querySelector('code').textContent), ['./scripts/install.sh server', './scripts/install.sh app']);
-  assert.deepEqual(cards.map((card) => card.querySelector('a').getAttribute('href')), ['/docs/installation/#server', '/docs/installation/#client']);
+  assert.equal(installation.querySelector('a[href="/docs/installation/"]').textContent.trim(), 'Installation guide');
   assert.equal(document.querySelectorAll('a[href*="releases/download"], a[href="/install.sh"]').length, 0);
   assert.equal(document.querySelector('.mobile-menu-download').textContent.trim(), 'Install');
-  assert.match(content.docs.find((page) => page.slug === 'installation').body, /git clone --branch dev https:\/\/github\.com\/CarlvinceTan\/polymux\.git/);
+  const guide = content.docs.find((page) => page.slug === 'installation').body;
+  assert.match(guide, /drag Polymux into Applications/);
+  assert.match(guide, /start the bundled server/);
 });
 
 test('home links resolve to existing sections and guide headings', () => {

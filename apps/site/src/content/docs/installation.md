@@ -10,12 +10,12 @@ published: true
 
 # Install
 
-Native downloads are published on the [Releases page](/releases/). Until a release is available, installation builds from source. Older Electron downloads are a different app.
+Download the macOS disk image from the [Releases page](/releases/). Open it, drag Polymux into Applications, then eject the disk image and open Polymux from Applications. Setup lets you start the bundled server on this Mac or pair with one that's already running. If the installer isn't available, use the source instructions below. Older Electron downloads are a different app.
 
 ## Requirements
 
-- **Client:** macOS 27 and Xcode 27.
-- **Server:** Go 1.27.4, Git, and a C compiler. Xcode’s command-line tools provide the compiler on macOS.
+- **Mac download:** an Apple silicon Mac running macOS 27.
+- **Build from source:** Xcode 27 for the client; Go 1.27.4, Git, and a C compiler for the server. Xcode’s command-line tools provide the compiler on macOS.
 
 ## The Mac app
 

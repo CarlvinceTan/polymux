@@ -159,19 +159,25 @@ for (const engine of [webkit, chromium]) {
   });
 }
 
-test('the default download is the newest Nightly, with stable as the fallback', async () => {
+test('the stable disk image is the primary download; Nightly stays optional', async () => {
   const browser = await chromium.launch();
   try {
     const stable = {version: '0.4.0', platforms: {macos: {url: `${origin}/stable.dmg`, size: 12_000_000}}};
     const nightly = {version: '4000.13.1', macos: {url: `${origin}/Polymux-dev-4000.13.1.zip`, size: 57_000_000}};
-    for (const [hasNightly, want] of [[true, nightly.macos.url], [false, stable.platforms.macos.url]]) {
+    for (const [hasStable, hasNightly] of [[true, true], [true, false], [false, true], [false, false]]) {
       const page = await browser.newPage();
-      await page.route('**/api/downloads*', (route) => route.fulfill({json: stable}));
+      await page.route('**/api/downloads*', (route) => hasStable ? route.fulfill({json: stable}) : route.fulfill({status: 503, json: {}}));
       await page.route('**/api/nightly*', (route) => hasNightly ? route.fulfill({json: nightly}) : route.fulfill({status: 503, json: {}}));
+      const checkedNightly = page.waitForResponse('**/api/nightly*');
       await page.goto(origin);
+      await checkedNightly;
+      const want = hasStable ? stable.platforms.macos.url : '#download';
       await page.locator(`.hero a.primary[href="${want}"]`).waitFor();
-      assert.equal(await page.locator('.download-line a').getAttribute('href'), want);
-      assert.equal(await page.locator(`.together a[href="${stable.platforms.macos.url}"]`).count(), hasNightly ? 1 : 0);
+      assert.deepEqual(await page.locator('.download-line a').evaluateAll((links) => links.map((link) => link.href)),
+        hasStable ? [want] : []);
+      const unstable = page.getByRole('link', {name: 'Download Nightly'});
+      if (hasNightly) assert.equal(await unstable.getAttribute('href'), nightly.macos.url);
+      else assert.equal(await unstable.count(), 0);
       await page.close();
     }
   } finally {
