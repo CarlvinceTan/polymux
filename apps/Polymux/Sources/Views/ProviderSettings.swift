@@ -427,44 +427,6 @@ struct ModelPicker: View {
     }
 }
 
-/// The reasoning levels a model takes, set where its provider is added.
-struct ReasoningLevelsMenu: View {
-    @Binding var levels: [String]?
-    @State private var choosing = false
-    private let all = [("Off", SettingsDefaultReasoning.off), ("Low", SettingsDefaultReasoning.low),
-                       ("Medium", SettingsDefaultReasoning.medium), ("High", SettingsDefaultReasoning.high),
-                       ("Xhigh", SettingsDefaultReasoning.xhigh), ("Max", SettingsDefaultReasoning.max)]
-
-    /// The highest level the model takes, which bounds the levels below it.
-    private var level: String {
-        all.last { levels?.contains($0.1) ?? false }?.1 ?? SettingsDefaultReasoning.off
-    }
-
-    private var title: String { all.first { $0.1 == level }?.0 ?? "Off" }
-
-    var body: some View {
-        Button { choosing = true } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "brain")
-                Text(title).lineLimit(1)
-            }
-            .foregroundStyle(.muted)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Reasoning levels")
-        .accessibilityValue(title)
-        .dropdown(isPresented: $choosing) {
-            DropdownOptions(selection: Binding(get: { level }, set: { reset(upTo: $0) }), options: all)
-        }
-    }
-
-    private func reset(upTo level: String) {
-        let index = all.firstIndex { $0.1 == level } ?? 0
-        levels = Array(all[..<index].map(\.1)) + [level]
-    }
-}
-
 struct ReasoningPicker: View {
     @Binding var selection: String
     var inset = false
@@ -594,7 +556,8 @@ struct ProviderForm: View {
         let type = current?.type ?? preset?.rawValue ?? "custom"
         let title = manual ? name : store?.names[type] ?? preset?.label ?? name
         PanelView(manual ? (current == nil ? "Add connection" : title) : (current?.status == ProviderOptionAuth.apiKey ? "Edit key" : "Edit account"),
-                  enabled: !saving, onClose: { close() }, onBack: onBack) {
+                  enabled: !saving, onClose: { close() }, onBack: onBack,
+                  accessory: current != nil && manual ? PanelAccessory(symbol: "plus", label: "Add connection", action: add) : nil) {
             Form {
                 Section {
                     SettingsField(title: "Name", text: $name, prompt: "Enter name")
@@ -618,16 +581,7 @@ struct ProviderForm: View {
                     }
                     if current != nil && manual { Toggle("Enabled", isOn: $enabled) }
                 } header: {
-                    HStack {
-                        Text(manual ? "Connection" : "Details").foregroundStyle(.primary)
-                        Spacer()
-                        if current != nil && manual {
-                            Button("Add", systemImage: "plus", action: add)
-                                .accessibilityLabel("Add connection").help("Add connection")
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .labelStyle(.iconOnly)
+                    Text(manual ? "Connection" : "Details").foregroundStyle(.primary)
                 }
                 .panelRow()
                 if manual && connections.count > 1 {
@@ -658,13 +612,8 @@ struct ProviderForm: View {
                             .accessibilityLabel("All models")
                             ForEach($models, id: \.id) { $model in
                                 if query.isEmpty || model.id.localizedStandardContains(query) {
-                                    HStack {
-                                        Toggle(isOn: $model.enabled) { Text(model.id).lineLimit(1) }
-                                            .accessibilityLabel(model.id)
-                                        if preset != .elevenlabs {
-                                            ReasoningLevelsMenu(levels: $model.reasoning)
-                                        }
-                                    }
+                                    Toggle(isOn: $model.enabled) { Text(model.id).lineLimit(1) }
+                                        .accessibilityLabel(model.id)
                                 }
                             }
                             if !query.isEmpty && !models.contains(where: { $0.id.localizedStandardContains(query) }) {

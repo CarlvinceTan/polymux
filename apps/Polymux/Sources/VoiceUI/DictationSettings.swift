@@ -36,6 +36,11 @@ public final class DictationSettings {
         didSet { defaults.set(polish, forKey: Key.polish) }
     }
 
+    /// Reviews dictation for misheard words and adds them to the dictionary by itself.
+    public var autoReview: Bool {
+        didSet { defaults.set(autoReview, forKey: Key.autoReview) }
+    }
+
     /// Empty rows are kept while the user types; the vocabulary cleans them when used.
     public var vocabulary: [VocabularyEntry] {
         didSet {
@@ -69,6 +74,7 @@ public final class DictationSettings {
         spokenFormatting = defaults.object(forKey: Key.spokenFormatting) as? Bool ?? false
         outputFixes = defaults.object(forKey: Key.outputFixes) as? Bool ?? true
         polish = defaults.object(forKey: Key.polish) as? Bool ?? DictationPolish.isAvailable
+        autoReview = defaults.object(forKey: Key.autoReview) as? Bool ?? false
         suggestions = defaults.data(forKey: Key.suggestions)
             .flatMap { try? JSONDecoder().decode([VocabSuggestion].self, from: $0) } ?? []
         dismissed = Set(defaults.stringArray(forKey: Key.dismissed) ?? [])
@@ -101,7 +107,7 @@ public final class DictationSettings {
         vocabulary.removeAll { $0.id == id }
     }
 
-    /// Queues new suggestions, skipping ones already pending, dismissed or covered by the dictionary.
+    /// Queues new suggestions, or adds them straight away when review is automatic, skipping ones already pending, dismissed or covered by the dictionary.
     public func suggest(_ found: [VocabSuggestion]) {
         for item in found where suggestions.count < Self.maxSuggestions {
             let covered = vocabulary.contains {
@@ -109,7 +115,7 @@ public final class DictationSettings {
                     && $0.soundsLike.contains { $0.lowercased() == item.heard.lowercased() }
             }
             guard !covered, !dismissed.contains(item.id), !suggestions.contains(where: { $0.id == item.id }) else { continue }
-            suggestions.append(item)
+            if autoReview { accept(item) } else { suggestions.append(item) }
         }
     }
 
@@ -138,6 +144,7 @@ public final class DictationSettings {
         static let spokenFormatting = "dictation.spokenFormatting"
         static let outputFixes = "dictation.outputFixes"
         static let polish = "dictation.polish"
+        static let autoReview = "dictation.autoReview"
         static let vocabulary = "dictation.vocabulary"
     }
 }

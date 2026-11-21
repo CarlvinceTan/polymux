@@ -650,7 +650,7 @@ struct ComposerView: View {
         let cleaned = DictationText.clean(raw, options: options, vocabulary: dictationSettings.vocabulary,
                                           capitalizeStart: startsSentence(in: before, at: span.lowerBound))
         var final = cleaned
-        if options.polish {
+        if dictationSettings.autoReview {
             let known = dictationSettings.vocabulary
             let confidences = dictatedConfidence
             // Off the typing path: the decision model takes a moment to load.

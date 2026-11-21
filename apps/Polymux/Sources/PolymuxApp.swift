@@ -609,6 +609,19 @@ struct ConnectionView: View {
             Section { Text(issue).font(.footnote).foregroundStyle(.muted) }
                 .panelRow()
         }
+        #if os(macOS)
+        Section {
+            Toggle("Launch at login", isOn: Binding(get: { LoginItem.shared.enabled }, set: { LoginItem.shared.set($0) }))
+                .accessibilityLabel("Launch at login")
+            if let issue = LoginItem.shared.issue {
+                Text(issue).font(.footnote).foregroundStyle(.muted)
+            }
+        } header: {
+            SectionHeader("Startup", symbol: "power", tint: .green)
+        }
+        .panelRow()
+        .onAppear { LoginItem.shared.refresh() }
+        #endif
         Section {
             Toggle("Allow notifications", isOn: Binding(get: { Notifications.shared.enabled },
                 set: { enabled in

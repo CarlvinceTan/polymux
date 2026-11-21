@@ -33,13 +33,13 @@ struct ProviderEditor: View {
                 ProviderPicker(client: client, onBack: onBack, choose: { page = .login($0, nil) }, manual: { page = .form(.custom) })
             case .provider:
                 let type = original?.type ?? selection?.type ?? ""
-                ProviderPage(client: client, type: type, connections: providers.filter { $0.type == type }, onBack: onBack,
+                ProviderPage(client: client, type: type, connections: providers.filter { sibling($0, of: selection ?? original, type: type) }, onBack: onBack,
                              edit: { selection = $0; page = .form(nil) }, connect: { page = .login($0, nil) },
                              removed: { publish(nil, removing: $0) }, changed: publish)
             case .form(let preset):
                 let type = selection?.type ?? preset?.rawValue ?? "custom"
                 ProviderForm(client: client, original: selection, preset: preset,
-                             connections: providers.filter { $0.type == type },
+                             connections: providers.filter { sibling($0, of: selection, type: type) },
                              onBack: { if preset == nil { page = .provider } else { onBack() } }, connect: { page = .login($0, $1) },
                              select: { selection = $0; page = .form(ProviderPreset(rawValue: $0.type)) },
                              add: { selection = nil; page = .form(preset) },
@@ -59,6 +59,12 @@ struct ProviderEditor: View {
                 }
             }
         }
+    }
+
+    /// Whether a provider is another connection of the same account kind; servers you named stand alone.
+    private func sibling(_ provider: Provider, of anchor: Provider?, type: String) -> Bool {
+        guard let anchor else { return provider.type == type && ProviderGroup.id(of: provider) == type }
+        return ProviderGroup.id(of: provider) == ProviderGroup.id(of: anchor)
     }
 
     private func publish(_ provider: Provider) { publish(provider, removing: provider.id) }

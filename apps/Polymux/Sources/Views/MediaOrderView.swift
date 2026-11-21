@@ -76,28 +76,28 @@ struct MediaOrderView: View {
 
     var body: some View {
         PanelView("\(kind.title) models", onClose: onBack, onBack: onBack, width: 460) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
-                    PanelSection {
-                        SettingsPicker("Mode", selection: mode, options: modes).sectionRow()
-                    }
-                    if order.mode == MediaOrderMode.custom { list }
-                    if let issue = store.error {
-                        Text(issue).font(.footnote).foregroundStyle(.muted).padding(.horizontal, PanelStyle.headingInset)
-                    } else if choices.isEmpty {
-                        Text("No \(kind.rawValue) models yet. Add a Gemini\(kind == .image ? " or OpenAI" : "") provider.")
-                            .font(.footnote).foregroundStyle(.muted).padding(.horizontal, PanelStyle.headingInset)
-                    }
+            Form {
+                Section {
+                    SettingsPicker("Mode", selection: mode, options: modes)
                 }
-                .padding(.horizontal, PanelStyle.contentInset)
+                .panelRow()
+                if order.mode == MediaOrderMode.custom { list }
+                if let issue = store.error ?? emptyNote {
+                    Section { EmptyView() } footer: { Text(issue).font(.footnote).foregroundStyle(.muted) }
+                }
             }
+            .formStyle(.grouped)
         }
     }
 
+    private var emptyNote: String? {
+        choices.isEmpty ? "No \(kind.rawValue) models yet. Add a Gemini\(kind == .image ? " or OpenAI" : "") provider." : nil
+    }
+
     private var list: some View {
-        PanelSection("Order") {
+        Section {
             if order.models.isEmpty {
-                Text("No models.").foregroundStyle(.muted).frame(maxWidth: .infinity).sectionRow()
+                Text("No models.").foregroundStyle(.muted).frame(maxWidth: .infinity)
             }
             ForEach(Array(order.models.enumerated()), id: \.offset) { index, step in
                 MediaStepRow(step: step, title: title(step), index: index, count: order.models.count, choices: choices) { next in
@@ -106,9 +106,6 @@ struct MediaOrderView: View {
                     edit { $0.swapAt(index, index + offset) }
                 } remove: {
                     edit { $0.remove(at: index) }
-                }
-                if index < order.models.count - 1 || order.models.count < limit {
-                    Divider().padding(.horizontal, PanelStyle.rowInset)
                 }
             }
             if order.models.count < limit {
@@ -122,7 +119,10 @@ struct MediaOrderView: View {
                         }), options: choices)
                     }
             }
+        } header: {
+            Text("Order").foregroundStyle(Color.primary)
         }
+        .panelRow()
     }
 
     private func title(_ step: MediaStep) -> String {
@@ -195,6 +195,5 @@ private struct MediaStepRow: View {
             .fixedSize()
             .accessibilityLabel("More actions for \(title)")
         }
-        .sectionRow()
     }
 }

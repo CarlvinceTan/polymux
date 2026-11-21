@@ -148,6 +148,7 @@ struct PanelView<Content: View, Actions: View>: View {
     @State private var headerHeight: CGFloat = 76
     @State private var actionHeight: CGFloat = 0
     @State private var contentHeight: CGFloat?
+    @State private var edges = ScrollEdges()
 
     init(_ title: String, enabled: Bool = true, onClose: @escaping () -> Void, onBack: (() -> Void)? = nil,
          header: AnyView? = nil, accessory: PanelAccessory? = nil, scrollUnder: Bool = true,
@@ -199,6 +200,7 @@ struct PanelView<Content: View, Actions: View>: View {
                     LinearGradient(colors: [fade, fade.opacity(0.85), .clear],
                                    startPoint: .top, endPoint: .bottom)
                         .frame(height: headerHeight + 28)
+                        .opacity(edges.above ? 1 : 0)
                         .allowsHitTesting(false)
                 }
             }
@@ -207,9 +209,11 @@ struct PanelView<Content: View, Actions: View>: View {
                     LinearGradient(colors: [.clear, fade.opacity(0.85), fade],
                                    startPoint: .top, endPoint: .bottom)
                         .frame(height: actionHeight + 64)
+                        .opacity(edges.below ? 1 : 0)
                         .allowsHitTesting(false)
                 }
             }
+            .animation(.easeOut(duration: 0.15), value: edges)
             .overlay(alignment: .top) {
                 if scrollUnder { panelHeader }
             }
@@ -229,6 +233,7 @@ struct PanelView<Content: View, Actions: View>: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .scrollContentBackground(.hidden)
             .scrollIndicators(.hidden)
+            .onScrollGeometryChange(for: ScrollEdges.self) { ScrollEdges($0) } action: { _, value in edges = value }
             .safeAreaInset(edge: .top, spacing: 0) {
                 Color.clear.frame(height: scrollUnder ? headerHeight + 8 : 0)
             }

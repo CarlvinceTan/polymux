@@ -197,6 +197,9 @@ struct SettingsEntry: Identifiable {
         switch tab {
         case .general:
             add("Appearance", ["Theme", "Light", "Dark", "Switcher badges"])
+            #if os(macOS)
+            add("Startup", ["Launch at login"])
+            #endif
             add("Notifications", ["Allow notifications"])
             #if os(macOS)
             add("Permissions", ["System permissions", "Manage permissions"] + Permissions.shared.all.map(\.title))

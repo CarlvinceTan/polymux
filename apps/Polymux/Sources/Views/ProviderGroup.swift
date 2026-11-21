@@ -31,12 +31,15 @@ struct ProviderGroup: Identifiable {
         return "\(prefix)\(count) \(count == 1 ? "model" : "models") (\(status))"
     }
 
+    /// What groups connections together: a server you point at stands alone, others share their type.
+    static func id(of provider: Provider) -> String { server(provider.type) ? provider.id : provider.type }
+
     static func collect(_ providers: [Provider], names: [String: String]) -> [Self] {
         var groups: [Self] = []
         for provider in providers {
             // The user names servers they point at; each one gets its own row.
             let own = server(provider.type)
-            let id = own ? provider.id : provider.type
+            let id = Self.id(of: provider)
             if let index = groups.firstIndex(where: { $0.id == id }) {
                 groups[index].connections.append(provider)
             } else {
