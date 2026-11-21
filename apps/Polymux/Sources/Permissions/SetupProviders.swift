@@ -3,48 +3,160 @@ import PolymuxKit
 
 /// Where connecting a provider is, inside setup's model step.
 enum SetupProviderPage: Hashable {
-    case choose, signIn(ProviderOption), local
+    case popular, other, methods(String), signIn(ProviderOption), local
 }
 
-/// Every provider the server offers, the popular ones first, drawn inline in setup.
-struct SetupProviderPicker: View {
+/// A provider setup shows first, with its mark.
+struct SetupBrand: Identifiable {
+    let type: String
+    let name: String
+    var symbol = "cloud.fill"
+    var tint: Color = .blue
+    var id: String { type }
+
+    static let popular = [
+        SetupBrand(type: "openai", name: "OpenAI", symbol: "circle.hexagongrid.fill", tint: .primary),
+        SetupBrand(type: "anthropic", name: "Anthropic", symbol: "asterisk", tint: .orange),
+        SetupBrand(type: "gemini", name: "Google Gemini", symbol: "sparkle", tint: .blue),
+        SetupBrand(type: "openrouter", name: "OpenRouter", symbol: "arrow.triangle.branch", tint: .indigo),
+    ]
+
+    var mark: some View {
+        Image(systemName: symbol).font(.system(size: 18, weight: .semibold)).foregroundStyle(tint)
+        .frame(width: 40, height: 40)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityHidden(true)
+    }
+
+    /// "ChatGPT subscription or API key", read from what the server offers.
+    func summary(_ options: [ProviderOption]) -> String {
+        let mine = options.filter { $0.type == type }
+        let signIn = mine.first { $0.auth == ProviderOptionAuth.oauth }.map { option -> String in
+            guard let open = option.label.firstIndex(of: "("), let close = option.label.lastIndex(of: ")"), open < close else { return "Sign in" }
+            return String(option.label[option.label.index(after: open)..<close])
+        }
+        let key = mine.contains { $0.auth == ProviderOptionAuth.apiKey } ? "API key" : nil
+        return [signIn, key].compactMap { $0 }.joined(separator: " or ")
+    }
+}
+
+/// The popular providers as tiles, and a way to every other one.
+struct SetupPopular: View {
+    let options: [ProviderOption]?
+    let open: (String) -> Void
+    let other: () -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private var brands: [SetupBrand] { SetupBrand.popular.filter { brand in (options ?? []).contains { $0.type == brand.type } } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if options == nil {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+            } else {
+                Text("Popular").font(.headline)
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(brands) { brand in
+                        Button { open(brand.type) } label: {
+                            HStack(spacing: 12) {
+                                brand.mark
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(brand.name).font(.headline).lineLimit(1)
+                                    Text(brand.summary(options ?? [])).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(12)
+                            .onboardingCard(scheme)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(brand.name)
+                        .accessibilityValue(brand.summary(options ?? []))
+                    }
+                }
+                Button(action: other) {
+                    OnboardingRow(title: "Other providers", detail: "Ollama, DeepSeek, Mistral and more.",
+                                  symbol: "ellipsis", tint: .secondary) {
+                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                    }
+                    .onboardingCard(scheme)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Other providers")
+            }
+        }
+    }
+}
+
+/// A provider's ways to connect, when it has more than one.
+struct SetupMethods: View {
+    let brand: SetupBrand?
+    let options: [ProviderOption]
+    let choose: (ProviderOption) -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                brand?.mark
+                Text(brand?.name ?? options.first?.name ?? "").font(.title3.bold())
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(options.enumerated()), id: \.element) { index, option in
+                    if index > 0 { Divider().padding(.horizontal, 12) }
+                    let oauth = option.auth == ProviderOptionAuth.oauth
+                    Button { choose(option) } label: {
+                        OnboardingRow(title: oauth ? "Sign in" : "API key", detail: option.label,
+                                      symbol: oauth ? "person.crop.circle.fill" : "key.fill", tint: oauth ? .purple : .blue) {
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(option.name) · \(option.label)")
+                }
+            }
+            .onboardingCard(scheme)
+        }
+    }
+}
+
+/// Every provider outside the popular ones, searchable.
+struct SetupOtherProviders: View {
     let options: [ProviderOption]?
     let choose: (ProviderOption) -> Void
     let local: () -> Void
     @State private var query = ""
     @Environment(\.colorScheme) private var scheme
 
-    private var popular: [ProviderOption] { ProviderOption.popular(in: options ?? []) }
+    private var terms: [Substring] { query.split(whereSeparator: \.isWhitespace) }
 
-    private var matches: [ProviderOption] {
-        let terms = query.split(whereSeparator: \.isWhitespace)
-        let all = (options ?? []).filter { option in
-            terms.allSatisfy { "\(option.name) \(option.label)".localizedStandardContains(String($0)) }
-        }
-        guard query.isEmpty else { return all }
-        let shown = Set(popular)
-        return all.filter { !shown.contains($0) }
+    private func matches(_ text: String) -> Bool { terms.allSatisfy { text.localizedStandardContains(String($0)) } }
+
+    private var rows: [ProviderOption] {
+        let popular = Set(SetupBrand.popular.map(\.type))
+        return (options ?? []).filter { !popular.contains($0.type) && matches("\($0.name) \($0.label)") }
     }
+
+    private var showsOllama: Bool { matches("\(ProviderPreset.ollama.label) local") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            TextField("Search providers", text: $query, prompt: Text("Search providers"))
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.large)
-                .autocorrectionDisabled()
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
+            PanelSearch("Search providers", text: $query, autofocus: true)
+                .focusEffectDisabled()
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .glassEffect(.regular, in: Capsule())
             if options == nil {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+            } else if rows.isEmpty && !showsOllama {
+                Text("No providers found.").foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 20)
             } else {
-                if query.isEmpty, !popular.isEmpty {
-                    group("Popular") {
-                        ForEach(Array(popular.enumerated()), id: \.element) { index, option in
-                            if index > 0 { Divider().padding(.horizontal, 12) }
-                            row(option)
-                        }
-                        Divider().padding(.horizontal, 12)
+                VStack(spacing: 0) {
+                    if showsOllama {
                         Button(action: local) {
                             OnboardingRow(title: ProviderPreset.ollama.label, detail: "Models on this computer",
                                           symbol: "desktopcomputer", tint: .green) { chevron }
@@ -53,25 +165,13 @@ struct SetupProviderPicker: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Ollama · Models on this computer")
                     }
-                }
-                if matches.isEmpty {
-                    Text("No providers found.").foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 20)
-                } else {
-                    group(query.isEmpty ? "All providers" : "Results") {
-                        ForEach(Array(matches.enumerated()), id: \.element) { index, option in
-                            if index > 0 { Divider().padding(.horizontal, 12) }
-                            row(option)
-                        }
+                    ForEach(Array(rows.enumerated()), id: \.element) { index, option in
+                        if index > 0 || showsOllama { Divider().padding(.horizontal, 12) }
+                        row(option)
                     }
                 }
+                .onboardingCard(scheme)
             }
-        }
-    }
-
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
-            VStack(spacing: 0, content: content).onboardingCard(scheme)
         }
     }
 

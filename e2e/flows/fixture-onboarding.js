@@ -12,11 +12,13 @@ await app.waitFor({ role: "statictext", name: "Connect a Model", timeout_ms: 500
 await app.waitFor({ role: "button", name: "Set up a model later", timeout_ms: 5000 });
 // Choosing a provider happens on the page itself, and Back steps out of it.
 await app.click({ role: "button", name: "Add a provider" });
-await app.waitFor({ role: "textfield", name: "Search providers", timeout_ms: 5000 });
+await app.waitFor({ role: "button", name: "Other providers", timeout_ms: 5000 });
 if ((await app.query({ role: "button", name: "Close Add provider" })).length) throw new Error("Setup opened a panel");
 await app.click({ role: "button", name: "Back" });
 await app.waitFor({ role: "button", name: "Add a provider", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Add a provider" });
+await app.click({ role: "button", name: "Other providers" });
+await app.waitFor({ role: "textfield", name: "Search providers", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Subscription · Subscription sign-in" });
 await app.waitFor({ text: "TEST-1234", timeout_ms: 10000 });
 await app.typeText("http://localhost/callback?code=test", { role: "textfield", name: "http://localhost/callback" });

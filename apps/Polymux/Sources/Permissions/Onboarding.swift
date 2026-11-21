@@ -37,7 +37,7 @@ struct Onboarding: View {
     @State private var joined = false
     @State private var joinIssue: String?
     /// Connecting a provider inside the model step; nil shows the step itself.
-    @State private var providerPage: SetupProviderPage?
+    @State private var providerPath: [SetupProviderPage] = []
     @State private var choosingModel = false
     #if os(iOS)
     @State private var scanning = false
@@ -135,7 +135,7 @@ struct Onboarding: View {
         .background(PanelSurface.color(scheme).ignoresSafeArea())
         .tint(.blue)
         .environment(session?.providers)
-        .onChange(of: step) { providerPage = nil }
+        .onChange(of: step) { providerPath = [] }
         #if os(iOS)
         .dropdownHost()
         #endif
@@ -283,14 +283,14 @@ struct Onboarding: View {
                 SetupProgress(count: steps.count, index: index)
                 Spacer(minLength: 0)
             }
-            if step == .models && providers.isEmpty && providerPage == nil {
+            if step == .models && providers.isEmpty && providerPath.isEmpty {
                 Button("Later", action: advance)
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Set up a model later")
             }
             // Connecting a provider has its own actions on the page.
-            if !needsPairing && !(step == .models && providerPage != nil) {
+            if !needsPairing && !(step == .models && !providerPath.isEmpty) {
                 Button(primaryTitle, action: advance)
                     .buttonStyle(OnboardingPrimaryButton())
                     .keyboardShortcut(.defaultAction)
@@ -509,12 +509,18 @@ struct Onboarding: View {
     }
 
     @ViewBuilder private var modelsPage: some View {
-        if let page = providerPage, let client = session?.client {
+        if let page = providerPath.last, let client = session?.client {
             switch page {
-            case .choose:
-                SetupProviderPicker(options: session?.providers.options, choose: { providerPage = .signIn($0) },
-                                    local: { providerPage = .local })
+            case .popular:
+                SetupPopular(options: session?.providers.options, open: openBrand, other: { providerPath.append(.other) })
                     .task { await session?.providers.refreshOptions() }
+            case .other:
+                SetupOtherProviders(options: session?.providers.options, choose: { providerPath.append(.signIn($0)) },
+                                    local: { providerPath.append(.local) })
+            case .methods(let type):
+                SetupMethods(brand: SetupBrand.popular.first { $0.type == type },
+                             options: (session?.providers.options ?? []).filter { $0.type == type },
+                             choose: { providerPath.append(.signIn($0)) })
             case .signIn(let option):
                 SetupSignIn(client: client, option: option, connected: connected).id(option)
             case .local:
@@ -529,7 +535,13 @@ struct Onboarding: View {
     private func connected(_ provider: Provider) {
         session?.providers.merge([provider])
         Task { await session?.settings.refresh() }
-        providerPage = nil
+        providerPath = []
+    }
+
+    /// A popular provider goes straight to connecting when it has one way to.
+    private func openBrand(_ type: String) {
+        let ways = (session?.providers.options ?? []).filter { $0.type == type }
+        providerPath.append(ways.count == 1 ? .signIn(ways[0]) : .methods(type))
     }
 
     private var modelsOverview: some View {
@@ -542,7 +554,7 @@ struct Onboarding: View {
                     }
                     Divider().padding(.horizontal, 12)
                 }
-                Button { providerPage = .choose } label: {
+                Button { providerPath = [.popular] } label: {
                     OnboardingRow(title: groups.isEmpty ? "Add a provider" : "Add another provider",
                                   detail: "OpenAI, Anthropic, Gemini, Ollama and more.",
                                   symbol: "plus", tint: .purple) {
@@ -748,8 +760,8 @@ struct Onboarding: View {
     }
 
     private func back() {
-        if step == .models, let page = providerPage {
-            providerPage = page == .choose ? nil : .choose
+        if step == .models, !providerPath.isEmpty {
+            providerPath.removeLast()
             return
         }
         if let index = steps.firstIndex(of: step), index > 0 {
