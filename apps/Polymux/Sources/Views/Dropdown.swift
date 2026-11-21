@@ -4,6 +4,8 @@ enum DropdownStyle {
     static let maximumHeight: CGFloat = 400
     /// Searchable lists keep one width while their matches change.
     static let listWidth: CGFloat = 320
+    static let settingsWidth: CGFloat = 240
+    static let modelWidth: CGFloat = 192
     static var rowHeight: CGFloat {
         #if os(macOS)
         PanelStyle.contentInset + PanelStyle.rowInset
@@ -21,6 +23,10 @@ enum DropdownStyle {
     }
 }
 
+enum DropdownWidth {
+    case content, trigger, fixed(CGFloat)
+}
+
 private struct DropdownScope: EnvironmentKey {
     static var defaultValue: PanelAction { PanelAction() }
 }
@@ -30,6 +36,8 @@ private struct DropdownState: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    @Entry var dropdownWidth: DropdownWidth = .content
+
     var dropdownClose: PanelAction {
         get { self[DropdownScope.self] }
         set { self[DropdownScope.self] = newValue }
@@ -42,10 +50,10 @@ extension EnvironmentValues {
 }
 
 extension View {
-    /// The menu is as wide as its content, up to the window's width.
     func dropdown<Presented: View>(isPresented: Binding<Bool>, alignment: HorizontalAlignment = .trailing,
+                                   width: DropdownWidth? = nil,
                                    @ViewBuilder content: @escaping () -> Presented) -> some View {
-        modifier(Dropdown(isPresented: isPresented, alignment: alignment, presented: content))
+        modifier(Dropdown(isPresented: isPresented, alignment: alignment, width: width, presented: content))
     }
 
     func dropdownHost() -> some View { modifier(DropdownHost()) }
@@ -55,6 +63,7 @@ private struct DropdownEntry: Identifiable {
     let id: UUID
     let anchor: Anchor<CGRect>
     let alignment: HorizontalAlignment
+    let width: DropdownWidth
     let view: AnyView
     let close: PanelAction
 }
@@ -74,7 +83,9 @@ private struct DropdownIDs: PreferenceKey {
 private struct Dropdown<Presented: View>: ViewModifier {
     @Binding var isPresented: Bool
     let alignment: HorizontalAlignment
+    let width: DropdownWidth?
     @ViewBuilder let presented: () -> Presented
+    @Environment(\.dropdownWidth) private var defaultWidth
     @State private var id = UUID()
 
     func body(content: Content) -> some View {
@@ -85,7 +96,8 @@ private struct Dropdown<Presented: View>: ViewModifier {
                 let view = presented()
                     .environment(\.dropdownClose, close)
                     .environment(\.isEnabled, true)
-                return [DropdownEntry(id: id, anchor: anchor, alignment: alignment, view: AnyView(view), close: close)]
+                return [DropdownEntry(id: id, anchor: anchor, alignment: alignment, width: width ?? defaultWidth,
+                                      view: AnyView(view), close: close)]
             }
             .preference(key: DropdownIDs.self, value: isPresented ? [id] : [])
             .onDisappear { isPresented = false }
@@ -137,8 +149,9 @@ private struct DropdownLayer: View {
                 .buttonStyle(.plain)
                 .focusable(false)
                 .accessibilityLabel("Dismiss menu")
-                DropdownLayout(anchor: proxy[entry.anchor], alignment: entry.alignment) {
+                DropdownLayout(anchor: proxy[entry.anchor], alignment: entry.alignment, width: entry.width) {
                     entry.view
+                        .frame(minWidth: 0, maxWidth: .infinity)
                         .glassEffect(.regular, in: .rect(cornerRadius: DropdownStyle.radius))
                         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
                 }
@@ -157,6 +170,7 @@ private struct DropdownLayer: View {
 private struct DropdownLayout: Layout {
     let anchor: CGRect
     let alignment: HorizontalAlignment
+    let width: DropdownWidth
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -165,7 +179,12 @@ private struct DropdownLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let view = subviews.first else { return }
         let inset = PanelStyle.rowInset
-        let menuWidth = max(0, min(view.sizeThatFits(.unspecified).width.rounded(.up), bounds.width - inset * 2))
+        let preferredWidth = switch width {
+        case .content: view.sizeThatFits(.unspecified).width.rounded(.up)
+        case .trigger: anchor.width
+        case .fixed(let value): value
+        }
+        let menuWidth = max(0, min(preferredWidth, bounds.width - inset * 2))
         let size = view.sizeThatFits(ProposedViewSize(width: menuWidth, height: nil))
         let rect = anchor.offsetBy(dx: bounds.minX, dy: bounds.minY)
         let edge = alignment == .leading ? rect.minX : rect.maxX - menuWidth

@@ -464,7 +464,6 @@ struct ConnectionView: View {
     @State private var providerTarget: ProviderTarget?
     @State private var pluginTarget: String?
     @State private var arrangingPlugins = false
-    @State private var editingVoice = false
     @State private var editingMedia: MediaKind?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -505,14 +504,13 @@ struct ConnectionView: View {
                 PluginLayoutEditor(store: plugins) { arrangingPlugins = false }
             } else if let kind = editingMedia, let settings {
                 MediaOrderView(kind: kind, store: settings, providers: providers, onBack: { editingMedia = nil })
-            } else if editingVoice, let settings {
-                VoiceFallback(store: settings, providers: providers, onBack: { editingVoice = false })
             } else if let networkPage, let server = pool.servers.devices.first(where: { $0.address == networkPage }) {
                 NetworkPage(pool: pool, server: server) { self.networkPage = nil }
             } else {
                 settingsPanel
             }
         }
+        .environment(\.dropdownWidth, .fixed(DropdownStyle.settingsWidth))
         .task(id: client?.id) { await networkStore?.refresh() }
     }
 
@@ -560,7 +558,7 @@ struct ConnectionView: View {
             case .general: generalSections
             case .voice:
                 if let settings {
-                    VoicePane(store: settings, providers: providers) { editingVoice = true }
+                    VoicePane(store: settings, providers: providers)
                 }
             case .models:
                 ProviderSettings(client: client, settings: settings) { providerTarget = ProviderTarget(provider: $0) }

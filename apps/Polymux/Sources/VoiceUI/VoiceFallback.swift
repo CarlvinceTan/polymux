@@ -5,7 +5,6 @@ import PolymuxKit
 struct VoiceFallback: View {
     let store: SettingsStore
     let providers: [Provider]
-    let onBack: () -> Void
     @State private var adding = false
     private let limit = 8
 
@@ -27,50 +26,37 @@ struct VoiceFallback: View {
     }
 
     var body: some View {
-        PanelView("Voice fallbacks", onClose: onBack, onBack: onBack, width: 460) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: PanelStyle.sectionGap) {
-                    PanelSection {
-                        SettingsPicker("Mode", selection: mode, options: VoiceSettings.modes).sectionRow()
-                    }
-                    if fallback.mode == LiveFallbackMode.custom { order }
-                    if let issue = store.error {
-                        Text(issue).font(.footnote).foregroundStyle(.muted).padding(.horizontal, PanelStyle.headingInset)
-                    }
-                }
-                .padding(.horizontal, PanelStyle.contentInset)
-            }
+        SettingsPicker("Fallbacks", selection: mode, options: VoiceSettings.modes)
+            .accessibilityLabel("Voice fallbacks")
+        if fallback.mode == LiveFallbackMode.custom { order }
+        if let issue = store.error {
+            Text(issue).font(.footnote).foregroundStyle(.muted)
         }
     }
 
+    @ViewBuilder
     private var order: some View {
-        PanelSection("Order") {
-            if fallback.models.isEmpty {
-                Text("No fallbacks.").foregroundStyle(.muted).frame(maxWidth: .infinity).sectionRow()
+        if fallback.models.isEmpty {
+            Text("No fallbacks.").foregroundStyle(.muted)
+        }
+        ForEach(Array(fallback.models.enumerated()), id: \.offset) { index, step in
+            VoiceStepRow(step: step, index: index, count: fallback.models.count, choices: choices) { next in
+                edit { $0[index] = next }
+            } move: { offset in
+                edit { $0.swapAt(index, index + offset) }
+            } remove: {
+                edit { $0.remove(at: index) }
             }
-            ForEach(Array(fallback.models.enumerated()), id: \.offset) { index, step in
-                VoiceStepRow(step: step, index: index, count: fallback.models.count, choices: choices) { next in
-                    edit { $0[index] = next }
-                } move: { offset in
-                    edit { $0.swapAt(index, index + offset) }
-                } remove: {
-                    edit { $0.remove(at: index) }
+        }
+        if fallback.models.count < limit {
+            Button { adding = true } label: { Label("Add", systemImage: "plus") }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add voice fallback")
+                .dropdown(isPresented: $adding, alignment: .leading) {
+                    DropdownOptions(selection: Binding(get: { "" }, set: { choice in
+                        if let step = VoiceStepRow.step(choice, voice: nil) { edit { $0.append(step) } }
+                    }), options: choices)
                 }
-                if index < fallback.models.count - 1 || fallback.models.count < limit {
-                    Divider().padding(.horizontal, PanelStyle.rowInset)
-                }
-            }
-            if fallback.models.count < limit {
-                Button { adding = true } label: { Label("Add", systemImage: "plus") }
-                    .buttonStyle(SectionButton())
-                    .accessibilityLabel("Add voice fallback")
-                    .dropdown(isPresented: $adding, alignment: .leading) {
-                        DropdownOptions(selection: Binding(get: { "" }, set: { choice in
-                            adding = false
-                            if let step = VoiceStepRow.step(choice, voice: nil) { edit { $0.append(step) } }
-                        }), options: choices)
-                    }
-            }
         }
     }
 
@@ -152,7 +138,6 @@ private struct VoiceStepRow: View {
             .fixedSize()
             .accessibilityLabel("More actions for \(title)")
         }
-        .sectionRow()
     }
 }
 

@@ -68,7 +68,7 @@ struct ProviderSettings: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Model")
             .accessibilityValue(selection.model.isEmpty ? "Server default" : selection.title)
-            .dropdown(isPresented: $choosing) {
+            .dropdown(isPresented: $choosing, width: .fixed(DropdownStyle.modelWidth)) {
                 ModelPicker(providers: providers, provider: settings?.value?.defaultProvider ?? "",
                             model: settings?.value?.defaultModel ?? "") { provider, model in
                     settings?.edit(SettingsPatch(defaultProvider: provider, defaultModel: model))
@@ -536,12 +536,12 @@ struct ReasoningPicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .sectionRow()
         .accessibilityLabel("Reasoning")
         .accessibilityValue(title)
-        .dropdown(isPresented: $choosing) {
+        .dropdown(isPresented: $choosing, width: .trigger) {
             DropdownOptions(selection: chosen, options: options)
         }
+        .sectionRow()
     }
 }
 

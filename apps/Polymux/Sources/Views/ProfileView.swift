@@ -336,13 +336,13 @@ struct ProfileView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .sectionRow()
                 .accessibilityLabel("Model")
                 .accessibilityValue(modelName.title)
                 .disabled(!loaded || modelSaving)
-                .dropdown(isPresented: $choosingModel) {
+                .dropdown(isPresented: $choosingModel, width: .trigger) {
                     ModelPicker(providers: providers, provider: provider, model: model, choose: remap)
                 }
+                .sectionRow()
                 Divider().padding(.horizontal, PanelStyle.rowInset)
                 ReasoningPicker(selection: Binding(get: { reasoning }, set: {
                     saveModel(UpdateAgentRequest(reasoning: $0))

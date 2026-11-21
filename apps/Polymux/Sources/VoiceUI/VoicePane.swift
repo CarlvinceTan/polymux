@@ -6,12 +6,11 @@ import SpeechKit
 struct VoicePane: View {
     let store: SettingsStore
     let providers: [Provider]
-    let editFallbacks: () -> Void
     @State private var dictation = DictationSettings.shared
     @State private var models = ModelStore.shared
 
     var body: some View {
-        VoiceSettings(store: store, providers: providers, editFallbacks: editFallbacks)
+        VoiceSettings(store: store, providers: providers)
         dictationSection
         if !dictation.suggestions.isEmpty { suggestionSection }
         dictionarySection

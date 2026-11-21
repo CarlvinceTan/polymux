@@ -1,5 +1,5 @@
 // @fixture --verify-fixture --verify-profile
-// Profile dropdowns line up with their row's trailing edge, stay below it, and don't move the profile or close on Escape.
+// Profile dropdowns match their trigger, open below it, and don't move the profile.
 const app = await cua.getApp(APP);
 let chief;
 for (let i = 0; i < 30 && !chief; i++) {
@@ -24,9 +24,10 @@ for (const [name, content, row] of [
     if (!before?.frame || !first?.frame || first.frame.y < before.frame.y + before.frame.h) {
         throw new Error(name + " dropdown covers its row: " + JSON.stringify({ before: before?.frame, first: first?.frame }));
     }
-    // The button frame excludes sectionRow's 8pt inset on each side; menu rows sit 4pt inside the menu.
-    if (Math.abs(first.frame.x + first.frame.w - before.frame.x - before.frame.w - 4) > 1) {
-        throw new Error(name + " dropdown isn't on its row's trailing edge: " + JSON.stringify({ before: before.frame, first: first.frame }));
+    // Menu rows sit 4pt inside the menu on both sides.
+    if (Math.abs(first.frame.x - before.frame.x - 4) > 1 ||
+        Math.abs(first.frame.x + first.frame.w - before.frame.x - before.frame.w + 4) > 1) {
+        throw new Error(name + " dropdown doesn't match its trigger: " + JSON.stringify({ before: before.frame, first: first.frame }));
     }
     if (name === "Model") await app.pressKey("escape", content);
     else await app.click({ role: "button", name: "Dismiss menu" });

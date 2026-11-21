@@ -40,12 +40,14 @@ struct SettingsPicker: View {
     let title: String
     @Binding var selection: String
     let options: [(String, String)]
+    let width: DropdownWidth?
     @State private var choosing = false
 
-    init(_ title: String, selection: Binding<String>, options: [(String, String)]) {
+    init(_ title: String, selection: Binding<String>, options: [(String, String)], width: DropdownWidth? = nil) {
         self.title = title
         _selection = selection
         self.options = options
+        self.width = width
     }
 
     private var value: String { options.first { $0.1 == selection }?.0 ?? selection }
@@ -63,7 +65,7 @@ struct SettingsPicker: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityValue(value)
-        .dropdown(isPresented: $choosing) {
+        .dropdown(isPresented: $choosing, width: width) {
             DropdownOptions(selection: $selection, options: options)
         }
     }

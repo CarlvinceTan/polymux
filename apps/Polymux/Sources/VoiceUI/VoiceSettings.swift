@@ -5,7 +5,6 @@ import PolymuxVoice
 struct VoiceSettings: View {
     let store: SettingsStore
     let providers: [Provider]
-    let editFallbacks: () -> Void
 
     var body: some View {
         if let settings = store.value {
@@ -17,22 +16,12 @@ struct VoiceSettings: View {
                 }, options: [("Gemini Live", "gemini"), ("OpenAI Realtime", "openai")])
                 .accessibilityLabel("Voice provider")
                 SettingsPicker("Model", selection: binding(\.liveModel) { SettingsPatch(liveModel: $0) },
-                               options: models(settings).map { ($0, $0) })
+                               options: models(settings).map { ($0, $0) }, width: .fixed(DropdownStyle.modelWidth))
                 .accessibilityLabel("Voice model")
                 SettingsPicker("Voice name", selection: binding(\.liveVoice) { SettingsPatch(liveVoice: $0) },
                                options: (Self.voices[settings.liveProvider] ?? []).map { ($0.capitalized, $0) })
                     .accessibilityLabel("Voice name")
-                Button(action: editFallbacks) {
-                    HStack {
-                        Text("Fallbacks").lineLimit(1).layoutPriority(1)
-                        Spacer()
-                        Text(Self.modes.first { $0.1 == settings.liveFallback.mode }?.0 ?? "").lineLimit(1)
-                        Image(systemName: "chevron.right")
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Voice fallbacks")
+                VoiceFallback(store: store, providers: providers)
                 SettingsPicker("Voice language", selection: binding(\.voiceLanguage) { SettingsPatch(voiceLanguage: $0) },
                                options: [("System", "")] + Self.languages.map { (VoiceConfig.language($0), $0) })
                     .accessibilityLabel("Voice language")
