@@ -2,6 +2,9 @@ package privacy
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -41,5 +44,17 @@ func TestOnlyCommandsRun(t *testing.T) {
 		if strings.Contains(step, "log out") == Runnable(step) {
 			t.Fatalf("%q: advice must not run, commands must", step)
 		}
+	}
+}
+
+func TestUinputRuleFileEndsInANewline(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "rule")
+	step := strings.Replace(UinputSteps("ada")[0], "sudo tee /etc/udev/rules.d/60-polymux-uinput.rules", "tee "+file, 1)
+	if out, err := exec.Command("/bin/sh", "-c", step).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil || !strings.HasPrefix(string(data), "KERNEL==") || !strings.HasSuffix(string(data), "\n") {
+		t.Fatalf("rule file = %q, %v", data, err)
 	}
 }

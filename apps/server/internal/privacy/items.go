@@ -48,7 +48,7 @@ const uinputRule = `KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="stat
 // UinputSteps is what gives a user input injection on Linux, as commands for a root shell.
 func UinputSteps(user string) []string {
 	return []string{
-		"printf '%s' '" + strings.TrimSpace(uinputRule) + "' | sudo tee /etc/udev/rules.d/60-polymux-uinput.rules",
+		"printf '%s\\n' '" + strings.TrimSpace(uinputRule) + "' | sudo tee /etc/udev/rules.d/60-polymux-uinput.rules",
 		"sudo modprobe uinput",
 		"sudo udevadm control --reload-rules && sudo udevadm trigger",
 		"sudo usermod -aG input " + user,
