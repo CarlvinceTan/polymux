@@ -1,5 +1,5 @@
 #!/bin/sh
-# Archive or upload an internal-only iOS build with automatic signing.
+# Archive or upload an iOS TestFlight build with automatic signing.
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 OUT=${POLYMUX_TESTFLIGHT_DIR:-"$ROOT/dist/testflight"}
@@ -39,7 +39,7 @@ else
   <key>teamID</key><string>$TEAM</string>
   <key>signingStyle</key><string>automatic</string>
   <key>manageAppVersionAndBuildNumber</key><false/>
-  <key>testFlightInternalTestingOnly</key><true/>
+  <key>testFlightInternalTestingOnly</key><false/>
   <key>uploadSymbols</key><true/>
 </dict></plist>
 EOF

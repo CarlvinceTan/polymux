@@ -67,7 +67,7 @@ jobs:
           printf '%s' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey.p8"
       - name: Archive iOS
         run: scripts/testflight.sh archive
-      - name: Upload to internal TestFlight only
+      - name: Upload to TestFlight
         run: scripts/testflight.sh upload
       - name: Remove API key
         if: always()

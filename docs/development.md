@@ -1,7 +1,7 @@
 # Development delivery
 
 The development channel follows `dev`; it is separate from public `app-v*` releases.
-Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac Nightly and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to internal TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
+Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac Nightly and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
 
 To turn it on:
 
@@ -39,7 +39,7 @@ Direct development signing still depends on a valid Apple development profile an
 
 Manually dispatch `.github/workflows/dev.yml` on `dev` to run the reusable Tests workflow, then independently:
 
-- archives and uploads an **internal-only** iOS build to TestFlight;
+- archives and uploads one iOS build to TestFlight for use by both internal and external tester groups;
 - signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease.
 
 Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac development feed is:
@@ -50,7 +50,7 @@ https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xm
 
 **Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch, so it takes effect once on `main`. The site's home page offers the newest `Polymux-dev-*.zip` through `/api/nightly` as its default download, labelled unstable, and falls back to the newest stable release when there's no Nightly.
 
-The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by the internal tester group. Internal-only iOS builds cannot later be submitted to external TestFlight or the App Store.
+The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by tester groups. To share the same build externally, add it to a private external group in App Store Connect, submit it for TestFlight App Review when required, and invite testers by email. Builds previously uploaded as internal-only cannot be added to external groups.
 
 All development jobs are serialized. `scripts/dev-version.py` sets the iOS build number to the `dev` commit count (shown as `0.4.0 (190)`), so local and CI uploads never collide; the script defaults to the same number. The Mac build number stays monotonic across workflow runs and reruns. Do not rewrite `dev` history or upload an arbitrary larger iOS build. Build `1.0.1` was the first manual upload; every later iOS build must exceed it.
 
@@ -259,4 +259,4 @@ python3 -B scripts/testflight_test.py  # macOS
 scripts/check.sh all
 ```
 
-The deployment tests use temporary HOME directories, fake CI/launchd, and disposable databases. They never install a crashing binary on the real server. TestFlight tests check the signing guards and internal-only export options without contacting Apple. Neither test suite proves real store delivery, notarization, or an installed update.
+The deployment tests use temporary HOME directories, fake CI/launchd, and disposable databases. They never install a crashing binary on the real server. TestFlight tests check the signing guards and export options without contacting Apple. Neither test suite proves real store delivery, notarization, or an installed update.

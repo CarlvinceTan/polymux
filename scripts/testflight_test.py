@@ -56,12 +56,12 @@ class TestFlightTests(unittest.TestCase):
         self.assertNotEqual(self.run_script("archive", ASC_KEY_PATH="/key.p8").returncode, 0)
         self.assertFalse(self.args.exists())
 
-    def test_upload_is_internal_only_and_preserves_build_number(self):
+    def test_upload_supports_both_tester_groups_and_preserves_build_number(self):
         self.archive_info()
         result = self.run_script("upload")
         self.assertEqual(result.returncode, 0, result.stderr)
         options = plistlib.loads((self.out / "ExportOptions.plist").read_bytes())
-        self.assertIs(options["testFlightInternalTestingOnly"], True)
+        self.assertIs(options["testFlightInternalTestingOnly"], False)
         self.assertIs(options["manageAppVersionAndBuildNumber"], False)
         self.assertEqual(options["method"], "app-store-connect")
         self.assertEqual(options["destination"], "upload")
