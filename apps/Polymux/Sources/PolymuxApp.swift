@@ -735,18 +735,14 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The icon's tile colour, like System Settings: blue for connectivity and security,
-    /// gray for system and hardware, pink for sound, purple for intelligence, orange for plugins.
+    /// The icon's tile colour: gray for system settings, blue for services,
+    /// pink for voice, orange for plugins.
     var tint: Color {
         switch self {
-        case .general: .gray
+        case .general, .updates, .shortcuts: .gray
         case .voice: .pink
-        case .models: .purple
-        case .network: .blue
-        case .vault: .blue
+        case .models, .network, .vault: .blue
         case .plugins: .orange
-        case .updates: .gray
-        case .shortcuts: .gray
         }
     }
 }
