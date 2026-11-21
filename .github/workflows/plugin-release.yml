@@ -8,7 +8,7 @@ on:
         description: Plugin to release
         required: true
   push:
-    tags: ['*-v*', '!app-v*']
+    tags: ['*-v*', '!stable-v*', '!nightly-v*']
 
 permissions:
   contents: write

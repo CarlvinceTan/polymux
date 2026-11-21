@@ -71,7 +71,7 @@ func downloadApp(client *http.Client, dir string, verify func(string) error) (st
 	}
 	name := "Polymux-" + release.Version + "-arm64.dmg"
 	asset := release.Platforms.MacOS
-	if !stableVersion.MatchString(release.Version) || asset.URL != releaseURL+"app-v"+release.Version+"/"+name ||
+	if !stableVersion.MatchString(release.Version) || asset.URL != releaseURL+"stable-v"+release.Version+"/"+name ||
 		asset.Size <= 0 || asset.Size > 1<<30 {
 		return "", errors.New("no valid stable Mac disk image")
 	}

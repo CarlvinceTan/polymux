@@ -39,7 +39,7 @@ func TestDownloadApp(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			asset := releaseURL + "app-v0.4.0/" + name
+			asset := releaseURL + "stable-v0.4.0/" + name
 			if tt.url != "" {
 				asset = tt.url
 			}
@@ -48,7 +48,7 @@ func TestDownloadApp(t *testing.T) {
 				switch req.URL.String() {
 				case downloadsURL:
 					body = fmt.Sprintf(`{"version":"0.4.0","platforms":{"macos":{"url":%q,"size":%d}}}`, asset, len(image))
-				case releaseURL + "app-v0.4.0/" + name:
+				case releaseURL + "stable-v0.4.0/" + name:
 					body = tt.payload
 				default:
 					t.Fatalf("unexpected request: %v", req.URL)

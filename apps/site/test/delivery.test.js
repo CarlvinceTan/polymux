@@ -51,7 +51,7 @@ test('the app version has published native notes matching the release tag and do
   const releases = loadPublishedReleases();
   const current = releases.find((release) => release.version === version);
   assert.ok(current, `Missing published notes for ${version}`);
-  assert.equal(current.tag, `app-v${version}`);
+  assert.equal(current.tag, `stable-v${version}`);
   assert.equal(current.downloadable, true);
   assert.equal(current.historical, false);
   assert.equal(releases.find((release) => release.downloadable && !release.historical)?.version, version);
@@ -59,7 +59,7 @@ test('the app version has published native notes matching the release tag and do
 
 test('manually running a native release at a tag never publishes it', () => {
   const {on: events, jobs} = workflow('release');
-  assert.deepEqual(events.push.tags, ['app-v*']);
+  assert.deepEqual(events.push.tags, ['stable-v*']);
   assert.ok(Object.hasOwn(events, 'workflow_dispatch'));
   const guard = "github.event_name == 'push' && github.ref_type == 'tag'";
   assert.equal(jobs.macos.steps.find((step) => step.name === 'Publish release').if, guard);
@@ -74,8 +74,8 @@ test('the release preflight accepts prepared notes and rejects missing, draft, o
     {name: 'missing notes', notes: null, error: /Publish .* on the site/},
     {name: 'draft notes', notes: notes.replace('published: true', 'published: false'), error: /must be published/},
     {name: 'disabled downloads', notes: notes.replace('downloadable: true', 'downloadable: false'), error: /must be downloadable/},
-    {name: 'Electron tag', notes: notes.replace(`tag: app-v${version}`, `tag: v${version}`), error: /must use tag: app-v/},
-    {name: 'mismatched pushed tag', notes, ref: 'tag', tag: 'app-v99.0.0', error: /does not match MARKETING_VERSION/},
+    {name: 'Electron tag', notes: notes.replace(`tag: stable-v${version}`, `tag: v${version}`), error: /must use tag: stable-v/},
+    {name: 'mismatched pushed tag', notes, ref: 'tag', tag: 'stable-v99.0.0', error: /does not match MARKETING_VERSION/},
   ];
   for (const item of cases) await context.test(item.name, () => {
     const root = mkdtempSync(join(tmpdir(), 'polymux-release-'));
@@ -94,7 +94,7 @@ test('the release preflight accepts prepared notes and rejects missing, draft, o
       });
       assert.equal(result.status, item.status ?? 1, result.stdout + result.stderr);
       if (item.error) assert.match(result.stdout + result.stderr, item.error);
-      else assert.equal(readFileSync(environment, 'utf8'), `VERSION=${version}\nTAG=app-v${version}\n`);
+      else assert.equal(readFileSync(environment, 'utf8'), `VERSION=${version}\nTAG=stable-v${version}\n`);
     } finally {rmSync(root, {recursive: true});}
   });
 });

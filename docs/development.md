@@ -1,6 +1,6 @@
 # Development delivery
 
-The development channel follows `dev`; it is separate from public `app-v*` releases.
+The development channel follows `dev`; it is separate from public `stable-v*` releases.
 Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac Nightly and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
 
 To turn it on:
@@ -40,7 +40,7 @@ Direct development signing still depends on a valid Apple development profile an
 Manually dispatch `.github/workflows/dev.yml` on `dev` to run the reusable Tests workflow, then independently:
 
 - archives and uploads one iOS build to TestFlight for use by both internal and external tester groups;
-- signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease, a rolling feed whose tag follows the newest build. Each build also gets a `v<version>-nightly.<build>` tag; `app-v*` tags are for stable releases from `main`.
+- signs and notarizes the Mac app, signs its Sparkle feed, and publishes it to the `dev-updates` GitHub prerelease, a rolling feed whose tag follows the newest build. Each build also gets a `nightly-v<version>-<build>` tag; stable releases from `main` use `stable-v<version>`, and plugins keep `<plugin>-v<version>`.
 
 The Mac app and bundled server compile beside verification. The compile job uses no signing credentials. Signing, notarization, and publication still require successful verification, as does the iOS upload.
 

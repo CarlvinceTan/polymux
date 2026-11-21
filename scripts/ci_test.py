@@ -27,7 +27,7 @@ class SelectionTests(unittest.TestCase):
     def test_manual_delivery_runs_every_check(self):
         self.assertIsNone(selection({}, "workflow_dispatch"))
         self.assertIsNone(selection({"before": "0" * 40}, "push"))
-        self.assertIsNone(selection({"before": "existing", "ref": "refs/tags/app-v1.0.0"}, "push"))
+        self.assertIsNone(selection({"before": "existing", "ref": "refs/tags/stable-v1.0.0"}, "push"))
         self.assertEqual(selection({"pull_request": {"base": {"sha": "base"}}}, "pull_request"), "base")
 
     def test_moving_a_file_out_checks_where_it_left(self):

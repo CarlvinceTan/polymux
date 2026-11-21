@@ -5,7 +5,7 @@ import {createAppcast} from '../lib/server/appcast.ts';
 import {loadContent} from '../scripts/content.ts';
 import {response} from './helpers.js';
 
-const entry = {version: '1.0.0', title: 'Native release', date: '2026-10-24', summary: 'Native app', downloadable: true, historical: false, tag: 'app-v1.0.0'};
+const entry = {version: '1.0.0', title: 'Native release', date: '2026-10-24', summary: 'Native app', downloadable: true, historical: false, tag: 'stable-v1.0.0'};
 const feed = '<?xml version="1.0" encoding="utf-8"?>\n<rss version="2.0"><channel><title>Polymux</title></channel></rss>';
 const remote = (overrides = {}) => ({
   tag_name: entry.tag,
@@ -26,7 +26,7 @@ test('serves the signed feed attached to the newest native release', async () =>
   assert.equal(result.statusCode, 200);
   assert.equal(result.headers['Content-Type'], 'application/xml; charset=utf-8');
   assert.match(result.body, /<rss/);
-  assert.match(requests[0], /\/releases\/tags\/app-v1\.0\.0$/);
+  assert.match(requests[0], /\/releases\/tags\/stable-v1\.0\.0$/);
   assert.equal(requests[1], 'https://files.example/appcast.xml');
 });
 
@@ -45,7 +45,7 @@ test('skips historical, unpublished, and prerelease entries when selecting the f
 });
 
 test('reports unavailable feeds without returning stale XML', async () => {
-  for (const value of [remote({draft: true}), remote({tag_name: 'app-v9.0.0'}), remote({assets: []}), null, {}]) {
+  for (const value of [remote({draft: true}), remote({tag_name: 'stable-v9.0.0'}), remote({assets: []}), null, {}]) {
     const result = response();
     await createAppcast([entry], {request: async () => json(value), download: async () => xml()})({}, result);
     assert.equal(result.statusCode, 503);
