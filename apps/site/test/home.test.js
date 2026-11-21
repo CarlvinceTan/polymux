@@ -21,6 +21,7 @@ test('installation offers a guide before the native download resolves', () => {
   const document = home.window.document;
   const installation = document.querySelector('#download');
   assert.equal(installation.querySelector('a[href="/docs/installation/"]').textContent.trim(), 'Installation guide');
+  assert.doesNotMatch(installation.querySelector('#install-panel-Desktop').textContent, /drag Polymux/);
   assert.equal(document.querySelectorAll('a[href*="releases/download"], a[href="/install.sh"]').length, 0);
   assert.equal(document.querySelector('.mobile-menu-download').textContent.trim(), 'Install');
   const guide = content.docs.find((page) => page.slug === 'installation').body;

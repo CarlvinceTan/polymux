@@ -129,7 +129,7 @@
       {/each}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Desktop" aria-labelledby="install-tab-Desktop" tabindex="0" hidden={selectedTab !== 'Desktop'}>
-      <p>Open the disk image, drag Polymux to Applications, then open it to start setup. The Mac app includes the server.</p>
+      <p>The Mac app includes the server.</p>
       {#if client}
         <div class="download-line">
           <a class="primary" href={client.url}><DownloadIcon />{downloadLabel}</a>
@@ -141,7 +141,7 @@
       {/if}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Phone" aria-labelledby="install-tab-Phone" tabindex="0" hidden={selectedTab !== 'Phone'}>
-      <p>Install the iPhone beta, then pair it with your Polymux server.</p>
+      <p>The iPhone app is a client. Pair it with a Polymux server on another device.</p>
       {#if phoneDownload}
         <a class="primary" href={phoneDownload}><DownloadIcon />Install TestFlight beta</a>
       {:else}
@@ -150,13 +150,14 @@
       {/if}
     </div>
     <div class="install-panel" role="tabpanel" id="install-panel-Terminal" aria-labelledby="install-tab-Terminal" tabindex="0" hidden={selectedTab !== 'Terminal'}>
-      <p>Install the stable CLI on Apple silicon. Requires a published stable CLI release.</p>
+      <p>Run the server from the terminal on macOS or Linux. The Mac CLI can also download the desktop app.</p>
+      <p class="install-note">Install on Apple silicon Macs:</p>
       <div class="terminal-command">
         <code>{installCommand}</code>
         <button type="button" onclick={copyInstall} aria-label="Copy Terminal install command">Copy</button>
       </div>
       <p class="terminal-status" role="status">{copyStatus}</p>
-      <p class="install-note">Run <code>polymux app download</code> to get the stable Mac disk image.</p>
+      <p class="install-note">On Mac, run <code>polymux app download</code> for the disk image. On Linux, <a href="/docs/installation/#linux">build the CLI from source</a>.</p>
     </div>
   </section>
 </main>

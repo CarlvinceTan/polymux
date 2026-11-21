@@ -88,6 +88,15 @@ To download the same Mac disk image as the website, run:
 
 The `.dmg` is saved in the current directory. Open it and drag Polymux to Applications.
 
+### Linux
+
+Linux runs the server from the CLI; there is no desktop app. With Go, Git, and a C compiler installed, clone the source as above and run:
+
+```sh
+./scripts/build.sh server
+./dist/server/polymux serve
+```
+
 ## Pair another Mac
 
 1. On an already connected client, open **Settings → Network**, choose the network, and press **+** beside the close button to get a pairing link and QR code.

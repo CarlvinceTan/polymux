@@ -99,9 +99,7 @@ The iOS build uses automatic signing: with the API key, Xcode creates and manage
 
 ## First Mac installation
 
-A stable-feed app does not automatically switch to the development feed. Install a signed, notarized development-channel build from `dev-updates` once the first workflow succeeds. Thereafter Sparkle uses the dev feed. Development builds default to hourly checks and automatic downloads; saved user preferences and Sparkle's installation rules still apply.
-
-Verify a second build updates the same installed app through Sparkle. Switching back to stable may require an explicit reinstall because development build numbers can exceed stable ones. The stable feed is unchanged.
+Install the signed, notarized Mac app from the website. In **Settings → Updates**, choose **Nightly** under **App update channel** to use the development feed for future checks. Verify a second build updates the same app through Sparkle. Switching back to **Stable** does not downgrade the installed app or cancel an update already in progress.
 
 ## Server deployment
 
