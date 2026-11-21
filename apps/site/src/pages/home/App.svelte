@@ -10,6 +10,10 @@
   import {formatFileSize, type ReleaseDownloads} from '../../lib/platform';
 
   const providers = ['OpenAI', 'Anthropic', 'Google Gemini', 'xAI', 'OpenRouter', 'Ollama'];
+  const installCommand = 'curl -fsSL https://polymux.com/install-cli.sh | sh';
+  const installTabs = ['Desktop', 'Phone', 'Terminal'] as const;
+  const betaLink = import.meta.env.VITE_TESTFLIGHT_URL?.trim() ?? '';
+  const phoneDownload = /^https:\/\/testflight\.apple\.com\/join\/[a-z\d]+$/i.test(betaLink) ? betaLink : '';
   const phrases: {text: string; agent: Agent['id']; colors: string}[] = [
     {text: 'On your devices.', agent: 'whale', colors: '#8fd0ff, #a98bff 50%, #ff8ad8'},
     {text: 'Planning your day.', agent: 'atlas', colors: '#8fd0ff, #3c97ff'},
@@ -19,8 +23,33 @@
   ];
   let phrase = $state(0);
   let downloads = $state.raw<ReleaseDownloads | null>(null);
-  const client = $derived(downloads?.platforms.macos ?? null);
-  let nightly = $state.raw<{version: string; macos: {url: string; size: number}} | null>(null);
+  let nightly = $state.raw<{version: string | null; build: string; macos: {name: string; url: string; size: number}} | null>(null);
+  let resolved = $state(false);
+  let copyStatus = $state('');
+  let selectedTab = $state<(typeof installTabs)[number]>('Desktop');
+  const client = $derived(resolved ? nightly?.macos ?? downloads?.platforms.macos ?? null : null);
+  const version = $derived(nightly ? nightly.version : downloads?.version);
+  const archive = $derived(client?.name.endsWith('.zip') ?? false);
+
+  function selectTab(event: KeyboardEvent, index: number) {
+    const last = installTabs.length - 1;
+    const next = event.key === 'ArrowRight' ? (index + 1) % installTabs.length
+      : event.key === 'ArrowLeft' ? (index + last) % installTabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? last : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    selectedTab = installTabs[next];
+    (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role=tab]')[next]?.focus();
+  }
+
+  async function copyInstall() {
+    try {
+      await navigator.clipboard.writeText(installCommand);
+      copyStatus = 'Copied';
+    } catch {
+      copyStatus = 'Select and copy the command.';
+    }
+  }
 
   onMount(() => {
     if (!window.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -28,15 +57,17 @@
     return () => clearInterval(interval);
   });
 
-  onMount(async () => {
-    try {
-      const response = await fetch('/api/downloads');
-      if (response.ok) downloads = await response.json() as ReleaseDownloads;
-    } catch {}
-    try {
-      const response = await fetch('/api/nightly');
-      if (response.ok) nightly = await response.json();
-    } catch {}
+  onMount(() => {
+    const controller = new AbortController();
+    const result = (path: string) => fetch(path, {signal: controller.signal})
+      .then((response) => response.ok ? response.json() : null).catch(() => null);
+    void Promise.all([result('/api/nightly'), result('/api/downloads')]).then(([preview, stable]) => {
+      if (controller.signal.aborted) return;
+      nightly = preview;
+      downloads = stable;
+      resolved = true;
+    });
+    return () => controller.abort();
   });
 </script>
 
@@ -104,22 +135,45 @@
 
   <section class="installation" id="download" aria-labelledby="install-title">
     <div class="section-heading">
-      <p class="eyebrow">Install Polymux</p>
-      <h2 id="install-title">Start with <span class="glow">your Mac.</span></h2>
-      <p>Open the disk image, drag Polymux to Applications, then open it to start setup. The Mac app includes the server.</p>
+      <h2 id="install-title">Install <span class="glow">Polymux.</span></h2>
     </div>
-    {#if client}
-      <p class="download-line">
-        <a class="primary" href={client.url}><DownloadIcon />Download for macOS</a>
-        <span>Polymux {downloads?.version} · DMG · {formatFileSize(client.size)}</span>
-      </p>
-      <p class="install-note">Apple silicon · macOS 27 or later · <a href="/docs/installation/#terminal">Terminal install</a></p>
-    {:else}
-      <p class="install-note"><a href="/docs/installation/">Installation guide</a></p>
-    {/if}
-    {#if nightly}
-      <p class="together"><a href={nightly.macos.url}>Download Nightly</a> · Unstable ZIP · {formatFileSize(nightly.macos.size)}</p>
-    {/if}
+    <div class="install-tabs" role="tablist" aria-label="Installation options">
+      {#each installTabs as tab, index (tab)}
+        <button type="button" role="tab" id={`install-tab-${tab}`} aria-controls={`install-panel-${tab}`}
+          aria-selected={selectedTab === tab} tabindex={selectedTab === tab ? 0 : -1}
+          onclick={() => selectedTab = tab} onkeydown={(event) => selectTab(event, index)}>{tab}</button>
+      {/each}
+    </div>
+    <div class="install-panel" role="tabpanel" id="install-panel-Desktop" aria-labelledby="install-tab-Desktop" tabindex="0" hidden={selectedTab !== 'Desktop'}>
+      <p>{archive ? 'Unzip the download, then drag Polymux to Applications and open it to start setup.' : 'Open the disk image, drag Polymux to Applications, then open it to start setup.'} The Mac app includes the server.</p>
+      {#if client}
+        <div class="download-line">
+          <a class="primary" href={client.url}><DownloadIcon />Download for macOS</a>
+          <p>{version ? `Version ${version}` : `Build ${nightly?.build}`} · {nightly ? 'Nightly · ' : ''}{archive ? 'ZIP' : 'DMG'} · {formatFileSize(client.size)}</p>
+        </div>
+        <p class="install-note">Apple silicon · macOS 27 or later</p>
+      {:else}
+        <p class="install-note"><a href="/docs/installation/">Installation guide</a></p>
+      {/if}
+    </div>
+    <div class="install-panel" role="tabpanel" id="install-panel-Phone" aria-labelledby="install-tab-Phone" tabindex="0" hidden={selectedTab !== 'Phone'}>
+      <p>Install the iPhone beta, then pair it with your Polymux server.</p>
+      {#if phoneDownload}
+        <a class="primary" href={phoneDownload}><DownloadIcon />Install TestFlight beta</a>
+      {:else}
+        <button class="primary" type="button" disabled>Install TestFlight beta</button>
+        <p class="install-note">The public beta isn’t open yet.</p>
+      {/if}
+    </div>
+    <div class="install-panel" role="tabpanel" id="install-panel-Terminal" aria-labelledby="install-tab-Terminal" tabindex="0" hidden={selectedTab !== 'Terminal'}>
+      <p>Install the stable CLI on Apple silicon{downloads?.platforms.macos ? '' : ' when a stable release is available'}.</p>
+      <div class="terminal-command">
+        <code>{installCommand}</code>
+        <button type="button" onclick={copyInstall} aria-label="Copy Terminal install command">Copy</button>
+      </div>
+      <p class="terminal-status" role="status">{copyStatus}</p>
+      <p class="install-note">Run <code>polymux app download</code> to get the stable Mac disk image.</p>
+    </div>
   </section>
 </main>
 

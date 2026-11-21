@@ -6,6 +6,8 @@ type Remote = {tag_name: string; draft?: boolean; html_url: string; assets: Asse
 
 const tag = 'dev-updates';
 const payload = /^Polymux-dev-(\d+)\.(\d+)\.(\d+)\.zip$/;
+const image = /^Polymux-nightly-(\d+\.\d+\.\d+)-(\d+\.\d+\.\d+)-arm64\.dmg$/;
+const symbols = /^Polymux-(\d+\.\d+\.\d+)-(\d+\.\d+\.\d+)-arm64\.dSYM\.zip$/;
 
 function isRelease(value: unknown): value is Remote {
   if (!value || typeof value !== 'object') return false;
@@ -32,11 +34,17 @@ export function createNightly(options: Parameters<typeof githubClient>[0] = {}) 
       response.setHeader('Cache-Control', 'public, s-maxage=30');
       return sendJson(response, 503, {error: 'No Nightly build is available yet.'});
     }
+    const build = parts(newest.name).join('.');
+    const disk = release.assets.find((asset) => image.exec(asset.name)?.[2] === build);
+    const macos = disk ?? newest;
+    const version = disk ? image.exec(disk.name)?.[1] :
+      release.assets.map((asset) => symbols.exec(asset.name)).find((match) => match?.[2] === build)?.[1];
     response.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=60');
     return sendJson(response, 200, {
-      version: parts(newest.name).join('.'),
+      version: version ?? null,
+      build,
       releaseUrl: release.html_url,
-      macos: {name: newest.name, url: newest.browser_download_url, size: newest.size},
+      macos: {name: macos.name, url: macos.browser_download_url, size: macos.size},
     });
   };
 }

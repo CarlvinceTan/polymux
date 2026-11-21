@@ -57,7 +57,7 @@ for (const engine of [webkit, chromium]) {
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('**/api/downloads*', (route) => route.fulfill({json: {
-      version: '0.4.0', platforms: {macos: {url: `${origin}/download.dmg`, size: 12_000_000}},
+      version: '0.4.0', platforms: {macos: {name: 'download.dmg', url: `${origin}/download.dmg`, size: 12_000_000}},
     }}));
     try {
       await context.test('every published page fits while folding, rotating, and returning to desktop', async () => {
@@ -159,26 +159,43 @@ for (const engine of [webkit, chromium]) {
   });
 }
 
-test('the stable disk image is the primary download; Nightly stays optional', async () => {
+test('installation tabs default to the Nightly desktop download and can copy the CLI command', async () => {
   const browser = await chromium.launch();
   try {
-    const stable = {version: '0.4.0', platforms: {macos: {url: `${origin}/stable.dmg`, size: 12_000_000}}};
-    const nightly = {version: '4000.13.1', macos: {url: `${origin}/Polymux-dev-4000.13.1.zip`, size: 57_000_000}};
-    for (const [hasStable, hasNightly] of [[true, true], [true, false], [false, true], [false, false]]) {
-      const page = await browser.newPage();
+    const stable = {version: '0.4.0', platforms: {macos: {name: 'stable.dmg', url: `${origin}/stable.dmg`, size: 12_000_000}}};
+    const nightly = {version: '0.4.0', build: '4000.13.1', macos: {name: 'nightly.dmg', url: `${origin}/nightly.dmg`, size: 57_000_000}};
+    const zip = {...nightly, macos: {...nightly.macos, name: 'nightly.zip', url: `${origin}/nightly.zip`}};
+    for (const [hasStable, preview] of [[true, nightly], [true, null], [false, zip], [false, nightly], [false, null]]) {
+      const page = await browser.newPage({viewport: {width: 320, height: 568}, permissions: ['clipboard-read', 'clipboard-write']});
       await page.route('**/api/downloads*', (route) => hasStable ? route.fulfill({json: stable}) : route.fulfill({status: 503, json: {}}));
-      await page.route('**/api/nightly*', (route) => hasNightly ? route.fulfill({json: nightly}) : route.fulfill({status: 503, json: {}}));
-      const checkedNightly = page.waitForResponse('**/api/nightly*');
+      await page.route('**/api/nightly*', (route) => preview ? route.fulfill({json: preview}) : route.fulfill({status: 503, json: {}}));
+      const checkedStable = page.waitForResponse('**/api/downloads*');
       await page.goto(origin);
-      await checkedNightly;
-      const want = hasStable ? stable.platforms.macos.url : '#download';
+      await checkedStable;
+      const want = preview?.macos.url ?? (hasStable ? stable.platforms.macos.url : '#download');
       await page.locator(`.hero a.primary[href="${want}"]`).waitFor();
+      const desktop = page.getByRole('tab', {name: 'Desktop'});
+      assert.equal(await desktop.getAttribute('aria-selected'), 'true');
+      assert.equal(await page.getByRole('tabpanel', {name: 'Desktop'}).count(), 1);
       assert.deepEqual(await page.locator('.download-line a').evaluateAll((links) => links.map((link) => link.href)),
-        hasStable ? [want] : []);
-      assert.equal(await page.getByRole('link', {name: 'Terminal install', exact: true}).count(), hasStable ? 1 : 0);
-      const unstable = page.getByRole('link', {name: 'Download Nightly'});
-      if (hasNightly) assert.equal(await unstable.getAttribute('href'), nightly.macos.url);
-      else assert.equal(await unstable.count(), 0);
+        want === '#download' ? [] : [want]);
+      assert.equal(await page.getByRole('link', {name: 'Download Nightly'}).count(), 0);
+      if (want !== '#download') {
+        assert.match(await page.locator('.download-line p').textContent(), /^Version 0\.4\.0/);
+        assert.ok(await page.locator('.download-line').evaluate((element) =>
+          element.querySelector('p').getBoundingClientRect().top >= element.querySelector('a').getBoundingClientRect().bottom));
+      }
+      if (preview === zip) assert.match(await page.locator('#download').textContent(), /Unzip the download/);
+      await desktop.press('ArrowRight');
+      const phone = page.getByRole('tab', {name: 'Phone'});
+      assert.equal(await phone.getAttribute('aria-selected'), 'true');
+      assert.ok(await page.getByRole('button', {name: 'Install TestFlight beta'}).isDisabled());
+      await phone.press('ArrowRight');
+      assert.equal(await page.getByRole('tab', {name: 'Terminal'}).getAttribute('aria-selected'), 'true');
+      await page.getByRole('button', {name: 'Copy Terminal install command'}).click();
+      await page.locator('.terminal-status').getByText('Copied', {exact: true}).waitFor();
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'curl -fsSL https://polymux.com/install-cli.sh | sh');
+      await noOverflow(page, 'Installation and command');
       await page.close();
     }
   } finally {

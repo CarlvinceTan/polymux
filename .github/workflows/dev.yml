@@ -135,6 +135,23 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP/Contents/Info.plist")" = "$POLYMUX_FEED_URL"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" = "$POLYMUX_BUILD_NUMBER"
           ditto -c -k --keepParent "$APP" "dist/macos/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip"
+      - name: Notarize Nightly disk image
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/macos/Polymux.app/Contents/Info.plist)
+          scripts/build.sh dmg
+          DMG="dist/macos/Polymux-nightly-$VERSION-$POLYMUX_BUILD_NUMBER-arm64.dmg"
+          mv "dist/macos/Polymux-$VERSION-arm64.dmg" "$DMG"
+          hdiutil verify "$DMG"
+          codesign --verify --strict "$DMG"
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature "$DMG"
       - name: Sign development feed
         env:
           SPARKLE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -156,7 +173,8 @@ jobs:
               --title 'Polymux development updates' --notes 'Development builds from passing dev commits.'
           fi
           # Keep versioned payloads immutable; switch the feed only after the payload is available.
-          gh release upload dev-updates "dist/dev-updates/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip" dist/symbols/*.dSYM.zip
+          gh release upload dev-updates dist/macos/Polymux-nightly-*.dmg dist/symbols/*.dSYM.zip \
+            "dist/dev-updates/Polymux-dev-$POLYMUX_BUILD_NUMBER.zip"
           gh release upload dev-updates dist/dev-updates/appcast.xml --clobber
           gh release edit dev-updates --prerelease --latest=false \
             --notes "Build $POLYMUX_BUILD_NUMBER from commit $GITHUB_SHA. Internal development channel."

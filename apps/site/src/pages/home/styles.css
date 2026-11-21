@@ -33,7 +33,7 @@
 }
 .primary:active, .secondary:active { scale: .97; }
 .text-link { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
-@media (hover: hover) and (pointer: fine) { .text-link:hover, .install-note a:hover, .together a:hover { text-decoration: underline; text-underline-offset: 4px; } }
+@media (hover: hover) and (pointer: fine) { .text-link:hover, .install-note a:hover { text-decoration: underline; text-underline-offset: 4px; } }
 .availability { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
 .app-preview { margin: 24px 0 0; border-block: 1px solid var(--line); }
 .app-preview summary { display: flex; align-items: center; justify-content: space-between; min-height: 64px; font-size: 13px; font-weight: 500; cursor: pointer; list-style: none; }
@@ -50,7 +50,8 @@ figcaption { margin-top: 18px; color: var(--muted); font-size: 12px; line-height
 .section-heading { max-width: 660px; margin: 0 auto 40px; text-align: center; }
 .section-heading h2 { margin: 0; font-size: clamp(32px, 4vw, 44px); line-height: 1.12; font-weight: 520; letter-spacing: -.035em; }
 .section-heading > p:last-child { max-width: 500px; margin: 20px auto 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
-.download-line { display: flex; align-items: center; justify-content: center; gap: 12px; margin: -12px 0 32px; color: var(--muted); font-size: 12px; }
+.download-line { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+.download-line p { margin: 0; }
 .choices { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; margin-top: 44px; }
 .choices > div, .install-grid article { position: relative; overflow: hidden; padding: 28px; border-radius: 24px; background: radial-gradient(70% 90% at 0% 0%, color-mix(in srgb, var(--tint) 22%, transparent), transparent 70%), color-mix(in srgb, var(--surface) 80%, transparent); box-shadow: inset 0 0 0 1px #ffffff14, inset 0 1px 0 #ffffff0f; }
 .chip { width: 52px; height: 52px; margin-bottom: 20px; display: grid; place-items: center; border-radius: 16px; background: linear-gradient(150deg, color-mix(in srgb, var(--tint) 40%, #ffffff1f), color-mix(in srgb, var(--tint) 14%, transparent)); box-shadow: inset 0 1px 0 #ffffff40, inset 0 0 0 1px #ffffff26, 0 12px 30px -10px var(--tint); }
@@ -73,8 +74,18 @@ figcaption { margin-top: 18px; color: var(--muted); font-size: 12px; line-height
 .install-grid .text-link { margin-top: var(--space); }
 .install-note { margin: 20px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; text-align: center; }
 .install-note a { text-decoration: underline; text-underline-offset: 3px; }
-.together { margin: 28px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
-.together a { color: var(--ink); font-weight: 500; }
+.installation .section-heading { margin-bottom: 24px; }
+.install-tabs { display: flex; width: fit-content; max-width: 100%; gap: 4px; margin: 0 auto 20px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
+.install-tabs button { min-height: 44px; padding: 0 clamp(11px, 3vw, 20px); border: 0; border-radius: inherit; background: transparent; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+.install-tabs button[aria-selected="true"] { background: var(--glass-hover); color: var(--ink); }
+.install-panel { max-width: 34rem; margin-inline: auto; text-align: center; }
+.install-panel > p:first-child { max-width: 31rem; margin: 0 auto 20px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+.install-panel > button:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+.terminal-command { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 6px 8px 6px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; color: var(--ink); text-align: left; }
+.terminal-command code { flex: 1; min-width: 0; padding-block: 6px; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+.terminal-command button { flex: none; min-height: 44px; padding-inline: 12px; border: 0; border-radius: 8px; color: var(--ink); background: var(--glass); cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .terminal-command button:hover { background: var(--glass-hover); } }
+.terminal-status { min-height: 1.5em; margin: 0; color: var(--muted); font-size: 12px; }
 
 @media (max-width: 760px) {
   .hero, .setup, .installation { width: calc(100% - 32px); }
@@ -88,7 +99,6 @@ figcaption { margin-top: 18px; color: var(--muted); font-size: 12px; line-height
   .section-heading { margin-bottom: 28px; }
   .choices { grid-template-columns: 1fr; gap: 28px; margin-top: 32px; }
   .installation { margin-top: 56px; padding-top: 48px; padding-bottom: 48px; }
-  .download-line { flex-wrap: wrap; }
   .install-grid { grid-template-columns: 1fr; gap: 16px; }
   .install-grid article { padding: var(--space); }
   .install-grid p { min-height: 0; }
