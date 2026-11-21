@@ -696,10 +696,7 @@ struct ConnectionView: View {
                 }
             }
         } header: {
-            SectionHeader("Permissions", symbol: "hand.raised.fill") {
-                Button("Manage") { GrantWindow.shared.show() }
-                    .accessibilityLabel("Manage permissions")
-            }
+            SectionHeader("Permissions", symbol: "hand.raised.fill")
         }
         .panelRow()
         .task(id: permissions.client?.id) { await permissions.refresh() }

@@ -2,24 +2,14 @@
 import AppKit
 import SwiftUI
 
-/// The Grant Permissions window. A permission's guide docks inside System Settings, over its list,
-/// with the server's icon ready to drag into it.
+/// A permission's guide docks inside System Settings, over its list, with the icon of whatever holds the
+/// grant (Polymux Server, or this app) ready to drag into it.
 @MainActor
-final class GrantWindow: NSObject, NSWindowDelegate {
+final class GrantWindow {
     static let shared = GrantWindow()
-    private var window: NSPanel?
     private var guide: NSPanel?
     private var following: Task<Void, Never>?
     private var checking: Task<Void, Never>?
-
-    func show() {
-        let window = window ?? make()
-        self.window = window
-        if !window.isVisible { window.center() }
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate()
-        startChecking()
-    }
 
     /// Shows a permission's guide over System Settings and follows it as it moves.
     func follow() {
@@ -37,7 +27,7 @@ final class GrantWindow: NSObject, NSWindowDelegate {
             while !Task.isCancelled {
                 await Permissions.shared.refresh()
                 if Permissions.shared.opened == nil { closeGuide() }
-                if window?.isVisible != true && guide == nil { return }
+                if guide == nil { return }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -97,19 +87,11 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         return i.isNull ? 0 : i.width * i.height
     }
 
-    func windowWillClose(_ notification: Notification) {
-        closeGuide()
-        checking?.cancel()
-        checking = nil
-    }
-
     private func closeGuide() {
         hideGuide()
         Permissions.shared.settle()
-        if window?.isVisible != true {
-            checking?.cancel()
-            checking = nil
-        }
+        checking?.cancel()
+        checking = nil
     }
 
     private func hideGuide() {
@@ -117,28 +99,6 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         following = nil
         guide?.orderOut(nil)
         guide = nil
-    }
-
-    private func make() -> NSPanel {
-        let view = GrantView { [weak self] in self?.window?.close() }
-        let host = NSHostingView(rootView: view)
-        host.sizingOptions = [.preferredContentSize]
-        // Laid out at its real size from the start, so it centres and its text wraps.
-        let size = NSHostingController(rootView: view).sizeThatFits(in: CGSize(width: 500, height: 2000))
-        // Borderless with its own rounded background, so no title bar shifts or pads the layout.
-        let panel = GrantPanel(contentRect: NSRect(origin: .zero, size: size),
-                               styleMask: [.borderless], backing: .buffered, defer: true)
-        panel.title = "Grant Permissions for Polymux"
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = true
-        panel.isReleasedWhenClosed = false
-        panel.delegate = self
-        panel.contentView = host
-        return panel
     }
 
     private func makeGuide(_ permission: Permission) -> NSPanel {
@@ -156,11 +116,6 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         panel.contentView = NSHostingView(rootView: view)
         return panel
     }
-}
-
-/// A borderless panel that still takes clicks and key focus like a titled one.
-private final class GrantPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
 }
 
 /// System Settings, which Polymux can only watch from outside.
@@ -192,17 +147,18 @@ enum SystemSettings {
     }
 }
 
-/// The card inside System Settings: one instruction and the server's tile to drag into the list.
+/// The card inside System Settings: one instruction and the holder's tile to drag into the list.
 private struct PermissionGuide: View {
     let permission: Permission
+    let holder = Holder.current
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Drag Polymux Server into the \(permission.title) list above")
+            Text("Drag \(holder.name) into the \(permission.title) list above")
                 .font(.callout.weight(.medium))
                 .multilineTextAlignment(.leading)
-            PermissionTile()
+            PermissionTile(holder: holder)
         }
         .padding(16)
         .frame(width: 480, alignment: .leading)
@@ -211,12 +167,31 @@ private struct PermissionGuide: View {
     }
 }
 
-/// The server as System Settings lists it: its icon and name, ready to drag.
+/// What a grant goes to: Polymux Server when this Mac runs it, otherwise this app.
+private struct Holder {
+    let name: String
+    let bundle: URL
+    let server: Bool
+
+    @MainActor static var current: Holder {
+        if Permissions.shared.hostsServer { return Holder(name: "Polymux Server", bundle: ServerHost.bundle, server: true) }
+        let bundle = Bundle.main.bundleURL
+        return Holder(name: FileManager.default.displayName(atPath: bundle.path).replacing(".app", with: ""),
+                      bundle: bundle, server: false)
+    }
+}
+
+/// The holder as System Settings lists it: its icon and name, ready to drag.
 private struct PermissionTile: View {
+    let holder: Holder
+
     var body: some View {
         HStack(spacing: 10) {
-            ServerIcon().frame(width: 30, height: 30)
-            Text("Polymux Server").font(.callout.weight(.medium))
+            Group {
+                if holder.server { ServerIcon() } else { AppIcon() }
+            }
+            .frame(width: 30, height: 30)
+            Text(holder.name).font(.callout.weight(.medium))
             Spacer(minLength: 8)
             Image(systemName: "hand.draw")
                 .font(.system(size: 14))
@@ -226,12 +201,12 @@ private struct PermissionTile: View {
         .frame(height: 44)
         .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
-        .onDrag { NSItemProvider(contentsOf: ServerHost.bundle) ?? NSItemProvider() }
+        .onDrag { NSItemProvider(contentsOf: holder.bundle) ?? NSItemProvider() }
         .onHover { inside in
             if inside { NSCursor.openHand.set() } else { NSCursor.arrow.set() }
         }
-        .help("Drag Polymux Server into the list in System Settings.")
-        .accessibilityLabel("Polymux Server")
+        .help("Drag \(holder.name) into the list in System Settings.")
+        .accessibilityLabel(holder.name)
     }
 }
 

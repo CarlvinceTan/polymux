@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import ApplicationServices
 import UserNotifications
 import PolymuxKit
 
@@ -19,6 +20,7 @@ enum Permission: String, CaseIterable, Identifiable {
         }
     }
 
+    /// What the permission allows, for whoever holds it: the server's bots, or this app for a remote server.
     var detail: String {
         switch self {
         case .fullDisk: "Allows bots running in Polymux to open files in protected folders and sandboxed containers."
@@ -76,13 +78,17 @@ final class Permissions {
 
     private init() {}
 
-    /// Server permissions only apply when this Mac runs the app's own server.
-    var all: [Permission] {
+    /// Whether this Mac runs the app's own server, so grants go to Polymux Server and not to the app.
+    var hostsServer: Bool {
         #if DEBUG
-        if CommandLine.arguments.contains("--verify-permissions") { return Permission.allCases }
+        if CommandLine.arguments.contains("--verify-permissions") { return true }
         #endif
-        return ServerHost.shared.running && ServerHost.shared.managed ? Permission.allCases : [.notifications]
+        return ServerHost.shared.running && ServerHost.shared.managed
     }
+
+    /// Every permission is listed. With the server here they are the server's; otherwise this Mac's own, which a
+    /// server on another device needs to control it.
+    var all: [Permission] { Permission.allCases }
 
     func refresh() async {
         refreshID += 1
@@ -95,7 +101,13 @@ final class Permissions {
             next.remove(.notifications)
         }
         // A failed check keeps the last answer.
-        if all.contains(.fullDisk), let status = try? await client?.privacy() {
+        let status: PrivacyStatus?
+        if hostsServer {
+            status = try? await client?.privacy()
+        } else {
+            status = Self.local()
+        }
+        if let status {
             for (permission, on) in [(Permission.fullDisk, status.fullDiskAccess), (.screen, status.screenRecording),
                                      (.accessibility, status.accessibility)] {
                 if on { next.insert(permission) } else { next.remove(permission) }
@@ -104,6 +116,17 @@ final class Permissions {
         guard !Task.isCancelled, id == refreshID else { return }
         granted = next
         if let opened, granted.contains(opened) { self.opened = nil }
+    }
+
+    /// What System Settings has granted this app itself.
+    private static func local() -> PrivacyStatus {
+        let tcc = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Application Support/com.apple.TCC/TCC.db")
+        let handle = try? FileHandle(forReadingFrom: tcc)
+        let disk = handle != nil
+        try? handle?.close()
+        return PrivacyStatus(fullDiskAccess: disk, screenRecording: CGPreflightScreenCaptureAccess(),
+                             accessibility: AXIsProcessTrusted())
     }
 
     func grant(_ permission: Permission) {
@@ -120,6 +143,14 @@ final class Permissions {
             return
         }
         opened = permission
+        // Asking lists this app in System Settings, so there is nothing to drag for these two.
+        if !hostsServer {
+            switch permission {
+            case .screen: _ = CGRequestScreenCaptureAccess()
+            case .accessibility: _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+            default: break
+            }
+        }
         NSApp.yieldActivation(toApplicationWithBundleIdentifier: SystemSettings.id)
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true

@@ -56,7 +56,8 @@ if ((await app.query({ role: "statictext", name: "You’re All Set" })).length) 
 await app.click({ role: "button", name: "Settings" });
 await app.waitFor({ role: "button", name: "Grant Full Disk Access", timeout_ms: 10000 });
 await app.waitFor({ name: "Screen & System Audio Recording: Granted", timeout_ms: 5000 });
-await app.waitFor({ role: "button", name: "Manage permissions", timeout_ms: 10000 });
+await app.waitFor({ role: "button", name: "Grant Accessibility", timeout_ms: 10000 });
+if ((await app.query({ role: "button", name: "Manage permissions" })).length) throw new Error("Settings still has a Manage permissions button");
 await app.waitFor({ text: "Device Access", timeout_ms: 5000 });
 await app.waitFor({ role: "button", name: "Run Setup Again", timeout_ms: 5000 });
 await app.click({ role: "button", name: "Run Setup Again" });
