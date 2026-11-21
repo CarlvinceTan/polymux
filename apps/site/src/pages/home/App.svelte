@@ -10,7 +10,7 @@
     {title: 'Run it on your Mac', text: 'Keep chats and memory on your own server. Pair another Mac or iPhone to pick up the same conversation.', href: '/docs/installation/', link: 'Set up your devices'},
     {title: 'Choose your models', text: 'Use a hosted provider or a local model. Set a model for each agent and choose what it falls back to if a provider is unavailable.', href: '/docs/models-and-agents/', link: 'Choose a model'},
     {title: 'Remember and run on a schedule', text: 'Keep preferences and project context between chats. Schedule recurring work to run while your server is on.', href: '/docs/workspace/', link: 'See memory and schedules'},
-    {title: 'Control access and approvals', text: 'Choose the tools and devices agents can use. Review approval requests for actions on your accounts or devices.', href: '/docs/skills-and-mcp/', link: 'Set up access'},
+    {title: 'Control what agents can access', text: 'Choose the tools and devices agents can use. Add the optional Permissions plugin to set tool rules per chat.', href: '/plugins/permissions/', link: 'See the Permissions plugin'},
   ];
   const installCommand = 'curl -fsSL https://polymux.com/install-cli.sh | sh';
   const installTabs = ['Desktop', 'Phone', 'Terminal'] as const;

@@ -140,8 +140,8 @@ for (const engine of [webkit, chromium]) {
           }
           await noOverflow(page, 'Apps and capabilities');
         }
-        await page.getByRole('link', {name: 'Set up access'}).click();
-        await page.waitForURL('**/docs/skills-and-mcp/');
+        await page.getByRole('link', {name: 'See the Permissions plugin'}).click();
+        await page.waitForURL('**/plugins/permissions/');
       });
 
       assert.deepEqual(errors, [], 'Browser runtime errors');

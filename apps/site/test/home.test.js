@@ -88,5 +88,5 @@ test('the homepage presents example app connections and capabilities instead of 
   assert.deepEqual([...map.querySelectorAll('h3')].map((heading) => heading.textContent), ['Browser', 'Mac apps', 'Messaging via Hub']);
   assert.match(document.querySelector('#explore').textContent, /optional Hub plugin/);
   const setup = document.querySelector('#how-it-works');
-  assert.match(setup.textContent, /own server.*local model.*recurring work.*approval requests/s);
+  assert.match(setup.textContent, /own server.*local model.*recurring work.*optional Permissions plugin/s);
 });
