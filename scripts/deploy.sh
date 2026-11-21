@@ -1,5 +1,5 @@
 #!/bin/sh
-# Keep this Mac's server on its update channel, chosen in Settings: Nightly is the newest dev
+# Keep this Mac's server on its update channel, chosen in Settings: Dev is the newest dev
 # commit whose server tests passed in CI, and Stable is the latest published release.
 # Usage: scripts/deploy.sh setup   once, from a checkout; it then runs every 30 seconds
 #        polymux-deploy            one deploy pass, as the login job runs it

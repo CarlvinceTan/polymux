@@ -28,7 +28,7 @@ struct UpdatesSettings: View {
                 set: { Updates.shared.automaticallyChecks = $0 }))
             SettingsPicker("Client channel", selection: Binding(get: { Updates.shared.channel.rawValue },
                 set: { if let channel = AppUpdateChannel(rawValue: $0) { Updates.shared.channel = channel } }),
-                options: [("Stable", AppUpdateChannel.stable.rawValue), ("Nightly", AppUpdateChannel.nightly.rawValue)])
+                options: [("Stable", AppUpdateChannel.stable.rawValue), ("Dev", AppUpdateChannel.nightly.rawValue)])
                 .disabled(Updates.shared.checking)
             #else
             LabeledContent("Version", value: Self.version)
@@ -60,7 +60,7 @@ struct UpdatesSettings: View {
             LabeledContent("Version", value: network?.server.build ?? "Not connected")
             SettingsPicker("Server channel", selection: Binding(get: { settings?.value?.updateChannel ?? SettingsUpdateChannel.nightly },
                                                         set: { settings?.edit(SettingsPatch(updateChannel: $0)) }),
-                           options: [("Nightly", SettingsUpdateChannel.nightly), ("Stable", SettingsUpdateChannel.stable)])
+                           options: [("Dev", SettingsUpdateChannel.nightly), ("Stable", SettingsUpdateChannel.stable)])
                 .disabled(settings?.value == nil)
             SettingsPicker("Updates", selection: Binding(get: { settings?.value?.updateMode ?? SettingsUpdateMode.automatic },
                                                         set: { settings?.edit(SettingsPatch(updateMode: $0)) }),
@@ -83,14 +83,14 @@ struct UpdatesSettings: View {
         return "Development"
     }
 
-    /// Nightly or Stable, from the build's update feed (Mac) or TestFlight receipt (iPhone).
+    /// Installed build source, from the Mac update feed or iPhone receipt.
     private static func channel(_ info: [String: Any]) -> String? {
         #if os(macOS)
         guard let feed = info["SUFeedURL"] as? String else { return nil }
-        return feed.contains("dev-updates") ? "Nightly" : "Stable"
+        return feed.contains("dev-updates") ? "Dev" : "Stable"
         #else
         switch Bundle.main.appStoreReceiptURL?.lastPathComponent {
-        case "sandboxReceipt": return "Nightly"
+        case "sandboxReceipt": return "Dev"
         case "receipt": return "Stable"
         default: return nil
         }

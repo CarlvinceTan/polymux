@@ -19,7 +19,7 @@ Download the macOS disk image from the [Releases page](/releases/). Open it, dra
 
 ## The Mac app
 
-The Mac app uses Stable updates by default. To get newer development builds, choose **Nightly** under **Settings › Updates › App update channel**. Switching back to **Stable** waits for a newer stable build rather than reinstalling an older version. **Server channel** controls server updates separately.
+The Mac app uses Stable updates by default. To get newer development builds, choose **Dev** under **Settings › Versions › Client channel**. Switching back to **Stable** waits for a newer stable build rather than reinstalling an older version. **Server channel** controls server updates separately.
 
 The Mac app carries its own copy of the server. On a Mac with no Polymux yet, it starts that server at login and connects to it, with nothing else to install. Turn it off under **Settings › Network › This Mac**.
 

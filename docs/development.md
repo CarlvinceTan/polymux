@@ -1,7 +1,7 @@
 # Development delivery
 
 The development channel follows `dev`; it is separate from public `stable-v*` releases.
-Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac Nightly and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
+Client delivery is push-based but switched off until you opt in. Pushing `dev` always runs validation. With the repository variable `DEV_DELIVERY` set to `true`, the same push also builds the Mac app for the Dev channel and publishes it to the `dev-updates` feed. Setting `IOS_RUNNER` as well uploads the iPhone build to TestFlight from that self-hosted Mac. Without the variable, delivery stays manual (dispatch `dev.yml`).
 
 ## Promote to main
 
@@ -58,7 +58,7 @@ Both clients use the existing `com.flarehq.polymux.app` identifier. The Mac deve
 https://github.com/CarlvinceTan/polymux/releases/download/dev-updates/appcast.xml
 ```
 
-**Nightly:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch. Nightly publishes a signed ZIP for the Mac app updater, not a separate installer. The site's Desktop tab uses the tagged `main` release; its installer is labelled Beta until `1.0.0`. The Phone tab exposes `VITE_TESTFLIGHT_URL` only when it's a TestFlight join link; set it after Apple approves a build and a public link is enabled.
+**Scheduled Dev builds:** `.github/workflows/nightly.yml` runs at 03:00 UTC and dispatches `dev.yml` on `dev` with `ios=false` only when `dev` has moved past the commit in the `dev-updates` release notes. Scheduled runs start from the default branch. The Dev channel publishes a signed ZIP for the Mac app updater, not a separate installer. The site's Desktop tab uses the tagged `main` release; its installer is labelled Beta until `1.0.0`. The Phone tab exposes `VITE_TESTFLIGHT_URL` only when it's a TestFlight join link; set it after Apple approves a build and a public link is enabled.
 
 The repository and Mac prerelease downloads are public. TestFlight access is controlled separately by tester groups. To share the same build externally, add it to a private external group in App Store Connect, submit it for TestFlight App Review when required, and invite testers by email. Builds previously uploaded as internal-only cannot be added to external groups.
 
@@ -109,7 +109,7 @@ The iOS build uses automatic signing: with the API key, Xcode creates and manage
 
 ## First Mac installation
 
-Install the signed, notarized Mac app from the website. In **Settings → Updates**, choose **Nightly** under **App update channel** to use the development feed for future checks. Verify a second build updates the same app through Sparkle. Switching back to **Stable** does not downgrade the installed app or cancel an update already in progress.
+Install the signed, notarized Mac app from the website. In **Settings → Versions**, choose **Dev** under **Client channel** to use the development feed for future checks. Verify a second build updates the same app through Sparkle. Switching back to **Stable** does not downgrade the installed app or cancel an update already in progress.
 
 ## Server deployment
 
@@ -157,7 +157,7 @@ POLYMUX_TEST_TOKEN_FILE=/path/to/test/data/devices/local-token \
 Several comma-separated test addresses exercise the same server through multiple
 providers. Never point these checks at a personal installation.
 
-On the server Mac, run `scripts/deploy.sh setup` from a checkout once. The launch agent polls `dev` every 30 seconds from its own `~/.polymux/src` checkout. The **Server channel** in Settings → Updates picks what it follows: Nightly is `dev`, and Stable is the latest published release. Stable never moves a server backwards, so switching to it waits for the next release newer than the running build. Nightly requires a successful `server` check on the candidate commit and does not run pull-request code on the server.
+On the server Mac, run `scripts/deploy.sh setup` from a checkout once. The launch agent polls `dev` every 30 seconds from its own `~/.polymux/src` checkout. The **Server channel** in Settings → Versions picks what it follows: Dev is `dev`, and Stable is the latest published release. Stable never moves a server backwards, so switching to it waits for the next release newer than the running build. The Dev channel requires a successful `server` check on the candidate commit and does not run pull-request code on the server.
 
 - `~/.polymux/deploy/sha` records the last successfully applied commit, not failed CI candidates.
 - If there are no server/build-script changes, it advances that marker without restarting.
