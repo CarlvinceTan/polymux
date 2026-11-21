@@ -48,14 +48,15 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         following?.cancel()
         following = Task { [weak self] in
             var seen = false
-            let deadline = Date.now.addingTimeInterval(10)
+            let started = Date.now
+            let deadline = started.addingTimeInterval(10)
             while !Task.isCancelled {
                 guard let self else { return }
                 if Permissions.shared.opened == nil { break }
                 if let frame = SystemSettings.frame() {
-                    // Raise Settings once, in case it opened behind Polymux's windows.
-                    if !seen { NSRunningApplication.runningApplications(withBundleIdentifier: SystemSettings.id).first?.activate() }
                     seen = true
+                    // Brings Settings forward for the first seconds, in case it opened behind Polymux.
+                    if !SystemSettings.isFront, Date.now < started.addingTimeInterval(3) { SystemSettings.raise() }
                     place(frame)
                 } else if seen || Date.now > deadline {
                     break
@@ -66,17 +67,30 @@ final class GrantWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Keeps the guide at the bottom-right of the Settings window, where the list is above it.
+    /// Keeps the guide at the bottom-right of the Settings window, on whichever screen it is on,
+    /// and only while Settings is the app in front.
     private func place(_ settings: CGRect) {
-        guard let guide, let screen = NSScreen.screens.first else { return }
-        let top = screen.frame.height - settings.minY
+        guard let guide, let primary = NSScreen.screens.first else { return }
+        guard SystemSettings.isFront else {
+            if guide.isVisible { guide.orderOut(nil) }
+            return
+        }
+        // Window frames have their origin at the top left of the primary screen; AppKit's is bottom left.
+        let flipped = CGRect(x: settings.minX, y: primary.frame.height - settings.maxY,
+                             width: settings.width, height: settings.height)
+        let screen = NSScreen.screens.max { overlap($0.frame, flipped) < overlap($1.frame, flipped) } ?? primary
         let size = guide.frame.size
         let visible = screen.visibleFrame
-        let x = min(max(settings.maxX - size.width - 16, visible.minX + 8), visible.maxX - size.width - 8)
-        let y = min(max(top - settings.height + 16, visible.minY + 8), visible.maxY - size.height - 8)
+        let x = min(max(flipped.maxX - size.width - 16, visible.minX + 8), visible.maxX - size.width - 8)
+        let y = min(max(flipped.minY + 16, visible.minY + 8), visible.maxY - size.height - 8)
         let origin = NSPoint(x: x, y: y)
         if guide.frame.origin != origin { guide.setFrameOrigin(origin) }
         if !guide.isVisible { guide.orderFrontRegardless() }
+    }
+
+    private func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        let i = a.intersection(b)
+        return i.isNull ? 0 : i.width * i.height
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -148,6 +162,15 @@ private final class GrantPanel: NSPanel {
 /// System Settings, which Polymux can only watch from outside.
 enum SystemSettings {
     static let id = "com.apple.systempreferences"
+
+    static var app: NSRunningApplication? { NSRunningApplication.runningApplications(withBundleIdentifier: id).first }
+    static var isFront: Bool { NSWorkspace.shared.frontmostApplication?.bundleIdentifier == id }
+
+    /// Brings Settings and its windows forward.
+    static func raise() {
+        app?.unhide()
+        app?.activate()
+    }
 
     /// Its front window's frame, with the origin at the top left of the main screen.
     static func frame() -> CGRect? {
