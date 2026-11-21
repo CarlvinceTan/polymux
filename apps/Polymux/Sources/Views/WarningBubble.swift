@@ -2,7 +2,7 @@ import SwiftUI
 
 struct WarningBubble: View {
     private static let countWidth: CGFloat = 24
-    static let countInset = countWidth + 12
+    static let countInset = countWidth + 9
 
     let text: String
     var symbol = "exclamationmark.triangle"
@@ -32,7 +32,7 @@ struct WarningBubble: View {
         .overlay(alignment: .trailing) {
             if more > 0 {
                 Text("+\(more)")
-                    .font(.footnote.monospacedDigit())
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.muted)
                     .fixedSize()
                     .frame(width: Self.countWidth, alignment: .leading)
