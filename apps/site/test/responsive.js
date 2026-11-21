@@ -126,30 +126,22 @@ for (const engine of [webkit, chromium]) {
         await drawer.getByRole('button', {name: 'Close', exact: true}).click();
       });
 
-      await context.test('demo selection, native-size zoom, and focus survive folding without reloading', async () => {
+      await context.test('app logo groups and capability links stay visible after folding and resizing', async () => {
         await page.setViewportSize(viewports[3]);
         await page.goto(origin);
-        await page.getByRole('button', {name: 'Nova', exact: true}).click();
-        const zoom = page.getByRole('button', {name: 'Zoom', exact: true});
-        await zoom.click();
-        const dialog = page.getByRole('dialog', {name: 'Native app preview', exact: true});
-        for (const viewport of viewports.slice(0, 5)) {
+        await page.getByRole('link', {name: 'Explore'}).click();
+        assert.equal(new URL(page.url()).hash, '#explore');
+        for (const viewport of viewports) {
           await page.setViewportSize(viewport);
-          await contained(dialog, 'Zoom dialog');
-          await contained(dialog.getByRole('button', {name: 'Close', exact: true}), 'Zoom close button');
-          assert.equal(await dialog.locator('img:not([hidden])').getAttribute('data-native-capture'), 'nova');
-          const scroll = await dialog.locator('.zoom-viewport').evaluate((element) => {
-            element.scrollLeft = element.scrollWidth;
-            return {left: element.scrollLeft, width: element.clientWidth, content: element.scrollWidth};
-          });
-          assert.ok(scroll.content <= scroll.width || scroll.left > 0, 'Native capture must pan inside Zoom.');
-          await noOverflow(page, 'Page with Zoom open');
+          for (const group of await page.locator('#explore .connection-group').all()) {
+            await group.scrollIntoViewIfNeeded();
+            await contained(group, 'App group');
+            assert.equal(await group.getByRole('listitem').count(), 3);
+          }
+          await noOverflow(page, 'Apps and capabilities');
         }
-        await dialog.getByRole('button', {name: 'Close', exact: true}).click();
-        assert.equal(await zoom.evaluate((element) => document.activeElement === element), true);
-        assert.equal(await page.getByRole('button', {name: 'Nova', exact: true}).getAttribute('aria-pressed'), 'true');
-        await page.getByText('Transcript', {exact: true}).click();
-        assert.equal(await page.locator('.transcript').getAttribute('open'), '');
+        await page.getByRole('link', {name: 'Set up access'}).click();
+        await page.waitForURL('**/docs/skills-and-mcp/');
       });
 
       assert.deepEqual(errors, [], 'Browser runtime errors');

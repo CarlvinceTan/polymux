@@ -60,7 +60,7 @@ test('the production server serves prerendered content, metadata, styles, and re
 
 test('production browser bundles contain no Markdown parser, YAML parser, sanitizer, or raw content modules', () => {
   const modules = (Array.isArray(built) ? built : [built]).flatMap((result) => result.output).filter((item) => item.type === 'chunk').flatMap((chunk) => Object.keys(chunk.modules));
-  assert.ok(modules.some((path) => path.includes('/src/components/AgentDemo.svelte')));
+  assert.ok(modules.some((path) => path.includes('/src/pages/home/Connections.svelte')));
   assert.ok(!modules.some((path) => /node_modules\/(?:yaml|marked|dompurify)\//.test(path)));
   assert.ok(!modules.some((path) => /content\/.*\.md/.test(path)));
 });
@@ -96,7 +96,7 @@ test('draft YAML variants never enter emitted HTML, machine docs, or browser bun
   } finally {rmSync(fixture.root, {recursive: true});}
 });
 
-test('the actual production entry hydrates prerendered markup without mismatches and retains demo interactions', async (context) => {
+test('the actual production entry hydrates prerendered markup and the installation tabs work', async (context) => {
   const html = await (await fetch(origin)).text();
   const page = new JSDOM(html, {url: origin, pretendToBeVisual: true});
   const restore = browserGlobals(page.window);
@@ -108,10 +108,11 @@ test('the actual production entry hydrates prerendered markup without mismatches
     await new Promise(setImmediate);
     const document = page.window.document;
     assert.equal(document.querySelectorAll('header.site-header').length, 1);
-    assert.equal(document.querySelectorAll('.agent-demo').length, 1);
-    document.querySelectorAll('.agent-choices button')[1].click();
+    assert.equal(document.querySelectorAll('#explore .connection-map').length, 1);
+    document.getElementById('install-tab-Terminal').click();
     await new Promise(setImmediate);
-    assert.equal(document.querySelector('.native-preview img:not([hidden])').getAttribute('data-native-capture'), 'nova');
+    assert.equal(document.getElementById('install-panel-Terminal').hidden, false);
+    assert.equal(document.getElementById('install-panel-Desktop').hidden, true);
     assert.ok(!warnings.some((message) => message.includes('hydration')), warnings.join('\n'));
   } finally {restore();}
 });
