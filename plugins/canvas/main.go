@@ -24,8 +24,9 @@ import (
 const bodyLimit = 1 << 20
 
 type service struct {
-	book *book
-	scan *scanner
+	book  *book
+	scan  *scanner
+	board *boards
 }
 
 func main() {
@@ -35,7 +36,8 @@ func main() {
 		log.Error("read reports", "error", err)
 		os.Exit(1)
 	}
-	s := &service{book: reports, scan: newScanner(os.Getenv("POLYMUX_PLUGIN_SETTINGS"), log)}
+	s := &service{book: reports, scan: newScanner(os.Getenv("POLYMUX_PLUGIN_SETTINGS"), log),
+		board: &boards{dir: filepath.Join(os.Getenv("POLYMUX_PLUGIN_DATA"), "boards")}}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := s.run(ctx, os.Getenv("POLYMUX_PLUGIN_PORT"), os.Getenv("POLYMUX_PLUGIN_TOKEN")); err != nil {
@@ -64,6 +66,10 @@ func (s *service) handler(token string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /graph", s.graph)
+	if s.board != nil {
+		mux.HandleFunc("GET /board", s.board.serve)
+		mux.HandleFunc("PUT /board", s.board.serve)
+	}
 	mux.HandleFunc("GET /preview", s.preview)
 	mux.HandleFunc("POST /report", s.report)
 	mux.HandleFunc("POST /tools/report_work", s.reportTool)

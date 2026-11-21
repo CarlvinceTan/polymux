@@ -7,6 +7,7 @@ const viewport = document.querySelector("#viewport");
 const map = document.querySelector("#map");
 const nodes = document.querySelector("#nodes");
 const wires = document.querySelector("#wires");
+const connections = document.querySelector("#connections");
 const inspector = document.querySelector("#inspector");
 const details = document.querySelector("#details");
 let selected = "";
@@ -54,16 +55,18 @@ function showDetails(id, focus = false) {
     for (const detail of node.details) list.append(el("dt", detail.label), el("dd", detail.value));
     content.push(list);
   }
+  if (node.manual) content.push(editForm(node, "Title", "Note", "note", saveCard));
   details.replaceChildren(...content);
   if (focus) document.querySelector("#dismiss").focus();
 }
 
-function draw(graph) {
+function draw(graph = liveGraph) {
   const active = document.activeElement?.dataset.id;
   current = new Map((graph.nodes ?? []).map(node => [node.id, node]));
-  const positions = new Map();
+  for (const card of board.cards) current.set(card.id, { ...card, manual: true });
+  positions.clear();
   const columns = [];
-  const pad = 24, dx = 236, dy = 104, width = 192, height = 70;
+  const pad = 80, dx = 240, dy = 110;
   for (const [id, node] of current) {
     let level = 0;
     let parent = node.parent;
@@ -75,31 +78,10 @@ function draw(graph) {
     }
     const row = columns[level] ?? 0;
     columns[level] = row + 1;
-    positions.set(id, [pad + level * dx, pad + row * dy]);
+    const saved = Object.hasOwn(board.positions, id) ? board.positions[id] : null;
+    positions.set(id, saved ? [saved.x, saved.y] : [pad + level * dx, pad + row * dy]);
   }
-  map.style.width = `${pad * 2 + Math.max(0, columns.length - 1) * dx + width}px`;
-  map.style.height = `${pad * 2 + Math.max(0, ...columns.filter(Boolean).map(rows => rows - 1)) * dy + height}px`;
-  const arrow = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" });
-  arrow.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", class: "arrow" }));
-  const defs = svg("defs", {});
-  defs.append(arrow);
-  const paths = [defs];
-  for (const wire of graph.wires ?? []) {
-    const a = positions.get(wire.from), b = positions.get(wire.to);
-    if (!a || !b || a === b) continue;
-    const right = a[0] < b[0];
-    const start = a[0] + (right || a[0] === b[0] ? width : 0);
-    const end = b[0] + (right ? 0 : width);
-    const middle = start === end ? start + 16 : (start + end) / 2;
-    const y1 = a[1] + height / 2, y2 = b[1] + height / 2;
-    const attrs = {
-      d: `M ${start} ${y1} C ${middle} ${y1}, ${middle} ${y2}, ${end} ${y2}`,
-      class: [wire.state === "active" ? "active" : "", ["dashed", "dotted"].includes(wire.line) ? wire.line : ""].join(" "),
-    };
-    if (["forward", "both"].includes(wire.direction)) attrs["marker-end"] = "url(#arrow)";
-    if (["back", "both"].includes(wire.direction)) attrs["marker-start"] = "url(#arrow)";
-    paths.push(svg("path", attrs));
-  }
+  paintWires();
   const buttons = [];
   for (const [id, node] of current) {
     const [x, y] = positions.get(id);
@@ -109,23 +91,90 @@ function draw(graph) {
     button.dataset.id = id;
     button.style.left = `${x}px`;
     button.style.top = `${y}px`;
-    const caption = [states[node.state], node.subtitle].filter(Boolean).join(" · ");
+    const caption = node.manual ? node.note : [states[node.state], node.subtitle].filter(Boolean).join(" · ");
     button.append(el("strong", node.title), el("span", caption));
     button.setAttribute("aria-label", [node.title, caption].filter(Boolean).join(", "));
-    button.addEventListener("click", () => showDetails(id, true));
+    button.addEventListener("click", event => {
+      if (!event.detail) selectCard(id);
+    });
     buttons.push(button);
   }
-  wires.replaceChildren(...paths);
   nodes.replaceChildren(...buttons);
-  viewport.hidden = buttons.length === 0;
-  status.hidden = buttons.length > 0;
-  status.textContent = "No activity yet.";
+  viewport.hidden = false;
+  status.hidden = buttons.length > 0 || tool !== "";
+  status.textContent = "No nodes yet.";
   buttons.find(button => button.dataset.id === active)?.focus({ preventScroll: true });
-  showDetails(selected);
+  if (!details.contains(document.activeElement)) {
+    if (chosenWire) showWire(chosenWire);
+    else showDetails(selected);
+  }
+}
+
+function paintWires() {
+  const arrow = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" });
+  arrow.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", class: "arrow" }));
+  const defs = svg("defs", {});
+  defs.append(arrow);
+  const paths = [defs];
+  const labels = [];
+  for (const wire of [...(liveGraph.wires ?? []), ...board.wires.map(wire => ({ ...wire, direction: "forward", manual: true }))]) {
+    const a = positions.get(wire.from), b = positions.get(wire.to);
+    if (!a || !b || a === b) continue;
+    const { d, x, y, vertical } = route(a, b);
+    const attrs = {
+      d,
+      class: [wire.id === chosenWire ? "chosen" : "", wire.state === "active" ? "active" : "",
+        ["dashed", "dotted"].includes(wire.line) ? wire.line : ""].join(" "),
+    };
+    if (["forward", "both"].includes(wire.direction)) attrs["marker-end"] = "url(#arrow)";
+    if (["back", "both"].includes(wire.direction)) attrs["marker-start"] = "url(#arrow)";
+    paths.push(svg("path", attrs));
+    if (wire.label && !wire.manual) {
+      const label = svg("text", { x: x + 6, y: y - 6 });
+      label.textContent = wire.label;
+      paths.push(label);
+    }
+    if (wire.manual) {
+      const hit = svg("path", { d: attrs.d, class: "wire-hit" });
+      hit.dataset.wire = wire.id;
+      hit.addEventListener("click", () => showWire(wire.id));
+      paths.push(hit);
+      const label = el("button", wire.label || "Wire");
+      label.type = "button";
+      label.className = "wire-label";
+      label.classList.toggle("vertical", vertical);
+      label.dataset.wire = wire.id;
+      label.setAttribute("aria-label", wire.label || "Connection");
+      label.style.left = `${x}px`;
+      label.style.top = `${y}px`;
+      label.addEventListener("click", () => showWire(wire.id));
+      labels.push(label);
+    }
+  }
+  wires.replaceChildren(...paths);
+  connections.replaceChildren(...labels);
+}
+
+function route([ax, ay], [bx, by]) {
+  if (Math.abs(bx - ax) < cardWidth + 16 && Math.abs(by - ay) > cardHeight) {
+    const x1 = ax + cardWidth / 2, x2 = bx + cardWidth / 2;
+    const start = ay + (ay < by ? cardHeight : 0);
+    const end = by + (ay < by ? 0 : cardHeight);
+    const y = (start + end) / 2;
+    return { d: `M ${x1} ${start} V ${y} H ${x2} V ${end}`, x: (x1 + x2) / 2, y, vertical: true };
+  }
+  const separate = Math.abs(bx - ax) > cardWidth;
+  const start = ax + (!separate || ax < bx ? cardWidth : 0);
+  const end = bx + (!separate || ax > bx ? cardWidth : 0);
+  const x = separate ? (start + end) / 2 : Math.max(start, end) + 24;
+  const y1 = ay + cardHeight / 2, y2 = by + cardHeight / 2;
+  return { d: `M ${start} ${y1} H ${x} V ${y2} H ${end}`, x, y: (y1 + y2) / 2, vertical: false };
 }
 
 document.querySelector("#dismiss").addEventListener("click", () => {
   const match = Array.from(nodes.children).find(button => button.dataset.id === selected);
+  chosenWire = "";
+  paintWires();
   showDetails("");
   match?.focus({ preventScroll: true });
 });
@@ -198,9 +247,11 @@ async function refresh() {
     ]);
     const graph = withActivity(reports, activity);
     const signature = JSON.stringify(graph);
-    if (signature !== previous) {
-      draw(graph);
+    if (signature !== previous && !gesture && !details.contains(document.activeElement)) {
+      liveGraph = graph;
       previous = signature;
+      draw();
+      if (!fitted && positions.size) { fitted = true; fit(); }
     }
   } catch {
     if (!previous) status.textContent = "Canvas is unavailable.";
@@ -208,4 +259,3 @@ async function refresh() {
     setTimeout(refresh, 3000);
   }
 }
-refresh();

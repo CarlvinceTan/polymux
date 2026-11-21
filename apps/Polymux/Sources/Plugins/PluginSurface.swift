@@ -31,6 +31,9 @@ import PolymuxKit
     @ViewBuilder static func view(_ plugin: Plugin, session: AppSession, openChat: @escaping (String) -> Void) -> some View {
         if plugin.surface == workspace {
             PluginWeb(plugin: plugin, chat: "", client: session.client, close: {}).id(plugin.name)
+                #if os(macOS)
+                .ignoresSafeArea(.container, edges: .top)
+                #endif
         }
     }
 

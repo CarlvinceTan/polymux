@@ -7,6 +7,7 @@
   <title>Canvas</title>
   <link rel="stylesheet" href="canvas.css">
   <script src="canvas.js" defer></script>
+  <script src="editor.js" defer></script>
 </head>
 <body>
   <main aria-label="Canvas">
@@ -14,9 +15,15 @@
     <div id="viewport" hidden role="region" aria-label="Work map" tabindex="0">
       <div id="map">
         <svg id="wires" aria-hidden="true"></svg>
+        <div id="connections"></div>
         <div id="nodes"></div>
       </div>
     </div>
+    <nav id="tools" aria-label="Canvas tools" hidden>
+      <div class="toolgroup" id="history"></div>
+      <div class="toolgroup" id="drawing"></div>
+    </nav>
+    <p id="notice" role="status" hidden></p>
     <aside id="inspector" hidden aria-label="Selection">
       <button id="dismiss" type="button" aria-label="Close details">Close</button>
       <div id="details"></div>

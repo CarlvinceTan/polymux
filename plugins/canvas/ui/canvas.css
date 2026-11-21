@@ -8,17 +8,31 @@
 }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--paper); color: CanvasText; }
-main { position: relative; height: 100dvh; }
+main { position: relative; height: 100dvh; overflow: hidden; }
 #status { display: grid; height: 100%; margin: 0; place-items: center; text-align: center; }
-#viewport { height: 100%; overflow: auto; }
-#map { position: relative; margin: auto; min-height: 100%; }
-#wires, #nodes { position: absolute; inset: 0; }
+#viewport { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+#viewport[data-tool] { cursor: crosshair; }
+#viewport.dragging, #viewport.dragging .node { cursor: grabbing; }
+#map { position: absolute; top: 0; left: 0; width: 1px; height: 1px; transform-origin: 0 0; }
+#wires, #nodes, #connections { position: absolute; inset: 0; }
 #wires { width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 #wires path { fill: none; stroke: var(--line); stroke-width: 1.5; }
 #wires .active { stroke: var(--accent); stroke-width: 2.5; }
 #wires .dashed { stroke-dasharray: 6 4; }
 #wires .dotted { stroke-dasharray: 2 4; }
 #wires .arrow { fill: var(--line); stroke: none; }
+#wires .wire-hit { stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
+#wires .chosen { stroke: var(--accent); stroke-width: 3; }
+#wires text { fill: CanvasText; font-size: 12px; paint-order: stroke; stroke: var(--paper); stroke-width: 5px; }
+#connections { pointer-events: none; }
+.wire-label {
+  position: absolute; transform: translate(-50%, -50%); pointer-events: auto;
+  width: max-content; max-width: 144px; min-width: 24px; min-height: 24px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 2px 6px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: CanvasText; font: 12px system-ui; cursor: pointer;
+}
+.wire-label.vertical { transform: translate(28px, -50%); }
 .node {
   position: absolute;
   display: flex;
@@ -35,17 +49,18 @@ main { position: relative; height: 100dvh; }
   color: inherit;
   font: inherit;
   text-align: start;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
 }
 .node :is(strong, span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
 .node span { font-size: 12px; }
 .node:is(:hover, :focus-visible, [aria-pressed="true"]) { outline: 2px solid var(--accent); outline-offset: 2px; }
 #inspector {
   position: absolute;
-  inset: auto 12px 12px auto;
+  inset: 12px 12px auto auto;
   box-sizing: border-box;
   width: min(320px, calc(100% - 24px));
-  max-height: 50%;
+  max-height: calc(100% - 24px);
   overflow: auto;
   background: var(--card);
   border: 1px solid var(--line);
@@ -58,3 +73,30 @@ main { position: relative; height: 100dvh; }
 #details img { max-width: 100%; border-radius: 8px; }
 #details dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; }
 #details dd { margin: 0; }
+#details form { display: grid; gap: 12px; clear: both; }
+#details label { display: grid; gap: 4px; }
+#details :is(input, textarea) { box-sizing: border-box; width: 100%; padding: 7px; font: inherit; }
+#details textarea { resize: vertical; }
+#details form > div { display: flex; gap: 8px; }
+#details form button { min-height: 36px; font: inherit; }
+#tools { position: absolute; inset: 50% auto auto 12px; transform: translateY(-50%); display: grid; gap: 8px; }
+.toolgroup { display: grid; padding: 3px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.toolgroup button {
+  display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+  color: CanvasText; background: transparent; border: 0; border-radius: 6px; cursor: pointer;
+}
+.toolgroup button:is(:hover, [aria-pressed="true"]) { background: var(--paper); color: var(--accent); }
+.toolgroup button:disabled { opacity: .45; cursor: default; }
+.toolgroup svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#notice { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); margin: 0; max-width: 70%; padding: 6px 10px; border-radius: 8px; background: var(--card); pointer-events: none; }
+@media (pointer: coarse) {
+  .toolgroup button, #details form button { min-width: 44px; min-height: 44px; }
+  #details :is(input, textarea) { font-size: 16px; }
+}
+@media (max-width: 520px) {
+  #inspector { inset: auto 8px 8px 8px; width: auto; max-height: 48%; }
+}
+@media (max-height: 470px) {
+  #tools { inset: 8px auto auto 8px; transform: none; }
+  .toolgroup { display: flex; }
+}

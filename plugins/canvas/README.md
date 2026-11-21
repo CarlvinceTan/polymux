@@ -1,6 +1,6 @@
 # Canvas
 
-Shows bot activity, handoffs, repositories and agent reports as a map. The plugin ships its own screen and opens above the chats or in a chat's side panel. It reads activity but never starts or changes work. Requires a client and server with [web workspace support](../../docs/plugins.md#web-pages).
+Shows bot activity, handoffs, repositories and agent reports on an editable board. Add cards and connections, edit their details, or drag live nodes into place. The plugin saves the workspace and each chat's board separately; board edits never start or change the underlying bot work. Requires a client and server with [web workspace support](../../docs/plugins.md#web-pages).
 
 ## Settings
 

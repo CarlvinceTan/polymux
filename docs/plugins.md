@@ -128,7 +128,7 @@ A transport adds `"provides": ["transport"]` and, if it has options, `"settings"
 
 ## Activity
 
-The [Canvas plugin](../plugins/canvas) owns its map UI, repository scans, and agent reports. Its page combines the host's read-only activity summaries with its own graph. Opening it in a chat filters the view, not who can read a report.
+The [Canvas plugin](../plugins/canvas) owns its editor, repository scans, and agent reports. It combines read-only activity summaries with editable cards, wires, and positions. The workspace and each chat save their own board. Opening it in a chat filters the live activity shown, not who can read a report.
 
 ## Official plugins
 

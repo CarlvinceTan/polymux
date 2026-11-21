@@ -193,11 +193,31 @@ def checks():
     check("it's called Canvas", plugin["title"] == "Canvas", plugin)
     check("it installs as a workspace", plugin["kind"] == "both" and plugin["surface"] == "web-workspace"
           and plugin.get("page") == "index.html", plugin)
-    for asset, content in {"index.html": b"Work map", "canvas.js": b"withActivity", "canvas.css": b"#viewport"}.items():
+    for asset, content in {"index.html": b"Work map", "canvas.js": b"withActivity",
+                           "editor.js": b"createCard", "canvas.css": b"#viewport"}.items():
         check(f"it serves packaged {asset}", content in fetch(f"/plugins/{NAME}/ui/{asset}"))
     layout = api("GET", "/plugins")["layout"]
     check("it gets a chat button, not a switcher tab", NAME not in layout["switcher"] and [NAME] in layout["buttons"], layout)
     check("it takes a chat list like a Scoped plugin", api("PATCH", f"/plugins/{NAME}", {"chats": [linus]})["chats"] == [linus])
+    board = f"/plugins/{NAME}/api/board"
+    def board_ready():
+        try:
+            return api("GET", board)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 503:
+                raise
+    original = wait("board service", board_ready)
+    changed = {**original, "cards": [{"id": "card:plan", "title": "Plan", "note": ""}],
+               "positions": {"card:plan": {"x": -72, "y": 288}}}
+    saved = api("PUT", board, changed)
+    check("the workspace saves node positions", saved["revision"] == 1 and api("GET", board) == saved)
+    check("chat boards start separate", api("GET", f"{board}?chat={linus}") == original)
+    try:
+        api("PUT", board, {**changed, "cards": [], "positions": {}})
+    except urllib.error.HTTPError as exc:
+        check("a stale edit cannot overwrite a newer board", exc.code == 409 and json.load(exc) == saved)
+    else:
+        check("a stale edit cannot overwrite a newer board", False)
 
     print("repositories", flush=True)
     path = repository()
@@ -290,6 +310,7 @@ def checks():
             return None
         return nodes if any(n["id"] == "claude-1" for n in nodes) else None
     check("reports survive a restart", wait("restart", recovered, 60))
+    check("board edits survive a restart", api("GET", board) == saved)
 
     print("removing", flush=True)
     api("DELETE", f"/plugins/{NAME}")
