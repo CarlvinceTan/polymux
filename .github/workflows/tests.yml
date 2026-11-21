@@ -16,6 +16,10 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       server: ${{ steps.paths.outputs.server }}
       swift: ${{ steps.paths.outputs.swift }}
@@ -25,6 +29,8 @@ jobs:
         with:
           fetch-depth: 0
       - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci.py >> "$GITHUB_OUTPUT"
       - name: Promotion baseline ${{ steps.paths.outputs.promotion_base }}
         run: ':'
@@ -43,13 +49,6 @@ jobs:
           cache-dependency-path: |
             apps/server/go.sum
             packages/*/go.sum
-      - name: Vet
-        if: needs.changes.outputs.server == 'true'
-        run: |
-          (cd apps/server && go vet -tags sqlite_fts5 ./...)
-          for package in runtime memory search vault; do
-            (cd "packages/$package" && GOWORK=off go vet ./...)
-          done
       - name: Test (race, evals included)
         if: needs.changes.outputs.server == 'true'
         run: |
@@ -62,6 +61,25 @@ jobs:
       - name: Server unchanged
         if: needs.changes.outputs.server != 'true'
         run: echo 'No server inputs changed; retain a successful server check for the deployer.'
+
+  vet:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: |
+            apps/server/go.sum
+            packages/*/go.sum
+      - name: Vet
+        run: |
+          (cd apps/server && go vet -tags sqlite_fts5 ./...)
+          for package in runtime memory search vault; do
+            (cd "packages/$package" && GOWORK=off go vet ./...)
+          done
 
   plugins:
     needs: changes
@@ -106,6 +124,9 @@ jobs:
         with:
           xcode-version: latest-stable
       - run: swift test
+      # Reuses the build above; the macOS job only compiles the renderer checks.
+      - name: AvatarKit C client
+        run: scripts/test-avatar.sh --reuse-build client
 
   macos:
     needs: changes
@@ -120,7 +141,7 @@ jobs:
         run: scripts/check.sh macos
       - name: Native renderer and input checks
         run: |
-          scripts/test-avatar.sh --reuse-build
+          scripts/test-avatar.sh --reuse-build render
           scripts/test-window.sh --reuse-build
           python3 -B apps/Polymux/Tests/InputTests/check_focus.py
 

@@ -3,7 +3,10 @@ import subprocess
 import tempfile
 import unittest
 
-from ci import affected, changed, plan, selection
+import os
+from unittest.mock import patch
+
+from ci import affected, changed, plan, reused, selection
 
 
 class SelectionTests(unittest.TestCase):
@@ -71,6 +74,22 @@ class SelectionTests(unittest.TestCase):
             event = {"ref": "refs/heads/dev", "before": "HEAD~1"}
             result, _ = plan(event, "push", "HEAD", lambda base: changed(base, repo))
             self.assertTrue(result["server"])
+
+    def test_main_push_asks_for_reuse_only_with_a_token(self):
+        main = {"ref": "refs/heads/main", "before": "old"}
+        calls = []
+        def find(*args):
+            calls.append(args)
+            return "candidate"
+        with patch.dict(os.environ, {"GH_TOKEN": "t", "GITHUB_REPOSITORY": "o/r", "GITHUB_SHA": "merge"}):
+            self.assertEqual(reused(main, "push", "tree", find), "candidate")
+            self.assertEqual(calls, [("o/r", "merge", "old", "tree")])
+            for event, kind in (({"ref": "refs/heads/dev"}, "push"), (main, "workflow_dispatch"),
+                                ({"ref": "refs/tags/v1"}, "push")):
+                self.assertIsNone(reused(event, kind, "tree", find))
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(reused(main, "push", "tree", find))
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

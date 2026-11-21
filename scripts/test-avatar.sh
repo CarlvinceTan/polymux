@@ -1,5 +1,6 @@
 #!/bin/bash
 # Check the native avatar compositor without launching the app.
+# Usage: scripts/test-avatar.sh [--reuse-build] [render|client]; no mode runs both.
 set -euo pipefail
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 if [ "${1:-}" != --locked ]; then
@@ -7,11 +8,16 @@ if [ "${1:-}" != --locked ]; then
 fi
 shift
 cd "$ROOT"
-[ "${1:-}" = --reuse-build ] || scripts/check.sh --locked macos
+REUSE=0
+if [ "${1:-}" = --reuse-build ]; then REUSE=1; shift; fi
+MODE=${1:-all}
+case $MODE in all|render|client) ;; *) echo "Unknown mode: $MODE" >&2; exit 2 ;; esac
+if [ "$MODE" != client ] && [ "$REUSE" = 0 ]; then scripts/check.sh --locked macos; fi
 PRODUCTS="$ROOT/.build/xcode-test/Build/Products/Debug"
 OUT=$(mktemp -d -t polymux-avatar)
 trap 'rm -rf "$OUT"' EXIT
-xcrun swiftc -swift-version 6 -parse-as-library -module-name AvatarRenderChecks \
+if [ "$MODE" != client ]; then
+xcrun swiftc -j "$(sysctl -n hw.ncpu)" -swift-version 6 -parse-as-library -module-name AvatarRenderChecks \
   -I "$PRODUCTS" -I "$PRODUCTS/include" -I packages/CSQLite \
   -Xcc -fmodule-map-file="$ROOT/packages/CSQLite/module.modulemap" \
   apps/Polymux/Sources/Avatar/*.swift \
@@ -33,7 +39,9 @@ except subprocess.TimeoutExpired:
     raise SystemExit(f"Avatar rendering stalled for more than {limit} seconds")
 raise SystemExit(code)
 PY
+fi
 
+if [ "$MODE" != render ]; then
 swift build --product AvatarKitC
 BIN=$(swift build --show-bin-path)
 xcrun clang -std=c11 -Wall -Wextra -Werror \
@@ -42,3 +50,4 @@ xcrun clang -std=c11 -Wall -Wextra -Werror \
   -L "$BIN" -lAvatarKitC -framework CoreGraphics \
   -Wl,-rpath,"$BIN" -o "$OUT/c-client"
 "$OUT/c-client"
+fi

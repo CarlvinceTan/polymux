@@ -1,9 +1,13 @@
 """Select native checks without skipping the server deployment status."""
 
+import contextlib
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+
+import promotion
 
 
 def affected(paths):
@@ -51,13 +55,27 @@ def plan(event, kind, main=None, diff=changed):
     return affected([path for path_set in paths for path in path_set]), main if dev else "full"
 
 
+def reused(event, kind, tree, find=promotion.reusable):
+    """The dev commit already verified for this exact main tree, so its checks needn't rerun."""
+    if kind != "push" or event.get("ref") != "refs/heads/main" or not os.environ.get("GH_TOKEN"):
+        return None
+    with contextlib.redirect_stdout(sys.stderr):
+        return find(os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_SHA", ""),
+                    event.get("before", ""), tree)
+
+
 if __name__ == "__main__":
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     main = subprocess.run(
         ["git", "rev-parse", "--verify", "refs/remotes/origin/main"],
         capture_output=True, text=True,
     ).stdout.strip()
-    result, baseline = plan(event, os.environ["GITHUB_EVENT_NAME"], main)
+    tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], capture_output=True, text=True).stdout.strip()
+    candidate = reused(event, os.environ["GITHUB_EVENT_NAME"], tree)
+    if candidate:
+        result, baseline = dict.fromkeys(("server", "swift", "plugins", "site"), False), f"reused {candidate[:8]}"
+    else:
+        result, baseline = plan(event, os.environ["GITHUB_EVENT_NAME"], main)
     print(f"promotion_base={baseline}")
     for name, value in result.items():
         print(f"{name}={str(value).lower()}")

@@ -33,10 +33,10 @@ def has_baseline(jobs, base):
     ))
 
 
-def verify(repo, head, base=None, allow_missing=False):
+def verify(repo, head, base=None, allow_missing=False, attempts=75):
     actions = f"repos/{repo}/actions"
     workflows = WORKFLOWS if base else ("tests.yml",)
-    for _ in range(75):
+    for _ in range(attempts):
         pending = []
         validated = {}
         for workflow in workflows:
@@ -65,6 +65,26 @@ def verify(repo, head, base=None, allow_missing=False):
         print(f"Waiting for {head[:8]}: {', '.join(pending)}", flush=True)
         time.sleep(20)
     raise ValueError("Timed out waiting for the dev push checks.")
+
+
+def reusable(repo, head, base, tree):
+    """Return the dev commit whose finished checks already cover this main push, else None."""
+    try:
+        if not base or set(base) == {"0"}:
+            return None
+        pulls = api(f"repos/{repo}/commits/{head}/pulls")
+        for pull in pulls:
+            if (pull.get("merged_at") and pull["base"]["ref"] == "main" and pull["head"]["ref"] == "dev"
+                    and pull["head"]["repo"]["full_name"] == repo):
+                candidate = pull["head"]["sha"]
+                if api(f"repos/{repo}/git/commits/{candidate}")["tree"]["sha"] != tree:
+                    continue
+                # One attempt: unfinished runs fall back to a full run instead of waiting.
+                if verify(repo, candidate, base, attempts=1):
+                    return candidate
+    except (ValueError, KeyError, TypeError, subprocess.CalledProcessError):
+        pass
+    return None
 
 
 if __name__ == "__main__":
