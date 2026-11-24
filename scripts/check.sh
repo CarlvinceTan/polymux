@@ -7,13 +7,16 @@ if [ "${1:-}" != --locked ]; then
   exec python3 "$ROOT/scripts/lib/locked.py" "$ROOT/.build/locks/xcode.lock" -- "$0" --locked "$@"
 fi
 shift
+# shellcheck source=lib/seed.sh
+. "$ROOT/scripts/lib/seed.sh"
 LOG=$(mktemp "${TMPDIR:-/tmp}/polymux-build.XXXXXX")
 trap 'rm -f "$LOG"' EXIT
 
 build() {
   destination=$1; data=$2
+  seed_packages "$data"
   if xcodebuild build -quiet -project "$ROOT/apps/Polymux/Polymux.xcodeproj" -scheme Polymux -configuration Debug \
-    -destination "$destination" -derivedDataPath "$ROOT/.build/$data" CODE_SIGNING_ALLOWED=NO >"$LOG" 2>&1; then
+    -destination "$destination" -derivedDataPath "$ROOT/.build/$data" CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO >"$LOG" 2>&1; then
     echo "$destination: ok"
   else
     status=$?

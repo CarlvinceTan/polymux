@@ -63,6 +63,7 @@ class ToolingTests(unittest.TestCase):
         scripts = self.root / "scripts"
         self.executable(scripts / "check.sh", (SCRIPTS / "check.sh").read_text())
         self.executable(scripts / "lib/locked.py", LOCKED.read_text())
+        self.executable(scripts / "lib/seed.sh", (SCRIPTS / "lib/seed.sh").read_text())
         calls = self.root / "calls"
         self.executable(self.root / "bin/xcodebuild", '#!/bin/sh\necho build >> "$CALLS"\nsleep 30\n')
         process = subprocess.Popen([str(scripts / "check.sh"), "all"],
@@ -81,6 +82,7 @@ class ToolingTests(unittest.TestCase):
         scripts = self.root / "scripts"
         self.executable(scripts / "check.sh", (SCRIPTS / "check.sh").read_text())
         self.executable(scripts / "lib/locked.py", LOCKED.read_text())
+        self.executable(scripts / "lib/seed.sh", (SCRIPTS / "lib/seed.sh").read_text())
         self.executable(self.root / "bin/xcodebuild", '#!/bin/sh\nexit 0\n')
         destination = self.root / "existing.app"
         destination.mkdir()

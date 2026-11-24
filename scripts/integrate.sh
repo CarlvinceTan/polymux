@@ -118,3 +118,5 @@ if ! git -C "$main" merge --ff-only "$new" >/dev/null; then
 	exit 1
 fi
 echo "Integrated $source into dev: $old..$(git -C "$main" rev-parse --short HEAD)"
+# Free the build output of worktrees nobody has touched for days; never fails the integration.
+"$main/scripts/prune.sh" --apply || true

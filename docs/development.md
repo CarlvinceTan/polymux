@@ -242,7 +242,8 @@ Use the shared entrypoints rather than duplicating build commands:
 | `scripts/test.sh swift [args...]` | Swift package tests; filters and other arguments are forwarded. |
 | `scripts/test.sh tools` | Script regression tests, without contacting deployment services. |
 | `scripts/test.sh all` | All four suites; select an explicit suite to pass arguments. |
-| `scripts/check.sh [macos\|ios\|all]` | Compile without launching. Shares the build lock with app runners and packaging. |
+| `scripts/check.sh [macos\|ios\|all]` | Compile without launching, with no index store. A new worktree's build folder starts from the dev checkout's resolved packages (an APFS clone, so it costs no disk). Shares the build lock with app runners and packaging. |
+| `scripts/prune.sh [--apply] [--days n]` | Remove build output from agent worktrees idle for n days (default 2); a dry run unless `--apply`. `scripts/integrate.sh` runs it after each integration. |
 | `scripts/run.sh --server` | A server with throwaway data; also used by `make run` in `apps/server`. |
 | `scripts/run.sh --fixture <flags>` | An isolated fixture app without building or launching the Go server. |
 | `scripts/run.sh --fresh` | The app as a new install: no server is started, so it runs its own under a launchd job of that instance's. |
