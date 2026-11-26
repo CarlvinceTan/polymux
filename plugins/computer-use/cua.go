@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -21,13 +22,18 @@ import (
 // One lane owns the connection, including initialization. No action is retried.
 type cuaDriver struct {
 	command string
-	once    sync.Once
-	lane    chan struct{}
-	child   *connection
+	// embedded runs the driver inside this process's TCC chain, so Polymux Server's own Accessibility
+	// and Screen Recording grants apply and CuaDriver.app needs none. POLYMUX_CUA_EMBEDDED=0 turns it off.
+	embedded bool
+	once     sync.Once
+	lane     chan struct{}
+	child    *connection
 }
 
 type connection struct {
 	cmd     *exec.Cmd
+	daemon  *exec.Cmd // the embedded daemon the proxy talks to, if any
+	dir     string    // private folder holding the daemon's socket
 	in      io.WriteCloser
 	out     io.ReadCloser
 	lines   *bufio.Scanner
@@ -70,8 +76,57 @@ func (d *cuaDriver) acquire(ctx context.Context) error {
 	}
 }
 
-func launch(command string) (*connection, error) {
-	cmd := exec.Command(command, "mcp")
+// hostID labels embedded output; it is advisory, since trust comes from the process chain.
+const hostID = "com.flarehq.polymux.server"
+
+// startDaemon runs `serve --embedded` as a direct child, which keeps it in this process's TCC chain,
+// and waits until its private socket accepts connections.
+func startDaemon(command string) (*exec.Cmd, string, error) {
+	dir, err := os.MkdirTemp("", "polymux-cua-")
+	if err != nil {
+		return nil, "", err
+	}
+	socket := filepath.Join(dir, "driver.sock")
+	daemon := exec.Command(command, "serve", "--embedded", "--socket", socket)
+	daemon.Env = append(os.Environ(), "CUA_DRIVER_EMBEDDED=1", "CUA_DRIVER_HOST_BUNDLE_ID="+hostID)
+	if err := daemon.Start(); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, "", fmt.Errorf("can't start cua-driver: %w", err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = daemon.Wait(); close(exited) }()
+	for range 100 {
+		if conn, err := net.Dial("unix", socket); err == nil {
+			_ = conn.Close()
+			return daemon, dir, nil
+		}
+		select {
+		case <-exited:
+			_ = os.RemoveAll(dir)
+			return nil, "", errors.New("cua-driver stopped before it was ready")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	_ = daemon.Process.Kill()
+	_ = os.RemoveAll(dir)
+	return nil, "", errors.New("cua-driver did not become ready")
+}
+
+func launch(command string, embedded bool) (*connection, error) {
+	args := []string{"mcp"}
+	var daemon *exec.Cmd
+	var dir string
+	if embedded {
+		var err error
+		if daemon, dir, err = startDaemon(command); err != nil {
+			return nil, err
+		}
+		args = []string{"mcp", "--embedded", "--socket", filepath.Join(dir, "driver.sock")}
+	}
+	cmd := exec.Command(command, args...)
+	if embedded {
+		cmd.Env = append(os.Environ(), "CUA_DRIVER_EMBEDDED=1", "CUA_DRIVER_HOST_BUNDLE_ID="+hostID)
+	}
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -82,11 +137,12 @@ func launch(command string) (*connection, error) {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		stopDaemon(daemon, dir)
 		return nil, fmt.Errorf("can't start cua-driver: %w", err)
 	}
 	lines := bufio.NewScanner(out)
 	lines.Buffer(make([]byte, 64<<10), 16<<20)
-	return &connection{cmd: cmd, in: in, out: out, lines: lines, session: "polymux-" + rand.Text()}, nil
+	return &connection{cmd: cmd, daemon: daemon, dir: dir, in: in, out: out, lines: lines, session: "polymux-" + rand.Text()}, nil
 }
 
 func (c *connection) send(method string, params any) (json.RawMessage, error) {
@@ -145,7 +201,17 @@ func (c *connection) initialize() error {
 	return json.NewEncoder(c.in).Encode(map[string]string{"jsonrpc": "2.0", "method": "notifications/initialized"})
 }
 
+func stopDaemon(daemon *exec.Cmd, dir string) {
+	if daemon != nil && daemon.Process != nil {
+		_ = daemon.Process.Kill()
+	}
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
+}
+
 func (c *connection) interrupt() {
+	stopDaemon(c.daemon, c.dir)
 	_ = c.cmd.Process.Kill()
 	_ = c.in.Close()
 	_ = c.out.Close()
@@ -158,7 +224,7 @@ func (d *cuaDriver) request(ctx context.Context, method string, params any) (jso
 	defer func() { <-d.lane }()
 	fresh := d.child == nil
 	if fresh {
-		child, err := launch(d.command)
+		child, err := launch(d.command, d.embedded)
 		if err != nil {
 			return nil, err
 		}
@@ -299,7 +365,7 @@ var cuaSpec = Spec{
 		"browser_type":     "tab_id target_id ref text",
 	},
 	Check:   checkCua,
-	Missing: "If a call says cua-driver isn't running or lacks permission, tell the user to open CuaDriver.app on that computer and grant Accessibility and Screen Recording.",
+	Missing: "If a call says cua-driver lacks permission, tell the user to grant Accessibility and Screen Recording to Polymux Server under Settings > General > Permissions on that computer.",
 }
 
 func checkCua(tool string, args map[string]any) string {

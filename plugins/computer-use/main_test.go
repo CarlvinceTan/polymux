@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -19,6 +21,10 @@ import (
 // TestMain doubles as a fake `cua-driver mcp` when FAKE_CUA is set.
 func TestMain(m *testing.M) {
 	if os.Getenv("FAKE_CUA") != "" {
+		if len(os.Args) > 1 && os.Args[1] == "serve" {
+			fakeDaemon()
+			return
+		}
 		fakeDriver()
 		return
 	}
@@ -82,7 +88,7 @@ func testDriver(t *testing.T) *cuaDriver {
 		t.Fatal(err)
 	}
 	script := filepath.Join(t.TempDir(), "cua-driver")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nFAKE_CUA=1 exec "+binary+"\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nFAKE_CUA=1 exec "+binary+" \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	d := &cuaDriver{command: script}
@@ -219,5 +225,70 @@ func TestBrowserPolicy(t *testing.T) {
 		if reason := cuaSpec.check(args); (reason == "") != tc.ok {
 			t.Errorf("%s: %q", tc.raw, reason)
 		}
+	}
+}
+
+// fakeDaemon stands in for `cua-driver serve --embedded`: it listens on the socket it is given.
+func fakeDaemon() {
+	var socket string
+	for i, arg := range os.Args {
+		if arg == "--socket" && i+1 < len(os.Args) {
+			socket = os.Args[i+1]
+		}
+	}
+	if os.Getenv("CUA_DRIVER_EMBEDDED") != "1" || os.Getenv("CUA_DRIVER_HOST_BUNDLE_ID") == "" {
+		os.Exit(3)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		os.Exit(4)
+	}
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}
+}
+
+// An embedded driver starts its daemon as its own child, talks to it over a private socket, and
+// leaves no process or folder behind once closed.
+func TestEmbeddedDriverStartsAndCleansUpItsDaemon(t *testing.T) {
+	d := testDriver(t)
+	d.embedded = true
+	if _, err := d.request(t.Context(), "tools/list", nil); err != nil {
+		t.Fatalf("embedded call: %v", err)
+	}
+	child := d.child
+	if child == nil || child.daemon == nil || child.dir == "" {
+		t.Fatalf("no embedded daemon: %+v", child)
+	}
+	if info, err := os.Stat(child.dir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("socket folder %v, %v", info, err)
+	}
+	pid, dir := child.daemon.Process.Pid, child.dir
+	d.close()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("socket folder left behind: %v", err)
+	}
+	if err := syscall.Kill(pid, 0); err == nil {
+		// Killed but not yet reaped is fine; a running daemon is not.
+		time.Sleep(200 * time.Millisecond)
+		if syscall.Kill(pid, 0) == nil {
+			t.Fatalf("daemon %d still running", pid)
+		}
+	}
+}
+
+func TestEmbeddedIsTheDefaultAndCanBeTurnedOff(t *testing.T) {
+	t.Setenv("POLYMUX_COMPUTER_DRIVER", "")
+	t.Setenv("POLYMUX_CUA_EMBEDDED", "")
+	if d, _ := newDriver(); !d.(*cuaDriver).embedded {
+		t.Fatal("cua-driver should run embedded by default, so Polymux Server's grants apply")
+	}
+	t.Setenv("POLYMUX_CUA_EMBEDDED", "0")
+	if d, _ := newDriver(); d.(*cuaDriver).embedded {
+		t.Fatal("POLYMUX_CUA_EMBEDDED=0 should turn it off")
 	}
 }

@@ -85,7 +85,7 @@ func (s Spec) check(i input) string {
 func newDriver() (Driver, error) {
 	switch name := os.Getenv("POLYMUX_COMPUTER_DRIVER"); name {
 	case "", "cua-driver":
-		return &cuaDriver{command: driverPath()}, nil
+		return &cuaDriver{command: driverPath(), embedded: os.Getenv("POLYMUX_CUA_EMBEDDED") != "0"}, nil
 	case "agent-desktop":
 		return &desktopDriver{command: desktopPath()}, nil
 	default:
