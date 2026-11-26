@@ -167,7 +167,7 @@ On the server Mac, run `scripts/deploy.sh setup` from a checkout once. The launc
 - To retry a quarantined commit after diagnosing it, remove that marker deliberately and run `~/.local/bin/polymux-deploy`. Prefer pushing a fixed commit.
 - Logs: `~/.polymux/logs/deploy.log` and `~/.polymux/logs/launchd.log`.
 
-The existing installer takes data backups; the deployer retains the newest ten. Rollback restores **only the binary**, not data. Schema changes must remain backward compatible with the previous binary or have a separately approved recovery plan.
+The installer takes data backups as APFS clones and keeps the newest ten. Rollback restores **only the binary**, not data. Schema changes must remain backward compatible with the previous binary or have a separately approved recovery plan.
 
 ## Safe update handoff
 

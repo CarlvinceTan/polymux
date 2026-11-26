@@ -133,8 +133,6 @@ deploy() {
         return 1
       fi
     fi
-    # install.sh backs up data on every deploy; keep the newest ten.
-    ls -1dt "$HOME/.polymux/backups"/data-* 2>/dev/null | tail -n +11 | while read -r dir; do rm -rf "$dir"; done
     # The next pass runs this commit's deploy script.
     if [ -f "$SRC/scripts/deploy.sh" ]; then install -S -m 0755 "$SRC/scripts/deploy.sh" "$BIN/polymux-deploy"; fi
   fi

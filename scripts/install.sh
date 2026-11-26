@@ -22,7 +22,12 @@ backup() {
   done
   for attempt in 1 2 3; do
     rm -rf "$dest"
-    if ditto "$HOME_DIR/data" "$dest"; then return 0; fi
+    # APFS clones share unchanged blocks, so a backup costs only what changed since.
+    if cp -cRp "$HOME_DIR/data" "$dest" 2>/dev/null || { rm -rf "$dest"; ditto "$HOME_DIR/data" "$dest"; }; then
+      # Keep the newest ten.
+      ls -1dt "$HOME_DIR/backups"/data-* | tail -n +11 | while read -r dir; do rm -rf "$dir"; done
+      return 0
+    fi
     [ "$attempt" = 3 ] || sleep 2
   done
   rm -rf "$dest"
