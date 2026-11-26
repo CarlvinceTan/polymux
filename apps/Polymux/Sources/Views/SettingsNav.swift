@@ -6,9 +6,14 @@ struct SettingsNav: View {
     @State private var query = ""
     @State private var chosen: String?
     @State private var hovered: String?
+    @Namespace private var selection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Matches the macOS Settings sidebar width.
     static let width: CGFloat = 200
+    /// A row's inset and the gap after its icon, shared by the search field so both columns line up.
+    static let rowInset: CGFloat = 10
+    static let iconGap: CGFloat = 9
 
     private var text: String { query.trimmingCharacters(in: .whitespaces) }
     private var results: [SettingsEntry] { SettingsEntry.all.filter { $0.matches(text) } }
@@ -22,6 +27,8 @@ struct SettingsNav: View {
                         row(SettingsEntry(tab: tab), selected: category == tab) { category = tab }
                     }
                 }
+                // The highlight slides to the chosen tab.
+                .animation(Motion.move.unless(reduceMotion), value: category)
                 Spacer(minLength: 0)
             } else if results.isEmpty {
                 Text("No results.").foregroundStyle(.muted)
@@ -36,6 +43,7 @@ struct SettingsNav: View {
                             }
                         }
                     }
+                    .animation(Motion.move.unless(reduceMotion), value: chosen)
                 }
                 .scrollIndicators(.never)
             }
@@ -50,14 +58,14 @@ struct SettingsNav: View {
 
     private var search: some View {
         HStack(spacing: PanelStyle.rowInset) {
-            PanelSearch("Search settings", text: $query)
+            PanelSearch("Search settings", text: $query, glyph: 22)
             if !query.isEmpty {
                 Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain).foregroundStyle(.muted)
                     .accessibilityLabel("Clear settings search").help("Clear search")
             }
         }
-        .padding(.horizontal, PanelStyle.headingInset)
+        .padding(.horizontal, Self.rowInset)
         .frame(height: 36)
         .glassEffect(.regular, in: Capsule())
     }
@@ -65,7 +73,7 @@ struct SettingsNav: View {
     /// A tab, or a found section with its tab beneath, as System Settings lists results.
     private func row(_ entry: SettingsEntry, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: Self.iconGap) {
                 TabIcon(tab: entry.tab)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(entry.title).lineLimit(1)
@@ -76,11 +84,18 @@ struct SettingsNav: View {
             }
             .font(.body)
             .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, Self.rowInset)
             .padding(.vertical, 3)
             .background {
-                RoundedRectangle(cornerRadius: PanelStyle.rowRadius)
-                    .fill(.primary.opacity(selected ? PanelStyle.selectedTint : hovered == entry.id ? PanelStyle.hoverTint : 0))
+                ZStack {
+                    if selected {
+                        RoundedRectangle(cornerRadius: PanelStyle.rowRadius)
+                            .fill(.primary.opacity(PanelStyle.selectedTint))
+                            .matchedGeometryEffect(id: "selection", in: selection)
+                    } else if hovered == entry.id {
+                        RoundedRectangle(cornerRadius: PanelStyle.rowRadius).fill(.primary.opacity(PanelStyle.hoverTint))
+                    }
+                }
             }
             .contentShape(Rectangle())
         }

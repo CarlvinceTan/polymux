@@ -596,6 +596,7 @@ struct ConnectionView: View {
                     .scrollContentBackground(.hidden)
                     .scrollIndicators(.hidden)
                     .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 16) }
+                    .columnFade()
                     .background(PanelSurface.color(scheme))
                     .panelDismiss(onClose: onClose)
                     .pageSlide(nav)
@@ -646,7 +647,10 @@ struct ConnectionView: View {
             }
         }
         .frame(minHeight: 44)
-        .padding(16)
+        // The icon sits over the section icons below; Back and Close sit at the cards' edges.
+        .padding(.leading, page?.back == nil ? PanelStyle.formInset + 10 : PanelStyle.formInset)
+        .padding(.trailing, PanelStyle.formInset)
+        .padding(.vertical, 16)
         .motion(Motion.page, value: page)
     }
 

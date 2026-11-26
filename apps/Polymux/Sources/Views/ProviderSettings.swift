@@ -547,17 +547,21 @@ struct PanelSearch: View {
     let title: String
     @Binding var text: String
     let autofocus: Bool
+    /// Widens the glyph's slot, so it lines up with row icons below.
+    let glyph: CGFloat?
     @FocusState private var focused: Bool
 
-    init(_ title: String, text: Binding<String>, autofocus: Bool = false) {
+    init(_ title: String, text: Binding<String>, autofocus: Bool = false, glyph: CGFloat? = nil) {
         self.title = title
         _text = text
         self.autofocus = autofocus
+        self.glyph = glyph
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: glyph == nil ? 8 : SettingsNav.iconGap) {
             Image(systemName: "magnifyingglass").foregroundStyle(.muted)
+                .frame(width: glyph)
             TextField(title, text: $text, prompt: Text(title).foregroundStyle(.muted))
                 .labelsHidden()
                 .textFieldStyle(.plain).autocorrectionDisabled().accessibilityLabel(title)

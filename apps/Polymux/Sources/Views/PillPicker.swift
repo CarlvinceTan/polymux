@@ -124,6 +124,30 @@ private struct EdgeFade: ViewModifier {
     }
 }
 
+/// Fades a vertical scroller into its surface wherever more lies past its top or bottom.
+private struct ColumnFade: ViewModifier {
+    @State private var edges = ScrollEdges()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: ScrollEdges.self) { ScrollEdges($0) } action: { _, value in edges = value }
+            .mask {
+                VStack(spacing: 0) {
+                    edge(edges.above, from: .top, to: .bottom)
+                    Color.black
+                    edge(edges.below, from: .bottom, to: .top)
+                }
+            }
+            .animation(Motion.quick.unless(reduceMotion), value: edges)
+    }
+
+    private func edge(_ fades: Bool, from start: UnitPoint, to end: UnitPoint) -> some View {
+        LinearGradient(colors: [fades ? .clear : .black, .black], startPoint: start, endPoint: end).frame(height: 28)
+    }
+}
+
 extension View {
     func edgeFade() -> some View { modifier(EdgeFade()) }
+    func columnFade() -> some View { modifier(ColumnFade()) }
 }

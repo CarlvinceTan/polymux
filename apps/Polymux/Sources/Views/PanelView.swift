@@ -189,8 +189,8 @@ struct PanelView<Content: View, Actions: View>: View {
     /// A page inside a host panel: the host draws the title, back and close.
     private var page: some View {
         VStack(spacing: 0) {
-            if let header { header.padding(.horizontal, 16).padding(.bottom, 12) }
-            scrollContent.clipped().contentShape(Rectangle())
+            if let header { header.padding(.horizontal, PanelStyle.formInset).padding(.bottom, 12) }
+            scrollContent.columnFade().contentShape(Rectangle())
         }
         .background(background)
         .overlay(alignment: .bottom) { actionFade }

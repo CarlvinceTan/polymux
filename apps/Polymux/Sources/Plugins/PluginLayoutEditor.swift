@@ -9,6 +9,7 @@ struct PluginLayoutEditor: View {
     @State private var switcher: [String]
     @State private var buttons: [ButtonRow]
     @State private var previewTab = PluginTab.chats
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private struct ButtonRow: Identifiable, Hashable {
         let id: String
@@ -48,10 +49,13 @@ struct PluginLayoutEditor: View {
 
     private var switcherSection: some View {
         Section {
-            PluginSwitcher(tabs: switcherTabs, selection: $previewTab)
-                .frame(maxWidth: 320).frame(maxWidth: .infinity)
-                .allowsHitTesting(false)
-                .moveDisabled(true)
+            DemoStage {
+                PluginSwitcher(tabs: switcherTabs, selection: $previewTab)
+                    .frame(maxWidth: 320)
+            }
+            .animation(Motion.move.unless(reduceMotion), value: switcher)
+            .stageRow()
+            .moveDisabled(true)
             ForEach(switcher, id: \.self) { name in
                 HStack {
                     Label(title(name), pluginSymbol: symbol(name)).labelStyle(PluginLabel()).lineLimit(1)
@@ -69,6 +73,7 @@ struct PluginLayoutEditor: View {
     private var buttonSection: some View {
         Section {
             preview
+                .stageRow()
                 .moveDisabled(true)
             ForEach($buttons) { $row in
                 HStack {
@@ -93,13 +98,13 @@ struct PluginLayoutEditor: View {
     }
 
     private var preview: some View {
-        HStack(spacing: 8) {
-            Spacer(minLength: 0)
-            PluginButtons(groups: previewGroups) { _ in }
-            PanelNavButton(symbol: "phone", label: "Speech conversation") {}
+        DemoStage {
+            HStack(spacing: 8) {
+                PluginButtons(groups: previewGroups) { _ in }
+                PanelNavButton(symbol: "phone", label: "Speech conversation") {}
+            }
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        .animation(Motion.move.unless(reduceMotion), value: groups)
     }
 
     private func arrows(_ name: String, first: Bool, last: Bool, move: @escaping (Int) -> Void) -> some View {
@@ -148,5 +153,12 @@ struct PluginLayoutEditor: View {
 
     private func save() {
         store.save(layout: PluginLayout(switcher: switcher, buttons: groups))
+    }
+}
+
+private extension View {
+    /// A stage fills its row edge to edge, inside the card's own inset.
+    func stageRow() -> some View {
+        listRowInsets(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
     }
 }
