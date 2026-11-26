@@ -8,5 +8,6 @@ Experimental work lives on `experimental/*` branches so `dev` and `main` stay fr
 | `experimental/kmp` | A Kotlin Multiplatform client and shared Compose Multiplatform UI in `apps/kmp/` for Android, iOS, macOS, Windows and Linux, generated from `contracts/`. |
 | `experimental/dreaming` | Ambient ingestion through an attention filter, short-lived impressions, and dreaming that turns goals and references into ideas, replayed over past repository days. See [Proactivity](proactivity.md). |
 | `experimental/canvas` | Native graph and board prototypes, separate from the Canvas plugin's packaged workspace. |
+| `experimental/menubar-notch` | An optional menu bar icon listing recent and working chats, and a pill around the MacBook notch while bots work (`apps/Polymux/Sources/StatusBar/`). |
 
 Add a row when you start a new experimental branch, and remove it when the branch is merged or deleted.
