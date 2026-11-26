@@ -5,14 +5,33 @@ import SwiftUI
 final class PageNav {
     private(set) var back = false
 
+    private var queue: [(back: Bool, change: () -> Void)] = []
+
     func push(_ change: @escaping () -> Void) { go(back: false, change) }
     func pop(_ change: @escaping () -> Void) { go(back: true, change) }
 
-    /// A changed direction renders first, so the leaving page takes it too.
+    /// Drops changes still waiting to run, such as a push from a tab that was left.
+    func cancel() { queue.removeAll() }
+
+    /// Changes run in order; a changed direction renders first, so the leaving page takes it too.
     private func go(back: Bool, _ change: @escaping () -> Void) {
-        guard self.back != back else { return withAnimation(Motion.page) { change() } }
-        self.back = back
-        DispatchQueue.main.async { withAnimation(Motion.page) { change() } }
+        if queue.isEmpty && self.back == back { return withAnimation(Motion.page) { change() } }
+        queue.append((back, change))
+        if queue.count == 1 { step() }
+    }
+
+    private func step() {
+        guard let next = queue.first else { return }
+        guard back != next.back else { return run() }
+        back = next.back
+        DispatchQueue.main.async { self.run() }
+    }
+
+    private func run() {
+        guard !queue.isEmpty else { return }
+        let next = queue.removeFirst()
+        withAnimation(Motion.page) { next.change() }
+        if !queue.isEmpty { DispatchQueue.main.async { self.step() } }
     }
 
     func transition(reduced: Bool) -> AnyTransition {
@@ -27,6 +46,8 @@ final class PageNav {
 
 /// What a page shows in its host's header.
 struct PageCrumb: Equatable {
+    /// The page publishing it, so two pages with the same title stay apart.
+    let id: UUID
     let title: String
     let enabled: Bool
     let back: PanelAction?
@@ -34,7 +55,7 @@ struct PageCrumb: Equatable {
     let accessory: PanelAccessory?
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.title == rhs.title && lhs.enabled == rhs.enabled && (lhs.back == nil) == (rhs.back == nil)
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.enabled == rhs.enabled && (lhs.back == nil) == (rhs.back == nil)
             && lhs.accessory?.symbol == rhs.accessory?.symbol && lhs.accessory?.label == rhs.accessory?.label
     }
 }

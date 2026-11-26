@@ -150,6 +150,7 @@ struct PanelView<Content: View, Actions: View>: View {
     @State private var actionHeight: CGFloat = 0
     @State private var contentHeight: CGFloat?
     @State private var edges = ScrollEdges()
+    @State private var pageID = UUID()
 
     init(_ title: String, enabled: Bool = true, onClose: @escaping () -> Void, onBack: (() -> Void)? = nil,
          header: AnyView? = nil, accessory: PanelAccessory? = nil, scrollUnder: Bool = true,
@@ -196,7 +197,7 @@ struct PanelView<Content: View, Actions: View>: View {
         .animation(.easeOut(duration: 0.15), value: edges)
         .overlay(alignment: .bottomTrailing) { actionBar }
         .preference(key: PageCrumbs.self, value: PageCrumb(
-            title: title, enabled: enabled, back: (onBack ?? panel?.back?.action).map { PanelAction(action: $0) },
+            id: pageID, title: title, enabled: enabled, back: (onBack ?? panel?.back?.action).map { PanelAction(action: $0) },
             close: PanelAction(action: close), accessory: accessory))
     }
 

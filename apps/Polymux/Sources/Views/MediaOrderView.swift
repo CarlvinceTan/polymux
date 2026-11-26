@@ -89,6 +89,7 @@ struct MediaOrderView: View {
             }
             .formStyle(.grouped)
         }
+        .panelDismiss(onClose: { close() })
     }
 
     private var emptyNote: String? {

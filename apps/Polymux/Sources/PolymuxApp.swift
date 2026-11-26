@@ -530,6 +530,8 @@ struct ConnectionView: View {
             } else {
                 HStack(spacing: 0) {
                     SettingsNav(category: $category)
+                        // The join question is answered before moving on.
+                        .disabled(joined != nil)
                     Divider()
                     VStack(spacing: 0) {
                         header
@@ -553,7 +555,12 @@ struct ConnectionView: View {
 
     /// One container, so returning from a sub-view doesn't refetch over optimistic edits.
     private var pane: some View {
-        ZStack {
+        let page = opened
+        // A page's callbacks act only while it is still the open one, so a late save can't close the next page.
+        func back(_ change: @escaping () -> Void) -> () -> Void {
+            { nav.pop { if opened == page { change() } } }
+        }
+        return ZStack {
             Group {
                 if let joined {
                     JoinChoice(pool: pool, joined: joined) {
@@ -561,25 +568,25 @@ struct ConnectionView: View {
                         onClose()
                     }
                 } else if joining {
-                    AddDevice(client: client, onBack: { nav.pop { joining = false } }) { link in
+                    AddDevice(client: client, onBack: back { joining = false }) { link in
                         try await join(link)
                         if joined == nil { onClose() }
                     }
                 } else if adding {
-                    AddDevice(client: client, onBack: { nav.pop { adding = false } })
+                    AddDevice(client: client, onBack: back { adding = false })
                 } else if let target = providerTarget {
-                    ProviderEditor(client: client, original: target.provider, onBack: { nav.pop { providerTarget = nil } }) {
+                    ProviderEditor(client: client, original: target.provider, onBack: back { providerTarget = nil }) {
                         providerStore?.accept($0)
                         Task { await settings?.refresh() }
                     }
                 } else if let pluginTarget {
-                    PluginDetail(name: pluginTarget) { nav.pop { self.pluginTarget = nil } }
+                    PluginDetail(name: pluginTarget, onBack: back { self.pluginTarget = nil })
                 } else if arrangingPlugins, let plugins {
-                    PluginLayoutEditor(store: plugins) { nav.pop { arrangingPlugins = false } }
+                    PluginLayoutEditor(store: plugins, onBack: back { arrangingPlugins = false })
                 } else if let kind = editingMedia, let settings {
-                    MediaOrderView(kind: kind, store: settings, providers: providers, onBack: { nav.pop { editingMedia = nil } })
+                    MediaOrderView(kind: kind, store: settings, providers: providers, onBack: back { editingMedia = nil })
                 } else if let networkPage, let server = pool.servers.devices.first(where: { $0.address == networkPage }) {
-                    NetworkPage(pool: pool, server: server) { nav.pop { self.networkPage = nil } }
+                    NetworkPage(pool: pool, server: server, onBack: back { self.networkPage = nil })
                 }
             }
             .id(opened)
@@ -652,6 +659,8 @@ struct ConnectionView: View {
 
     /// Back to the tab's own page, as switching tabs does.
     private func reset() {
+        nav.cancel()
+        opened += 1
         joining = false
         adding = false
         providerTarget = nil
