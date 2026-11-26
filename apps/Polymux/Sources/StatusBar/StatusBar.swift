@@ -32,8 +32,6 @@ final class StatusBar {
     var session: AppSession? {
         didSet { follow(); NotchPanel.shared.update() }
     }
-    /// Settings was asked for from the menu; the next window on show opens it.
-    var settingsPending = false
     @ObservationIgnored private var refresher: Task<Void, Never>?
 
     private init() {}

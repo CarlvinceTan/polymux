@@ -14,8 +14,6 @@ final class NotchPanel {
     var expanded = CommandLine.arguments.contains("--verify-notch-open") {
         didSet { if expanded != oldValue { place() } }
     }
-    /// Whether a notched screen is attached, for the Settings toggle.
-    private(set) var available = NotchPanel.screen != nil
     @ObservationIgnored private var panel: NSPanel?
     @ObservationIgnored private var observing = false
 
@@ -23,21 +21,14 @@ final class NotchPanel {
     static let width: CGFloat = 360
     static let row: CGFloat = 48
 
-    private init() {
-        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
-                                               object: nil, queue: .main) { _ in
-            Task { @MainActor in NotchPanel.shared.update() }
-        }
-    }
+    private init() {}
 
     /// Shows the pill while the setting is on, a notched screen is present and a bot is working.
     func update() {
         observe()
-        available = Self.screen != nil
         let bar = StatusBar.shared
         guard bar.notch, let screen = Self.screen, !bar.working.isEmpty else {
             panel?.orderOut(nil)
-            if !CommandLine.arguments.contains("--verify-notch-open") { expanded = false }
             return
         }
         let panel = panel ?? make()
@@ -91,6 +82,10 @@ final class NotchPanel {
         let host = NSHostingView(rootView: NotchView(panel: self, bar: StatusBar.shared))
         host.sizingOptions = []
         panel.contentView = host
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { _ in
+            Task { @MainActor in NotchPanel.shared.update() }
+        }
         self.panel = panel
         return panel
     }
