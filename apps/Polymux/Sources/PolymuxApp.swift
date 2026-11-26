@@ -17,11 +17,15 @@ struct PolymuxApp: App {
     #else
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     #endif
+    #if os(macOS)
+    @State private var statusBar = StatusBar.shared
+    #endif
 
     init() {
         _ = Notifications.shared
         #if os(macOS)
         _ = Updates.shared
+        StatusBar.shared.start()
         #endif
     }
     var body: some Scene {
@@ -37,6 +41,14 @@ struct PolymuxApp: App {
             }
             SettingsCommands()
         }
+        #endif
+        #if os(macOS)
+        MenuBarExtra(isInserted: $statusBar.menu) {
+            StatusMenu(bar: statusBar)
+        } label: {
+            StatusLabel(bar: statusBar)
+        }
+        .menuBarExtraStyle(.window)
         #endif
     }
 }
@@ -316,6 +328,7 @@ struct AppRoot: View {
         }
         #if os(macOS)
         .task(id: localSession?.client.id) { Permissions.shared.client = localSession?.client }
+        .task(id: activeSession?.client.id) { if let activeSession { StatusBar.shared.session = activeSession } }
         .onChange(of: appearance, initial: true) { Permissions.shared.appearance = $1 }
         #endif
         .panelHost()
@@ -621,6 +634,17 @@ struct ConnectionView: View {
         }
         .panelRow()
         .onAppear { LoginItem.shared.refresh() }
+        Section {
+            Toggle("Menu bar icon", isOn: Binding(get: { StatusBar.shared.menu }, set: { StatusBar.shared.menu = $0 }))
+                .accessibilityLabel("Menu bar icon")
+            if NotchPanel.screen != nil {
+                Toggle("Notch activity", isOn: Binding(get: { StatusBar.shared.notch }, set: { StatusBar.shared.notch = $0 }))
+                    .accessibilityLabel("Notch activity")
+            }
+        } header: {
+            SectionHeader("Menu Bar", symbol: "menubar.rectangle", tint: .indigo)
+        }
+        .panelRow()
         #endif
         Section {
             Toggle("Allow notifications", isOn: Binding(get: { Notifications.shared.enabled },

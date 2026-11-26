@@ -119,6 +119,13 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         return destination?.thread
     }
 
+    /// Opens a chat in that server's window when it appears.
+    func route(_ thread: String, server: String) {
+        destination = (server, thread)
+        routeID = UUID()
+        defaults.set(server, forKey: "serverAddress")
+    }
+
     private func register() {
         #if os(macOS)
         NSApplication.shared.registerForRemoteNotifications()
@@ -178,10 +185,7 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         let thread = response.notification.request.content.userInfo["conversationID"] as? String
         await MainActor.run {
             guard let server, self.feeds[server] != nil, let thread else { return }
-            self.destination = (server, thread)
-            self.routeID = UUID()
-            // That server's window takes the chat when it appears.
-            self.defaults.set(server, forKey: "serverAddress")
+            self.route(thread, server: server)
         }
     }
 

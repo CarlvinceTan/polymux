@@ -28,6 +28,8 @@
      "flows": ["fixture-plugin*"]},
     {"paths": ["*/Hub/*", "*/PolymuxKit/HubStore.swift"],
      "flows": ["fixture-hub*"]},
+    {"paths": ["*/StatusBar/*"],
+     "flows": ["fixture-status-bar.js"]},
     {"paths": ["*/AvatarUI/*", "*/Avatar/*", "packages/AvatarKit/**"],
      "flows": ["fixture-avatar*", "fixture-new-bot.js", "fixture-actions.js"]}
   ]
