@@ -69,8 +69,8 @@ struct StatusMenu: View {
         HStack {
             Button("Open") { bar.show() }
             Button("Settings") {
+                bar.settingsPending = true
                 bar.show()
-                URLRouter.shared.handler?(URL(string: "polymux://settings")!)
             }
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }

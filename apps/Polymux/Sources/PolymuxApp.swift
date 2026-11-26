@@ -328,7 +328,13 @@ struct AppRoot: View {
         }
         #if os(macOS)
         .task(id: localSession?.client.id) { Permissions.shared.client = localSession?.client }
-        .task(id: activeSession?.client.id) { if let activeSession { StatusBar.shared.session = activeSession } }
+        // Follows the server on show, so a switch or removal never leaves the old one's chats listed.
+        .task(id: activeSession?.client.id) { StatusBar.shared.session = activeSession }
+        .onChange(of: StatusBar.shared.settingsPending, initial: true) { _, pending in
+            guard pending else { return }
+            StatusBar.shared.settingsPending = false
+            showSettings = true
+        }
         .onChange(of: appearance, initial: true) { Permissions.shared.appearance = $1 }
         #endif
         .panelHost()
@@ -637,7 +643,7 @@ struct ConnectionView: View {
         Section {
             Toggle("Menu bar icon", isOn: Binding(get: { StatusBar.shared.menu }, set: { StatusBar.shared.menu = $0 }))
                 .accessibilityLabel("Menu bar icon")
-            if NotchPanel.screen != nil {
+            if NotchPanel.shared.available {
                 Toggle("Notch activity", isOn: Binding(get: { StatusBar.shared.notch }, set: { StatusBar.shared.notch = $0 }))
                     .accessibilityLabel("Notch activity")
             }
