@@ -10,7 +10,7 @@ async function bounds(name) {
     return rows[0].frame;
 }
 const first = "Amazon Bedrock · AWS credentials or bearer token";
-const header = ["Back", "Add custom provider", "Close Add provider", "All", "API key", "Sign in"];
+const header = ["Back", "Add custom provider", "Close Settings", "All", "API key", "Sign in"];
 await app.click({ role: "button", name: "Settings" });
 await app.click({ role: "button", name: "Models" });
 await app.click({ role: "button", name: "Add provider" });

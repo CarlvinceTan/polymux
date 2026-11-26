@@ -144,6 +144,7 @@ struct PanelView<Content: View, Actions: View>: View {
     let content: Content
     let actions: Actions
     @Environment(\.panelContext) private var panel
+    @Environment(\.pageNav) private var nav
     @Environment(\.colorScheme) private var scheme
     @State private var headerHeight: CGFloat = 76
     @State private var actionHeight: CGFloat = 0
@@ -181,6 +182,39 @@ struct PanelView<Content: View, Actions: View>: View {
     }
 
     var body: some View {
+        if let nav { page.pageSlide(nav) } else { standalone }
+    }
+
+    /// A page inside a host panel: the host draws the title, back and close.
+    private var page: some View {
+        VStack(spacing: 0) {
+            if let header { header.padding(.horizontal, 16).padding(.bottom, 12) }
+            scrollContent.clipped().contentShape(Rectangle())
+        }
+        .background(background)
+        .overlay(alignment: .bottom) { actionFade }
+        .animation(.easeOut(duration: 0.15), value: edges)
+        .overlay(alignment: .bottomTrailing) { actionBar }
+        .preference(key: PageCrumbs.self, value: PageCrumb(
+            title: title, enabled: enabled, back: (onBack ?? panel?.back?.action).map { PanelAction(action: $0) },
+            close: PanelAction(action: close), accessory: accessory))
+    }
+
+    private var actionFade: some View {
+        LinearGradient(colors: [.clear, fade.opacity(0.85), fade], startPoint: .top, endPoint: .bottom)
+            .frame(height: actionHeight + 64)
+            .opacity(actionHeight > 0 && edges.below ? 1 : 0)
+            .allowsHitTesting(false)
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 10) { actions }
+            .buttonStyle(PanelButton())
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { actionHeight = $0 }
+            .padding(16)
+    }
+
+    private var standalone: some View {
         VStack(spacing: 0) {
             if scrollUnder {
                 scrollContent
@@ -217,12 +251,7 @@ struct PanelView<Content: View, Actions: View>: View {
             .overlay(alignment: .top) {
                 if scrollUnder { panelHeader }
             }
-            .overlay(alignment: .bottomTrailing) {
-                HStack(spacing: 10) { actions }
-                    .buttonStyle(PanelButton())
-                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { actionHeight = $0 }
-                    .padding(16)
-            }
+            .overlay(alignment: .bottomTrailing) { actionBar }
             #if os(macOS)
             .allowsWindowActivationEvents()
             #endif
@@ -235,7 +264,7 @@ struct PanelView<Content: View, Actions: View>: View {
             .scrollIndicators(.hidden)
             .onScrollGeometryChange(for: ScrollEdges.self) { ScrollEdges($0) } action: { _, value in edges = value }
             .safeAreaInset(edge: .top, spacing: 0) {
-                Color.clear.frame(height: scrollUnder ? headerHeight + 8 : 0)
+                Color.clear.frame(height: scrollUnder && nav == nil ? headerHeight + 8 : 0)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Color.clear.frame(height: actionHeight > 0 ? actionHeight + 40 : 16)

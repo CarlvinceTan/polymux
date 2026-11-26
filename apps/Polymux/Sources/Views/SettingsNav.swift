@@ -41,8 +41,8 @@ struct SettingsNav: View {
             }
         }
         .padding(.horizontal, 10)
-        // The search field lines up with the pane's first section title.
-        .padding(.top, 4)
+        // The search field lines up with the pane's header row.
+        .padding(.top, 20)
         .padding(.bottom, 12)
         .frame(width: Self.width)
         .onChange(of: text.isEmpty) { _, empty in if empty { chosen = nil } }

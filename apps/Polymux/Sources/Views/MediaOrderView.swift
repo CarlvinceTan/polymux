@@ -48,6 +48,7 @@ struct MediaOrderView: View {
     let store: SettingsStore
     let providers: [Provider]
     let onBack: () -> Void
+    @Environment(\.panelClose) private var close
     @State private var adding = false
     private let limit = 8
     private let modes = [("Auto", MediaOrderMode.auto), ("Custom", MediaOrderMode.custom)]
@@ -75,7 +76,7 @@ struct MediaOrderView: View {
     }
 
     var body: some View {
-        PanelView("\(kind.title) models", onClose: onBack, onBack: onBack, width: 460) {
+        PanelView("\(kind.title) models", onClose: { close() }, onBack: onBack, width: 460) {
             Form {
                 Section {
                     SettingsPicker("Mode", selection: mode, options: modes)

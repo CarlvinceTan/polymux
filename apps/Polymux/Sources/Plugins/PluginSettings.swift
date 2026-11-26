@@ -184,11 +184,12 @@ struct PluginDetail: View {
     @Environment(\.panelClose) private var close
     @State private var removing = false
     @State private var subpage = false
+    @Environment(\.pageNav) private var nav
 
     var body: some View {
         if let store, let plugin = store.plugin(named: name) {
             if subpage {
-                PluginSurface.subpage(plugin) { subpage = false }
+                PluginSurface.subpage(plugin) { nav.pop { subpage = false } }
             } else {
                 page(plugin, store: store)
             }
@@ -209,7 +210,7 @@ struct PluginDetail: View {
                 }
                 .panelRow()
                 PluginOptions(plugin: plugin, store: store)
-                PluginSurface.settings(plugin) { subpage = true }
+                PluginSurface.settings(plugin) { nav.push { subpage = true } }
                 if plugin.kind != PluginKind.global { chats(plugin, store: store) }
                 Section {
                     Button("Uninstall", role: .destructive) { removing = true }

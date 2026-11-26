@@ -169,6 +169,7 @@ struct NetworkPage: View {
     @State private var transfer: Transfer?
     @State private var leaving = false
     @State private var deleting = false
+    @Environment(\.pageNav) private var nav
 
     private struct Transfer {
         let kind: MoveServer.Kind
@@ -200,9 +201,9 @@ struct NetworkPage: View {
             if let managing {
                 DeviceView(device: managing, renames: !restricted(managing),
                            status: restricted(managing) ? .unknown : status(managing), server: managing.id == network?.host,
-                           onBack: { self.managing = nil }, save: { rename(managing, to: $0) }) { manage(managing) }
+                           onBack: { nav.pop { self.managing = nil } }, save: { rename(managing, to: $0) }) { manage(managing) }
             } else if adding {
-                AddDevice(client: session?.client, onBack: { adding = false })
+                AddDevice(client: session?.client, onBack: { nav.pop { adding = false } })
             } else if let transfer, let id = transfer.target.serverID {
                 MoveServer(kind: transfer.kind, sourceName: title, source: session?.client, network: store,
                            target: NetworkInfo.Peer(id: id, name: transfer.target.title), finished: session == nil) {
@@ -219,7 +220,7 @@ struct NetworkPage: View {
 
     private var page: some View {
         PanelView(title, onClose: { close() }, onBack: back,
-                  accessory: PanelAccessory(symbol: "plus", label: "Add device") { adding = true }) {
+                  accessory: PanelAccessory(symbol: "plus", label: "Add device") { nav.push { adding = true } }) {
             Form {
                 Section {
                     SettingsField(title: "Name", text: $name, prompt: server.title)
@@ -322,7 +323,7 @@ struct NetworkPage: View {
     }
 
     private func choice(_ kind: MoveServer.Kind) -> some View {
-        PanelView(kind == .move ? "Move server" : "Merge network", onClose: { close() }, onBack: { choosing = nil }) {
+        PanelView(kind == .move ? "Move server" : "Merge network", onClose: { close() }, onBack: { nav.pop { choosing = nil } }) {
             Form {
                 Section {
                     ForEach(others) { target in
@@ -348,7 +349,7 @@ struct NetworkPage: View {
             Text("Offline").foregroundStyle(.muted).frame(maxWidth: .infinity)
         }
         ForEach((network?.devices ?? []).sorted { $0.id == network?.current && $1.id != network?.current }) { device in
-            Button { managing = device } label: {
+            Button { nav.push { managing = device } } label: {
                 HStack(spacing: 10) {
                     StatusDot(state: status(device))
                     VStack(alignment: .leading, spacing: 2) {
@@ -372,14 +373,14 @@ struct NetworkPage: View {
             .accessibilityLabel(device.title)
             .accessibilityValue(details(device))
             .appMenu {
-                Button("Rename", systemImage: "pencil") { managing = device }
+                Button("Rename", systemImage: "pencil") { nav.push { managing = device } }
                 if removable(device) {
                     Button("Remove", systemImage: "trash", role: .destructive) { remove(device) }
                 }
             }
         }
         ForEach(network?.restricted ?? []) { device in
-            Button { managing = device } label: {
+            Button { nav.push { managing = device } } label: {
                 LabeledContent(device.title) {
                     Image(systemName: "chevron.right").foregroundStyle(.muted)
                 }
@@ -396,7 +397,7 @@ struct NetworkPage: View {
         if restricted(device) {
             LabeledContent("Access") {
                 Button("Allow") {
-                    managing = nil
+                    nav.pop { managing = nil }
                     Task { await store?.allow(device) }
                 }
                 .buttonStyle(.bordered)
@@ -405,7 +406,7 @@ struct NetworkPage: View {
             }
         } else if removable(device) {
             Button("Remove", role: .destructive) {
-                managing = nil
+                nav.pop { managing = nil }
                 remove(device)
             }
             .buttonStyle(.borderless)
@@ -428,14 +429,16 @@ struct NetworkPage: View {
     }
 
     private func start(_ kind: MoveServer.Kind) {
-        if others.count == 1, let only = others.first { begin(kind, only) } else { choosing = kind }
+        if others.count == 1, let only = others.first { begin(kind, only) } else { nav.push { choosing = kind } }
     }
 
     private func begin(_ kind: MoveServer.Kind, _ target: ServerDevice) {
         Task {
             guard await pool.link(server.address, to: target.address) else { return }
-            choosing = nil
-            transfer = Transfer(kind: kind, target: target)
+            nav.push {
+                choosing = nil
+                transfer = Transfer(kind: kind, target: target)
+            }
         }
     }
 

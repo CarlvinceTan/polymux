@@ -10,6 +10,8 @@ enum Motion {
     static let quick = Animation.easeOut(duration: 0.16)
     /// Panels, columns and anything that moves across the window.
     static let move = Animation.timingCurve(0.22, 1, 0.36, 1, duration: columnTime)
+    /// A page pushed or popped inside a panel.
+    static let page = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.32)
     /// Content arriving or leaving on its own, such as a note or a loaded image.
     static let fade = Animation.easeInOut(duration: 0.2)
 }

@@ -9,6 +9,7 @@ struct ProviderEditor: View {
     @State private var page: Page
     @State private var selection: Provider?
     @Environment(ProviderStore.self) private var store: ProviderStore?
+    @Environment(\.pageNav) private var nav
     private var providers: [Provider] { store?.providers ?? original.map { [$0] } ?? [] }
 
     private enum Page {
@@ -30,12 +31,13 @@ struct ProviderEditor: View {
         if let client {
             switch page {
             case .picker:
-                ProviderPicker(client: client, onBack: onBack, choose: { page = .login($0, nil, nil) }, manual: { page = .create($0) })
+                ProviderPicker(client: client, onBack: onBack, choose: { option in nav.push { page = .login(option, nil, nil) } },
+                               manual: { preset in nav.push { page = .create(preset) } })
             case .provider:
                 if let selection {
                     ProviderPage(client: client, providerID: selection.id, onBack: onBack,
-                                 connect: { option, connection in page = .login(option, selection.id, connection) },
-                                 editConnection: { page = .connection($0) },
+                                 connect: { option, connection in nav.push { page = .login(option, selection.id, connection) } },
+                                 editConnection: { connection in nav.push { page = .connection(connection) } },
                                  removed: { publish(nil, removing: $0); onBack() })
                 }
             case .create(let preset):
@@ -45,15 +47,15 @@ struct ProviderEditor: View {
                 }
             case .connection(let connection):
                 if let selection {
-                    ConnectionForm(client: client, provider: selection, connection: connection, onBack: { page = .provider },
-                                   reconnect: { page = .login($0, selection.id, connection?.id) }, saved: publish)
+                    ConnectionForm(client: client, provider: selection, connection: connection, onBack: { nav.pop { page = .provider } },
+                                   reconnect: { option in nav.push { page = .login(option, selection.id, connection?.id) } }, saved: publish)
                 }
             case .login(let option, let target, let connection):
                 ProviderLoginView(client: client, option: option, provider: target, connection: connection, onBack: {
-                    page = selection == nil ? .picker : .provider
+                    nav.pop { page = selection == nil ? .picker : .provider }
                 }) { provider in
                     publish(provider)
-                    if selection == nil { onBack() } else { selection = provider; page = .provider }
+                    if selection == nil { onBack() } else { nav.pop { selection = provider; page = .provider } }
                 }
             }
         }

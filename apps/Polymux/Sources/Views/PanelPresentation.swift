@@ -103,6 +103,8 @@ private struct PanelPresentation<Presented: View>: ViewModifier {
         return presented()
             .environment(\.panelClose, dismiss)
             .environment(\.panelContext, PanelContext(dismiss: dismiss, ancestor: parent?.close))
+            // A panel opened from a hosted page is a panel of its own.
+            .environment(\.pageNav, nil)
     }
 
     func body(content: Content) -> some View {

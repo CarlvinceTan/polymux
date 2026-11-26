@@ -499,7 +499,12 @@ struct ConnectionView: View {
     @State private var pluginTarget: String?
     @State private var arrangingPlugins = false
     @State private var editingMedia: MediaKind?
+    @State private var nav = PageNav()
+    /// Bumped on each page opened, so a page reopened mid-transition starts fresh.
+    @State private var opened = 0
+    @State private var crumb: PageCrumb?
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.colorScheme) private var scheme
 
     init(pool: SessionPool, settings: SettingsStore?, client: APIClient?,
          join: @escaping (URL) async throws -> Void, joinIssue: String?, joined: Binding<String?>,
@@ -515,53 +520,145 @@ struct ConnectionView: View {
     }
 
     var body: some View {
-        // One container, so returning from a sub-view doesn't refetch over optimistic edits.
-        ZStack {
-            if let joined {
-                JoinChoice(pool: pool, joined: joined) {
-                    self.joined = nil
-                    onClose()
+        Group {
+            if compact {
+                VStack(spacing: 0) {
+                    header
+                    if !subpage { compactTabs.padding(.bottom, 12) }
+                    pane
                 }
-            } else if joining {
-                AddDevice(client: client, onBack: { joining = false }) { link in
-                    try await join(link)
-                    if joined == nil { onClose() }
-                }
-            } else if adding {
-                AddDevice(client: client, onBack: { adding = false })
-            } else if let target = providerTarget {
-                ProviderEditor(client: client, original: target.provider, onBack: { providerTarget = nil }) {
-                    providerStore?.accept($0)
-                    Task { await settings?.refresh() }
-                }
-            } else if let pluginTarget {
-                PluginDetail(name: pluginTarget) { self.pluginTarget = nil }
-            } else if arrangingPlugins, let plugins {
-                PluginLayoutEditor(store: plugins) { arrangingPlugins = false }
-            } else if let kind = editingMedia, let settings {
-                MediaOrderView(kind: kind, store: settings, providers: providers, onBack: { editingMedia = nil })
-            } else if let networkPage, let server = pool.servers.devices.first(where: { $0.address == networkPage }) {
-                NetworkPage(pool: pool, server: server) { self.networkPage = nil }
             } else {
-                settingsPanel
+                HStack(spacing: 0) {
+                    SettingsNav(category: $category)
+                    Divider()
+                    VStack(spacing: 0) {
+                        header
+                        pane
+                    }
+                }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PanelSurface.color(scheme))
+        .environment(\.pageNav, nav)
+        .onPreferenceChange(PageCrumbs.self) { crumb = $0 }
+        .preference(key: PanelHeight.self, value: PanelSize.maximumHeight)
+        .preference(key: PanelWidth.self, value: PanelSize.width + SettingsNav.width)
+        .onChange(of: category) { reset() }
+        #if os(macOS)
+        .allowsWindowActivationEvents()
+        #endif
         .task(id: client?.id) { await networkStore?.refresh() }
     }
 
-    private var settingsPanel: some View {
-        PanelView(category.title, onClose: onClose, header: compact ? AnyView(compactTabs) : nil,
-                  scrollUnder: false, width: PanelSize.width + SettingsNav.width, height: PanelSize.maximumHeight,
-                  closeLabel: "Close Settings") {
-            HStack(spacing: 0) {
-                if !compact {
-                    SettingsNav(category: $category)
-                    Divider()
+    /// One container, so returning from a sub-view doesn't refetch over optimistic edits.
+    private var pane: some View {
+        ZStack {
+            Group {
+                if let joined {
+                    JoinChoice(pool: pool, joined: joined) {
+                        self.joined = nil
+                        onClose()
+                    }
+                } else if joining {
+                    AddDevice(client: client, onBack: { nav.pop { joining = false } }) { link in
+                        try await join(link)
+                        if joined == nil { onClose() }
+                    }
+                } else if adding {
+                    AddDevice(client: client, onBack: { nav.pop { adding = false } })
+                } else if let target = providerTarget {
+                    ProviderEditor(client: client, original: target.provider, onBack: { nav.pop { providerTarget = nil } }) {
+                        providerStore?.accept($0)
+                        Task { await settings?.refresh() }
+                    }
+                } else if let pluginTarget {
+                    PluginDetail(name: pluginTarget) { nav.pop { self.pluginTarget = nil } }
+                } else if arrangingPlugins, let plugins {
+                    PluginLayoutEditor(store: plugins) { nav.pop { arrangingPlugins = false } }
+                } else if let kind = editingMedia, let settings {
+                    MediaOrderView(kind: kind, store: settings, providers: providers, onBack: { nav.pop { editingMedia = nil } })
+                } else if let networkPage, let server = pool.servers.devices.first(where: { $0.address == networkPage }) {
+                    NetworkPage(pool: pool, server: server) { nav.pop { self.networkPage = nil } }
                 }
+            }
+            .id(opened)
+            if !subpage {
                 settingsPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .scrollContentBackground(.hidden)
+                    .scrollIndicators(.hidden)
+                    .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 16) }
+                    .background(PanelSurface.color(scheme))
+                    .panelDismiss(onClose: onClose)
+                    .pageSlide(nav)
             }
         }
-        .panelDismiss(onClose: onClose)
+        .clipped()
+    }
+
+    private var subpage: Bool {
+        joined != nil || joining || adding || providerTarget != nil || pluginTarget != nil || arrangingPlugins
+            || editingMedia != nil || networkPage.map { address in pool.servers.devices.contains { $0.address == address } } == true
+    }
+
+    /// The tab, then the page inside it, like a breadcrumb; the page's own back and buttons sit beside it.
+    private var header: some View {
+        let page = subpage ? crumb : nil
+        let enabled = page?.enabled ?? true
+        let title = page?.title ?? category.title
+        return HStack(spacing: 10) {
+            if let back = page?.back {
+                PanelNavButton(symbol: "chevron.left", label: "Back", enabled: enabled) { nav.pop { back() } }
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
+            HStack(spacing: 8) {
+                TabIcon(tab: category)
+                if page != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.muted)
+                        .accessibilityHidden(true)
+                        .transition(.opacity)
+                }
+                ZStack(alignment: .leading) {
+                    Text(title)
+                        .font(.headline).lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                        .id(title)
+                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: nav.back ? -12 : 12)),
+                                                removal: .opacity.animation(Motion.quick)))
+                }
+            }
+            Spacer(minLength: 8)
+            if let accessory = page?.accessory {
+                PanelNavButton(symbol: accessory.symbol, label: accessory.label, enabled: enabled, action: accessory.action)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
+            PanelNavButton(symbol: "xmark", label: "Close Settings", enabled: enabled) {
+                if let close = page?.close { close() } else { onClose() }
+            }
+        }
+        .frame(minHeight: 44)
+        .padding(16)
+        .motion(Motion.page, value: page)
+    }
+
+    private func open(_ change: @escaping () -> Void) {
+        nav.push {
+            opened += 1
+            change()
+        }
+    }
+
+    /// Back to the tab's own page, as switching tabs does.
+    private func reset() {
+        joining = false
+        adding = false
+        providerTarget = nil
+        pluginTarget = nil
+        arrangingPlugins = false
+        editingMedia = nil
+        networkPage = nil
     }
 
     private var compact: Bool { sizeClass == .compact }
@@ -581,9 +678,9 @@ struct ConnectionView: View {
         switch category {
         case .vault: VaultSettings()
         case .network:
-            NetworkSettings(pool: pool, joinIssue: joinIssue, open: { networkPage = $0 }, join: { joining = true },
-                            add: client == nil ? nil : { adding = true })
-        case .plugins: PluginSettings(open: { pluginTarget = $0 }, arrange: { arrangingPlugins = true })
+            NetworkSettings(pool: pool, joinIssue: joinIssue, open: { id in open { networkPage = id } }, join: { open { joining = true } },
+                            add: client == nil ? nil : { open { adding = true } })
+        case .plugins: PluginSettings(open: { name in open { pluginTarget = name } }, arrange: { open { arrangingPlugins = true } })
         default: settingsForm
         }
     }
@@ -597,8 +694,8 @@ struct ConnectionView: View {
                     VoicePane(store: settings, providers: providers)
                 }
             case .models:
-                ProviderSettings(client: client, settings: settings) { providerTarget = ProviderTarget(provider: $0) }
-                if let settings { MediaSettings(store: settings) { editingMedia = $0 } }
+                ProviderSettings(client: client, settings: settings) { provider in open { providerTarget = ProviderTarget(provider: provider) } }
+                if let settings { MediaSettings(store: settings) { kind in open { editingMedia = kind } } }
             case .vault, .plugins, .network: EmptyView()
             case .updates: UpdatesSettings(network: network, settings: settings)
             case .shortcuts: ShortcutsSettings()
